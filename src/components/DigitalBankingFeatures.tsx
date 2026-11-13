@@ -1,11 +1,11 @@
 /**
- * Bank Nusantara — 60+ Layanan Perbankan Digital Interaktif
+ * Bank Nusantara — Layanan Perbankan Digital Interaktif
  * Terintegrasi penuh dengan:
  * 1. Tukar Kode Redeem (Klaim hadiah saldo yang dibuat di Panel Admin dengan kuota orang & batas waktu aktif)
  * 2. Tukar Kode Pulsa & Tukar Kode Token Listrik (Menggunakan kode yang sudah dibeli nasabah)
  * 3. Masukkan & Lacak Resi Pengiriman + Tebus COD
- * 4. Pemotongan Saldo Langsung saat Beli Barang + Modal Pemberitahuan Menunggu Persetujuan Admin
- * 5. Sinkronisasi Otorisasi PIN Admin (159357) & Persetujuan Admin untuk seluruh 60+ Fitur
+ * 4. Pemotongan Saldo Langsung saat Beli Barang + Modal Pemberitahuan Persetujuan Pembeli / Diproses
+ * 5. Sinkronisasi Otorisasi PIN Admin (159357) & Persetujuan Admin
  */
 import React, { useState } from 'react';
 import {
@@ -47,6 +47,10 @@ import {
   CreditCard,
   Plus,
   BookOpen,
+  ShoppingBag,
+  Utensils,
+  Cpu,
+  Briefcase,
 } from 'lucide-react';
 import { useBank, PayBillResult } from '../context/BankContext';
 import {
@@ -56,6 +60,7 @@ import {
   playAtmSound,
   getFeatureUltraDetailedExplanation,
 } from '../utils/bankUtils';
+import { getServiceFormSchema, ServiceFormSchema } from '../utils/featureFormSchemas';
 import { CardTier, FeatureSecurityConfig } from '../types/bank';
 import { PinPromptModal } from './PinPromptModal';
 import { AdminPinModal } from './AdminPinModal';
@@ -93,13 +98,15 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
     buyerApproveAllTransactions,
   } = useBank();
 
-  // Search & Category filter for 60+ features
+  // Search & Category filter
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('Semua');
 
   // Active modal state
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [selectedGenericFeature, setSelectedGenericFeature] = useState<FeatureSecurityConfig | null>(null);
+  const [genericFormSchema, setGenericFormSchema] = useState<ServiceFormSchema | null>(null);
+  const [genericExtraValues, setGenericExtraValues] = useState<Record<string, string>>({});
   const [detailExplanationFeature, setDetailExplanationFeature] = useState<FeatureSecurityConfig | null>(null);
 
   // Admin PIN Gate when a feature has `requireAdminPin: true` set in Admin Panel
@@ -108,7 +115,10 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
   // Prominent Purchase Receipt & Admin Approval Notice Modal
   const [lastPurchaseReceipt, setLastPurchaseReceipt] = useState<{
     title: string;
+    category?: string;
     customerId: string;
+    serviceDetails?: Array<{ label: string; value: string }>;
+    timestamp?: string;
     result: PayBillResult;
   } | null>(null);
 
@@ -248,10 +258,17 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
       setRedeemSuccessData(null);
       setActiveModal(feat.id);
     } else {
-      // Open universal interactive payment/purchase modal for any of the 50+ features
+      // Open service-specific interactive payment/purchase modal
+      const schema = getServiceFormSchema(feat);
+      const initialExtras: Record<string, string> = {};
+      schema.extraFields.forEach((field) => {
+        initialExtras[field.key] = field.defaultValue;
+      });
       setSelectedGenericFeature(feat);
+      setGenericFormSchema(schema);
+      setGenericExtraValues(initialExtras);
       setGenericAmount(feat.defaultAmount || 100_000);
-      setGenericTargetId(`ID-${Math.floor(10000000 + Math.random() * 90000000)}`);
+      setGenericTargetId(schema.primaryDefaultValue);
       setGenericNote(`Pembelian / Pembayaran ${feat.title}`);
       setActiveModal('generic_paid_feature');
     }
@@ -266,7 +283,13 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
       setActiveModal(null);
       setLastPurchaseReceipt({
         title,
+        category: 'Tagihan & Utilitas',
         customerId: plnMeterId,
+        serviceDetails: [
+          { label: 'Jenis Layanan', value: plnType === 'token' ? 'Token Listrik Prabayar' : 'Tagihan Listrik Pascabayar' },
+          { label: 'ID Pelanggan / Meter', value: plnMeterId },
+        ],
+        timestamp: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
         result: res,
       });
     } else {
@@ -283,7 +306,13 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
       setActiveModal(null);
       setLastPurchaseReceipt({
         title,
+        category: 'Tagihan & Utilitas',
         customerId: `${pulsaOperator} - ${pulsaPhone}`,
+        serviceDetails: [
+          { label: 'Operator Seluler', value: pulsaOperator },
+          { label: 'Nomor HP Tujuan', value: pulsaPhone },
+        ],
+        timestamp: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
         result: res,
       });
     } else {
@@ -291,11 +320,32 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
     }
   };
 
-  // Submit Generic 50+ Paid Feature
+  // Submit Generic Service-Specific Feature
   const handleGenericFeatureSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedGenericFeature) return;
-    const title = `${selectedGenericFeature.title} (${genericTargetId})`;
+    const schema = genericFormSchema || getServiceFormSchema(selectedGenericFeature);
+    const serviceDetails: Array<{ label: string; value: string }> = [
+      { label: schema.primaryFieldLabel, value: genericTargetId },
+    ];
+    schema.extraFields.forEach((field) => {
+      const val = genericExtraValues[field.key] ?? field.defaultValue;
+      if (val) {
+        serviceDetails.push({ label: field.label, value: val });
+      }
+    });
+    if (genericNote.trim()) {
+      serviceDetails.push({ label: 'Catatan Pelanggan', value: genericNote.trim() });
+    }
+    const detailSummary = schema.extraFields
+      .map((field) => genericExtraValues[field.key] || field.defaultValue)
+      .filter(Boolean)
+      .slice(0, 2)
+      .join(' • ');
+    const title = detailSummary
+      ? `${selectedGenericFeature.title} (${genericTargetId} — ${detailSummary})`
+      : `${selectedGenericFeature.title} (${genericTargetId})`;
+
     const res = payBill(
       'belanja_fitur',
       title,
@@ -307,8 +357,11 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
     if (res.success) {
       setActiveModal(null);
       setLastPurchaseReceipt({
-        title,
+        title: selectedGenericFeature.title,
+        category: selectedGenericFeature.category,
         customerId: genericTargetId,
+        serviceDetails,
+        timestamp: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
         result: res,
       });
     } else {
@@ -411,12 +464,16 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
     if (feat.id === 'bpjs') return HeartHandshake;
     if (feat.id === 'qris') return QrCode;
     if (feat.category === 'E-Wallet & QRIS') return Wallet;
-    if (feat.category === 'Travel & Tiket') return Plane;
-    if (feat.category === 'Hiburan & Gaya Hidup') return Gamepad2;
-    if (feat.category === 'Pendidikan & Cicilan') return GraduationCap;
-    if (feat.category === 'Zakat & Sosial') return Heart;
+    if (feat.category === 'E-Commerce & Logistik') return ShoppingBag;
+    if (feat.category === 'Kuliner & F&B') return Utensils;
+    if (feat.category === 'Teknologi AI & Cloud' || feat.category === 'Teknologi & Satelit') return Cpu;
+    if (feat.category === 'Perbankan & Bisnis UMKM' || feat.category === 'Bisnis & UMKM') return Briefcase;
+    if (feat.category === 'Travel & Tiket' || feat.category === 'Transportasi & Tiket') return Plane;
+    if (feat.category === 'Hiburan & Gaya Hidup' || feat.category === 'Gaya Hidup & Hiburan' || feat.category === 'Hiburan & Game') return Gamepad2;
+    if (feat.category === 'Pendidikan & Cicilan' || feat.category === 'Pendidikan & Sosial' || feat.category === 'Pendidikan & Kampus') return GraduationCap;
+    if (feat.category === 'Zakat & Sosial' || feat.category === 'Kesehatan & Medis') return Heart;
     if (feat.category === 'Investasi & Proteksi') return TrendingUp;
-    if (feat.category === 'Pajak & Negara') return Building2;
+    if (feat.category === 'Pajak & Negara' || feat.category === 'Layanan Publik & Pajak') return Building2;
     return Sparkles;
   };
 
@@ -464,17 +521,17 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs uppercase font-mono tracking-widest text-amber-400 font-bold">
-              PORTAL {featureConfigs.length}+ LAYANAN DIGITAL & KODE VOUCHER
+              PORTAL LAYANAN DIGITAL &amp; KODE VOUCHER
             </span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold">
+            <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
               Sistem Real-Time
             </span>
           </div>
           <h2 className="text-xl sm:text-2xl font-black text-white mt-1">
-            Pusat {featureConfigs.length}+ Fitur Perbankan, Tukar Kode Redeem, Pulsa, Token & Resi
+            Pusat Layanan Perbankan, Tukar Kode Redeem, Pulsa, Token &amp; Resi
           </h2>
           <p className="text-xs text-slate-300 max-w-2xl mt-1">
-            Setiap pembelian menggunakan uang akan <strong>langsung memotong saldo rekening Anda</strong> dan segera diproses oleh sistem. Pembelian non-kode (seperti Air/PDAM, tagihan, makanan, dll.) menggunakan <strong>Persetujuan Pembeli</strong> setelah selesai diproses.
+            Setiap pembelian menggunakan uang akan <strong>langsung memotong saldo rekening Anda</strong> dan segera diproses oleh sistem. Pembelian non-kode (seperti Air/PDAM, tagihan, kuliner, dll.) menggunakan <strong>Persetujuan Pembeli</strong> setelah selesai diproses.
           </p>
         </div>
 
@@ -649,7 +706,7 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
         </button>
       </div>
 
-      {/* SEARCH BAR & CATEGORY TABS FOR 60+ FEATURES */}
+      {/* SEARCH BAR & CATEGORY TABS FOR SERVICES */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 space-y-3">
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
           <div className="relative flex-1">
@@ -658,12 +715,12 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari dari 60+ fitur layanan (misal: Pulsa, PLN, Resi, Redeem, PDAM, Pesawat, Game, Zakat, Emas)..."
+              placeholder="Cari layanan digital, tagihan, e-commerce, kuliner, AI, atau bisnis..."
               className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white text-xs focus:outline-none focus:border-amber-400"
             />
           </div>
           <span className="text-xs font-mono text-amber-300 font-bold shrink-0">
-            Menampilkan {filteredFeatures.length} Fitur
+            {selectedCategory === 'Semua' ? 'Semua Kategori Layanan' : selectedCategory}
           </span>
         </div>
 
@@ -684,7 +741,7 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
         </div>
       </div>
 
-      {/* 60+ FEATURES GRID */}
+      {/* SERVICES GRID */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         {filteredFeatures.map((item) => {
           const Icon = getCategoryIcon(item);
@@ -748,16 +805,17 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
          ========================================================================= */}
       {lastPurchaseReceipt && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border-2 border-amber-400 text-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-xs animate-in fade-in zoom-in-95">
+          <div className="bg-slate-900 border-2 border-amber-400 text-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl space-y-4 text-xs animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400 text-emerald-300 flex items-center justify-center">
-                  <CheckCircle2 className="w-6 h-6" />
+                  <Receipt className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-black text-base text-white">Rincian Potong Saldo & Status</h3>
-                  <p className="text-[11px] text-amber-300 font-mono">
+                  <h3 className="font-black text-base text-white">Struk Digital &amp; Rincian Transaksi</h3>
+                  <p className="text-[11px] text-amber-300 font-mono tabular-nums">
                     Ref: {lastPurchaseReceipt.result.transaction?.referenceNo}
+                    {lastPurchaseReceipt.timestamp ? ` • ${lastPurchaseReceipt.timestamp}` : ''}
                   </p>
                 </div>
               </div>
@@ -769,24 +827,47 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
               </button>
             </div>
 
-            {/* Balance Deduction Breakdown Box */}
+            {/* Balance Deduction & Service Parameters Receipt */}
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
-              <div className="text-slate-400 text-[11px] font-semibold border-b border-slate-800 pb-2">
-                Item Pembelian: <strong className="text-white block text-xs mt-0.5">{lastPurchaseReceipt.title}</strong>
+              <div className="border-b border-slate-800 pb-2.5">
+                {lastPurchaseReceipt.category && (
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 block">
+                    {lastPurchaseReceipt.category}
+                  </span>
+                )}
+                <strong className="text-white block text-sm mt-0.5">{lastPurchaseReceipt.title}</strong>
               </div>
+
+              {lastPurchaseReceipt.serviceDetails && lastPurchaseReceipt.serviceDetails.length > 0 && (
+                <div className="space-y-1.5 border-b border-slate-800/80 pb-2.5">
+                  {lastPurchaseReceipt.serviceDetails.map((detail, idx) => (
+                    <div key={idx} className="flex justify-between items-start gap-3 text-[11px]">
+                      <span className="text-slate-400 shrink-0">{detail.label}</span>
+                      <span className="text-slate-100 font-mono text-right break-words">
+                        {detail.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="flex justify-between items-center text-slate-300">
                 <span>Saldo Awal Sebelum Beli:</span>
-                <span className="font-mono">{formatRupiah(lastPurchaseReceipt.result.previousBalance || 0)}</span>
+                <span className="font-mono tabular-nums">
+                  {formatRupiah(lastPurchaseReceipt.result.previousBalance || 0)}
+                </span>
               </div>
               <div className="flex justify-between items-center text-rose-400 font-bold">
                 <span>Nominal Saldo Terpotong:</span>
-                <span className="font-mono text-sm">
+                <span className="font-mono tabular-nums text-sm">
                   - {formatRupiah(lastPurchaseReceipt.result.amountDeducted || 0)}
                 </span>
               </div>
               <div className="flex justify-between items-center border-t border-slate-800 pt-2 text-emerald-400 font-black text-sm">
                 <span>Sisa Saldo Anda Sekarang:</span>
-                <span className="font-mono">{formatRupiah(lastPurchaseReceipt.result.newBalance || 0)}</span>
+                <span className="font-mono tabular-nums">
+                  {formatRupiah(lastPurchaseReceipt.result.newBalance || 0)}
+                </span>
               </div>
             </div>
 
@@ -1502,15 +1583,17 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
       )}
 
       {/* =========================================================================
-          MODAL 7: UNIVERSAL INTERACTIVE PURCHASE MODAL FOR ALL 50+ PAID FEATURES
+          MODAL 7: SERVICE-SPECIFIC INTERACTIVE FORM MODAL
          ========================================================================= */}
       {activeModal === 'generic_paid_feature' && selectedGenericFeature && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-xs">
+          <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl space-y-4 text-xs">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
-                <span className="text-[10px] font-mono text-cyan-400 uppercase">{selectedGenericFeature.category}</span>
-                <h3 className="font-bold text-base text-white">{selectedGenericFeature.title}</h3>
+                <span className="text-[10px] font-mono text-cyan-400 uppercase block">
+                  {genericFormSchema?.serviceBadge || selectedGenericFeature.category}
+                </span>
+                <h3 className="font-bold text-base text-white mt-0.5">{selectedGenericFeature.title}</h3>
               </div>
               <button onClick={() => setActiveModal(null)} className="p-1 text-slate-400 hover:text-white cursor-pointer">
                 <X className="w-4 h-4" />
@@ -1525,23 +1608,62 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
             <div className="p-2.5 rounded-xl border bg-blue-500/10 border-blue-500/30 text-blue-200 text-[11px] flex items-center gap-2">
               <Clock className="w-4 h-4 shrink-0 text-blue-400" />
               <span>
-                Pembayaran langsung memotong saldo rekening Anda dan pesanan segera diproses oleh sistem. Untuk layanan non-kode (seperti Air/PDAM, tagihan, makanan, dll.), konfirmasi menggunakan <strong>Persetujuan Pembeli</strong> setelah diproses.
+                Pembayaran langsung memotong saldo rekening Anda dan pesanan segera diproses oleh sistem. Layanan non-kode dikonfirmasi menggunakan <strong>Persetujuan Pembeli</strong> setelah diproses.
               </span>
             </div>
 
             <form onSubmit={handleGenericFeatureSubmit} className="space-y-3.5">
               <div>
                 <label className="text-slate-300 font-semibold block mb-1">
-                  Nomor Pelanggan / Tujuan / Kode Booking:
+                  {genericFormSchema?.primaryFieldLabel || 'Nomor Pelanggan / Tujuan / Kode Booking:'}
                 </label>
                 <input
                   type="text"
                   required
                   value={genericTargetId}
                   onChange={(e) => setGenericTargetId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono"
+                  placeholder={genericFormSchema?.primaryFieldPlaceholder}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-amber-400"
                 />
               </div>
+
+              {genericFormSchema?.extraFields.map((field) => (
+                <div key={field.key}>
+                  <label className="text-slate-300 font-semibold block mb-1">{field.label}:</label>
+                  {field.type === 'select' && field.options ? (
+                    <select
+                      value={genericExtraValues[field.key] ?? field.defaultValue}
+                      onChange={(e) =>
+                        setGenericExtraValues((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-400"
+                    >
+                      {field.options.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type={field.type}
+                      required={field.required}
+                      value={genericExtraValues[field.key] ?? field.defaultValue}
+                      onChange={(e) =>
+                        setGenericExtraValues((prev) => ({
+                          ...prev,
+                          [field.key]: e.target.value,
+                        }))
+                      }
+                      placeholder={field.placeholder}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-400"
+                    />
+                  )}
+                </div>
+              ))}
 
               <div>
                 <label className="text-slate-300 font-semibold block mb-1">
@@ -1553,15 +1675,19 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
                   min="1000"
                   value={genericAmount}
                   onChange={(e) => setGenericAmount(parseInt(e.target.value, 10) || 0)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-amber-300 font-mono font-bold text-sm"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-amber-300 font-mono tabular-nums font-bold text-sm focus:outline-none focus:border-amber-400"
                 />
-                <div className="grid grid-cols-3 gap-1.5 mt-1.5">
-                  {[50_000, 150_000, 500_000].map((q) => (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mt-1.5">
+                  {(genericFormSchema?.nominalPresets || [50_000, 150_000, 500_000]).map((q) => (
                     <button
                       key={q}
                       type="button"
                       onClick={() => setGenericAmount(q)}
-                      className="py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg font-mono text-[10px] text-slate-200 cursor-pointer"
+                      className={`py-1.5 px-2 rounded-lg font-mono tabular-nums text-[10px] border cursor-pointer transition-colors ${
+                        genericAmount === q
+                          ? 'bg-amber-500/20 border-amber-400 text-amber-300 font-bold'
+                          : 'bg-slate-800 border-slate-700 hover:bg-slate-700 text-slate-200'
+                      }`}
                     >
                       {formatRupiah(q)}
                     </button>
@@ -1575,15 +1701,15 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
                   type="text"
                   value={genericNote}
                   onChange={(e) => setGenericNote(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-400"
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-black rounded-xl cursor-pointer shadow-lg"
+                className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-black rounded-xl cursor-pointer shadow-lg font-mono tabular-nums"
               >
-                Bayar Sekarang ({formatRupiah(genericAmount)}) ➔
+                Bayar &amp; Cetak Struk ({formatRupiah(genericAmount)}) ➔
               </button>
             </form>
           </div>

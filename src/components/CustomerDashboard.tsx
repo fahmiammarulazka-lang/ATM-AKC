@@ -31,6 +31,7 @@ import {
   Filter,
   MessageSquare,
   Briefcase,
+  Crown,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CardVisualizer } from './CardVisualizer';
@@ -41,6 +42,8 @@ import { DigitalBankingFeatures } from './DigitalBankingFeatures';
 import { JobVacancyView } from './JobVacancyView';
 import { VerifiedBadge } from './VerifiedBadge';
 import { CompleteSettingsView } from './CompleteSettingsView';
+import { TabEmasView } from './TabEmasView';
+import { TransferBebasPanel } from './TransferBebasPanel';
 import {
   formatRupiah,
   formatIndoDate,
@@ -85,11 +88,13 @@ export const CustomerDashboard: React.FC = () => {
     | 'layanan'
     | 'chat'
     | 'transfer'
+    | 'emas'
     | 'pinjaman'
     | 'mutasi'
     | 'keamanan'
     | 'jadwal'
   >('ringkasan');
+  const [transferMode, setTransferMode] = useState<'reguler' | 'bebas'>('reguler');
   const [showCardPinModal, setShowCardPinModal] = useState<boolean>(false);
   const [pendingTierSwitch, setPendingTierSwitch] = useState<CardTier | null>(null);
 
@@ -248,10 +253,19 @@ export const CustomerDashboard: React.FC = () => {
     if (filterType === 'all') return true;
     if (filterType === 'tarik' && tx.type === 'tarik') return true;
     if (filterType === 'setor' && tx.type === 'setor') return true;
-    if (filterType === 'transfer' && (tx.type === 'transfer_out' || tx.type === 'transfer_in')) return true;
+    if (
+      filterType === 'transfer' &&
+      (tx.type === 'transfer_out' ||
+        tx.type === 'transfer_in' ||
+        tx.type === 'transfer_bebas_out' ||
+        tx.type === 'transfer_bebas_in')
+    )
+      return true;
+    if (filterType === 'emas' && (tx.type === 'beli_emas' || tx.type === 'jual_emas' || tx.category === 'emas'))
+      return true;
     if (filterType === 'pinjaman' && (tx.type === 'pinjaman_disburse' || tx.type === 'pinjaman_bayar')) return true;
 
-    return true;
+    return false;
   });
 
   return (
@@ -339,7 +353,7 @@ export const CustomerDashboard: React.FC = () => {
               Ingin Penjelasan Lengkap Semua Tombol atau Tanya Jawab Pakai Suara?
             </h3>
             <p className="text-[11px] text-slate-300">
-              Tutorial otomatis bertambah setiap ada fitur baru ({featureConfigs.length + 8} modul aktif) dan juga tersedia di tombol paling bawah halaman.
+              Panduan interaktif aplikasi siap membantu Anda kapan saja dan juga tersedia di tombol paling bawah halaman.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -484,7 +498,7 @@ export const CustomerDashboard: React.FC = () => {
           }`}
         >
           <Sparkles className="w-4 h-4" />
-          <span>{featureConfigs.length}+ Fitur Digital, Redeem & Pulsa</span>
+          <span>Layanan Digital, Redeem &amp; Pulsa</span>
         </button>
 
         <button
@@ -508,7 +522,19 @@ export const CustomerDashboard: React.FC = () => {
           }`}
         >
           <Send className="w-4 h-4 text-emerald-400" />
-          <span>Transfer Antar Rekening</span>
+          <span>Transfer &amp; Transfer Bebas</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('emas')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            activeTab === 'emas'
+              ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/30'
+              : 'text-amber-300 hover:text-white hover:bg-amber-500/10 border border-amber-500/35'
+          }`}
+        >
+          <Crown className="w-4 h-4" />
+          <span>Emas 24K</span>
         </button>
 
         <button
@@ -757,9 +783,51 @@ export const CustomerDashboard: React.FC = () => {
       {activeTab === 'chat' && <NusantaraChat />}
 
       {/* =========================================================================
-          TAB 2: FITUR TRANSFER ANTAR REKENING (Section 7 - 8 Steps)
+          TAB EMAS MEWAH 24K REAL-TIME
+         ========================================================================= */}
+      {activeTab === 'emas' && <TabEmasView />}
+
+      {/* =========================================================================
+          TAB 2: FITUR TRANSFER (MODE REGULER & MODE TRANSFER BEBAS 5%)
          ========================================================================= */}
       {activeTab === 'transfer' && (
+        <div className="space-y-5">
+          {/* Segmented Mode Switcher inside Transfer Tab */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900/90 border border-slate-800 p-3">
+            <div className="flex items-center gap-1.5 p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setTransferMode('reguler')}
+                className={`px-4 py-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                  transferMode === 'reguler'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Transfer Reguler (Antar Rekening)
+              </button>
+              <button
+                type="button"
+                onClick={() => setTransferMode('bebas')}
+                className={`px-4 py-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                  transferMode === 'bebas'
+                    ? 'bg-amber-400 text-slate-950 font-bold'
+                    : 'text-amber-300 hover:text-white'
+                }`}
+              >
+                Transfer Bebas 5% (Uang, Coin &amp; Emas)
+              </button>
+            </div>
+            <span className="text-xs text-slate-400">
+              {transferMode === 'bebas'
+                ? 'Kirim Uang, Coin Spin, Emas 24K, atau ketiganya sekaligus · Admin 5%'
+                : 'Transfer perbankan reguler antar rekening Bank Nusantara & Bank Lain'}
+            </span>
+          </div>
+
+          {transferMode === 'bebas' ? (
+            <TransferBebasPanel onNavigateToMutasi={() => setActiveTab('mutasi')} />
+          ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           <div className="lg:col-span-7 bg-slate-900/80 border border-slate-800 rounded-3xl p-5 sm:p-7 shadow-xl space-y-5">
             <div>
@@ -1026,6 +1094,8 @@ export const CustomerDashboard: React.FC = () => {
               </div>
             </div>
           </div>
+        </div>
+          )}
         </div>
       )}
 
@@ -1428,7 +1498,8 @@ export const CustomerDashboard: React.FC = () => {
                   <option value="all">Semua Tipe</option>
                   <option value="tarik">Tarik Tunai</option>
                   <option value="setor">Setor Tunai</option>
-                  <option value="transfer">Transfer</option>
+                  <option value="transfer">Transfer &amp; Transfer Bebas</option>
+                  <option value="emas">Transaksi Emas 24K</option>
                   <option value="pinjaman">Pinjaman</option>
                 </select>
               </div>
@@ -1444,7 +1515,14 @@ export const CustomerDashboard: React.FC = () => {
                 <div className="font-mono text-xl font-bold text-emerald-300 mt-1">
                   {formatRupiah(
                     currentAccountTransactions
-                      .filter((tx) => tx.type === 'setor' || tx.type === 'transfer_in' || tx.type === 'pinjaman_disburse')
+                      .filter(
+                        (tx) =>
+                          tx.type === 'setor' ||
+                          tx.type === 'transfer_in' ||
+                          tx.type === 'transfer_bebas_in' ||
+                          tx.type === 'jual_emas' ||
+                          tx.type === 'pinjaman_disburse'
+                      )
                       .reduce((acc, curr) => acc + curr.amount, 0)
                   )}
                 </div>
@@ -1458,7 +1536,15 @@ export const CustomerDashboard: React.FC = () => {
                 <div className="font-mono text-xl font-bold text-rose-300 mt-1">
                   {formatRupiah(
                     currentAccountTransactions
-                      .filter((tx) => tx.type === 'tarik' || tx.type === 'transfer_out' || tx.type === 'biaya_admin' || tx.type === 'pinjaman_bayar')
+                      .filter(
+                        (tx) =>
+                          tx.type === 'tarik' ||
+                          tx.type === 'transfer_out' ||
+                          tx.type === 'transfer_bebas_out' ||
+                          tx.type === 'beli_emas' ||
+                          tx.type === 'biaya_admin' ||
+                          tx.type === 'pinjaman_bayar'
+                      )
                       .reduce((acc, curr) => acc + curr.amount, 0)
                   )}
                 </div>
@@ -1676,7 +1762,7 @@ export const CustomerDashboard: React.FC = () => {
       )}
 
       {/* =========================================================================
-          TAB 6: PUSAT PENGATURAN SUPER LENGKAP (60+ PENGATURAN & FITUR DIHAPUS)
+          TAB 6: PUSAT PENGATURAN LENGKAP & FITUR DIHAPUS
          ========================================================================= */}
       {activeTab === 'keamanan' && <CompleteSettingsView />}
 

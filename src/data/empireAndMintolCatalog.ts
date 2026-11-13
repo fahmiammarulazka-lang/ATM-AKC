@@ -750,7 +750,7 @@ export const MINTOL_ADMIN_FEATURES_CATALOG: MintolFeatureOption[] = [
   {
     id: 'mintol_matikan_pin_admin_fitur',
     category: 'Pinjaman, Tagihan & Fitur Lainnya',
-    title: 'Minta Bebaskan Semua 65+ Fitur dari Syarat PIN & Persetujuan Admin',
+    title: 'Minta Bebaskan Semua Fitur dari Syarat PIN & Persetujuan Admin',
     label: 'Minta Bebaskan Semua Fitur dari PIN Admin',
     iconEmoji: '🔓',
     icon: '🔓',

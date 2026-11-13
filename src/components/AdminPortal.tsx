@@ -71,6 +71,7 @@ import {
 } from '../data/empireAndMintolCatalog';
 import { VerifiedBadge } from './VerifiedBadge';
 import { AdminQuickAccountControlPanel } from './AdminQuickAccountControlPanel';
+import { AdminGoldTransferPanel } from './AdminGoldTransferPanel';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -211,6 +212,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   const [activeAdminTab, setActiveAdminTab] = useState<
     | 'super_tools'
     | 'spin_wheel_admin'
+    | 'gold_transfer_admin'
     | 'empire_admin'
     | 'mintol_admin'
     | 'app_updates'
@@ -576,7 +578,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             Pusat Kendali Semua Fitur, PIN Admin, Kode Redeem & Persetujuan Keuangan
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 max-w-2xl mt-1">
-            Atur bebas apakah setiap fitur ({featureConfigs.length}+ Fitur) membutuhkan PIN Admin atau tidak, kelola antrean persetujuan pembelian nasabah, buat Kode Redeem dengan kuota & batas waktu, serta tinjau permohonan Lupa PIN ATM.
+            Atur bebas apakah setiap fitur layanan membutuhkan PIN Admin atau tidak, kelola antrean persetujuan pembelian nasabah, buat Kode Redeem dengan kuota &amp; batas waktu, serta tinjau permohonan Lupa PIN ATM.
           </p>
         </div>
 
@@ -651,9 +653,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           onClick={() => setActiveAdminTab('features')}
           className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 shadow-lg cursor-pointer transition-all"
         >
-          <span className="text-slate-400 block text-[11px]">Total Fitur Dapat Diatur Admin</span>
+          <span className="text-slate-400 block text-[11px]">Konfigurasi Otorisasi Layanan</span>
           <div className="font-mono text-2xl font-black text-cyan-400 mt-1 flex items-center gap-2">
-            <span>{featureConfigs.length} Fitur</span>
+            <span>Kontrol PIN</span>
           </div>
         </div>
 
@@ -717,6 +719,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         >
           <Sparkles className="w-4 h-4" />
           <span>🎡 Kontrol Spin Wheel, Diskon Koin &amp; Probabilitas</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('gold_transfer_admin')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'gold_transfer_admin'
+              ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/30'
+              : 'text-amber-300 hover:text-white hover:bg-amber-950/60 border border-amber-400/60'
+          }`}
+        >
+          <Crown className="w-4 h-4" />
+          <span>🪙 Kontrol Emas 24K &amp; Transfer Bebas 5%</span>
         </button>
 
         <button
@@ -817,7 +831,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           }`}
         >
           <Sliders className="w-4 h-4" />
-          <span>Kontrol Fitur, PIN &amp; Fitur Dihapus ({featureConfigs.length} Aktif / {deletedFeaturesList.length} Dihapus)</span>
+          <span>Kontrol Fitur, PIN &amp; Fitur Dihapus</span>
         </button>
 
         <button
@@ -904,6 +918,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <span>Brankas & SOP 100x</span>
         </button>
       </div>
+
+      {/* ================= ADMIN TAB: KONTROL EMAS 24K & TRANSFER BEBAS 5% ================= */}
+      {activeAdminTab === 'gold_transfer_admin' && <AdminGoldTransferPanel />}
 
       {/* ================= ADMIN TAB: KONTROL SPIN THE WHEEL, DISKON KOIN (1-1 JUTA) & PROBABILITAS ================= */}
       {activeAdminTab === 'spin_wheel_admin' && (
@@ -4589,7 +4606,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 KONFIGURASI KEAMANAN & OTORISASI FITUR NASABAH
               </span>
               <h3 className="font-bold text-white text-base sm:text-lg mt-0.5">
-                Daftar Lengkap {featureConfigs.length} Fitur Bank Nusantara (Bebas Atur PIN Admin & Persetujuan)
+                Daftar Lengkap Layanan Bank Nusantara (Bebas Atur PIN Admin &amp; Persetujuan)
               </h3>
               <p className="text-slate-400 text-xs mt-1 max-w-2xl">
                 Sesuai permintaan Anda: Di sini terdapat <strong>semua fitur</strong> aplikasi. Anda bebas mengatur apakah setiap fitur <strong>Memakai PIN Admin (159357) atau Tidak</strong> saat diakses nasabah, serta apakah fitur tersebut <strong>Wajib Persetujuan Admin atau Langsung Otomatis</strong>.

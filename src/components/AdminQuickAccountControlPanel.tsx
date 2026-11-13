@@ -56,6 +56,7 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
     adminDirectChangeAccountPin,
     adminSetAccountJobLevel,
     adminAdjustAccountSpinCoins,
+    adminAdjustAccountGold,
     adminAdjustLevelVouchers,
     adminInjectPulsaAndPln,
     adminResetDailyWithdrawalQuota,
@@ -522,6 +523,18 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                   className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-bold text-[11px] cursor-pointer"
                 >
                   🪙 +1.000 Koin Spin
+                </button>
+
+                {/* 8b. Quick +Rp 20 Juta Emas 24K */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = adminAdjustAccountGold(acc.id, 20_000_000, 'rupiah', 'add');
+                    showToast(res.message);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-400/40 text-yellow-200 font-bold text-[11px] cursor-pointer"
+                >
+                  👑 +Rp 20 Juta Emas
                 </button>
 
                 {/* 9. Quick +20 Voucher Level */}

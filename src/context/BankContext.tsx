@@ -43,6 +43,13 @@ import {
   AdminHelpRequestRecord,
   SultanEmpireAdminConfig,
   UserAppSettings,
+  GoldFormType,
+  GoldMotifType,
+  GoldBatchRecord,
+  GoldPriceHistoryPoint,
+  GoldAndTransferMarketConfig,
+  TransferBebasAssetMode,
+  TransferBebasReceipt,
 } from '../types/bank';
 import {
   INITIAL_ACCOUNTS,
@@ -767,6 +774,77 @@ interface BankContextType {
   isAiBotModalOpen: boolean;
   setIsAiBotModalOpen: (open: boolean) => void;
 
+  // Tab Emas Mewah 24K Real-Time & Transfer Bebas (Admin 5% - Uang, Coin, Emas, Gabungan)
+  goldMarketConfig: GoldAndTransferMarketConfig;
+  buyGold: (input: {
+    rupiahAmount: number;
+    goldForm: GoldFormType;
+    motif: GoldMotifType;
+    note?: string;
+  }) => {
+    success: boolean;
+    message: string;
+    gramsAdded?: number;
+    batch?: GoldBatchRecord;
+    newBalance?: number;
+    newGoldGrams?: number;
+  };
+  sellGold: (input: {
+    mode: 'rupiah' | 'batch' | 'all';
+    rupiahAmount?: number;
+    batchId?: string;
+  }) => {
+    success: boolean;
+    message: string;
+    proceedsRupiah?: number;
+    grossMarketValue?: number;
+    penaltyDeducted?: number;
+    profitOrLoss?: number;
+    gramsSold?: number;
+    sameDayApplied?: boolean;
+  };
+  setCustomerCustomGoldPrice: (pricePerGram: number | null) => {
+    success: boolean;
+    message: string;
+  };
+  updateCustomerGoldPreferences: (input: {
+    targetRupiah?: number;
+    preferredForm?: GoldFormType;
+    preferredMotif?: GoldMotifType;
+  }) => { success: boolean; message: string };
+  dismissGoldMonthlyBanner: () => void;
+  transferBebas: (input: {
+    assetMode: TransferBebasAssetMode;
+    recipientAccount: string;
+    recipientName: string;
+    recipientBank: string;
+    uangAmount: number;
+    coinAmount: number;
+    goldRupiahAmount: number;
+    note?: string;
+    pin: string;
+  }) => {
+    success: boolean;
+    message: string;
+    receipt?: TransferBebasReceipt;
+    transaction?: Transaction;
+  };
+  adminUpdateGoldMarketConfig: (
+    partial: Partial<GoldAndTransferMarketConfig>
+  ) => { success: boolean; message: string };
+  adminSimulateGoldNextMonth: (months?: number) => {
+    success: boolean;
+    message: string;
+    newPricePerGram: number;
+  };
+  adminResetGoldMarketConfig: () => { success: boolean; message: string };
+  adminAdjustAccountGold: (
+    accountId: string,
+    value: number,
+    inputUnit: 'rupiah' | 'grams',
+    mode: 'add' | 'set'
+  ) => { success: boolean; message: string };
+
   // Banking operations
   withdrawCash: (amount: number, pin: string) => { success: boolean; message: string; transaction?: Transaction };
   depositCash: (amount: number, note?: string) => { success: boolean; message: string; transaction?: Transaction };
@@ -841,6 +919,65 @@ const STORAGE_KEYS = {
   MINTOL_REQUESTS: 'bank_nusantara_mintol_requests_v1',
   DELETED_FEATURES: 'bank_nusantara_deleted_features_v1',
   USER_SETTINGS: 'bank_nusantara_user_settings_v1',
+  GOLD_TRANSFER_MARKET: 'bank_nusantara_gold_transfer_v1',
+};
+
+const getLocalDateKey = (d: Date = new Date()): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const getLocalMonthKey = (d: Date = new Date()): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+};
+
+const computeMonthsDifference = (fromYM: string, toYM: string): number => {
+  const [fy, fm] = fromYM.split('-').map((n) => parseInt(n, 10));
+  const [ty, tm] = toYM.split('-').map((n) => parseInt(n, 10));
+  if (!fy || !fm || !ty || !tm) return 0;
+  return (ty - fy) * 12 + (tm - fm);
+};
+
+const formatMonthShortIndo = (d: Date): string => {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  return `${months[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+const createInitialGoldMarketConfig = (): GoldAndTransferMarketConfig => {
+  const now = new Date();
+  const currentPrice = 1_400_000;
+  const growth = 5;
+  const history: GoldPriceHistoryPoint[] = [];
+  // Build 5 previous months + current month curve reflecting +5% monthly growth
+  for (let i = 5; i >= 0; i--) {
+    const dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const priceAtMonth = Math.round(currentPrice / Math.pow(1 + growth / 100, i));
+    history.push({
+      id: `gold-hist-init-${i}`,
+      label: formatMonthShortIndo(dt),
+      monthKey: getLocalMonthKey(dt),
+      pricePerGram: priceAtMonth,
+      changePercent: i === 5 ? 0 : growth,
+      timestamp: dt.toISOString(),
+      isSimulation: false,
+    });
+  }
+  return {
+    basePricePerGram: currentPrice,
+    currentPricePerGram: currentPrice,
+    monthlyGrowthPercent: 5,
+    sameDayPenaltyMode: '1%',
+    sameDayPenaltyPercent: 1,
+    transferBebasAdminFeePercent: 5,
+    minNominalRupiah: 1_000,
+    lastProcessedMonthKey: getLocalMonthKey(now),
+    simulatedMonthsOffset: 0,
+    priceHistory: history,
+  };
 };
 
 export const DEFAULT_USER_APP_SETTINGS: UserAppSettings = {
@@ -1028,6 +1165,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // ignore
     }
     return INITIAL_SULTAN_EMPIRE_CONFIG;
+  });
+
+  const [goldMarketConfig, setGoldMarketConfig] = useState<GoldAndTransferMarketConfig>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.GOLD_TRANSFER_MARKET);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return { ...createInitialGoldMarketConfig(), ...parsed };
+      }
+    } catch {
+      // ignore
+    }
+    return createInitialGoldMarketConfig();
   });
 
   const [adminHelpRequests, setAdminHelpRequests] = useState<AdminHelpRequestRecord[]>(() => {
@@ -1491,6 +1641,62 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem(STORAGE_KEYS.APP_UPDATES, JSON.stringify(appUpdates));
     } catch { /* empty */ }
   }, [appUpdates]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.GOLD_TRANSFER_MARKET, JSON.stringify(goldMarketConfig));
+    } catch { /* empty */ }
+  }, [goldMarketConfig]);
+
+  // Real-time Calendar Watcher: Checks every 1 second whether system month rolled over onto Tanggal 1
+  // and compounds +5% per month automatically (even across multiple missed months).
+  useEffect(() => {
+    const checkMonthlyRollover = () => {
+      const now = new Date();
+      const realMonthKey = getLocalMonthKey(now);
+      setGoldMarketConfig((prev) => {
+        const monthsDiff = computeMonthsDifference(prev.lastProcessedMonthKey, realMonthKey);
+        if (monthsDiff <= 0) return prev;
+        const growthRate = Math.max(0, prev.monthlyGrowthPercent ?? 5);
+        const factor = Math.pow(1 + growthRate / 100, monthsDiff);
+        const updatedPrice = Math.round(prev.currentPricePerGram * factor);
+        const newPoints: GoldPriceHistoryPoint[] = [];
+        for (let step = 1; step <= monthsDiff; step++) {
+          const [fy, fm] = prev.lastProcessedMonthKey.split('-').map(Number);
+          const stepDate = new Date(fy, fm - 1 + step, 1);
+          const stepPrice = Math.round(
+            prev.currentPricePerGram * Math.pow(1 + growthRate / 100, step)
+          );
+          newPoints.push({
+            id: `gold-m-${Date.now()}-${step}`,
+            label: formatMonthShortIndo(stepDate),
+            monthKey: getLocalMonthKey(stepDate),
+            pricePerGram: stepPrice,
+            changePercent: growthRate,
+            timestamp: stepDate.toISOString(),
+            isSimulation: false,
+          });
+        }
+        return {
+          ...prev,
+          currentPricePerGram: updatedPrice,
+          lastProcessedMonthKey: realMonthKey,
+          priceHistory: [...prev.priceHistory, ...newPoints].slice(-24),
+          lastMonthlyEventBanner: {
+            title: `Kenaikan Otomatis Tanggal 1 (+${growthRate}%${monthsDiff > 1 ? ` × ${monthsDiff} Bulan` : ''})`,
+            message: `Bulan baru telah tiba! Harga Emas 24K naik otomatis menjadi ${formatRupiah(updatedPrice)}/gram.`,
+            monthKey: realMonthKey,
+            growthPercent: growthRate,
+            timestamp: now.toISOString(),
+          },
+        };
+      });
+    };
+
+    checkMonthlyRollover();
+    const timer = window.setInterval(checkMonthlyRollover, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const activeWebsitePopups = websitePopups.filter(
     (p) => !p.dismissed && !dismissedPopupIds.includes(p.id)
@@ -6961,7 +7167,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       json: jsonStr,
-      message: `Snapshot JSON Master Bank (${accounts.length} rekening, ${transactions.length} transaksi, ${featureConfigs.length} fitur) berhasil disalin ke clipboard!`,
+      message: `Snapshot JSON Master Bank (${accounts.length} rekening, ${transactions.length} transaksi) berhasil disalin ke clipboard!`,
     };
   };
 
@@ -7742,6 +7948,767 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
+  // ================= TAB EMAS MEWAH 24K REAL-TIME & TRANSFER BEBAS (ADMIN 5%) =================
+  const getEffectiveGoldPrice = (acc: BankAccount | null | undefined): number => {
+    if (acc?.customUserGoldPricePerGram && acc.customUserGoldPricePerGram >= 1000) {
+      return acc.customUserGoldPricePerGram;
+    }
+    return goldMarketConfig.currentPricePerGram || 1_400_000;
+  };
+
+  const buyGold = (input: {
+    rupiahAmount: number;
+    goldForm: GoldFormType;
+    motif: GoldMotifType;
+    note?: string;
+  }) => {
+    if (!currentAccount) {
+      return { success: false, message: 'Silakan login ke kartu rekening terlebih dahulu.' };
+    }
+    if (currentAccount.cardStatus !== 'active') {
+      return {
+        success: false,
+        message: 'Kartu tidak aktif/dibekukan sehingga pembelian emas ditolak.',
+      };
+    }
+    const minNom = Math.max(1000, goldMarketConfig.minNominalRupiah || 1000);
+    const cleanAmount = Math.round(Number(input.rupiahAmount) || 0);
+    if (cleanAmount < minNom) {
+      return {
+        success: false,
+        message: `Nominal pembelian minimal adalah ${formatRupiah(minNom)}.`,
+      };
+    }
+    const isInf = isUnlimitedNumber(currentAccount.balance);
+    if (!isInf && currentAccount.balance < cleanAmount) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Saldo rekening tidak mencukupi. Dibutuhkan ${formatRupiah(cleanAmount)}.`,
+      };
+    }
+
+    const activePrice = getEffectiveGoldPrice(currentAccount);
+    const gramsAdded = cleanAmount / activePrice;
+    const now = new Date();
+    const newBatch: GoldBatchRecord = {
+      id: `gold-batch-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      purchasedAt: now.toISOString(),
+      purchaseDateKey: getLocalDateKey(now),
+      grams: gramsAdded,
+      costRupiah: cleanAmount,
+      pricePerGramAtBuy: activePrice,
+      goldForm: input.goldForm,
+      motif: input.motif,
+      note: input.note,
+    };
+
+    const nextBatches = [...(currentAccount.goldBatches || []), newBatch];
+    const nextGoldGrams = nextBatches.reduce((sum, b) => sum + b.grams, 0);
+    const nextBalance = isInf ? currentAccount.balance : currentAccount.balance - cleanAmount;
+
+    setAccounts((prev) =>
+      prev.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              balance: nextBalance,
+              goldGrams: nextGoldGrams,
+              goldBatches: nextBatches,
+              goldPreferredForm: input.goldForm,
+              goldPreferredMotif: input.motif,
+            }
+          : a
+      )
+    );
+
+    const newTx: Transaction = {
+      id: `tx-gold-buy-${Date.now()}`,
+      accountId: currentAccount.id,
+      type: 'beli_emas',
+      title: `Beli Emas 24K (${input.goldForm === 'batangan' ? 'Batangan' : 'Perhiasan'}) — ${gramsAdded.toFixed(4)} g`,
+      amount: cleanAmount,
+      goldGrams: gramsAdded,
+      timestamp: now.toISOString(),
+      description: `Pembelian Emas 24K 999.9 senilai ${formatRupiah(cleanAmount)} @ ${formatRupiah(activePrice)}/gr`,
+      recipientName: 'Brankas Emas 24K Bank Nusantara',
+      status: 'success',
+      referenceNo: `GLD-${Date.now().toString().slice(-6)}`,
+      category: 'emas',
+    };
+    setTransactions((prev) => [newTx, ...prev]);
+    playAtmSound('cash');
+
+    return {
+      success: true,
+      message: `Pembelian Emas 24K sebesar ${formatRupiah(cleanAmount)} (${gramsAdded.toFixed(4)} gram) berhasil!`,
+      gramsAdded,
+      batch: newBatch,
+      newBalance: nextBalance,
+      newGoldGrams: nextGoldGrams,
+    };
+  };
+
+  const sellGold = (input: {
+    mode: 'rupiah' | 'batch' | 'all';
+    rupiahAmount?: number;
+    batchId?: string;
+  }) => {
+    if (!currentAccount) {
+      return { success: false, message: 'Silakan login ke kartu rekening terlebih dahulu.' };
+    }
+    if (currentAccount.cardStatus !== 'active') {
+      return {
+        success: false,
+        message: 'Kartu tidak aktif/dibekukan sehingga penjualan emas tidak dapat diproses.',
+      };
+    }
+
+    const batches = [...(currentAccount.goldBatches || [])];
+    const totalOwnedGrams =
+      batches.length > 0
+        ? batches.reduce((s, b) => s + b.grams, 0)
+        : currentAccount.goldGrams || 0;
+
+    if (totalOwnedGrams <= 0.000001) {
+      return { success: false, message: 'Anda belum memiliki saldo emas untuk dijual.' };
+    }
+
+    const activePrice = getEffectiveGoldPrice(currentAccount);
+    const todayKey = getLocalDateKey(new Date());
+    const penaltyPercent = Math.max(0, Math.min(99, goldMarketConfig.sameDayPenaltyPercent ?? 1));
+    const minNom = Math.max(1000, goldMarketConfig.minNominalRupiah || 1000);
+
+    // Ensure at least a fallback legacy batch exists if goldGrams was set directly without batches
+    const workingBatches: GoldBatchRecord[] =
+      batches.length > 0
+        ? batches.map((b) => ({ ...b }))
+        : [
+            {
+              id: `gold-legacy-${Date.now()}`,
+              purchasedAt: new Date(Date.now() - 86400_000 * 32).toISOString(),
+              purchaseDateKey: '2020-01-01',
+              grams: totalOwnedGrams,
+              costRupiah: Math.round(totalOwnedGrams * activePrice),
+              pricePerGramAtBuy: activePrice,
+              goldForm: currentAccount.goldPreferredForm || 'batangan',
+              motif: currentAccount.goldPreferredMotif || 'klasik',
+            },
+          ];
+
+    let gramsRemainingToSell = 0;
+    if (input.mode === 'all') {
+      gramsRemainingToSell = totalOwnedGrams;
+    } else if (input.mode === 'batch' && input.batchId) {
+      const targetBatch = workingBatches.find((b) => b.id === input.batchId);
+      if (!targetBatch) {
+        return { success: false, message: 'Batch pembelian emas tidak ditemukan.' };
+      }
+      gramsRemainingToSell = targetBatch.grams;
+    } else {
+      const cleanNominal = Math.round(Number(input.rupiahAmount) || 0);
+      if (cleanNominal < minNom) {
+        return {
+          success: false,
+          message: `Nominal penjualan minimal adalah ${formatRupiah(minNom)}.`,
+        };
+      }
+      gramsRemainingToSell = cleanNominal / activePrice;
+      if (gramsRemainingToSell > totalOwnedGrams + 0.00001) {
+        return {
+          success: false,
+          message: `Saldo emas tidak mencukupi. Maksimal nilai pasar emas Anda saat ini adalah ${formatRupiah(
+            Math.round(totalOwnedGrams * activePrice)
+          )}.`,
+        };
+      }
+    }
+
+    let grossMarketValue = 0;
+    let totalProceeds = 0;
+    let totalOriginalCost = 0;
+    let gramsActuallySold = 0;
+    let sameDayApplied = false;
+
+    const updatedBatches: GoldBatchRecord[] = [];
+    for (const batch of workingBatches) {
+      if (input.mode === 'batch' && batch.id !== input.batchId) {
+        updatedBatches.push(batch);
+        continue;
+      }
+      if (gramsRemainingToSell <= 0.0000001) {
+        updatedBatches.push(batch);
+        continue;
+      }
+      const takeGrams = Math.min(batch.grams, gramsRemainingToSell);
+      const portionRatio = batch.grams > 0 ? takeGrams / batch.grams : 0;
+      const portionMarketValue = takeGrams * activePrice;
+      const isSameDay = batch.purchaseDateKey === todayKey;
+      if (isSameDay) sameDayApplied = true;
+      const netProceeds = isSameDay
+        ? portionMarketValue * (1 - penaltyPercent / 100)
+        : portionMarketValue;
+
+      grossMarketValue += portionMarketValue;
+      totalProceeds += netProceeds;
+      totalOriginalCost += batch.costRupiah * portionRatio;
+      gramsActuallySold += takeGrams;
+      gramsRemainingToSell -= takeGrams;
+
+      const leftoverGrams = batch.grams - takeGrams;
+      if (leftoverGrams > 0.000001) {
+        updatedBatches.push({
+          ...batch,
+          grams: leftoverGrams,
+          costRupiah: Math.max(0, Math.round(batch.costRupiah * (1 - portionRatio))),
+        });
+      }
+    }
+
+    const finalProceeds = Math.round(totalProceeds);
+    const finalGross = Math.round(grossMarketValue);
+    const penaltyDeducted = Math.max(0, finalGross - finalProceeds);
+    const profitOrLoss = finalProceeds - Math.round(totalOriginalCost);
+    const nextGoldGrams = updatedBatches.reduce((sum, b) => sum + b.grams, 0);
+    const isInf = isUnlimitedNumber(currentAccount.balance);
+    const nextBalance = isInf ? currentAccount.balance : currentAccount.balance + finalProceeds;
+
+    setAccounts((prev) =>
+      prev.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              balance: nextBalance,
+              goldGrams: nextGoldGrams,
+              goldBatches: updatedBatches,
+            }
+          : a
+      )
+    );
+
+    const newTx: Transaction = {
+      id: `tx-gold-sell-${Date.now()}`,
+      accountId: currentAccount.id,
+      type: 'jual_emas',
+      title: `Jual Emas 24K (${gramsActuallySold.toFixed(4)} g)${sameDayApplied ? ` · Penyesuaian Hari Sama -${penaltyPercent}%` : ''}`,
+      amount: finalProceeds,
+      goldGrams: gramsActuallySold,
+      adminFeeAmount: penaltyDeducted,
+      timestamp: new Date().toISOString(),
+      description: `Pencairan ${gramsActuallySold.toFixed(4)} g Emas @ ${formatRupiah(activePrice)}/gr${
+        sameDayApplied ? ` (Potongan jual hari sama -${penaltyPercent}%: ${formatRupiah(penaltyDeducted)})` : ''
+      }`,
+      senderName: 'Brankas Emas 24K Bank Nusantara',
+      status: 'success',
+      referenceNo: `SLD-${Date.now().toString().slice(-6)}`,
+      category: 'emas',
+    };
+    setTransactions((prev) => [newTx, ...prev]);
+    playAtmSound('cash');
+
+    return {
+      success: true,
+      message: `Penjualan ${gramsActuallySold.toFixed(4)} g Emas berhasil cair sebesar ${formatRupiah(
+        finalProceeds
+      )}${sameDayApplied ? ` (Penyesuaian jual hari sama -${penaltyPercent}% sebesar ${formatRupiah(penaltyDeducted)})` : ''}!`,
+      proceedsRupiah: finalProceeds,
+      grossMarketValue: finalGross,
+      penaltyDeducted,
+      profitOrLoss,
+      gramsSold: gramsActuallySold,
+      sameDayApplied,
+    };
+  };
+
+  const setCustomerCustomGoldPrice = (pricePerGram: number | null) => {
+    if (!currentAccount) {
+      return { success: false, message: 'Silakan pilih akun terlebih dahulu.' };
+    }
+    if (pricePerGram !== null && pricePerGram < 1000) {
+      return {
+        success: false,
+        message: 'Harga patokan kustom minimal adalah Rp 1.000 per gram.',
+      };
+    }
+    setAccounts((prev) =>
+      prev.map((a) =>
+        a.id === currentAccount.id ? { ...a, customUserGoldPricePerGram: pricePerGram } : a
+      )
+    );
+    playAtmSound('beep');
+    return {
+      success: true,
+      message:
+        pricePerGram === null
+          ? `Patokan harga dikembalikan ke harga pasar aktif (${formatRupiah(
+              goldMarketConfig.currentPricePerGram
+            )}/gr).`
+          : `Harga patokan emas Anda diatur ke ${formatRupiah(pricePerGram)}/gram.`,
+    };
+  };
+
+  const updateCustomerGoldPreferences = (input: {
+    targetRupiah?: number;
+    preferredForm?: GoldFormType;
+    preferredMotif?: GoldMotifType;
+  }) => {
+    if (!currentAccount) {
+      return { success: false, message: 'Silakan pilih akun terlebih dahulu.' };
+    }
+    setAccounts((prev) =>
+      prev.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              ...(input.targetRupiah !== undefined
+                ? { goldSavingsTarget: Math.max(1000, Math.round(input.targetRupiah)) }
+                : {}),
+              ...(input.preferredForm ? { goldPreferredForm: input.preferredForm } : {}),
+              ...(input.preferredMotif ? { goldPreferredMotif: input.preferredMotif } : {}),
+            }
+          : a
+      )
+    );
+    playAtmSound('beep');
+    return { success: true, message: 'Preferensi Brankas Emas berhasil disimpan.' };
+  };
+
+  const dismissGoldMonthlyBanner = () => {
+    setGoldMarketConfig((prev) => ({
+      ...prev,
+      lastMonthlyEventBanner: undefined,
+    }));
+  };
+
+  const transferBebas = (input: {
+    assetMode: TransferBebasAssetMode;
+    recipientAccount: string;
+    recipientName: string;
+    recipientBank: string;
+    uangAmount: number;
+    coinAmount: number;
+    goldRupiahAmount: number;
+    note?: string;
+    pin: string;
+  }) => {
+    if (!currentAccount) {
+      return { success: false, message: 'Silakan login ke kartu terlebih dahulu.' };
+    }
+    if (currentAccount.cardStatus !== 'active') {
+      return {
+        success: false,
+        message: 'Kartu Anda sedang tidak aktif / dibekukan.',
+      };
+    }
+    if (input.pin !== currentAccount.pin) {
+      playAtmSound('alert');
+      return { success: false, message: 'PIN Kartu 6 digit yang Anda masukkan salah!' };
+    }
+    const cleanRecAcc = (input.recipientAccount || '').trim();
+    const cleanRecName = (input.recipientName || '').trim() || 'Penerima Transfer Bebas';
+    if (!cleanRecAcc) {
+      return { success: false, message: 'Nomor rekening / ID tujuan wajib diisi.' };
+    }
+    if (cleanRecAcc === currentAccount.accountNumber) {
+      return { success: false, message: 'Tidak dapat melakukan Transfer Bebas ke rekening sendiri.' };
+    }
+
+    const feePercent = Math.max(0, Math.min(50, goldMarketConfig.transferBebasAdminFeePercent ?? 5));
+    const feeRate = feePercent / 100;
+    const minNom = Math.max(1000, goldMarketConfig.minNominalRupiah || 1000);
+    const activeGoldPrice = getEffectiveGoldPrice(currentAccount);
+
+    const includeUang = input.assetMode === 'uang' || input.assetMode === 'gabungan';
+    const includeCoin = input.assetMode === 'coin' || input.assetMode === 'gabungan';
+    const includeGold = input.assetMode === 'emas' || input.assetMode === 'gabungan';
+
+    const uangSent = includeUang ? Math.round(Number(input.uangAmount) || 0) : 0;
+    const coinSent = includeCoin ? Math.round(Number(input.coinAmount) || 0) : 0;
+    const goldRupiahSent = includeGold ? Math.round(Number(input.goldRupiahAmount) || 0) : 0;
+
+    if (includeUang && uangSent < minNom) {
+      return { success: false, message: `Nominal Transfer Uang minimal ${formatRupiah(minNom)}.` };
+    }
+    if (includeCoin && coinSent < 1) {
+      return { success: false, message: 'Jumlah Transfer Coin minimal 1 Koin.' };
+    }
+    if (includeGold && goldRupiahSent < minNom) {
+      return {
+        success: false,
+        message: `Nominal Transfer Emas minimal senilai ${formatRupiah(minNom)}.`,
+      };
+    }
+
+    const isInf = isUnlimitedNumber(currentAccount.balance);
+    if (!isInf && uangSent > currentAccount.balance) {
+      return { success: false, message: 'Saldo Uang Rupiah tidak mencukupi untuk Transfer Bebas.' };
+    }
+    if (coinSent > (currentAccount.spinCoins || 0)) {
+      return { success: false, message: 'Saldo Coin Spin tidak mencukupi untuk Transfer Bebas.' };
+    }
+    const ownedGoldGrams =
+      (currentAccount.goldBatches && currentAccount.goldBatches.length > 0
+        ? currentAccount.goldBatches.reduce((s, b) => s + b.grams, 0)
+        : currentAccount.goldGrams) || 0;
+    const goldGramsSent = goldRupiahSent > 0 ? goldRupiahSent / activeGoldPrice : 0;
+    if (goldGramsSent > ownedGoldGrams + 0.00001) {
+      return {
+        success: false,
+        message: `Saldo Emas Anda (${ownedGoldGrams.toFixed(4)} g) tidak mencukupi untuk mengirim senilai ${formatRupiah(
+          goldRupiahSent
+        )}.`,
+      };
+    }
+
+    // Q2 Exact Admin Fee Rule: Sender sends X, recipient receives X * (1 - 5%)
+    const uangAdminFee = Math.round(uangSent * feeRate);
+    const uangReceived = Math.max(0, uangSent - uangAdminFee);
+
+    const coinAdminFee = Math.round(coinSent * feeRate);
+    const coinReceived = Math.max(0, coinSent - coinAdminFee);
+
+    const goldAdminFeeRupiah = Math.round(goldRupiahSent * feeRate);
+    const goldReceivedRupiah = Math.max(0, goldRupiahSent - goldAdminFeeRupiah);
+    const goldReceivedGrams = goldReceivedRupiah > 0 ? goldReceivedRupiah / activeGoldPrice : 0;
+
+    // Deduct sender gold FIFO batches
+    let nextSenderBatches = [...(currentAccount.goldBatches || [])];
+    if (goldGramsSent > 0) {
+      if (nextSenderBatches.length === 0 && ownedGoldGrams > 0) {
+        nextSenderBatches = [
+          {
+            id: `gold-legacy-${Date.now()}`,
+            purchasedAt: new Date(Date.now() - 86400_000 * 32).toISOString(),
+            purchaseDateKey: '2020-01-01',
+            grams: ownedGoldGrams,
+            costRupiah: Math.round(ownedGoldGrams * activeGoldPrice),
+            pricePerGramAtBuy: activeGoldPrice,
+            goldForm: currentAccount.goldPreferredForm || 'batangan',
+            motif: currentAccount.goldPreferredMotif || 'klasik',
+          },
+        ];
+      }
+      let rem = goldGramsSent;
+      const kept: GoldBatchRecord[] = [];
+      for (const b of nextSenderBatches) {
+        if (rem <= 0.0000001) {
+          kept.push(b);
+          continue;
+        }
+        const take = Math.min(b.grams, rem);
+        const ratio = b.grams > 0 ? take / b.grams : 0;
+        rem -= take;
+        const left = b.grams - take;
+        if (left > 0.000001) {
+          kept.push({
+            ...b,
+            grams: left,
+            costRupiah: Math.max(0, Math.round(b.costRupiah * (1 - ratio))),
+          });
+        }
+      }
+      nextSenderBatches = kept;
+    }
+    const nextSenderGoldGrams = nextSenderBatches.reduce((s, b) => s + b.grams, 0);
+
+    const internalRecipient = accounts.find((a) => a.accountNumber === cleanRecAcc);
+    const nowIso = new Date().toISOString();
+    const todayKey = getLocalDateKey();
+    const refNo = `TFB-${Date.now().toString().slice(-6)}`;
+
+    setAccounts((prev) =>
+      prev.map((acc) => {
+        if (acc.id === currentAccount.id) {
+          return {
+            ...acc,
+            balance: isInf ? acc.balance : Math.max(0, acc.balance - uangSent),
+            spinCoins: Math.max(0, (acc.spinCoins || 0) - coinSent),
+            goldGrams: goldGramsSent > 0 ? nextSenderGoldGrams : acc.goldGrams,
+            goldBatches: goldGramsSent > 0 ? nextSenderBatches : acc.goldBatches,
+          };
+        }
+        if (internalRecipient && acc.id === internalRecipient.id) {
+          const recIsInf = isUnlimitedNumber(acc.balance);
+          const recNewBatches = [...(acc.goldBatches || [])];
+          if (goldReceivedGrams > 0) {
+            recNewBatches.push({
+              id: `gold-tf-${Date.now()}`,
+              purchasedAt: nowIso,
+              purchaseDateKey: todayKey,
+              grams: goldReceivedGrams,
+              costRupiah: goldReceivedRupiah,
+              pricePerGramAtBuy: activeGoldPrice,
+              goldForm: acc.goldPreferredForm || 'batangan',
+              motif: acc.goldPreferredMotif || 'klasik',
+              note: `Kiriman Transfer Bebas dari ${currentAccount.fullName}`,
+            });
+          }
+          const recGoldGrams =
+            goldReceivedGrams > 0
+              ? (acc.goldGrams || 0) + goldReceivedGrams
+              : acc.goldGrams || 0;
+          return {
+            ...acc,
+            balance: recIsInf ? acc.balance : acc.balance + uangReceived,
+            spinCoins: (acc.spinCoins || 0) + coinReceived,
+            goldGrams: recGoldGrams,
+            goldBatches: goldReceivedGrams > 0 ? recNewBatches : acc.goldBatches,
+          };
+        }
+        return acc;
+      })
+    );
+
+    const assetLabelParts: string[] = [];
+    if (uangSent > 0) assetLabelParts.push(`Uang ${formatRupiah(uangSent)}`);
+    if (coinSent > 0) assetLabelParts.push(`${coinSent.toLocaleString('id-ID')} Coin`);
+    if (goldRupiahSent > 0)
+      assetLabelParts.push(`Emas ${goldGramsSent.toFixed(4)} g (${formatRupiah(goldRupiahSent)})`);
+
+    const senderTx: Transaction = {
+      id: `tx-tfb-out-${Date.now()}`,
+      accountId: currentAccount.id,
+      type: 'transfer_bebas_out',
+      title: `Transfer Bebas (${feePercent}% Admin) ke ${internalRecipient?.fullName || cleanRecName}`,
+      amount: uangSent + goldRupiahSent,
+      goldGrams: goldGramsSent || undefined,
+      coinAmount: coinSent || undefined,
+      adminFeeAmount: uangAdminFee + goldAdminFeeRupiah,
+      senderAccount: currentAccount.accountNumber,
+      senderName: currentAccount.fullName,
+      recipientAccount: cleanRecAcc,
+      recipientName: internalRecipient?.fullName || cleanRecName,
+      recipientBank: input.recipientBank || 'Transfer Bebas Lintas Aset',
+      description: `Dikirim: ${assetLabelParts.join(' + ')} · Potongan Admin ${feePercent}% ditanggung dari nominal kirim.${
+        input.note ? ` Catatan: ${input.note}` : ''
+      }`,
+      status: 'success',
+      referenceNo: refNo,
+      timestamp: nowIso,
+      category: 'transfer',
+    };
+
+    const nextTxs: Transaction[] = [senderTx];
+    if (internalRecipient) {
+      const receivedParts: string[] = [];
+      if (uangReceived > 0) receivedParts.push(`Uang ${formatRupiah(uangReceived)}`);
+      if (coinReceived > 0) receivedParts.push(`${coinReceived.toLocaleString('id-ID')} Coin`);
+      if (goldReceivedGrams > 0)
+        receivedParts.push(
+          `Emas ${goldReceivedGrams.toFixed(4)} g (${formatRupiah(goldReceivedRupiah)})`
+        );
+      nextTxs.push({
+        id: `tx-tfb-in-${Date.now() + 1}`,
+        accountId: internalRecipient.id,
+        type: 'transfer_bebas_in',
+        title: `Terima Transfer Bebas dari ${currentAccount.fullName}`,
+        amount: uangReceived + goldReceivedRupiah,
+        goldGrams: goldReceivedGrams || undefined,
+        coinAmount: coinReceived || undefined,
+        senderAccount: currentAccount.accountNumber,
+        senderName: currentAccount.fullName,
+        recipientAccount: internalRecipient.accountNumber,
+        recipientName: internalRecipient.fullName,
+        recipientBank: 'Bank Nusantara Transfer Bebas',
+        description: `Bersih diterima (setelah admin ${feePercent}%): ${receivedParts.join(' + ')}`,
+        status: 'success',
+        referenceNo: refNo,
+        timestamp: nowIso,
+        category: 'transfer',
+      });
+    }
+
+    setTransactions((prev) => [...nextTxs, ...prev]);
+    playAtmSound('success');
+
+    const receipt: TransferBebasReceipt = {
+      referenceNo: refNo,
+      timestamp: nowIso,
+      assetMode: input.assetMode,
+      recipientAccount: cleanRecAcc,
+      recipientName: internalRecipient?.fullName || cleanRecName,
+      recipientBank: input.recipientBank || 'Tujuan Bebas',
+      isInternalAccount: Boolean(internalRecipient),
+      adminFeePercent: feePercent,
+      uangSent,
+      uangAdminFee,
+      uangReceived,
+      coinSent,
+      coinAdminFee,
+      coinReceived,
+      goldRupiahSent,
+      goldGramsSent,
+      goldAdminFeeRupiah,
+      goldReceivedRupiah,
+      goldReceivedGrams,
+      note: input.note,
+    };
+
+    return {
+      success: true,
+      message: `Transfer Bebas berhasil dikirim ke ${receipt.recipientName} (Biaya Admin ${feePercent}% dipotong dari nominal kirim)!`,
+      receipt,
+      transaction: senderTx,
+    };
+  };
+
+  const adminUpdateGoldMarketConfig = (partial: Partial<GoldAndTransferMarketConfig>) => {
+    setGoldMarketConfig((prev) => {
+      const nextPenaltyPercent =
+        partial.sameDayPenaltyMode === '1%'
+          ? 1
+          : partial.sameDayPenaltyMode === '5%'
+          ? 5
+          : partial.sameDayPenaltyPercent !== undefined
+          ? partial.sameDayPenaltyPercent
+          : prev.sameDayPenaltyPercent;
+      return {
+        ...prev,
+        ...partial,
+        sameDayPenaltyPercent: nextPenaltyPercent,
+      };
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Konfigurasi Harga Emas 24K & Transfer Bebas Admin berhasil disimpan!',
+    };
+  };
+
+  const adminSimulateGoldNextMonth = (months = 1) => {
+    const cleanMonths = Math.max(1, Math.min(24, Math.floor(months)));
+    let computedNewPrice = goldMarketConfig.currentPricePerGram;
+    setGoldMarketConfig((prev) => {
+      const growthRate = Math.max(0, prev.monthlyGrowthPercent ?? 5);
+      const nextOffset = (prev.simulatedMonthsOffset || 0) + cleanMonths;
+      const now = new Date();
+      const newPoints: GoldPriceHistoryPoint[] = [];
+      let runningPrice = prev.currentPricePerGram;
+      for (let i = 1; i <= cleanMonths; i++) {
+        runningPrice = Math.round(runningPrice * (1 + growthRate / 100));
+        const simDate = new Date(
+          now.getFullYear(),
+          now.getMonth() + (prev.simulatedMonthsOffset || 0) + i,
+          1
+        );
+        newPoints.push({
+          id: `gold-sim-${Date.now()}-${i}`,
+          label: `${formatMonthShortIndo(simDate)} (Tgl 1)`,
+          monthKey: getLocalMonthKey(simDate),
+          pricePerGram: runningPrice,
+          changePercent: growthRate,
+          timestamp: new Date().toISOString(),
+          isSimulation: true,
+        });
+      }
+      computedNewPrice = runningPrice;
+      const latestSimDate = new Date(now.getFullYear(), now.getMonth() + nextOffset, 1);
+      return {
+        ...prev,
+        currentPricePerGram: runningPrice,
+        simulatedMonthsOffset: nextOffset,
+        priceHistory: [...prev.priceHistory, ...newPoints].slice(-24),
+        lastMonthlyEventBanner: {
+          title: `Simulasi Tanggal 1 Aktif (+${growthRate}% × ${cleanMonths} Bulan)`,
+          message: `Harga Emas 24K resmi naik +${growthRate}% per bulan menjadi ${formatRupiah(
+            runningPrice
+          )}/gram (${formatMonthShortIndo(latestSimDate)}).`,
+          monthKey: getLocalMonthKey(latestSimDate),
+          growthPercent: growthRate,
+          timestamp: new Date().toISOString(),
+        },
+      };
+    });
+    playAtmSound('cash');
+    return {
+      success: true,
+      message: `Simulasi Tanggal 1 (+${cleanMonths} bulan) berhasil dijalankan! Harga emas naik menjadi ${formatRupiah(
+        computedNewPrice
+      )}/gram.`,
+      newPricePerGram: computedNewPrice,
+    };
+  };
+
+  const adminResetGoldMarketConfig = () => {
+    const fresh = createInitialGoldMarketConfig();
+    setGoldMarketConfig(fresh);
+    playAtmSound('beep');
+    return {
+      success: true,
+      message: 'Konfigurasi & harga Emas 24K dikembalikan ke standar awal (Rp 1.400.000/gr, +5%/bulan, -1% hari sama).',
+    };
+  };
+
+  const adminAdjustAccountGold = (
+    accountId: string,
+    value: number,
+    inputUnit: 'rupiah' | 'grams',
+    mode: 'add' | 'set'
+  ) => {
+    const target = accounts.find((a) => a.id === accountId);
+    if (!target) {
+      return { success: false, message: 'Rekening nasabah tidak ditemukan.' };
+    }
+    const price = goldMarketConfig.currentPricePerGram || 1_400_000;
+    const cleanVal = Math.max(0, Number(value) || 0);
+    const deltaGrams = inputUnit === 'rupiah' ? cleanVal / price : cleanVal;
+    const costRp = inputUnit === 'rupiah' ? Math.round(cleanVal) : Math.round(deltaGrams * price);
+    const now = new Date();
+
+    setAccounts((prev) =>
+      prev.map((a) => {
+        if (a.id !== accountId) return a;
+        if (mode === 'set') {
+          const newBatch: GoldBatchRecord[] =
+            deltaGrams > 0
+              ? [
+                  {
+                    id: `gold-adm-${Date.now()}`,
+                    purchasedAt: now.toISOString(),
+                    purchaseDateKey: getLocalDateKey(now),
+                    grams: deltaGrams,
+                    costRupiah: costRp,
+                    pricePerGramAtBuy: price,
+                    goldForm: a.goldPreferredForm || 'batangan',
+                    motif: a.goldPreferredMotif || 'klasik',
+                    note: 'Penyesuaian saldo emas oleh Admin',
+                  },
+                ]
+              : [];
+          return {
+            ...a,
+            goldGrams: deltaGrams,
+            goldBatches: newBatch,
+          };
+        }
+        const addedBatch: GoldBatchRecord = {
+          id: `gold-adm-${Date.now()}`,
+          purchasedAt: now.toISOString(),
+          purchaseDateKey: getLocalDateKey(now),
+          grams: deltaGrams,
+          costRupiah: costRp,
+          pricePerGramAtBuy: price,
+          goldForm: a.goldPreferredForm || 'batangan',
+          motif: a.goldPreferredMotif || 'klasik',
+          note: 'Suntikan saldo emas dari Panel Admin',
+        };
+        const nextBatches = deltaGrams > 0 ? [...(a.goldBatches || []), addedBatch] : a.goldBatches || [];
+        return {
+          ...a,
+          goldGrams: (a.goldGrams || 0) + deltaGrams,
+          goldBatches: nextBatches,
+        };
+      })
+    );
+    playAtmSound('cash');
+    return {
+      success: true,
+      message: `Saldo Emas untuk ${target.fullName} berhasil ${
+        mode === 'add' ? `ditambahkan +${deltaGrams.toFixed(4)} g (${formatRupiah(costRp)})` : `diatur menjadi ${deltaGrams.toFixed(4)} g`
+      }!`,
+    };
+  };
+
   // ================= FITUR DIHAPUS (HAPUS & PULIHKAN FITUR) + PENGATURAN SUPER LENGKAP =================
   const deleteFeatureById = (featureId: string) => {
     const found = rawFeatureConfigs.find((f) => f.id === featureId);
@@ -8479,6 +9446,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         markTutorialCompleted,
         isAiBotModalOpen,
         setIsAiBotModalOpen,
+        goldMarketConfig,
+        buyGold,
+        sellGold,
+        setCustomerCustomGoldPrice,
+        updateCustomerGoldPreferences,
+        dismissGoldMonthlyBanner,
+        transferBebas,
+        adminUpdateGoldMarketConfig,
+        adminSimulateGoldNextMonth,
+        adminResetGoldMarketConfig,
+        adminAdjustAccountGold,
         withdrawCash,
         depositCash,
         transferMoney,

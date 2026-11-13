@@ -156,7 +156,7 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
       {
         buttonName: 'Tombol [Mobile Banking]',
         location: 'Navbar Atas Urutan Ke-1',
-        functionDetail: 'Membuka dashboard utama nasabah yang berisi kartu 3D, 65+ layanan pembayaran, transfer, pinjaman, mutasi, jadwal, dan Pengaturan Lengkap.',
+        functionDetail: 'Membuka dashboard utama nasabah yang berisi kartu 3D, katalog layanan pembayaran, transfer, pinjaman, mutasi, jadwal, dan Pengaturan Lengkap.',
       },
       {
         buttonName: 'Tombol [Lowongan Kerja Lv.X]',
@@ -227,7 +227,7 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
     ],
     stepByStepGuide: [
       'Buka menu Mobile Banking untuk melihat ringkasan harta, level karir, koin spin, dan status kartu Anda.',
-      'Klik tombol sub-tab di bawah kartu untuk berpindah ke 65+ Fitur Digital, PayChat, Transfer, Pinjaman, Mutasi, Jadwal, atau Pengaturan Lengkap.',
+      'Klik tombol sub-tab di bawah kartu untuk berpindah ke Layanan Digital, PayChat, Transfer, Pinjaman, Mutasi, Jadwal, atau Pengaturan Lengkap.',
     ],
     formulaOrSimulation: [
       'Setiap transaksi belanja yang berhasil akan memberikan Poin Reward yang nantinya dapat dikonversi menjadi uang tunai.',
@@ -334,12 +334,12 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
     buttonsAndInputs: [
       {
         buttonName: 'Tombol [Buat Kode Tarik Tunai Tanpa Kartu]',
-        location: 'Mobile Banking -> 65+ Fitur Digital -> Tab Cardless Cash',
+        location: 'Mobile Banking -> Layanan Digital -> Tab Cardless Cash',
         functionDetail: 'Menghasilkan 6 digit kode rahasia untuk penarikan uang tunai tanpa kartu.',
       },
     ],
     stepByStepGuide: [
-      'Buka Mobile Banking -> 65+ Fitur Digital -> Pilih bagian "Tarik Tunai Tanpa Kartu (Cardless)".',
+      'Buka Mobile Banking -> Layanan Digital -> Pilih bagian "Tarik Tunai Tanpa Kartu (Cardless)".',
       'Pilih nominal penarikan (misal Rp 500.000 atau Rp 1.000.000) dan masukkan PIN ATM Anda.',
       'Catat 6 digit Kode Token yang muncul di layar untuk dicairkan.',
     ],
@@ -564,29 +564,29 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
     chapterNumber: 13,
     category: 'Layanan Digital',
     icon: '⚡',
-    title: 'Katalog 65+ Fitur Digital, Pembayaran Tagihan, E-Wallet, QRIS & Belanja',
-    subtitle: 'Cara menggunakan puluhan layanan tagihan PLN, Pulsa, BPJS, PDAM, Pajak, Top-Up E-Wallet, hingga Tiket Pesawat',
+    title: 'Katalog Layanan Digital, Pembayaran Tagihan, E-Wallet, QRIS & Belanja',
+    subtitle: 'Cara menggunakan layanan tagihan harian, e-commerce, kuliner, AI & cloud, hingga perbankan bisnis',
     deepExplanationParagraphs: [
-      'Di dalam menu Mobile Banking -> sub-tab "65+ Fitur Digital, Redeem & Pulsa", tersedia lebih dari 65 layanan pembayaran terpadu yang mencakup seluruh kebutuhan harian nasabah.',
-      'Kategori layanan meliputi: Listrik PLN & Token, Pulsa & Paket Data Seluler, Top-Up Dompet Digital (GoPay, OVO, DANA, ShopeePay, LinkAja), Tagihan Air PDAM, BPJS Kesehatan & Ketenagakerjaan, Pajak (PBB, Samsat, e-Billing, Paspor, Tilang ETLE), Internet & TV Kabel, Pendidikan, Zakat & Donasi, Voucher Game, hingga Tiket Pesawat & Kereta Api.',
+      'Di dalam menu Mobile Banking -> sub-tab "Layanan Digital, Redeem & Pulsa", tersedia beragam layanan pembayaran terpadu yang mencakup seluruh kebutuhan harian nasabah.',
+      'Kategori layanan meliputi: Listrik PLN & Token, Pulsa & Paket Data Seluler, Top-Up Dompet Digital (GoPay, OVO, DANA, ShopeePay, LinkAja), Tagihan Air PDAM, BPJS Kesehatan & Ketenagakerjaan, E-Commerce & Logistik, Kuliner & F&B, Teknologi AI & Cloud, Perbankan Bisnis UMKM, hingga Tiket Perjalanan.',
       'Setiap fitur di katalog ini dapat diatur secara fleksibel di Panel Admin: apakah membutuhkan PIN Admin (159357) atau tidak, dan apakah membutuhkan Persetujuan Admin atau langsung berhasil.',
     ],
     buttonsAndInputs: [
       {
         buttonName: 'Kolom [Cari Layanan Digital...]',
-        location: 'Bagian atas Katalog 65+ Fitur Digital',
+        location: 'Bagian atas Katalog Layanan Digital',
         functionDetail: 'Mencari cepat layanan berdasarkan nama atau kategori tagihan.',
       },
       {
         buttonName: 'Tombol [Bayar / Beli Sekarang]',
         location: 'Di setiap kartu layanan fitur digital',
-        functionDetail: 'Membuka jendela pembayaran layanan, memotong saldo, dan menerbitkan bukti pembayaran atau kode voucher.',
+        functionDetail: 'Membuka jendela formulir khusus layanan, memotong saldo, dan menerbitkan struk digital terperinci.',
       },
     ],
     stepByStepGuide: [
-      'Buka Mobile Banking -> Klik tab "65+ Fitur Digital, Redeem & Pulsa".',
+      'Buka Mobile Banking -> Klik tab "Layanan Digital, Redeem & Pulsa".',
       'Ketik nama layanan di kotak pencarian atau pilih kategori yang diinginkan.',
-      'Masukkan Nomor Pelanggan / Nomor HP dan nominal pembayaran, lalu klik Konfirmasi.',
+      'Isi parameter spesifik layanan beserta nominal pembayaran, lalu klik Bayar & Cetak Struk.',
     ],
     formulaOrSimulation: [
       'Jika ada fitur yang tidak Anda inginkan di katalog ini, Anda dapat menghapusnya kapan saja di menu "⚙️ Pengaturan Lengkap & Fitur Dihapus"!',
@@ -610,7 +610,7 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
     buttonsAndInputs: [
       {
         buttonName: 'Input [Masukkan Kode Redeem Berhadiah]',
-        location: 'Bagian atas halaman 65+ Fitur Digital',
+        location: 'Bagian atas halaman Layanan Digital',
         functionDetail: 'Tempat mengetik kode promo/redeem dari Admin (contoh: NUSANTARAJAYA, SULTAN2025) untuk klaim saldo gratis.',
       },
       {
@@ -620,7 +620,7 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
       },
     ],
     stepByStepGuide: [
-      'Beli Pulsa atau Token Listrik di menu 65+ Fitur Digital.',
+      'Beli Pulsa atau Token Listrik di menu Layanan Digital.',
       'Lihat kode 16/20 digit yang muncul di daftar "Kode Voucher yang Sudah Dibeli".',
       'Klik tombol "Tukar Kode Sekarang" untuk mengaktifkan pulsa atau kWh listrik tersebut.',
     ],
@@ -645,7 +645,7 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
     buttonsAndInputs: [
       {
         buttonName: 'Tombol [+ Tambah / Input Nomor Resi Baru]',
-        location: 'Bagian Lacak Resi & COD di 65+ Fitur Digital',
+        location: 'Bagian Lacak Resi & COD di Layanan Digital',
         functionDetail: 'Mendaftarkan nomor resi pengiriman baru beserta nominal COD-nya.',
       },
       {
@@ -655,7 +655,7 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
       },
     ],
     stepByStepGuide: [
-      'Buka tab "65+ Fitur Digital" lalu gulir ke bagian "Lacak Resi Pengiriman & Bayar COD".',
+      'Buka tab "Layanan Digital" lalu gulir ke bagian "Lacak Resi Pengiriman & Bayar COD".',
       'Klik "Bayar COD" pada paket yang belum lunas, atau tambahkan nomor resi baru.',
     ],
     formulaOrSimulation: [
@@ -679,17 +679,17 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
     buttonsAndInputs: [
       {
         buttonName: 'Tombol [+ Buat Celengan Impian Baru]',
-        location: 'Bagian Celengan Impian di 65+ Fitur Digital',
+        location: 'Bagian Celengan Impian di Layanan Digital',
         functionDetail: 'Membuat kantong tabungan baru dengan nama dan target dana impian.',
       },
       {
         buttonName: 'Tombol [Buka Deposito Berjangka]',
-        location: 'Bagian Deposito Berjangka di 65+ Fitur Digital',
+        location: 'Bagian Deposito Berjangka di Layanan Digital',
         functionDetail: 'Membuka bilyet deposito baru dan menghitung proyeksi bunga jatuh tempo.',
       },
     ],
     stepByStepGuide: [
-      'Buka bagian Celengan Impian atau Deposito di dalam tab 65+ Fitur Digital.',
+      'Buka bagian Celengan Impian atau Deposito di dalam tab Layanan Digital.',
       'Masukkan nominal dana yang ingin disimpan lalu klik Simpan / Buka Deposito.',
     ],
     formulaOrSimulation: [
@@ -779,7 +779,7 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
     deepExplanationParagraphs: [
       'Menu Pengaturan kini telah diperluas secara menyeluruh menjadi "⚙️ Pusat Pengaturan Super Lengkap & Kelola Fitur Dihapus" yang dapat diakses melalui Mobile Banking -> Tab "⚙️ Pengaturan Lengkap & Fitur Dihapus".',
       'Di dalamnya terdapat 8 sub-tab lengkap dengan lebih dari 60 opsi pengaturan fungsional:',
-      '1. 🗑️ Tab Fitur Dihapus & Kelola Fitur: Di sini Anda bisa mencari dan MENGHAPUS fitur apa pun dari daftar 65+ fitur aktif (baik satu per satu dengan tombol "🗑️ Hapus" maupun banyak sekaligus dengan kotak centang "Hapus Fitur Terpilih"). Semua fitur yang telah dihapus akan masuk ke "Keranjang Fitur Dihapus" di bagian atas dan dapat dipulihkan kapan saja dengan tombol "♻️ Pulihkan" atau "♻️ Pulihkan Semua"!',
+      '1. 🗑️ Tab Fitur Dihapus & Kelola Fitur: Di sini Anda bisa mencari dan MENGHAPUS fitur apa pun dari daftar katalog aktif (baik satu per satu dengan tombol "🗑️ Hapus" maupun banyak sekaligus dengan kotak centang "Hapus Fitur Terpilih"). Semua fitur yang telah dihapus akan masuk ke "Keranjang Fitur Dihapus" di bagian atas dan dapat dipulihkan kapan saja dengan tombol "♻️ Pulihkan" atau "♻️ Pulihkan Semua"!',
       '2. 👤 Tab Profil & Identitas: Edit Nama Lengkap, NIK 16 digit, Nomor HP, Email, Alamat Domisili, tampilkan CVV/PIN kartu, hingga ganti Nomor Rekening baru.',
       '3. 🔐 Tab PIN & Privasi Keamanan: Bekukan/buka kunci kartu sementara, ganti PIN 6 digit, ajukan Lupa PIN, sensor saldo otomatis, 2FA OTP, Kode Anti-Phishing, dan waktu Auto-Lock layar.',
       '4. 💳 Tab Limit Kartu & Internasional: Geser slider Limit Belanja Harian (hingga Rp 500 Juta), Limit Sekali Transaksi (hingga Rp 1 Miliar), Limit Transfer Harian (hingga Rp 2 Miliar), serta nyalakan/matikan Transaksi Luar Negeri, Contactless PayWave, E-Commerce, Auto-Debit, dan QRIS Cross-Border.',
@@ -934,6 +934,43 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
     ],
     tipsAndTroubleshooting: [
       'Semua perubahan diskon dan multiplier yang Anda simpan di Panel Admin langsung berdampak detik itu juga pada seluruh layar nasabah.',
+    ],
+  },
+  {
+    id: 'bab-23-emas-24k-transfer-bebas',
+    chapterNumber: 23,
+    category: 'Emas 24K & Transfer Bebas',
+    icon: '👑',
+    title: '👑 Tab Emas Mewah 24K Real-Time & Mode Transfer Bebas (Admin 5% — Uang, Coin, Emas)',
+    subtitle: 'Panduan lengkap koleksi Emas Batangan/Perhiasan, aturan harga Tanggal 1 (+5%), penalti hari sama, dan transfer lintas aset',
+    deepExplanationParagraphs: [
+      'Pada Tab Transfer, Anda dapat beralih ke mode "Transfer Bebas 5% (Uang, Coin & Emas)" untuk mengirim Uang Rupiah, Coin Spin, Saldo Emas 24K, ataupun Paket Gabungan ketiganya sekaligus mulai Rp 1.000 hingga tak terbatas. Biaya admin 5% dipotong langsung dari nominal yang dikirim (contoh: kirim Rp 10.000.000 maka penerima menerima bersih Rp 9.500.000).',
+      'Pada Tab Emas 24K, Anda dapat memilih bentuk visual Emas Batangan (persegi panjang tebal 3D) maupun Emas Perhiasan (persegi panjang tipis elegan) dengan 3 motif pilihan (Klasik, Nusantara, Royal Platinum), sertifikat digital 24K 999.9, serta tombol putar depan-belakang.',
+      'Anda bebas mengkustom nominal beli/jual mulai Rp 1.000 hingga tak terbatas, menyesuaikan otomatis dengan 25%/50%/100% saldo uang, atau mengatur patokan harga kustom. Jika emas dijual di hari pembelian yang sama, nilainya disesuaikan turun 1% (atau 5% bila diaktifkan Admin); sedangkan setiap tanggal 1 bulan berganti secara real-time, harga emas otomatis naik +5% per bulan!',
+    ],
+    buttonsAndInputs: [
+      {
+        buttonName: 'Segmen [Transfer Bebas 5% (Uang, Coin & Emas)]',
+        location: 'Tab Transfer Dashboard',
+        functionDetail: 'Mengirim Uang, Coin, Emas, atau Gabungan ke rekening terdaftar maupun tujuan bebas manual dengan otorisasi PIN 6 digit.',
+      },
+      {
+        buttonName: 'Pemilih [Emas Batangan] vs [Emas Perhiasan] & [Putar]',
+        location: 'Tab Emas 24K',
+        functionDetail: 'Mengubah tampilan fisik emas 3D, memilih motif, membalik tampilan depan/belakang, dan mengatur patokan harga serta target tabungan.',
+      },
+    ],
+    stepByStepGuide: [
+      'Buka Tab Transfer lalu pilih mode Transfer Bebas 5% untuk mengirim Uang, Coin, Emas, atau Gabungan.',
+      'Buka Tab Emas 24K untuk memilih bentuk Batangan/Perhiasan, lihat hitung mundur real-time menuju Tanggal 1, dan lakukan Beli/Jual emas mulai Rp 1.000.',
+      'Admin dapat membuka Tab "Kontrol Emas 24K & Transfer Bebas 5%" di Panel Admin untuk menyuntik Emas/Coin atau menekan tombol Simulasi Tanggal 1 (+5%).',
+    ],
+    formulaOrSimulation: [
+      'Transfer Bebas: Kirim X -> Admin 5% (0.05 × X) -> Penerima Terima Bersih 0.95 × X.',
+      'Emas 24K: Jual hari sama = -1% (atau -5% di Admin) | Ganti bulan Tanggal 1 = +5% majemuk real-time.',
+    ],
+    tipsAndTroubleshooting: [
+      'Untuk mengetes kenaikan bulanan +5% tanpa menunggu kalender bulan depan, Admin dapat langsung menekan tombol "Simulasi Tgl 1 (+1 Bulan)" di Panel Admin.',
     ],
   },
 ];
@@ -1121,7 +1158,7 @@ export const AppTutorialModal: React.FC = () => {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-400/40 text-indigo-300 text-[10px] font-black uppercase">
-                  ENSIKLOPEDIA TUTORIAL SUPER LENGKAP • 22 BAB UTAMA + 56 SUPER TOOLS + {featureConfigs.length} FITUR AKTIF
+                  ENSIKLOPEDIA TUTORIAL SUPER LENGKAP • PANDUAN LAYANAN &amp; OTORITAS
                 </span>
               </div>
               <h2 className="text-lg sm:text-xl font-black text-white mt-0.5">
@@ -1212,8 +1249,7 @@ export const AppTutorialModal: React.FC = () => {
                 >
                   <Layers className="w-4 h-4 text-emerald-300" />
                   <span>
-                    ⚡ Modul Otomatis ({featureConfigs.length} Fitur Aktif &amp;{' '}
-                    {deletedFeaturesList.length} Fitur Dihapus)
+                    ⚡ Modul Otomatis &amp; Status Layanan ({deletedFeaturesList.length} Dihapus)
                   </span>
                 </button>
               </div>
@@ -1509,27 +1545,30 @@ export const AppTutorialModal: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* RIWAYAT UPDATE TERBARU */}
+                  {/* RIWAYAT UPDATE SEBELUMNYA */}
                   <div className="space-y-3">
                     <h4 className="text-sm font-black text-cyan-300 uppercase">
-                      A. Panduan Fitur dari Riwayat Update Terbaru ({appUpdates.length} Versi)
+                      A. Panduan Fitur dari Arsip Pembaruan Aplikasi
                     </h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      {appUpdates.slice(0, 6).map((upd) => (
-                        <div
-                          key={upd.id}
-                          className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-black">
-                              {upd.version}
-                            </span>
-                            <span className="text-[10px] text-slate-400">{upd.releaseDate}</span>
+                      {appUpdates
+                        .filter((upd) => !upd.isCurrent)
+                        .slice(0, 6)
+                        .map((upd) => (
+                          <div
+                            key={upd.id}
+                            className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-1.5"
+                          >
+                            <div className="flex items-center justify-between">
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-black">
+                                {upd.version}
+                              </span>
+                              <span className="text-[10px] text-slate-400">{upd.fullDate}</span>
+                            </div>
+                            <p className="text-xs font-black text-white">{upd.title}</p>
+                            <p className="text-[11px] text-slate-400">{upd.description}</p>
                           </div>
-                          <p className="text-xs font-black text-white">{upd.title}</p>
-                          <p className="text-[11px] text-slate-400">{upd.summary}</p>
-                        </div>
-                      ))}
+                        ))}
                     </div>
                   </div>
 
@@ -1559,17 +1598,17 @@ export const AppTutorialModal: React.FC = () => {
                   {/* DAFTAR SELURUH FITUR AKTIF */}
                   <div className="space-y-3">
                     <h4 className="text-sm font-black text-amber-300 uppercase">
-                      C. Katalog Lengkap {featureConfigs.length} Layanan Digital Aktif Beserta Status PIN Admin
+                      C. Katalog Layanan Digital Aktif Beserta Status PIN Admin
                     </h4>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
-                      {featureConfigs.map((fc, idx) => (
+                      {featureConfigs.map((fc) => (
                         <div
                           key={fc.id}
                           className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-1 text-xs"
                         >
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-bold text-indigo-300">
-                              #{idx + 1} • {fc.category}
+                              {fc.category}
                             </span>
                             <span className="text-[10px] font-mono text-emerald-400">
                               {fc.defaultAmount ? formatRupiah(fc.defaultAmount) : 'Fleksibel'}

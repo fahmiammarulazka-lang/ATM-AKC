@@ -211,9 +211,7 @@ export const AppAiBotModal: React.FC = () => {
           currentAccount.balance
         )}, Level Kerja: Level ${currentAccount.jobLevel || 1}, Voucher Level: ${
           currentAccount.levelVouchers || 0
-        }, Koin Spin: ${(currentAccount.spinCoins || 0).toLocaleString('id-ID')} Koin, Total Fitur Aplikasi: ${
-          featureConfigs.length
-        } Fitur.`
+        }, Koin Spin: ${(currentAccount.spinCoins || 0).toLocaleString('id-ID')} Koin.`
       : 'Belum ada kartu aktif.';
 
     try {

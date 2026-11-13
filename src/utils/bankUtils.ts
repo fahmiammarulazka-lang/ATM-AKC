@@ -395,7 +395,7 @@ export function getFeatureUltraDetailedExplanation(feat: {
       {
         number: '07',
         title: 'Prosedur Langkah demi Langkah Penggunaan Fitur',
-        content: `1) Pastikan Kartu ATM Anda berstatus AKTIF (tidak sedang dibekukan atau di-Banned). 2) Buka tab "65+ Fitur Digital, Redeem & Pulsa" lalu pilih "${feat.title}". 3) Masukkan Nomor Pelanggan / ID Tujuan dan pilih atau ketik nominal pembayaran. 4) Periksa rincian saldo sebelum & sesudah transaksi. 5) Klik tombol Eksekusi/Bayar dan simpan bukti struk digital referensi transaksi.`,
+        content: `1) Pastikan Kartu ATM Anda berstatus AKTIF (tidak sedang dibekukan atau di-Banned). 2) Buka tab "Layanan Digital, Redeem & Pulsa" lalu pilih "${feat.title}". 3) Masukkan ID/Tujuan beserta detail layanan dan pilih atau ketik nominal pembayaran. 4) Periksa rincian saldo sebelum & sesudah transaksi. 5) Klik tombol Bayar & Cetak Struk untuk menyimpan bukti struk digital referensi transaksi.`,
       },
       {
         number: '08',

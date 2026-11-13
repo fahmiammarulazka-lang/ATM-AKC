@@ -96,6 +96,82 @@ export interface BankAccount {
   // Tutorial Kartu Baru (Wajib Disetujui Admin Dulu Baru Ada Tutorialnya)
   hasCompletedTutorial?: boolean;
   tutorialApprovedByAdmin?: boolean;
+  // Investasi Emas 24K Mewah (Batch FIFO & Preferensi Visual)
+  goldGrams?: number;
+  goldBatches?: GoldBatchRecord[];
+  goldSavingsTarget?: number;
+  goldPreferredForm?: GoldFormType;
+  goldPreferredMotif?: GoldMotifType;
+  customUserGoldPricePerGram?: number | null;
+}
+
+export type GoldFormType = 'batangan' | 'perhiasan';
+export type GoldMotifType = 'klasik' | 'nusantara' | 'royal_platinum';
+export type TransferBebasAssetMode = 'uang' | 'coin' | 'emas' | 'gabungan';
+
+export interface GoldBatchRecord {
+  id: string;
+  purchasedAt: string;
+  purchaseDateKey: string; // YYYY-MM-DD local date for same-day rule check
+  grams: number;
+  costRupiah: number;
+  pricePerGramAtBuy: number;
+  goldForm: GoldFormType;
+  motif: GoldMotifType;
+  note?: string;
+}
+
+export interface GoldPriceHistoryPoint {
+  id: string;
+  label: string;
+  monthKey: string;
+  pricePerGram: number;
+  changePercent: number;
+  timestamp: string;
+  isSimulation?: boolean;
+}
+
+export interface GoldAndTransferMarketConfig {
+  basePricePerGram: number; // Harga dasar awal patokan
+  currentPricePerGram: number; // Harga aktif real-time setelah kenaikan tanggal 1
+  monthlyGrowthPercent: number; // Default 5% setiap tanggal 1 berganti bulan
+  sameDayPenaltyMode: '1%' | '5%' | 'custom'; // Bawaan 1% (opsi 5% di Admin)
+  sameDayPenaltyPercent: number; // Default 1
+  transferBebasAdminFeePercent: number; // Default 5%
+  minNominalRupiah: number; // Default 1000
+  lastProcessedMonthKey: string; // Real YYYY-MM terproses terakhir
+  simulatedMonthsOffset: number; // Counter bulan simulasi dari Admin
+  priceHistory: GoldPriceHistoryPoint[];
+  lastMonthlyEventBanner?: {
+    title: string;
+    message: string;
+    monthKey: string;
+    growthPercent: number;
+    timestamp: string;
+  };
+}
+
+export interface TransferBebasReceipt {
+  referenceNo: string;
+  timestamp: string;
+  assetMode: TransferBebasAssetMode;
+  recipientAccount: string;
+  recipientName: string;
+  recipientBank: string;
+  isInternalAccount: boolean;
+  adminFeePercent: number;
+  uangSent: number;
+  uangAdminFee: number;
+  uangReceived: number;
+  coinSent: number;
+  coinAdminFee: number;
+  coinReceived: number;
+  goldRupiahSent: number;
+  goldGramsSent: number;
+  goldAdminFeeRupiah: number;
+  goldReceivedRupiah: number;
+  goldReceivedGrams: number;
+  note?: string;
 }
 
 export interface GoogleUserSession {
@@ -312,7 +388,11 @@ export type TransactionType =
   | 'cardless_withdraw'
   | 'redeem_code'
   | 'bayar_resi'
-  | 'belanja_fitur';
+  | 'belanja_fitur'
+  | 'transfer_bebas_out'
+  | 'transfer_bebas_in'
+  | 'beli_emas'
+  | 'jual_emas';
 
 export interface Transaction {
   id: string;
@@ -335,6 +415,9 @@ export interface Transaction {
   buyerApprovalStatus?: 'waiting_admin' | 'waiting_buyer' | 'approved' | 'rejected';
   buyerApprovedAt?: string;
   featureId?: string;
+  goldGrams?: number;
+  coinAmount?: number;
+  adminFeeAmount?: number;
   category?:
     | 'transfer'
     | 'tarik_tunai'
@@ -346,7 +429,8 @@ export interface Transaction {
     | 'ewallet'
     | 'investasi'
     | 'donasi'
-    | 'redeem';
+    | 'redeem'
+    | 'emas';
 }
 
 export type LoanType = 'kecil' | 'menengah' | 'bisnis';

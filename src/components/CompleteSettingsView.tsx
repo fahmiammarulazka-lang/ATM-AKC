@@ -203,9 +203,9 @@ export const CompleteSettingsView: React.FC = () => {
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <div className="bg-slate-950/80 border border-slate-800 rounded-2xl px-4 py-2.5 text-right">
-              <p className="text-[10px] font-bold uppercase text-slate-400">Fitur Aktif / Dihapus</p>
+              <p className="text-[10px] font-bold uppercase text-slate-400">Status Layanan</p>
               <p className="text-sm font-black text-emerald-400">
-                {featureConfigs.length} Aktif •{' '}
+                Layanan Aktif •{' '}
                 <span className="text-rose-400">{deletedFeaturesList.length} Dihapus</span>
               </p>
             </div>
@@ -350,7 +350,7 @@ export const CompleteSettingsView: React.FC = () => {
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div>
                 <h3 className="text-lg font-black text-slate-900">
-                  📋 Kelola & Hapus Fitur dari Katalog Aktif ({featureConfigs.length} Fitur Aktif)
+                  📋 Kelola &amp; Hapus Fitur dari Katalog Layanan
                 </h3>
                 <p className="text-xs text-slate-500">
                   Centang beberapa fitur untuk dihapus sekaligus, atau klik tombol <strong>🗑️ Hapus</strong> pada fitur mana pun yang ingin Anda hilangkan.

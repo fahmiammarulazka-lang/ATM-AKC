@@ -50,6 +50,7 @@ import {
   Wrench,
   Gift,
   Package,
+  Crown,
 } from 'lucide-react';
 import { formatRupiah, CARD_TIER_CONFIGS, LOAN_TIER_CONFIGS } from '../utils/bankUtils';
 
@@ -488,14 +489,14 @@ const EXTRA_CHAPTERS_DATA: ExtraChapterContent[] = [
   {
     id: 58,
     badge: 'BAB 58 — KONTROL PIN ADMIN PER FITUR',
-    title: '5️⃣8️⃣ Panduan Konfigurasi Keamanan 136+ Fitur di Panel Admin (PIN Admin & Persetujuan)',
+    title: '5️⃣8️⃣ Panduan Konfigurasi Keamanan Layanan di Panel Admin (PIN Admin & Persetujuan)',
     subtitle: 'Cara mengatur fitur mana yang memakai PIN Admin (159357) dan mana yang wajib tinjauan.',
     color: 'text-rose-400',
     icon: SlidersIconFallback,
     sections: [
       {
         heading: 'Kendali Penuh Setiap Fitur Aplikasi',
-        body: 'Di Panel Admin (Tab: Kontrol Fitur), Admin dapat mengatur satu per satu atau secara massal terhadap seluruh 136+ fitur: apakah fitur tersebut mewajibkan input PIN Admin (159357) saat dibuka nasabah, dan apakah pembayarannya wajib melalui persetujuan Admin atau langsung otomatis selesai. Admin bahkan dapat menambahkan fitur baru secara kustom!',
+        body: 'Di Panel Admin (Tab: Kontrol Fitur), Admin dapat mengatur satu per satu atau secara massal terhadap seluruh layanan aplikasi: apakah layanan tersebut mewajibkan input PIN Admin (159357) saat dibuka nasabah, dan apakah pembayarannya wajib melalui persetujuan Admin atau langsung otomatis selesai. Admin bahkan dapat menambahkan fitur baru secara kustom!',
       },
     ],
   },
@@ -515,8 +516,8 @@ const EXTRA_CHAPTERS_DATA: ExtraChapterContent[] = [
   },
   {
     id: 60,
-    badge: 'BAB 60 — KAMUS & INDEKS 136+ FITUR',
-    title: '6️⃣0️⃣ Kamus Istilah Perbankan Nusantara & Indeks Cepat 136+ Layanan Digital',
+    badge: 'BAB 60 — KAMUS & INDEKS LAYANAN',
+    title: '6️⃣0️⃣ Kamus Istilah Perbankan Nusantara & Indeks Cepat Layanan Digital',
     subtitle: 'Rangkuman terminologi perbankan resmi dan peta navigasi seluruh fitur aplikasi.',
     color: 'text-amber-400',
     icon: BookOpen,
@@ -593,7 +594,35 @@ const EXTRA_CHAPTERS_DATA: ExtraChapterContent[] = [
     sections: [
       {
         heading: 'Melayani Nusantara dengan Standar Terbaik',
-        body: 'Dengan 65 Bab Buku Panduan Resmi, 136+ Fitur Perbankan Digital, 26 Super Tools Admin, dan Pusat Riwayat Update yang transparan, PT Bank Nusantara (Persero) Tbk berkomitmen memberikan pengalaman perbankan digital terbaik bagi Anda.',
+        body: 'Dengan Buku Panduan Resmi, Portal Layanan Perbankan Digital Terpadu, Super Tools Admin, dan Pusat Riwayat Update yang transparan, PT Bank Nusantara (Persero) Tbk berkomitmen memberikan pengalaman perbankan digital terbaik bagi Anda.',
+      },
+    ],
+  },
+  {
+    id: 66,
+    badge: 'BAB 66 — MODE TRANSFER BEBAS (ADMIN 5%)',
+    title: '6️⃣6️⃣ Transfer Bebas Lintas Aset (Uang, Coin Spin, Emas 24K & Gabungan)',
+    subtitle: 'Kirim aset fleksibel mulai Rp 1.000 sampai tak terbatas dengan potongan biaya admin 5% transparan.',
+    color: 'text-emerald-400',
+    icon: Send,
+    sections: [
+      {
+        heading: 'Mekanisme Pemotongan Biaya Admin 5%',
+        body: 'Di dalam Tab Transfer, pilih mode "Transfer Bebas 5%". Anda dapat mengirim Uang Rupiah, Coin Spin, Emas 24K, atau Paket Gabungan ketiganya ke rekening terdaftar maupun tujuan bebas manual. Jika Anda mengirim Rp 10.000.000, saldo Anda terpotong Rp 10.000.000, biaya admin 5% (Rp 500.000) dipotong otomatis, dan penerima menerima bersih Rp 9.500.000.',
+      },
+    ],
+  },
+  {
+    id: 67,
+    badge: 'BAB 67 — TAB EMAS MEWAH 24K REAL-TIME',
+    title: '6️⃣7️⃣ Brankas Emas Batangan & Perhiasan 24K, Kenaikan +5% Tanggal 1 & Kustom Nominal',
+    subtitle: 'Tampilan 3D mewah adaptif, pelacakan batch FIFO hari yang sama vs lintas bulan, dan simulator Admin.',
+    color: 'text-amber-300',
+    icon: Crown,
+    sections: [
+      {
+        heading: 'Aturan Jual Hari Sama (-1% / -5%) & Kenaikan Bulanan Tanggal 1 (+5%)',
+        body: 'Tab Emas menampilkan koleksi Emas Batangan (persegi panjang tebal) dan Emas Perhiasan (persegi panjang tipis elegan) lengkap dengan motif Klasik, Nusantara, Royal Platinum, dan sertifikat 24K 999.9. Setiap pembelian dicatat sebagai batch individual mulai Rp 1.000 hingga tak terbatas. Penjualan pada hari pembelian yang sama dikenakan penyesuaian -1% (atau -5% sesuai mode Admin), sedangkan setiap pergantian bulan persis tanggal 1 secara real-time harga emas otomatis naik +5%.',
       },
     ],
   },
@@ -619,7 +648,7 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
     { id: 5, title: '5. Tata Cara Menggunakan Mesin ATM dari Awal', icon: MonitorPlay, color: 'text-cyan-400' },
     { id: 6, title: '6. 11 Fitur Lengkap di Mesin ATM Nusantara', icon: Layers, color: 'text-teal-400' },
     { id: 7, title: '7. Prosedur & Aturan Transfer Antar Rekening', icon: Send, color: 'text-indigo-400' },
-    { id: 8, title: '8. Fitur Tambahan & 20+ Layanan Digital', icon: BellRing, color: 'text-rose-400' },
+    { id: 8, title: '8. Fitur Tambahan & Layanan Digital', icon: BellRing, color: 'text-rose-400' },
     { id: 9, title: '9. Protokol Keamanan & Perlindungan Kartu ATM', icon: ShieldAlert, color: 'text-yellow-400' },
     { id: 10, title: '10. Layanan Pinjaman Online & Analisis Kredit', icon: BadgeDollarSign, color: 'text-emerald-400' },
     { id: 11, title: '11. Upgrade Kartu ke Emas / Premium & Tinjauan Admin', icon: Sparkles, color: 'text-amber-400' },
@@ -672,7 +701,7 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
             🏦 BANK NUSANTARA — 65 Bab Buku Panduan Lengkap
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 max-w-2xl mt-1 leading-relaxed">
-            Ensiklopedia perbankan resmi <strong>65 Bab Lengkap</strong>: Mencakup panduan 5 jenis kartu (termasuk Kartu Admin ∞), login Google &amp; Kartu Lama, 11 fitur Mesin ATM, 26 Super Tools Admin, Lapor Bug dengan Foto Bebas, Riwayat Update, serta panduan lengkap 136+ layanan perbankan digital.
+            Ensiklopedia perbankan resmi <strong>65 Bab Lengkap</strong>: Mencakup panduan 5 jenis kartu (termasuk Kartu Admin ∞), login Google &amp; Kartu Lama, 11 fitur Mesin ATM, Super Tools Admin, Lapor Bug dengan Foto Bebas, Riwayat Update, serta panduan lengkap layanan perbankan digital.
           </p>
         </div>
 
@@ -770,7 +799,7 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                 onClick={() => onNavigateToTab('dashboard', 'layanan')}
                 className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-[11px] text-center font-medium border border-slate-700/50 cursor-pointer"
               >
-                20+ Layanan ➔
+                Layanan Digital ➔
               </button>
               <button
                 onClick={() => onNavigateToTab('dashboard', 'chat')}
@@ -1355,10 +1384,10 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                   BAB 8 — EKOSISTEM DIGITAL
                 </span>
                 <h2 className="text-xl sm:text-2xl font-black text-white mt-1">
-                  8️⃣ Fitur Tambahan & 20+ Layanan Digital
+                  8️⃣ Fitur Tambahan &amp; Layanan Digital Terpadu
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Bank Nusantara menghadirkan ekosistem perbankan digital komprehensif dengan lebih dari 20 fitur interaktif:
+                  Bank Nusantara menghadirkan ekosistem perbankan digital komprehensif dengan beragam layanan interaktif:
                 </p>
               </div>
 
@@ -1654,7 +1683,7 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
               <div className="space-y-3 text-xs">
                 <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
                   <strong className="text-white block text-sm">Langkah 1 — Buat Token di Aplikasi Mobile:</strong>
-                  <p className="text-slate-400">Masuk ke menu <em>20+ Layanan Digital</em> ➔ pilih <em>Tarik Tunai Tanpa Kartu</em> ➔ pilih nominal ➔ masukkan PIN kartu Anda ➔ dapatkan 6 digit kode token rahasia.</p>
+                  <p className="text-slate-400">Masuk ke menu <em>Layanan Digital</em> ➔ pilih <em>Tarik Tunai Tanpa Kartu</em> ➔ pilih nominal ➔ masukkan PIN kartu Anda ➔ dapatkan 6 digit kode token rahasia.</p>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-1">
                   <strong className="text-white block text-sm">Langkah 2 — Menuju Mesin ATM Bank Nusantara:</strong>
@@ -2179,7 +2208,7 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
 
                 <div className="p-5 rounded-2xl bg-slate-950 border border-purple-500/40 space-y-2">
                   <h3 className="font-black text-purple-300 text-sm">
-                    5. Tombol "Penjelasan Lengkap 100x Lipat" di Seluruh 118+ Fitur
+                    5. Tombol &quot;Penjelasan Lengkap 100x Lipat&quot; di Layanan Digital
                   </h3>
                   <p className="text-slate-300 leading-relaxed">
                     Setiap fitur di dalam menu Layanan Digital maupun di dalam tab Kontrol Fitur Panel Admin kini dilengkapi tombol <strong>"📚 Penjelasan Lengkap 100x Lipat"</strong>. Ketika diklik, sistem membuka jendela ensiklopedia 6 bagian yang memuat Ringkasan Eksekutif, SOP 6 Langkah, Arsitektur Core-Banking, Protokol Keamanan Berlapis, Simulasi Perhitungan Keuangan, serta Tanya Jawab (FAQ) lengkap.

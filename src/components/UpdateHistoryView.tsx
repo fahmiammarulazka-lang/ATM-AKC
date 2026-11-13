@@ -56,7 +56,7 @@ export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({
               <span>PUSAT CATATAN RILIS & RIWAYAT UPDATE RESMI</span>
             </span>
             <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/40 font-mono font-bold text-[10px]">
-              Total {appUpdates.length} Catatan Update • {featureConfigs.length}+ Fitur Aktif
+              Total {appUpdates.length} Catatan Update
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
