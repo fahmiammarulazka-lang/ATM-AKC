@@ -1,0 +1,412 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Verified Google user profile owning Bank Nusantara cloud storage and vault documents.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Verified Google email address",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name of the account holder",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Profile avatar URL",
+          "maxLength": 512
+        },
+        "role": {
+          "type": "string",
+          "enum": ["customer"],
+          "description": "Immutable client role assigned on profile creation"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when user profile was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when user profile was last updated"
+        }
+      },
+      "required": ["uid", "email", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "UserVaultCore": {
+      "title": "UserVaultCore",
+      "description": "Core Bank Nusantara accounts, active card selection, Gold 24K market config, and user settings stored as native Firestore Maps and Lists.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID matching parent userId",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "description": "Owner email for human identification",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "currentAccountId": {
+          "type": "string",
+          "description": "Currently selected BankAccount ID",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "accounts": {
+          "type": "array",
+          "description": "Bounded list of up to 30 BankAccount objects with gold batches and coin balances"
+        },
+        "goldMarketConfig": {
+          "type": "object",
+          "description": "Gold 24K real-time market configuration and +5% monthly history"
+        },
+        "userSettings": {
+          "type": "object",
+          "description": "User application preference settings map"
+        },
+        "updatedAtMs": {
+          "type": "number",
+          "description": "Client monotonic save epoch in milliseconds for sync conflict resolution"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of first creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "ownerId",
+        "email",
+        "currentAccountId",
+        "accounts",
+        "goldMarketConfig",
+        "userSettings",
+        "updatedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserVaultLedger": {
+      "title": "UserVaultLedger",
+      "description": "Financial ledger collections (transactions, pockets, depositos, loans, scheduled payments, favorites, notifications, chats, card upgrades, vouchers, resi).",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "transactions": {
+          "type": "array",
+          "description": "Bounded list of up to 150 recent transactions"
+        },
+        "pockets": {
+          "type": "array",
+          "description": "Bounded list of up to 60 saving pockets"
+        },
+        "depositos": {
+          "type": "array",
+          "description": "Bounded list of up to 60 depositos"
+        },
+        "loans": {
+          "type": "array",
+          "description": "Bounded list of up to 60 loans"
+        },
+        "scheduledPayments": {
+          "type": "array",
+          "description": "Bounded list of up to 60 scheduled payments"
+        },
+        "favorites": {
+          "type": "array",
+          "description": "Bounded list of up to 60 favorite recipients"
+        },
+        "notifications": {
+          "type": "array",
+          "description": "Bounded list of up to 80 app notifications"
+        },
+        "cardlessTokens": {
+          "type": "array",
+          "description": "Bounded list of up to 40 cardless withdrawal tokens"
+        },
+        "cardUpgrades": {
+          "type": "array",
+          "description": "Bounded list of up to 40 card upgrade requests"
+        },
+        "pinResetRequests": {
+          "type": "array",
+          "description": "Bounded list of up to 40 PIN reset requests"
+        },
+        "redeemCodes": {
+          "type": "array",
+          "description": "Bounded list of up to 60 redeem codes"
+        },
+        "purchasedCodes": {
+          "type": "array",
+          "description": "Bounded list of up to 60 purchased voucher codes"
+        },
+        "resiList": {
+          "type": "array",
+          "description": "Bounded list of up to 60 shipping tracking records"
+        },
+        "chats": {
+          "type": "array",
+          "description": "Bounded list of up to 100 PayChat messages"
+        },
+        "updatedAtMs": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "transactions",
+        "pockets",
+        "depositos",
+        "loans",
+        "scheduledPayments",
+        "favorites",
+        "notifications",
+        "cardlessTokens",
+        "cardUpgrades",
+        "pinResetRequests",
+        "redeemCodes",
+        "purchasedCodes",
+        "resiList",
+        "chats",
+        "updatedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserVaultExtras": {
+      "title": "UserVaultExtras",
+      "description": "Spin wheel, Sultan Empire configuration, feature security toggles, admin help requests, and update history.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "spinWheelConfig": {
+          "type": "object",
+          "description": "Spin wheel configuration map"
+        },
+        "spinHistory": {
+          "type": "array",
+          "description": "Bounded list of up to 80 spin history entries"
+        },
+        "sultanEmpireConfig": {
+          "type": "object",
+          "description": "Sultan Empire configuration map"
+        },
+        "featureConfigs": {
+          "type": "array",
+          "description": "Bounded list of up to 200 feature security config items"
+        },
+        "deletedFeatureIds": {
+          "type": "array",
+          "description": "Bounded list of up to 200 deleted feature IDs"
+        },
+        "adminHelpRequests": {
+          "type": "array",
+          "description": "Bounded list of up to 60 Mintol Admin help requests"
+        },
+        "appUpdates": {
+          "type": "array",
+          "description": "Bounded list of up to 40 app update records"
+        },
+        "budgetCategories": {
+          "type": "array",
+          "description": "Bounded list of up to 30 monthly budget categories with limits"
+        },
+        "manualExpenses": {
+          "type": "array",
+          "description": "Bounded list of up to 200 manual expense records"
+        },
+        "budgetTxCategoryMap": {
+          "type": "object",
+          "description": "Map of transactionId to overridden budgetCategoryId"
+        },
+        "budgetAlertHistory": {
+          "type": "array",
+          "description": "Bounded list of up to 150 sent threshold alert keys (80% and 100%)"
+        },
+        "updatedAtMs": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "ownerId",
+        "spinWheelConfig",
+        "spinHistory",
+        "sultanEmpireConfig",
+        "featureConfigs",
+        "deletedFeatureIds",
+        "adminHelpRequests",
+        "appUpdates",
+        "budgetCategories",
+        "manualExpenses",
+        "budgetTxCategoryMap",
+        "budgetAlertHistory",
+        "updatedAtMs",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BugReport": {
+      "title": "BugReport",
+      "description": "User submitted bug report synchronized to Admin panel.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "reporterName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "reporterAccountNumber": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "reporterEmail": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "explanation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "photoFileName": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "status": {
+          "type": "string",
+          "enum": ["baru", "diproses", "selesai"]
+        },
+        "adminReply": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "authorId", "reporterName", "category", "explanation", "status", "createdAt", "updatedAt"]
+    },
+    "AdminRegistry": {
+      "title": "AdminRegistry",
+      "description": "Trusted server-side registry of administrator UIDs.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Google authenticated user profile root document"
+    },
+    "/users/{userId}/vault/core": {
+      "schema": { "$ref": "#/entities/UserVaultCore" },
+      "description": "Native Map/List storage for accounts, Gold 24K config, and user settings"
+    },
+    "/users/{userId}/vault/ledger": {
+      "schema": { "$ref": "#/entities/UserVaultLedger" },
+      "description": "Native Map/List storage for transactions, pockets, depositos, loans, and financial records"
+    },
+    "/users/{userId}/vault/extras": {
+      "schema": { "$ref": "#/entities/UserVaultExtras" },
+      "description": "Native Map/List storage for Spin Wheel, Sultan Empire, Feature configs, and Updates"
+    },
+    "/bug_reports/{reportId}": {
+      "schema": { "$ref": "#/entities/BugReport" },
+      "description": "Bug reports submitted by authenticated users"
+    },
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRegistry" },
+      "description": "Admin role registry"
+    }
+  }
+}

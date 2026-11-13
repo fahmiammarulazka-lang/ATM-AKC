@@ -59,6 +59,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
   const {
     googleUser,
     loginWithGoogle,
+    loginWithFirebaseGoogle,
     logoutGoogle,
     accounts,
     registerCard,
@@ -70,6 +71,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
   const [customGoogleEmail, setCustomGoogleEmail] = useState<string>('');
   const [customGoogleName, setCustomGoogleName] = useState<string>('');
   const [googleError, setGoogleError] = useState<string>('');
+  const [firebasePopupLoading, setFirebasePopupLoading] = useState<boolean>(false);
 
   // Stage 2: Post-Google Login Mode ('register' = Mulai Daftar Kartu Baru, 'login_old' = Login ke Kartu Lama Pakai PIN Kartu Lama)
   const [onboardingTab, setOnboardingTab] = useState<'register' | 'login_old'>('register');
@@ -88,6 +90,20 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
   // Old Card Login with Old Card PIN State
   const [selectedOldCard, setSelectedOldCard] = useState<BankAccount | null>(null);
   const [oldCardSearch, setOldCardSearch] = useState<string>('');
+
+  // Handle real Firebase Google Popup Sign-In
+  const handleFirebaseGooglePopup = async () => {
+    setGoogleError('');
+    setFirebasePopupLoading(true);
+    try {
+      const res = await loginWithFirebaseGoogle();
+      if (!res.success) {
+        setGoogleError(res.message);
+      }
+    } finally {
+      setFirebasePopupLoading(false);
+    }
+  };
 
   // Handle selecting a preset Google account
   const handleSelectGoogleAccount = (email: string, name: string) => {
@@ -209,6 +225,37 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
                 <span className="text-xs font-bold text-white">Pilih Akun Google untuk Masuk</span>
               </div>
               <span className="text-[10px] font-mono text-emerald-400">Google OAuth 2.0</span>
+            </div>
+
+            <button
+              type="button"
+              disabled={firebasePopupLoading}
+              onClick={handleFirebaseGooglePopup}
+              className="w-full py-3 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs flex items-center justify-center gap-2.5 shadow-md transition-all cursor-pointer disabled:opacity-60"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z" />
+                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z" />
+                <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z" />
+                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z" />
+              </svg>
+              <span>
+                {firebasePopupLoading
+                  ? 'Membuka Jendela Google...'
+                  : 'Masuk dengan Google (Sinkron Cloud Firebase)'}
+              </span>
+            </button>
+
+            {googleError && !showCustomGoogleForm && (
+              <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[11px]">
+                {googleError}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 text-[10px] text-slate-500 pt-1">
+              <div className="flex-1 h-px bg-slate-800" />
+              <span>atau pilih akun cepat</span>
+              <div className="flex-1 h-px bg-slate-800" />
             </div>
 
             <div className="space-y-2">

@@ -8,6 +8,7 @@ import { Navbar, AppNavView } from './components/Navbar';
 import { CustomerDashboard, DashboardTab } from './components/CustomerDashboard';
 import { TransferWorkspace } from './components/TransferWorkspace';
 import { TabEmasView } from './components/TabEmasView';
+import { BudgetingWorkspace } from './components/BudgetingWorkspace';
 import { TransferBebasAssetMode } from './types/bank';
 import { AtmSimulator } from './components/AtmSimulator';
 import { AdminPortal } from './components/AdminPortal';
@@ -227,6 +228,7 @@ function BankAppContent() {
             }}
           />
         )}
+        {activeView === 'anggaran' && <BudgetingWorkspace />}
         {activeView === 'jobs' && <JobVacancyView />}
         {activeView === 'spin_wheel' && <SpinTheWheelView />}
         {activeView === 'empire' && <SultanEmpireView />}

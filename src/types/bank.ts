@@ -178,6 +178,7 @@ export interface GoogleUserSession {
   email: string;
   name: string;
   picture?: string;
+  firebaseUid?: string;
   loggedInAt: string;
   hasCompletedOnboarding: boolean;
 }
@@ -699,3 +700,44 @@ export interface UserAppSettings {
   autoRedeemPulsaTokenNotif: boolean;
 }
 
+export type BudgetCategoryIcon =
+  | 'shopping-cart'
+  | 'zap'
+  | 'film'
+  | 'utensils'
+  | 'car'
+  | 'heart-pulse'
+  | 'shopping-bag'
+  | 'wallet';
+
+export type BudgetCategoryColor =
+  | 'emerald'
+  | 'amber'
+  | 'indigo'
+  | 'rose'
+  | 'cyan'
+  | 'violet'
+  | 'orange'
+  | 'slate';
+
+export interface BudgetCategory {
+  id: string;
+  accountId: string; // '__ALL__' or specific BankAccount.id
+  name: string;
+  monthlyLimit: number;
+  icon: BudgetCategoryIcon;
+  color: BudgetCategoryColor;
+  keywords: string[];
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export interface ManualExpenseRecord {
+  id: string;
+  accountId: string;
+  categoryId: string;
+  title: string;
+  amount: number;
+  note?: string;
+  timestamp: string;
+}

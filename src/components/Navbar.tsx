@@ -23,15 +23,18 @@ import {
   GraduationCap,
   Cpu,
   Send,
+  PieChart,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
 import { VerifiedBadge } from './VerifiedBadge';
+import { computeMonthlyBudgetReport, getCurrentMonthKey } from '../utils/budgetUtils';
 
 export type AppNavView =
   | 'dashboard'
   | 'transfer'
   | 'emas'
+  | 'anggaran'
   | 'jobs'
   | 'spin_wheel'
   | 'empire'
@@ -64,10 +67,28 @@ export const Navbar: React.FC<NavbarProps> = ({
     appUpdates,
     setIsAiBotModalOpen,
     setIsTutorialModalOpen,
+    budgetCategories,
+    transactions,
+    manualExpenses,
+    budgetTxCategoryMap,
   } = useBank();
 
   const currentUpdateVersion =
     appUpdates.find((u) => u.isCurrent)?.version || appUpdates[0]?.version || 'v7.0';
+
+  const budgetAlertReport = currentAccount
+    ? computeMonthlyBudgetReport({
+        accountId: currentAccount.id,
+        monthKey: getCurrentMonthKey(),
+        categories: budgetCategories,
+        transactions,
+        manualExpenses,
+        txCategoryMap: budgetTxCategoryMap,
+      })
+    : null;
+  const budgetAlertCount = budgetAlertReport
+    ? budgetAlertReport.warningCount + budgetAlertReport.exceededCount
+    : 0;
 
   const [showUserDropdown, setShowUserDropdown] = useState<boolean>(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState<boolean>(false);
@@ -139,6 +160,24 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Crown className="w-4 h-4" />
             <span>Emas 24K</span>
+          </button>
+
+          {/* Tab Anggaran & Pelacak Pengeluaran Bulanan */}
+          <button
+            onClick={() => setActiveView('anggaran')}
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              activeView === 'anggaran'
+                ? 'bg-indigo-600 text-white font-bold shadow-md'
+                : 'text-indigo-300 hover:text-white hover:bg-slate-900 border border-indigo-500/35'
+            }`}
+          >
+            <PieChart className="w-4 h-4 text-indigo-300" />
+            <span>Anggaran</span>
+            {budgetAlertCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 font-mono text-[10px] font-black">
+                {budgetAlertCount}
+              </span>
+            )}
           </button>
 
           <button

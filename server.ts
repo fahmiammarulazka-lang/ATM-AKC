@@ -12,6 +12,8 @@ const __dirname = path.dirname(__filename);
 
 const PORT = 3000;
 const STATE_FILE = path.join(__dirname, '.bank-global-state.json');
+const DB_FILE = path.join(__dirname, '.bank-database.json');
+const DB_TEMP_FILE = path.join(__dirname, '.bank-database.json.tmp');
 
 export interface ServerGlobalChatMessage {
   id: string;
@@ -60,6 +62,7 @@ interface PersistedGlobalState {
   websitePopups: ServerPopupNotification[];
   bugReports: ServerBugReport[];
   sharedBankData: Record<string, unknown>;
+  userSnapshotsByScope: Record<string, Record<string, unknown>>;
   lastUpdated: number;
 }
 
@@ -91,13 +94,20 @@ const DEFAULT_STATE: PersistedGlobalState = {
     },
   ],
   sharedBankData: {},
+  userSnapshotsByScope: {},
   lastUpdated: Date.now(),
 };
 
 function loadPersistedState(): PersistedGlobalState {
   try {
-    if (fs.existsSync(STATE_FILE)) {
-      const raw = fs.readFileSync(STATE_FILE, 'utf-8');
+    const targetFile = fs.existsSync(DB_FILE)
+      ? DB_FILE
+      : fs.existsSync(STATE_FILE)
+      ? STATE_FILE
+      : null;
+
+    if (targetFile) {
+      const raw = fs.readFileSync(targetFile, 'utf-8');
       const parsed = JSON.parse(raw);
       return {
         globalChats: Array.isArray(parsed.globalChats)
@@ -106,11 +116,15 @@ function loadPersistedState(): PersistedGlobalState {
         websitePopups: Array.isArray(parsed.websitePopups) ? parsed.websitePopups : [],
         bugReports: Array.isArray(parsed.bugReports) ? parsed.bugReports : DEFAULT_STATE.bugReports,
         sharedBankData: parsed.sharedBankData || {},
+        userSnapshotsByScope:
+          parsed.userSnapshotsByScope && typeof parsed.userSnapshotsByScope === 'object'
+            ? parsed.userSnapshotsByScope
+            : {},
         lastUpdated: parsed.lastUpdated || Date.now(),
       };
     }
   } catch (err) {
-    console.error('Failed to load persisted state:', err);
+    console.error('Failed to load persisted database state:', err);
   }
   return { ...DEFAULT_STATE };
 }
@@ -120,9 +134,12 @@ let serverState: PersistedGlobalState = loadPersistedState();
 function savePersistedState() {
   try {
     serverState.lastUpdated = Date.now();
-    fs.writeFileSync(STATE_FILE, JSON.stringify(serverState, null, 2), 'utf-8');
+    const serialized = JSON.stringify(serverState, null, 2);
+    fs.writeFileSync(DB_TEMP_FILE, serialized, 'utf-8');
+    fs.renameSync(DB_TEMP_FILE, DB_FILE);
+    fs.writeFileSync(STATE_FILE, serialized, 'utf-8');
   } catch (err) {
-    console.error('Failed to save persisted state:', err);
+    console.error('Failed to save persisted database state:', err);
   }
 }
 
@@ -486,6 +503,55 @@ async function startServer() {
     res.json({
       success: true,
       sharedBankData: serverState.sharedBankData,
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  // ==================== DATABASE STATE API (FULL SERVER PERSISTENCE) ====================
+  app.get('/api/db/state', (req, res) => {
+    const rawScope = typeof req.query.scopeKey === 'string' ? req.query.scopeKey.trim().toLowerCase() : '';
+    const scopedSnapshot = rawScope ? serverState.userSnapshotsByScope[rawScope] || null : null;
+    res.json({
+      success: true,
+      snapshot: scopedSnapshot || (Object.keys(serverState.sharedBankData).length > 0 ? serverState.sharedBankData : null),
+      sharedBankData: serverState.sharedBankData,
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/db/state', (req, res) => {
+    const { scopeKey, snapshot } = (req.body || {}) as {
+      scopeKey?: string;
+      snapshot?: Record<string, unknown>;
+    };
+    if (!snapshot || typeof snapshot !== 'object') {
+      res.status(400).json({ success: false, message: 'Snapshot database tidak valid.' });
+      return;
+    }
+
+    const incomingTs = typeof snapshot.updatedAtMs === 'number' ? snapshot.updatedAtMs : Date.now();
+    const cleanScope = typeof scopeKey === 'string' ? scopeKey.trim().toLowerCase() : '';
+
+    if (cleanScope) {
+      const existingScoped = serverState.userSnapshotsByScope[cleanScope];
+      const existingTs = existingScoped && typeof existingScoped.updatedAtMs === 'number' ? existingScoped.updatedAtMs : 0;
+      if (incomingTs >= existingTs) {
+        serverState.userSnapshotsByScope[cleanScope] = snapshot;
+      }
+    }
+
+    const sharedTs = typeof serverState.sharedBankData.updatedAtMs === 'number' ? serverState.sharedBankData.updatedAtMs : 0;
+    if (incomingTs >= sharedTs) {
+      serverState.sharedBankData = {
+        ...serverState.sharedBankData,
+        ...snapshot,
+      };
+    }
+
+    savePersistedState();
+
+    res.json({
+      success: true,
       lastUpdated: serverState.lastUpdated,
     });
   });

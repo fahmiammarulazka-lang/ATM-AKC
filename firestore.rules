@@ -1,0 +1,368 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==================== GLOBAL HELPER FUNCTIONS ====================
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'fahmiammarulazka@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidTimestamp(val) {
+      return val is timestamp && val == request.time;
+    }
+
+    function hasParentUser(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId)) &&
+        get(/databases/$(database)/documents/users/$(userId)).data.uid == userId;
+    }
+
+    // ==================== ENTITY VALIDATION BLUEPRINTS ====================
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'photoUrl', 'role', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.uid == userId &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 512)) &&
+        data.role == 'customer' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVaultCore(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'email', 'currentAccountId', 'accounts',
+          'goldMarketConfig', 'userSettings', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerId', 'email', 'currentAccountId', 'accounts',
+          'goldMarketConfig', 'userSettings', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') && data.ownerId == userId &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.currentAccountId is string && data.currentAccountId.size() >= 1 && data.currentAccountId.size() <= 128 &&
+        data.accounts is list && data.accounts.size() <= 30 &&
+        (data.accounts.size() == 0 || data.accounts[0] is map) &&
+        data.goldMarketConfig is map &&
+        data.userSettings is map &&
+        data.updatedAtMs is number &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVaultLedger(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'transactions', 'pockets', 'depositos', 'loans',
+          'scheduledPayments', 'favorites', 'notifications', 'cardlessTokens',
+          'cardUpgrades', 'pinResetRequests', 'redeemCodes', 'purchasedCodes',
+          'resiList', 'chats', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerId', 'transactions', 'pockets', 'depositos', 'loans',
+          'scheduledPayments', 'favorites', 'notifications', 'cardlessTokens',
+          'cardUpgrades', 'pinResetRequests', 'redeemCodes', 'purchasedCodes',
+          'resiList', 'chats', 'updatedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') && data.ownerId == userId &&
+        data.transactions is list && data.transactions.size() <= 150 &&
+        (data.transactions.size() == 0 || data.transactions[0] is map) &&
+        data.pockets is list && data.pockets.size() <= 60 &&
+        (data.pockets.size() == 0 || data.pockets[0] is map) &&
+        data.depositos is list && data.depositos.size() <= 60 &&
+        (data.depositos.size() == 0 || data.depositos[0] is map) &&
+        data.loans is list && data.loans.size() <= 60 &&
+        (data.loans.size() == 0 || data.loans[0] is map) &&
+        data.scheduledPayments is list && data.scheduledPayments.size() <= 60 &&
+        (data.scheduledPayments.size() == 0 || data.scheduledPayments[0] is map) &&
+        data.favorites is list && data.favorites.size() <= 60 &&
+        (data.favorites.size() == 0 || data.favorites[0] is map) &&
+        data.notifications is list && data.notifications.size() <= 80 &&
+        (data.notifications.size() == 0 || data.notifications[0] is map) &&
+        data.cardlessTokens is list && data.cardlessTokens.size() <= 40 &&
+        (data.cardlessTokens.size() == 0 || data.cardlessTokens[0] is map) &&
+        data.cardUpgrades is list && data.cardUpgrades.size() <= 40 &&
+        (data.cardUpgrades.size() == 0 || data.cardUpgrades[0] is map) &&
+        data.pinResetRequests is list && data.pinResetRequests.size() <= 40 &&
+        (data.pinResetRequests.size() == 0 || data.pinResetRequests[0] is map) &&
+        data.redeemCodes is list && data.redeemCodes.size() <= 60 &&
+        (data.redeemCodes.size() == 0 || data.redeemCodes[0] is map) &&
+        data.purchasedCodes is list && data.purchasedCodes.size() <= 60 &&
+        (data.purchasedCodes.size() == 0 || data.purchasedCodes[0] is map) &&
+        data.resiList is list && data.resiList.size() <= 60 &&
+        (data.resiList.size() == 0 || data.resiList[0] is map) &&
+        data.chats is list && data.chats.size() <= 100 &&
+        (data.chats.size() == 0 || data.chats[0] is map) &&
+        data.updatedAtMs is number &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVaultExtras(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'spinWheelConfig', 'spinHistory', 'sultanEmpireConfig',
+          'featureConfigs', 'deletedFeatureIds', 'adminHelpRequests', 'appUpdates',
+          'budgetCategories', 'manualExpenses', 'budgetTxCategoryMap', 'budgetAlertHistory',
+          'updatedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerId', 'spinWheelConfig', 'spinHistory', 'sultanEmpireConfig',
+          'featureConfigs', 'deletedFeatureIds', 'adminHelpRequests', 'appUpdates',
+          'budgetCategories', 'manualExpenses', 'budgetTxCategoryMap', 'budgetAlertHistory',
+          'updatedAtMs', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+        data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') && data.ownerId == userId &&
+        data.spinWheelConfig is map &&
+        data.spinHistory is list && data.spinHistory.size() <= 80 &&
+        (data.spinHistory.size() == 0 || data.spinHistory[0] is map) &&
+        data.sultanEmpireConfig is map &&
+        data.featureConfigs is list && data.featureConfigs.size() <= 200 &&
+        (data.featureConfigs.size() == 0 || data.featureConfigs[0] is map) &&
+        data.deletedFeatureIds is list && data.deletedFeatureIds.size() <= 200 &&
+        (data.deletedFeatureIds.size() == 0 || data.deletedFeatureIds[0] is string) &&
+        data.adminHelpRequests is list && data.adminHelpRequests.size() <= 60 &&
+        (data.adminHelpRequests.size() == 0 || data.adminHelpRequests[0] is map) &&
+        data.appUpdates is list && data.appUpdates.size() <= 40 &&
+        (data.appUpdates.size() == 0 || data.appUpdates[0] is map) &&
+        data.budgetCategories is list && data.budgetCategories.size() <= 30 &&
+        (data.budgetCategories.size() == 0 || data.budgetCategories[0] is map) &&
+        data.manualExpenses is list && data.manualExpenses.size() <= 200 &&
+        (data.manualExpenses.size() == 0 || data.manualExpenses[0] is map) &&
+        data.budgetTxCategoryMap is map &&
+        data.budgetAlertHistory is list && data.budgetAlertHistory.size() <= 150 &&
+        (data.budgetAlertHistory.size() == 0 || data.budgetAlertHistory[0] is string) &&
+        data.updatedAtMs is number &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBugReport(data, reportId) {
+      return data.keys().hasAll([
+          'id', 'authorId', 'reporterName', 'category', 'explanation', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'authorId', 'reporterName', 'reporterAccountNumber', 'reporterEmail',
+          'category', 'explanation', 'photoFileName', 'status', 'adminReply', 'createdAt', 'updatedAt'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.id == reportId &&
+        data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 && data.authorId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.reporterName is string && data.reporterName.size() >= 1 && data.reporterName.size() <= 120 &&
+        (!('reporterAccountNumber' in data) || (data.reporterAccountNumber is string && data.reporterAccountNumber.size() <= 32)) &&
+        (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 160)) &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+        data.explanation is string && data.explanation.size() >= 1 && data.explanation.size() <= 2000 &&
+        (!('photoFileName' in data) || (data.photoFileName is string && data.photoFileName.size() <= 180)) &&
+        data.status in ['baru', 'diproses', 'selesai'] &&
+        (!('adminReply' in data) || (data.adminReply is string && data.adminReply.size() <= 1000)) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // ==================== COLLECTION MATCH RULES ====================
+
+    // Admin registry (read-only for owner/admin; managed out-of-band or by super admin)
+    match /admins/{adminUid} {
+      allow get: if isValidId(adminUid) && (isOwner(adminUid) || isAdmin());
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // User Root Profile (PII isolated to owner or admin)
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+
+      allow create: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == request.auth.uid &&
+        isValidTimestamp(incoming().createdAt) &&
+        isValidTimestamp(incoming().updatedAt);
+
+      allow update: if isValidId(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().role == existing().role &&
+        incoming().createdAt == existing().createdAt &&
+        isValidTimestamp(incoming().updatedAt) &&
+        (
+          isAdmin() ||
+          (
+            isOwner(userId) &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoUrl', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(userId) && isAdmin();
+
+      // Master Gate Subcollection: Vault Core
+      match /vault/core {
+        allow get: if isValidId(userId) && (isOwner(userId) || isAdmin()) && hasParentUser(userId);
+        allow list: if false;
+
+        allow create: if isValidId(userId) &&
+          (isOwner(userId) || isAdmin()) &&
+          isValidVaultCore(incoming(), userId) &&
+          hasParentUser(userId) &&
+          isValidTimestamp(incoming().createdAt) &&
+          isValidTimestamp(incoming().updatedAt);
+
+        allow update: if isValidId(userId) &&
+          isValidVaultCore(incoming(), userId) &&
+          hasParentUser(userId) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          isValidTimestamp(incoming().updatedAt) &&
+          (
+            isAdmin() ||
+            (
+              isOwner(userId) &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'email', 'currentAccountId', 'accounts', 'goldMarketConfig', 'userSettings', 'updatedAtMs', 'updatedAt'
+              ])
+            )
+          );
+
+        allow delete: if isValidId(userId) && isAdmin();
+      }
+
+      // Master Gate Subcollection: Vault Ledger
+      match /vault/ledger {
+        allow get: if isValidId(userId) && (isOwner(userId) || isAdmin()) && hasParentUser(userId);
+        allow list: if false;
+
+        allow create: if isValidId(userId) &&
+          (isOwner(userId) || isAdmin()) &&
+          isValidVaultLedger(incoming(), userId) &&
+          hasParentUser(userId) &&
+          isValidTimestamp(incoming().createdAt) &&
+          isValidTimestamp(incoming().updatedAt);
+
+        allow update: if isValidId(userId) &&
+          isValidVaultLedger(incoming(), userId) &&
+          hasParentUser(userId) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          isValidTimestamp(incoming().updatedAt) &&
+          (
+            isAdmin() ||
+            (
+              isOwner(userId) &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'transactions', 'pockets', 'depositos', 'loans', 'scheduledPayments',
+                'favorites', 'notifications', 'cardlessTokens', 'cardUpgrades',
+                'pinResetRequests', 'redeemCodes', 'purchasedCodes', 'resiList',
+                'chats', 'updatedAtMs', 'updatedAt'
+              ])
+            )
+          );
+
+        allow delete: if isValidId(userId) && isAdmin();
+      }
+
+      // Master Gate Subcollection: Vault Extras (Spin, Empire, Features, Updates, Budgeting)
+      match /vault/extras {
+        allow get: if isValidId(userId) && (isOwner(userId) || isAdmin()) && hasParentUser(userId);
+        allow list: if false;
+
+        allow create: if isValidId(userId) &&
+          (isOwner(userId) || isAdmin()) &&
+          isValidVaultExtras(incoming(), userId) &&
+          hasParentUser(userId) &&
+          isValidTimestamp(incoming().createdAt) &&
+          isValidTimestamp(incoming().updatedAt);
+
+        allow update: if isValidId(userId) &&
+          isValidVaultExtras(incoming(), userId) &&
+          hasParentUser(userId) &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          isValidTimestamp(incoming().updatedAt) &&
+          (
+            isAdmin() ||
+            (
+              isOwner(userId) &&
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'spinWheelConfig', 'spinHistory', 'sultanEmpireConfig',
+                'featureConfigs', 'deletedFeatureIds', 'adminHelpRequests', 'appUpdates',
+                'budgetCategories', 'manualExpenses', 'budgetTxCategoryMap', 'budgetAlertHistory',
+                'updatedAtMs', 'updatedAt'
+              ])
+            )
+          );
+
+        allow delete: if isValidId(userId) && isAdmin();
+      }
+    }
+
+    // Bug Reports
+    match /bug_reports/{reportId} {
+      allow get: if isValidId(reportId) && (isAdmin() || (isVerifiedUser() && existing().authorId == request.auth.uid));
+      allow list: if isAdmin() || (isVerifiedUser() && existing().authorId == request.auth.uid);
+
+      allow create: if isValidId(reportId) &&
+        isVerifiedUser() &&
+        isValidBugReport(incoming(), reportId) &&
+        incoming().authorId == request.auth.uid &&
+        incoming().status == 'baru' &&
+        !('adminReply' in incoming()) &&
+        isValidTimestamp(incoming().createdAt) &&
+        isValidTimestamp(incoming().updatedAt);
+
+      allow update: if isValidId(reportId) &&
+        isValidBugReport(incoming(), reportId) &&
+        incoming().id == existing().id &&
+        incoming().authorId == existing().authorId &&
+        incoming().createdAt == existing().createdAt &&
+        isValidTimestamp(incoming().updatedAt) &&
+        (
+          isAdmin() ||
+          (
+            isVerifiedUser() &&
+            existing().authorId == request.auth.uid &&
+            existing().status != 'selesai' &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['explanation', 'category', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isValidId(reportId) && isAdmin();
+    }
+  }
+}

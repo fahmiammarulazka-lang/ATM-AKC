@@ -50,7 +50,37 @@ import {
   GoldAndTransferMarketConfig,
   TransferBebasAssetMode,
   TransferBebasReceipt,
+  BudgetCategory,
+  BudgetCategoryIcon,
+  BudgetCategoryColor,
+  ManualExpenseRecord,
 } from '../types/bank';
+import {
+  auth,
+  googleProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+  type FirebaseUser,
+} from '../firebase';
+import {
+  saveSnapshotToDeviceStorage,
+  loadSnapshotFromDeviceStorage,
+  clearDeviceSnapshotStorage,
+  type BankPersistableSnapshot,
+} from '../services/deviceStorage';
+import {
+  saveSnapshotToFirestore,
+  loadSnapshotFromFirestoreOnce,
+  subscribeFirestoreVault,
+  saveBugReportToFirestore,
+} from '../services/firebasePersistence';
+import {
+  DEFAULT_BUDGET_CATEGORIES,
+  computeMonthlyBudgetReport,
+  getCurrentMonthKey,
+  formatMonthLabelIndo,
+} from '../utils/budgetUtils';
 import {
   INITIAL_ACCOUNTS,
   INITIAL_TRANSACTIONS,
@@ -166,7 +196,9 @@ interface BankContextType {
 
   // Google Login & Initial Registration Onboarding Flow
   googleUser: GoogleUserSession | null;
-  loginWithGoogle: (email: string, name: string, picture?: string) => void;
+  firebaseUser: FirebaseUser | null;
+  loginWithGoogle: (email: string, name: string, picture?: string, firebaseUid?: string) => void;
+  loginWithFirebaseGoogle: () => Promise<{ success: boolean; message: string }>;
   completeGoogleOnboarding: () => void;
   reopenGoogleOnboarding: () => void;
   logoutGoogle: () => void;
@@ -879,6 +911,33 @@ interface BankContextType {
   // Account lookup helper
   lookupAccount: (accountNumber: string, bankCode?: string) => { found: boolean; name?: string; bank?: string };
 
+  // Budgeting & Expense Tracking (Anggaran Bulanan)
+  budgetCategories: BudgetCategory[];
+  manualExpenses: ManualExpenseRecord[];
+  budgetTxCategoryMap: Record<string, string>;
+  budgetAlertHistory: string[];
+  addBudgetCategory: (input: {
+    name: string;
+    monthlyLimit: number;
+    icon: BudgetCategoryIcon;
+    color: BudgetCategoryColor;
+    keywords?: string[];
+  }) => { success: boolean; message: string };
+  updateBudgetCategory: (
+    categoryId: string,
+    updates: Partial<Pick<BudgetCategory, 'name' | 'monthlyLimit' | 'icon' | 'color' | 'keywords'>>
+  ) => { success: boolean; message: string };
+  deleteBudgetCategory: (categoryId: string) => { success: boolean; message: string };
+  addManualExpense: (input: {
+    categoryId: string;
+    title: string;
+    amount: number;
+    note?: string;
+    timestamp?: string;
+  }) => { success: boolean; message: string };
+  deleteManualExpense: (expenseId: string) => void;
+  setTransactionBudgetCategory: (transactionId: string, categoryId: string) => void;
+
   // Reset to default or start from zero
   resetAllData: () => void;
   startFromZero: () => void;
@@ -920,6 +979,10 @@ const STORAGE_KEYS = {
   DELETED_FEATURES: 'bank_nusantara_deleted_features_v1',
   USER_SETTINGS: 'bank_nusantara_user_settings_v1',
   GOLD_TRANSFER_MARKET: 'bank_nusantara_gold_transfer_v1',
+  BUDGET_CATEGORIES: 'bank_nusantara_budget_categories_v1',
+  MANUAL_EXPENSES: 'bank_nusantara_manual_expenses_v1',
+  BUDGET_TX_MAP: 'bank_nusantara_budget_tx_map_v1',
+  BUDGET_ALERTS: 'bank_nusantara_budget_alerts_v1',
 };
 
 const getLocalDateKey = (d: Date = new Date()): string => {
@@ -1426,6 +1489,53 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
 
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+
+  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.BUDGET_CATEGORIES);
+      if (saved) {
+        const parsed: BudgetCategory[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const missingDefaults = DEFAULT_BUDGET_CATEGORIES.filter(
+            (def) => !parsed.some((p) => p.id === def.id)
+          );
+          return [...parsed, ...missingDefaults];
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_BUDGET_CATEGORIES;
+  });
+
+  const [manualExpenses, setManualExpenses] = useState<ManualExpenseRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.MANUAL_EXPENSES);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [budgetTxCategoryMap, setBudgetTxCategoryMap] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.BUDGET_TX_MAP);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [budgetAlertHistory, setBudgetAlertHistory] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.BUDGET_ALERTS);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
   // Sync to local storage
   useEffect(() => {
     try {
@@ -1590,18 +1700,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const currentAccount = accounts.find((a) => a.id === currentAccountId) || accounts[0] || null;
 
   // ================= GOOGLE LOGIN & ONBOARDING HANDLERS =================
-  const loginWithGoogle = (email: string, name: string, picture?: string) => {
+  const loginWithGoogle = (email: string, name: string, picture?: string, firebaseUid?: string) => {
     const cleanEmail = email.trim().toLowerCase() || 'fahmiammarulazka@gmail.com';
     const cleanName = name.trim() || cleanEmail.split('@')[0];
     const session: GoogleUserSession = {
       email: cleanEmail,
       name: cleanName,
       picture,
+      firebaseUid,
       loggedInAt: new Date().toISOString(),
       hasCompletedOnboarding: false, // Setelah login Google disuruh mulai daftar kartu (atau login ke kartu lama)
     };
     setGoogleUser(session);
     playAtmSound('success');
+  };
+
+  const loginWithFirebaseGoogle = async (): Promise<{ success: boolean; message: string }> => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      setFirebaseUser(user);
+      const email = (user.email || 'fahmiammarulazka@gmail.com').trim().toLowerCase();
+      const name = (user.displayName || email.split('@')[0]).trim();
+      loginWithGoogle(email, name, user.photoURL || undefined, user.uid);
+      return {
+        success: true,
+        message: `Berhasil masuk sebagai ${name} (${email}). Sinkronisasi Firebase aktif.`,
+      };
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Gagal membuka popup login Google Firebase.';
+      return {
+        success: false,
+        message: errMsg.includes('popup-closed-by-user')
+          ? 'Login Google dibatalkan sebelum selesai.'
+          : `Login Google Firebase gagal: ${errMsg}`,
+      };
+    }
   };
 
   const completeGoogleOnboarding = () => {
@@ -1614,6 +1748,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logoutGoogle = () => {
     setGoogleUser(null);
+    void signOut(auth).catch(() => {});
     playAtmSound('beep');
   };
 
@@ -1647,6 +1782,333 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem(STORAGE_KEYS.GOLD_TRANSFER_MARKET, JSON.stringify(goldMarketConfig));
     } catch { /* empty */ }
   }, [goldMarketConfig]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.BUDGET_CATEGORIES, JSON.stringify(budgetCategories));
+    } catch { /* empty */ }
+  }, [budgetCategories]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.MANUAL_EXPENSES, JSON.stringify(manualExpenses));
+    } catch { /* empty */ }
+  }, [manualExpenses]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.BUDGET_TX_MAP, JSON.stringify(budgetTxCategoryMap));
+    } catch { /* empty */ }
+  }, [budgetTxCategoryMap]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.BUDGET_ALERTS, JSON.stringify(budgetAlertHistory));
+    } catch { /* empty */ }
+  }, [budgetAlertHistory]);
+
+  // ================= 3-LAYER UNIFIED PERSISTENCE (FIREBASE + SERVER DB + PENYIMPANAN HP) =================
+  const lastSyncEpochRef = useRef<number>(0);
+  const isApplyingExternalSnapshotRef = useRef<boolean>(false);
+  const hasBootHydratedRef = useRef<boolean>(false);
+
+  const buildPersistableSnapshot = (epochMs: number): BankPersistableSnapshot => ({
+    version: 1,
+    updatedAtMs: epochMs,
+    currentAccountId,
+    googleUser,
+    accounts,
+    transactions,
+    goldMarketConfig,
+    userSettings,
+    pockets,
+    depositos,
+    loans,
+    scheduledPayments,
+    favorites,
+    notifications,
+    cardlessTokens,
+    cardUpgrades,
+    pinResetRequests,
+    redeemCodes,
+    purchasedCodes,
+    resiList,
+    chats,
+    spinWheelConfig,
+    spinHistory,
+    sultanEmpireConfig,
+    featureConfigs: rawFeatureConfigs,
+    deletedFeatureIds,
+    adminHelpRequests,
+    appUpdates,
+    budgetCategories,
+    manualExpenses,
+    budgetTxCategoryMap,
+    budgetAlertHistory,
+    websitePopups,
+    dismissedPopupIds,
+    globalChats,
+    bugReports,
+    adminUnlocked,
+  });
+
+  const applyExternalSnapshot = (snapshot: Partial<BankPersistableSnapshot>) => {
+    const incomingTs = typeof snapshot.updatedAtMs === 'number' ? snapshot.updatedAtMs : 0;
+    if (incomingTs <= lastSyncEpochRef.current) return;
+
+    isApplyingExternalSnapshotRef.current = true;
+    lastSyncEpochRef.current = incomingTs;
+
+    if (Array.isArray(snapshot.accounts) && snapshot.accounts.length > 0) {
+      const parsed = snapshot.accounts as BankAccount[];
+      const missing = INITIAL_ACCOUNTS.filter((initAcc) => !parsed.some((p) => p.id === initAcc.id));
+      setAccounts([...parsed, ...missing]);
+    }
+    if (typeof snapshot.currentAccountId === 'string' && snapshot.currentAccountId) {
+      setCurrentAccountIdState(snapshot.currentAccountId);
+    }
+    if (Array.isArray(snapshot.transactions)) {
+      setTransactions(snapshot.transactions as Transaction[]);
+    }
+    if (snapshot.goldMarketConfig && typeof snapshot.goldMarketConfig === 'object') {
+      setGoldMarketConfig((prev) => ({ ...prev, ...(snapshot.goldMarketConfig as GoldAndTransferMarketConfig) }));
+    }
+    if (snapshot.userSettings && typeof snapshot.userSettings === 'object') {
+      setUserSettings((prev) => ({ ...prev, ...(snapshot.userSettings as UserAppSettings) }));
+    }
+    if (Array.isArray(snapshot.pockets)) setPockets(snapshot.pockets as PocketSaving[]);
+    if (Array.isArray(snapshot.depositos)) setDepositos(snapshot.depositos as DepositoRecord[]);
+    if (Array.isArray(snapshot.loans)) setLoans(snapshot.loans as LoanApplication[]);
+    if (Array.isArray(snapshot.scheduledPayments)) setScheduledPayments(snapshot.scheduledPayments as ScheduledPayment[]);
+    if (Array.isArray(snapshot.favorites)) setFavorites(snapshot.favorites as FavoriteAccount[]);
+    if (Array.isArray(snapshot.notifications)) setNotifications(snapshot.notifications as AppNotification[]);
+    if (Array.isArray(snapshot.cardlessTokens)) setCardlessTokens(snapshot.cardlessTokens as CardlessToken[]);
+    if (Array.isArray(snapshot.cardUpgrades)) setCardUpgrades(snapshot.cardUpgrades as CardUpgradeApplication[]);
+    if (Array.isArray(snapshot.pinResetRequests)) setPinResetRequests(snapshot.pinResetRequests as PinResetRequest[]);
+    if (Array.isArray(snapshot.redeemCodes)) setRedeemCodes(snapshot.redeemCodes as RedeemCode[]);
+    if (Array.isArray(snapshot.purchasedCodes)) setPurchasedCodes(snapshot.purchasedCodes as PurchasedVoucherCode[]);
+    if (Array.isArray(snapshot.resiList)) setResiList(snapshot.resiList as ResiTrackingRecord[]);
+    if (Array.isArray(snapshot.chats)) setChats(snapshot.chats as ChatMessage[]);
+    if (snapshot.spinWheelConfig && typeof snapshot.spinWheelConfig === 'object') {
+      setSpinWheelConfig((prev) => ({ ...prev, ...(snapshot.spinWheelConfig as SpinWheelAdminConfig) }));
+    }
+    if (Array.isArray(snapshot.spinHistory)) setSpinHistory(snapshot.spinHistory as SpinHistoryRecord[]);
+    if (snapshot.sultanEmpireConfig && typeof snapshot.sultanEmpireConfig === 'object') {
+      setSultanEmpireConfig((prev) => ({ ...prev, ...(snapshot.sultanEmpireConfig as SultanEmpireAdminConfig) }));
+    }
+    if (Array.isArray(snapshot.featureConfigs)) setFeatureConfigs(snapshot.featureConfigs as FeatureSecurityConfig[]);
+    if (Array.isArray(snapshot.deletedFeatureIds)) setDeletedFeatureIds(snapshot.deletedFeatureIds);
+    if (Array.isArray(snapshot.adminHelpRequests)) setAdminHelpRequests(snapshot.adminHelpRequests as AdminHelpRequestRecord[]);
+    if (Array.isArray(snapshot.appUpdates) && snapshot.appUpdates.length > 0) {
+      setAppUpdates(snapshot.appUpdates as AppUpdateRecord[]);
+    }
+    if (Array.isArray(snapshot.budgetCategories) && snapshot.budgetCategories.length > 0) {
+      const incomingCats = snapshot.budgetCategories as BudgetCategory[];
+      const missingDefaults = DEFAULT_BUDGET_CATEGORIES.filter(
+        (def) => !incomingCats.some((c) => c.id === def.id)
+      );
+      setBudgetCategories([...incomingCats, ...missingDefaults]);
+    }
+    if (Array.isArray(snapshot.manualExpenses)) {
+      setManualExpenses(snapshot.manualExpenses as ManualExpenseRecord[]);
+    }
+    if (snapshot.budgetTxCategoryMap && typeof snapshot.budgetTxCategoryMap === 'object') {
+      setBudgetTxCategoryMap(snapshot.budgetTxCategoryMap);
+    }
+    if (Array.isArray(snapshot.budgetAlertHistory)) {
+      setBudgetAlertHistory(snapshot.budgetAlertHistory);
+    }
+    if (snapshot.googleUser && typeof snapshot.googleUser === 'object') {
+      setGoogleUser((prev) => prev || (snapshot.googleUser as GoogleUserSession));
+    }
+
+    window.setTimeout(() => {
+      isApplyingExternalSnapshotRef.current = false;
+    }, 50);
+  };
+
+  // Boot Hydration from Layer 3 (HP IndexedDB) & Layer 2 (Server DB)
+  useEffect(() => {
+    let active = true;
+    const scopeKey = googleUser?.email || '';
+
+    const hydrate = async () => {
+      try {
+        const [deviceSnap, dbRes] = await Promise.all([
+          loadSnapshotFromDeviceStorage(scopeKey),
+          fetch(`/api/db/state${scopeKey ? `?scopeKey=${encodeURIComponent(scopeKey)}` : ''}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null),
+        ]);
+        if (!active) return;
+
+        const serverSnap =
+          dbRes && dbRes.snapshot && typeof dbRes.snapshot === 'object'
+            ? (dbRes.snapshot as Partial<BankPersistableSnapshot>)
+            : null;
+
+        const deviceTs = typeof deviceSnap?.updatedAtMs === 'number' ? deviceSnap.updatedAtMs : 0;
+        const serverTs = typeof serverSnap?.updatedAtMs === 'number' ? serverSnap.updatedAtMs : 0;
+
+        if (deviceSnap && deviceTs >= serverTs && deviceTs > 0) {
+          applyExternalSnapshot(deviceSnap);
+        } else if (serverSnap && serverTs > 0) {
+          applyExternalSnapshot(serverSnap);
+        }
+      } finally {
+        hasBootHydratedRef.current = true;
+      }
+    };
+
+    void hydrate();
+    return () => {
+      active = false;
+    };
+    // Run once on mount; scope changes handled cleanly by auth listeners below
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Layer 1 (Firebase Auth + Firestore Real-Time Vault Sync)
+  const latestSnapshotRef = useRef<BankPersistableSnapshot | null>(null);
+  useEffect(() => {
+    let unsubFirestore: (() => void) | null = null;
+    const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
+      setFirebaseUser(fbUser);
+      if (unsubFirestore) {
+        unsubFirestore();
+        unsubFirestore = null;
+      }
+      if (!fbUser || !fbUser.emailVerified) return;
+
+      try {
+        const remote = await loadSnapshotFromFirestoreOnce(fbUser);
+        if (remote && typeof remote.updatedAtMs === 'number' && remote.updatedAtMs > lastSyncEpochRef.current) {
+          applyExternalSnapshot(remote);
+        } else if (latestSnapshotRef.current) {
+          await saveSnapshotToFirestore(fbUser, latestSnapshotRef.current);
+        }
+
+        unsubFirestore = subscribeFirestoreVault(fbUser, (partial) => {
+          if (typeof partial.updatedAtMs === 'number' && partial.updatedAtMs > lastSyncEpochRef.current) {
+            applyExternalSnapshot(partial);
+          }
+        });
+      } catch (err) {
+        console.error('Sinkronisasi awal Firebase Firestore tertunda:', err);
+      }
+    });
+
+    return () => {
+      unsubAuth();
+      if (unsubFirestore) unsubFirestore();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Automatic 3-Layer Save Coordinator (HP IndexedDB + Server DB + Firebase Firestore)
+  useEffect(() => {
+    const nowEpoch = Date.now();
+    const snap = buildPersistableSnapshot(nowEpoch);
+    latestSnapshotRef.current = snap;
+
+    if (isApplyingExternalSnapshotRef.current) {
+      return;
+    }
+
+    lastSyncEpochRef.current = nowEpoch;
+    const scopeKey = googleUser?.email || firebaseUser?.email || 'default';
+
+    // Layer 3: HP IndexedDB (fast write)
+    const deviceTimer = window.setTimeout(() => {
+      void saveSnapshotToDeviceStorage(snap, googleUser?.email);
+    }, 150);
+
+    // Layer 2 (Server DB) + Layer 1 (Firebase Firestore)
+    const remoteTimer = window.setTimeout(() => {
+      if (!hasBootHydratedRef.current) return;
+      fetch('/api/db/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scopeKey, snapshot: snap }),
+      }).catch(() => {});
+
+      if (firebaseUser && firebaseUser.emailVerified) {
+        void saveSnapshotToFirestore(firebaseUser, snap).catch(() => {});
+      }
+    }, 650);
+
+    return () => {
+      window.clearTimeout(deviceTimer);
+      window.clearTimeout(remoteTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    accounts,
+    currentAccountId,
+    googleUser,
+    firebaseUser,
+    transactions,
+    goldMarketConfig,
+    userSettings,
+    pockets,
+    depositos,
+    loans,
+    scheduledPayments,
+    favorites,
+    notifications,
+    cardlessTokens,
+    cardUpgrades,
+    pinResetRequests,
+    redeemCodes,
+    purchasedCodes,
+    resiList,
+    chats,
+    spinWheelConfig,
+    spinHistory,
+    sultanEmpireConfig,
+    rawFeatureConfigs,
+    deletedFeatureIds,
+    adminHelpRequests,
+    appUpdates,
+    budgetCategories,
+    manualExpenses,
+    budgetTxCategoryMap,
+    budgetAlertHistory,
+    adminUnlocked,
+  ]);
+
+  // Immediate flush when user closes/backgrounds browser on HP
+  useEffect(() => {
+    const flushImmediately = () => {
+      const snap = latestSnapshotRef.current;
+      if (!snap) return;
+      void saveSnapshotToDeviceStorage(snap, googleUser?.email);
+      try {
+        fetch('/api/db/state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scopeKey: googleUser?.email || firebaseUser?.email || 'default',
+            snapshot: snap,
+          }),
+          keepalive: true,
+        }).catch(() => {});
+      } catch {
+        // ignore
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') flushImmediately();
+    };
+
+    window.addEventListener('pagehide', flushImmediately);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flushImmediately);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [googleUser?.email, firebaseUser?.email]);
 
   // Real-time Calendar Watcher: Checks every 1 second whether system month rolled over onto Tanggal 1
   // and compounds +5% per month automatically (even across multiple missed months).
@@ -2129,6 +2591,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           })
         );
       }
+    }
+
+    if (auth.currentUser && auth.currentUser.emailVerified) {
+      void saveBugReportToFirestore(auth.currentUser, {
+        id: newBug.id,
+        reporterName: newBug.reporterName,
+        reporterAccountNumber: newBug.reporterAccountNumber,
+        reporterEmail: newBug.reporterEmail,
+        category: newBug.category,
+        explanation: newBug.explanation,
+        photoFileName: newBug.photoFileName,
+      }).catch(() => {});
     }
 
     return {
@@ -5765,6 +6239,191 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setScheduledPayments((prev) => prev.filter((s) => s.id !== id));
   };
 
+  // ================= BUDGETING & EXPENSE TRACKER HANDLERS =================
+  const addBudgetCategory = (input: {
+    name: string;
+    monthlyLimit: number;
+    icon: BudgetCategoryIcon;
+    color: BudgetCategoryColor;
+    keywords?: string[];
+  }): { success: boolean; message: string } => {
+    const cleanName = input.name.trim();
+    if (!cleanName || cleanName.length < 2) {
+      return { success: false, message: 'Nama kategori minimal 2 karakter.' };
+    }
+    if (!Number.isFinite(input.monthlyLimit) || input.monthlyLimit < 0) {
+      return { success: false, message: 'Batas anggaran bulanan tidak valid.' };
+    }
+    const newCat: BudgetCategory = {
+      id: `cat-custom-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      accountId: currentAccountId || '__ALL__',
+      name: cleanName.slice(0, 50),
+      monthlyLimit: Math.round(input.monthlyLimit),
+      icon: input.icon || 'wallet',
+      color: input.color || 'indigo',
+      keywords: (input.keywords || []).map((k) => k.trim().toLowerCase()).filter(Boolean),
+      isDefault: false,
+      createdAt: new Date().toISOString(),
+    };
+    setBudgetCategories((prev) => [...prev, newCat]);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Kategori "${newCat.name}" dengan limit ${formatRupiah(newCat.monthlyLimit)} berhasil ditambahkan.`,
+    };
+  };
+
+  const updateBudgetCategory = (
+    categoryId: string,
+    updates: Partial<Pick<BudgetCategory, 'name' | 'monthlyLimit' | 'icon' | 'color' | 'keywords'>>
+  ): { success: boolean; message: string } => {
+    const target = budgetCategories.find((c) => c.id === categoryId);
+    if (!target) {
+      return { success: false, message: 'Kategori anggaran tidak ditemukan.' };
+    }
+    if (updates.monthlyLimit !== undefined && (!Number.isFinite(updates.monthlyLimit) || updates.monthlyLimit < 0)) {
+      return { success: false, message: 'Nominal limit anggaran harus 0 atau lebih.' };
+    }
+    setBudgetCategories((prev) =>
+      prev.map((c) =>
+        c.id === categoryId
+          ? {
+              ...c,
+              ...(updates.name !== undefined && updates.name.trim() ? { name: updates.name.trim().slice(0, 50) } : {}),
+              ...(updates.monthlyLimit !== undefined ? { monthlyLimit: Math.round(updates.monthlyLimit) } : {}),
+              ...(updates.icon !== undefined ? { icon: updates.icon } : {}),
+              ...(updates.color !== undefined ? { color: updates.color } : {}),
+              ...(updates.keywords !== undefined ? { keywords: updates.keywords } : {}),
+            }
+          : c
+      )
+    );
+    playAtmSound('success');
+    return { success: true, message: `Pengaturan kategori "${updates.name || target.name}" diperbarui.` };
+  };
+
+  const deleteBudgetCategory = (categoryId: string): { success: boolean; message: string } => {
+    const target = budgetCategories.find((c) => c.id === categoryId);
+    if (!target) {
+      return { success: false, message: 'Kategori tidak ditemukan.' };
+    }
+    if (target.isDefault) {
+      return { success: false, message: 'Kategori bawaan tidak dapat dihapus, namun limitnya bebas diubah.' };
+    }
+    setBudgetCategories((prev) => prev.filter((c) => c.id !== categoryId));
+    setManualExpenses((prev) =>
+      prev.map((m) => (m.categoryId === categoryId ? { ...m, categoryId: 'cat-other' } : m))
+    );
+    setBudgetTxCategoryMap((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((txId) => {
+        if (next[txId] === categoryId) next[txId] = 'cat-other';
+      });
+      return next;
+    });
+    playAtmSound('beep');
+    return { success: true, message: `Kategori kustom "${target.name}" berhasil dihapus.` };
+  };
+
+  const addManualExpense = (input: {
+    categoryId: string;
+    title: string;
+    amount: number;
+    note?: string;
+    timestamp?: string;
+  }): { success: boolean; message: string } => {
+    const cleanTitle = input.title.trim();
+    if (!cleanTitle) {
+      return { success: false, message: 'Judul pengeluaran wajib diisi.' };
+    }
+    if (!Number.isFinite(input.amount) || input.amount <= 0) {
+      return { success: false, message: 'Nominal pengeluaran harus lebih dari Rp 0.' };
+    }
+    const newEntry: ManualExpenseRecord = {
+      id: `exp-man-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      accountId: currentAccountId,
+      categoryId: input.categoryId || 'cat-other',
+      title: cleanTitle.slice(0, 80),
+      amount: Math.round(input.amount),
+      note: input.note?.trim().slice(0, 180) || undefined,
+      timestamp: input.timestamp || new Date().toISOString(),
+    };
+    setManualExpenses((prev) => [newEntry, ...prev]);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Pengeluaran "${newEntry.title}" sebesar ${formatRupiah(newEntry.amount)} dicatat.`,
+    };
+  };
+
+  const deleteManualExpense = (expenseId: string) => {
+    setManualExpenses((prev) => prev.filter((e) => e.id !== expenseId));
+    playAtmSound('beep');
+  };
+
+  const setTransactionBudgetCategory = (transactionId: string, categoryId: string) => {
+    setBudgetTxCategoryMap((prev) => ({ ...prev, [transactionId]: categoryId }));
+    playAtmSound('beep');
+  };
+
+  // Monitor 80% (Warning) & 100% (Exceeded) budget thresholds for current month -> trigger Notification Bell alert once per threshold
+  useEffect(() => {
+    if (!currentAccountId) return;
+    const monthKey = getCurrentMonthKey();
+    const report = computeMonthlyBudgetReport({
+      accountId: currentAccountId,
+      monthKey,
+      categories: budgetCategories,
+      transactions,
+      manualExpenses,
+      txCategoryMap: budgetTxCategoryMap,
+    });
+
+    const newKeys: string[] = [];
+    const newNotifs: AppNotification[] = [];
+
+    report.usages.forEach((usage) => {
+      if (usage.limit <= 0) return;
+      if (usage.status === 'warning' || usage.status === 'exceeded') {
+        const key80 = `${currentAccountId}:${monthKey}:${usage.category.id}:80`;
+        if (!budgetAlertHistory.includes(key80) && !newKeys.includes(key80)) {
+          newKeys.push(key80);
+          if (usage.status === 'warning') {
+            newNotifs.push({
+              id: `notif-b80-${usage.category.id}-${Date.now()}`,
+              title: `Peringatan Anggaran 80% · ${usage.category.name}`,
+              message: `Pemakaian ${usage.category.name} (${formatMonthLabelIndo(monthKey)}) sudah mencapai ${Math.round(usage.percentUsed)}% (${formatRupiah(usage.spent)} dari batas ${formatRupiah(usage.limit)}).`,
+              type: 'warning',
+              timestamp: new Date().toISOString(),
+              read: false,
+            });
+          }
+        }
+      }
+      if (usage.status === 'exceeded') {
+        const key100 = `${currentAccountId}:${monthKey}:${usage.category.id}:100`;
+        if (!budgetAlertHistory.includes(key100) && !newKeys.includes(key100)) {
+          newKeys.push(key100);
+          newNotifs.push({
+            id: `notif-b100-${usage.category.id}-${Date.now() + 1}`,
+            title: `Batas Anggaran Terlampaui · ${usage.category.name}`,
+            message: `Pengeluaran ${usage.category.name} (${formatMonthLabelIndo(monthKey)}) telah melewati limit bulanan: ${formatRupiah(usage.spent)} / ${formatRupiah(usage.limit)}.`,
+            type: 'alert',
+            timestamp: new Date().toISOString(),
+            read: false,
+          });
+        }
+      }
+    });
+
+    if (newKeys.length > 0) {
+      setBudgetAlertHistory((prev) => Array.from(new Set([...prev, ...newKeys])).slice(-150));
+    }
+    if (newNotifs.length > 0) {
+      setNotifications((prev) => [...newNotifs, ...prev].slice(0, 80));
+    }
+  }, [currentAccountId, budgetCategories, transactions, manualExpenses, budgetTxCategoryMap, budgetAlertHistory]);
+
   const resetAllData = () => {
     setAccounts(INITIAL_ACCOUNTS);
     setCurrentAccountIdState('acc-1');
@@ -5785,7 +6444,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setResiList(INITIAL_RESI_LIST);
     setPinResetRequests([]);
     setWebsitePopups([]);
+    setBudgetCategories(DEFAULT_BUDGET_CATEGORIES);
+    setManualExpenses([]);
+    setBudgetTxCategoryMap({});
+    setBudgetAlertHistory([]);
     setGoogleUser(null);
+    void signOut(auth).catch(() => {});
+    void clearDeviceSnapshotStorage();
     try {
       localStorage.clear();
     } catch { /* empty */ }
@@ -9225,7 +9890,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         userRole,
         setUserRole,
         googleUser,
+        firebaseUser,
         loginWithGoogle,
+        loginWithFirebaseGoogle,
         completeGoogleOnboarding,
         reopenGoogleOnboarding,
         logoutGoogle,
@@ -9472,6 +10139,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         toggleScheduledPayment,
         deleteScheduledPayment,
         lookupAccount,
+        budgetCategories,
+        manualExpenses,
+        budgetTxCategoryMap,
+        budgetAlertHistory,
+        addBudgetCategory,
+        updateBudgetCategory,
+        deleteBudgetCategory,
+        addManualExpense,
+        deleteManualExpense,
+        setTransactionBudgetCategory,
         resetAllData,
         startFromZero,
       }}

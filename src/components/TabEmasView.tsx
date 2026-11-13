@@ -88,6 +88,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
     currentAccount?.goldPreferredMotif || 'klasik'
   );
   const [isFlippedBack, setIsFlippedBack] = useState<boolean>(false);
+  const [certiImgError, setCertiImgError] = useState<boolean>(false);
   const [tiltPos, setTiltPos] = useState<{ x: number; y: number; active: boolean }>({
     x: 50,
     y: 50,
@@ -395,34 +396,40 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
     return { coords, linePath, areaPath, width, height, projectedNextPrice };
   }, [goldMarketConfig.priceHistory, activePricePerGram, monthlyGrowthPct]);
 
-  // Motif visual styles for the luxury gold slab/jewelry piece
+  // Motif visual styles for the luxury gold slab/jewelry frame
   const motifSurface = useMemo(() => {
     if (goldMotif === 'royal_platinum') {
       return {
         gradient:
-          'linear-gradient(135deg, #27221A 0%, #D4AF37 22%, #FFF3C4 48%, #C5B358 72%, #3D3321 100%)',
-        border: 'border-amber-200/70',
+          'linear-gradient(145deg, #FFF5C8 0%, #E7C65E 24%, #C29932 52%, #F6DC80 76%, #6B5212 100%)',
+        border: 'border-amber-200/80',
+        castEdgeColor: '#5B4510',
         bevelBottom: 'from-[#8A6D1C] via-[#4A3B10] to-[#1F1807]',
         engraving: 'text-[#2B1F06]',
+        frameAccent: 'border-amber-200/50 bg-[#14120D]',
         motifName: 'Royal Platinum',
       };
     }
     if (goldMotif === 'nusantara') {
       return {
         gradient:
-          'linear-gradient(135deg, #8B5A00 0%, #F2C94C 26%, #FFF1A8 50%, #D49B1A 74%, #6E4700 100%)',
-        border: 'border-amber-300/60',
+          'linear-gradient(145deg, #FFF0A6 0%, #F4C430 28%, #C98A0C 58%, #F9D96C 82%, #754C00 100%)',
+        border: 'border-amber-300/80',
+        castEdgeColor: '#694302',
         bevelBottom: 'from-[#9A6808] via-[#5E3E02] to-[#2B1B00]',
         engraving: 'text-[#362100]',
+        frameAccent: 'border-amber-400/45 bg-[#151108]',
         motifName: 'Nusantara Heritage',
       };
     }
     return {
       gradient:
-        'linear-gradient(135deg, #9C7210 0%, #E7C048 25%, #FFF4B8 50%, #D9A726 75%, #7C5808 100%)',
-      border: 'border-amber-300/70',
+        'linear-gradient(145deg, #FFF7B8 0%, #F1C94A 26%, #CF9914 54%, #FFE175 78%, #7F5A06 100%)',
+      border: 'border-amber-300/85',
+      castEdgeColor: '#755205',
       bevelBottom: 'from-[#A67C00] via-[#664B00] to-[#2E2100]',
       engraving: 'text-[#2E1E00]',
+      frameAccent: 'border-amber-400/45 bg-[#11131A]',
       motifName: 'Klasik 24K',
     };
   }, [goldMotif]);
@@ -728,10 +735,10 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
             </div>
           </div>
 
-          {/* Interactive Gold Object Stage */}
-          <div className="flex-1 flex flex-col items-center justify-center py-4">
+          {/* Interactive Single-Piece Gold Object Stage */}
+          <div className="flex-1 flex flex-col items-center justify-center py-3 space-y-5">
             <div
-              className={`w-full max-w-xl transition-transform duration-300 ${goldScaleTier.scaleClass}`}
+              className={`relative flex flex-col items-center justify-center transition-transform duration-300 ${goldScaleTier.scaleClass}`}
               onMouseMove={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -739,142 +746,271 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                 setTiltPos({ x, y, active: true });
               }}
               onMouseLeave={() => setTiltPos({ x: 50, y: 50, active: false })}
-              style={{ perspective: '1100px' }}
+              style={{ perspective: '1200px' }}
             >
-              {/* Rectangular geometry: Batangan = thicker/taller 3D bullion slab, Perhiasan = sleeker, thinner jewelry plate */}
+              {/* Subtle ambient spotlight behind the single gold piece */}
               <div
-                className={`relative w-full transition-all duration-500 ${
-                  isBatangan ? 'h-64 sm:h-72' : 'h-40 sm:h-44'
-                }`}
+                aria-hidden="true"
+                className="pointer-events-none absolute -inset-6 rounded-full opacity-35 blur-2xl"
                 style={{
-                  transformStyle: 'preserve-3d',
-                  transform: `rotateY(${isFlippedBack ? 180 : 0}deg) ${
-                    tiltPos.active && !isFlippedBack
-                      ? `rotateX(${(50 - tiltPos.y) * 0.14}deg) rotateY(${(tiltPos.x - 50) * 0.16}deg)`
-                      : ''
-                  }`,
+                  background:
+                    'radial-gradient(circle, rgba(245,196,67,0.38) 0%, rgba(245,196,67,0) 70%)',
                 }}
-              >
-                {/* FRONT FACE */}
+              />
+
+              {isBatangan ? (
+                /* EMAS BATANGAN (HANYA 1 BIJI — SINGLE 3D CAST BULLION INGOT) */
                 <div
-                  className={`absolute inset-0 rounded-2xl border-2 ${motifSurface.border} overflow-hidden flex flex-col justify-between p-5 sm:p-6`}
+                  className="relative w-56 sm:w-64 h-80 sm:h-[340px] transition-transform duration-500"
                   style={{
-                    backfaceVisibility: 'hidden',
-                    background: motifSurface.gradient,
-                    boxShadow: goldScaleTier.glowStyle,
+                    transformStyle: 'preserve-3d',
+                    transform: `rotateY(${isFlippedBack ? 180 : 0}deg) ${
+                      tiltPos.active && !isFlippedBack
+                        ? `rotateX(${(50 - tiltPos.y) * 0.16}deg) rotateY(${(tiltPos.x - 50) * 0.18}deg)`
+                        : ''
+                    }`,
                   }}
                 >
-                  {/* Specular cursor glare */}
+                  {/* FRONT FACE: Single Thick 3D Cast Gold Ingot */}
                   <div
-                    className="pointer-events-none absolute inset-0 transition-opacity duration-200"
-                    style={{
-                      opacity: tiltPos.active ? 0.55 : 0.25,
-                      background: `radial-gradient(circle at ${tiltPos.x}% ${tiltPos.y}%, rgba(255,255,255,0.75) 0%, rgba(255,255,255,0.12) 32%, transparent 65%)`,
-                    }}
-                  />
-
-                  {/* Nusantara Batik-like SVG Micro Texture */}
-                  {goldMotif === 'nusantara' && (
+                    className="absolute inset-0"
+                    style={{ backfaceVisibility: 'hidden' }}
+                  >
+                    {/* 3D Extruded Side & Bottom Cast Thickness Shell (Right + Bottom Bevel) */}
                     <div
-                      className="pointer-events-none absolute inset-0 opacity-15"
+                      aria-hidden="true"
+                      className="absolute inset-0 translate-x-3 translate-y-3.5 rounded-[24px] border border-amber-700/70"
                       style={{
-                        backgroundImage:
-                          'radial-gradient(circle at 12px 12px, #4A2F00 2px, transparent 2px)',
-                        backgroundSize: '24px 24px',
+                        background: `linear-gradient(155deg, ${motifSurface.castEdgeColor} 0%, #3E2A02 55%, #1E1400 100%)`,
+                        boxShadow: '0 22px 42px rgba(0,0,0,0.75)',
                       }}
                     />
-                  )}
 
-                  {/* Filigree inset border for Perhiasan */}
-                  {!isBatangan && (
-                    <div className="pointer-events-none absolute inset-2.5 rounded-xl border border-[#4A3200]/35" />
-                  )}
+                    {/* Main Top Polished Cast Gold Bar Face */}
+                    <div
+                      className={`relative w-full h-full rounded-[22px] border-2 ${motifSurface.border} overflow-hidden flex flex-col items-center justify-between px-6 py-7`}
+                      style={{
+                        background: motifSurface.gradient,
+                        boxShadow: `${goldScaleTier.glowStyle}, inset 0 2px 10px rgba(255,255,255,0.65), inset 0 -10px 18px rgba(102,68,0,0.45)`,
+                      }}
+                    >
+                      {/* Specular cursor glare */}
+                      <div
+                        className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+                        style={{
+                          opacity: tiltPos.active ? 0.65 : 0.28,
+                          background: `radial-gradient(circle at ${tiltPos.x}% ${tiltPos.y}%, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0.14) 34%, transparent 66%)`,
+                        }}
+                      />
 
-                  {/* Top Engraved Row */}
-                  <div className={`relative z-10 flex items-center justify-between gap-2 ${motifSurface.engraving}`}>
-                    <div>
-                      <div className="text-[11px] font-bold tracking-widest uppercase opacity-80">
-                        BANK NUSANTARA BULLION · {motifSurface.motifName}
+                      {/* Inner Chamfered Die Groove */}
+                      <div className="pointer-events-none absolute inset-3 rounded-[16px] border border-[#6E4D04]/35 shadow-[inset_0_2px_6px_rgba(0,0,0,0.18)]" />
+
+                      {/* Nusantara Micro Motif */}
+                      {goldMotif === 'nusantara' && (
+                        <div
+                          className="pointer-events-none absolute inset-0 opacity-15"
+                          style={{
+                            backgroundImage:
+                              'radial-gradient(circle at 14px 14px, #4A2F00 2px, transparent 2px)',
+                            backgroundSize: '28px 28px',
+                          }}
+                        />
+                      )}
+
+                      {/* Top Embossed Fine Gold Assay Stamp */}
+                      <div
+                        className={`relative z-10 text-center space-y-2 pt-2 ${motifSurface.engraving}`}
+                      >
+                        <div className="text-[11px] font-bold tracking-[0.28em] uppercase opacity-75">
+                          BANK NUSANTARA
+                        </div>
+                        <div className="leading-none">
+                          <div className="text-xl sm:text-2xl font-black tracking-[0.18em]">
+                            FINE
+                          </div>
+                          <div className="text-3xl sm:text-4xl font-black tracking-[0.12em] mt-0.5">
+                            GOLD
+                          </div>
+                        </div>
+                        <div className="w-24 h-[2px] mx-auto bg-current opacity-45" />
+                        <div className="font-mono tabular-nums text-xl sm:text-2xl font-black tracking-widest">
+                          999.9
+                        </div>
                       </div>
-                      <div className="text-sm sm:text-base font-extrabold tracking-tight mt-0.5">
-                        {isBatangan ? 'EMAS BATANGAN MURNI 24K' : 'EMAS PERHIASAN ELEGAN 24K'}
+
+                      {/* Bottom Embossed Net Weight Stamp */}
+                      <div
+                        className={`relative z-10 text-center pb-2 ${motifSurface.engraving}`}
+                      >
+                        <div className="text-[11px] font-bold tracking-[0.25em] uppercase opacity-75">
+                          NET WT
+                        </div>
+                        <div className="font-mono tabular-nums text-2xl sm:text-3xl font-black mt-0.5">
+                          {totalGrams > 0 ? `${totalGrams.toFixed(2)} g` : '1000 g'}
+                        </div>
+                        <div className="text-[10px] font-mono font-bold tracking-widest opacity-70 mt-1">
+                          24K · {motifSurface.motifName.toUpperCase()}
+                        </div>
                       </div>
-                    </div>
-                    <div className="text-right font-mono tabular-nums">
-                      <div className="text-xs font-extrabold">24K · 999.9</div>
-                      <div className="text-[10px] opacity-80">{serialNumber}</div>
                     </div>
                   </div>
 
-                  {/* Center / Bottom Engraved Wealth & Owner Name */}
+                  {/* BACK FACE (FLIPPED 180°) */}
                   <div
-                    className={`relative z-10 flex flex-wrap items-end justify-between gap-4 ${motifSurface.engraving}`}
+                    className={`absolute inset-0 rounded-[22px] border-2 ${motifSurface.border} overflow-hidden flex flex-col justify-between p-6`}
+                    style={{
+                      backfaceVisibility: 'hidden',
+                      transform: 'rotateY(180deg)',
+                      background: motifSurface.gradient,
+                      boxShadow: goldScaleTier.glowStyle,
+                    }}
                   >
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wider font-semibold opacity-75">
-                        Pemilik Sah Terdaftar
+                    <div className={`flex items-center justify-between ${motifSurface.engraving}`}>
+                      <span className="text-[11px] font-extrabold uppercase tracking-wider">
+                        ASSAY SEAL · 999.9
+                      </span>
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div className={`space-y-3 text-xs ${motifSurface.engraving}`}>
+                      <div className="border-y border-current/25 py-3 text-center">
+                        <div className="text-[10px] uppercase tracking-widest opacity-75">
+                          Nomor Seri Bullion
+                        </div>
+                        <div className="font-mono font-black text-base mt-0.5">{serialNumber}</div>
                       </div>
-                      <div className="text-sm sm:text-lg font-extrabold tracking-wide uppercase">
-                        {currentAccount.fullName}
+                      <div className="grid grid-cols-2 gap-2 text-center">
+                        <div>
+                          <div className="text-[10px] opacity-75">Batch Aktif</div>
+                          <div className="font-mono font-bold">{batches.length} Batch</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] opacity-75">Tgl 1 (+/Bln)</div>
+                          <div className="font-mono font-bold">+{monthlyGrowthPct}%</div>
+                        </div>
                       </div>
                     </div>
-
-                    <div className="text-right">
-                      <div className="text-[10px] uppercase tracking-wider font-semibold opacity-75">
-                        Nilai Real-Time &amp; Berat Bersih
-                      </div>
-                      <div className="font-mono tabular-nums text-lg sm:text-2xl font-black">
-                        {formatRupiah(currentMarketValueRp)}
-                      </div>
-                      <div className="font-mono tabular-nums text-xs font-bold opacity-85">
-                        {totalGrams.toFixed(4)} Gram Fine Gold
-                      </div>
+                    <div className={`text-[11px] text-center font-semibold opacity-85 ${motifSurface.engraving}`}>
+                      Logam Mulia Tunggal 24K Terverifikasi PT Bank Nusantara Tbk.
                     </div>
                   </div>
                 </div>
-
-                {/* BACK FACE (FLIPPED) */}
+              ) : (
+                /* EMAS PERHIASAN (HANYA 1 BIJI — FOTO CERTICARD FINE GOLD 999.9 ASLI) */
                 <div
-                  className={`absolute inset-0 rounded-2xl border-2 ${motifSurface.border} overflow-hidden flex flex-col justify-between p-5 sm:p-6`}
+                  className="relative w-60 sm:w-64 h-80 sm:h-[360px] transition-transform duration-500"
                   style={{
-                    backfaceVisibility: 'hidden',
-                    transform: 'rotateY(180deg)',
-                    background: motifSurface.gradient,
-                    boxShadow: goldScaleTier.glowStyle,
+                    transformStyle: 'preserve-3d',
+                    transform: `rotateY(${isFlippedBack ? 180 : 0}deg) ${
+                      tiltPos.active && !isFlippedBack
+                        ? `rotateX(${(50 - tiltPos.y) * 0.14}deg) rotateY(${(tiltPos.x - 50) * 0.16}deg)`
+                        : ''
+                    }`,
                   }}
                 >
-                  <div className={`flex items-center justify-between ${motifSurface.engraving}`}>
-                    <div className="text-xs font-extrabold uppercase tracking-wider">
-                      TAMPAK BELAKANG · SERTIFIKASI ASSAY 999.9
-                    </div>
-                    <ShieldCheck className="w-5 h-5" />
+                  {/* FRONT FACE: Attached CertiCard Fine Gold 999.9 Photo (Sleek, Single Unit, Unobstructed Stamps) */}
+                  <div
+                    className={`absolute inset-0 rounded-2xl border-2 ${motifSurface.border} ${motifSurface.frameAccent} overflow-hidden p-2 flex flex-col items-center justify-center`}
+                    style={{
+                      backfaceVisibility: 'hidden',
+                      boxShadow: goldScaleTier.glowStyle,
+                    }}
+                  >
+                    {!certiImgError ? (
+                      <img
+                        src="/assets/aistudio/Screenshot-2026-09-14-090239-2622848781_29080416.webp"
+                        alt="Emas Perhiasan CertiCard Fine Gold 999.9"
+                        referrerPolicy="no-referrer"
+                        onError={() => setCertiImgError(true)}
+                        className="w-full h-full object-cover rounded-xl select-none"
+                      />
+                    ) : (
+                      <div
+                        className="w-full h-full rounded-xl flex flex-col items-center justify-center p-5 text-center"
+                        style={{ background: motifSurface.gradient }}
+                      >
+                        <div className={`space-y-1.5 ${motifSurface.engraving}`}>
+                          <div className="text-xs font-bold tracking-widest uppercase">
+                            LOGAM MULIA
+                          </div>
+                          <div className="text-2xl font-black">FINE GOLD</div>
+                          <div className="font-mono text-xl font-black">999.9</div>
+                          <div className="font-mono text-xs font-bold">{serialNumber}</div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Specular cursor sheen overlay over CertiCard blister */}
+                    <div
+                      className="pointer-events-none absolute inset-0 transition-opacity duration-200"
+                      style={{
+                        opacity: tiltPos.active ? 0.42 : 0.14,
+                        background: `radial-gradient(circle at ${tiltPos.x}% ${tiltPos.y}%, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.08) 34%, transparent 64%)`,
+                      }}
+                    />
                   </div>
-                  <div className={`grid grid-cols-3 gap-3 text-xs ${motifSurface.engraving}`}>
-                    <div>
-                      <div className="text-[10px] opacity-75">No. Seri Bullion</div>
-                      <div className="font-mono font-bold">{serialNumber}</div>
+
+                  {/* BACK FACE (FLIPPED 180° — Seri & Assay Perhiasan CertiCard) */}
+                  <div
+                    className={`absolute inset-0 rounded-2xl border-2 ${motifSurface.border} overflow-hidden flex flex-col justify-between p-6`}
+                    style={{
+                      backfaceVisibility: 'hidden',
+                      transform: 'rotateY(180deg)',
+                      background: motifSurface.gradient,
+                      boxShadow: goldScaleTier.glowStyle,
+                    }}
+                  >
+                    <div className={`flex items-center justify-between ${motifSurface.engraving}`}>
+                      <span className="text-[11px] font-extrabold uppercase tracking-wider">
+                        CERTICARD ASSAY · 999.9
+                      </span>
+                      <ShieldCheck className="w-5 h-5" />
                     </div>
-                    <div>
-                      <div className="text-[10px] opacity-75">Total Batch Aktif</div>
-                      <div className="font-mono font-bold">{batches.length} Batch</div>
+                    <div className={`space-y-3 text-xs ${motifSurface.engraving}`}>
+                      <div className="border-y border-current/25 py-3 text-center">
+                        <div className="text-[10px] uppercase tracking-widest opacity-75">
+                          Serial Sertifikat Perhiasan
+                        </div>
+                        <div className="font-mono font-black text-base mt-0.5">{serialNumber}</div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-center">
+                        <div>
+                          <div className="text-[10px] opacity-75">Batch Aktif</div>
+                          <div className="font-mono font-bold">{batches.length} Batch</div>
+                        </div>
+                        <div>
+                          <div className="text-[10px] opacity-75">Tgl 1 (+/Bln)</div>
+                          <div className="font-mono font-bold">+{monthlyGrowthPct}%</div>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-[10px] opacity-75">Kenaikan Tgl 1</div>
-                      <div className="font-mono font-bold">+{monthlyGrowthPct}% / Bulan</div>
+                    <div className={`text-[11px] text-center font-semibold opacity-85 ${motifSurface.engraving}`}>
+                      Sertifikasi Keaslian Fine Gold 24K · PT Bank Nusantara Tbk.
                     </div>
-                  </div>
-                  <div className={`text-[11px] font-semibold opacity-85 ${motifSurface.engraving}`}>
-                    Dijamin keasliannya oleh Divisi Logam Mulia PT Bank Nusantara (Persero) Tbk.
                   </div>
                 </div>
-              </div>
+              )}
+            </div>
 
-              {/* 3D Thickness Edge Under-Bar (pronounced on Emas Batangan, sleek on Emas Perhiasan) */}
-              <div
-                className={`mx-2 rounded-b-xl bg-gradient-to-b ${motifSurface.bevelBottom} border-x border-b border-amber-500/40 transition-all duration-300 ${
-                  isBatangan ? 'h-6 opacity-100' : 'h-2 opacity-80'
-                }`}
-              />
+            {/* NON-OVERLAPPING BOTTOM DYNAMIC OWNERSHIP & WEALTH BAR (Stays clear of Fine Gold 999.9 stamp) */}
+            <div className="w-full rounded-2xl bg-[#11151E] border border-amber-500/30 px-4 py-3.5 flex flex-wrap items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[11px] text-slate-400">
+                  Pemilik Sah · {motifSurface.motifName} ·{' '}
+                  <span className="font-mono text-amber-300/90">{serialNumber}</span>
+                </div>
+                <div className="text-sm sm:text-base font-extrabold text-white uppercase tracking-wide truncate">
+                  {currentAccount.fullName}
+                </div>
+              </div>
+              <div className="text-right font-mono tabular-nums">
+                <div className="text-base sm:text-lg font-black text-amber-300">
+                  {formatRupiah(currentMarketValueRp)}
+                </div>
+                <div className="text-xs font-semibold text-emerald-300">
+                  {totalGrams.toFixed(4)} Gram · 24K Fine Gold
+                </div>
+              </div>
             </div>
           </div>
 
