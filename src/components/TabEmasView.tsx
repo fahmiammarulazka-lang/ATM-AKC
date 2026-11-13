@@ -9,14 +9,17 @@ import React, { useEffect, useMemo, useState } from 'react';
 import confetti from 'canvas-confetti';
 import {
   ArrowDownRight,
+  ArrowLeft,
   ArrowUpRight,
   Award,
   CalendarClock,
   CheckCircle2,
   Coins,
   Crown,
+  History,
   Info,
   RotateCw,
+  Send,
   ShieldCheck,
   Sparkles,
   Target,
@@ -47,7 +50,19 @@ const formatDateShortIndo = (iso: string): string => {
   }
 };
 
-export const TabEmasView: React.FC = () => {
+interface TabEmasViewProps {
+  standalone?: boolean;
+  onNavigateToDashboard?: () => void;
+  onNavigateToTransferGold?: () => void;
+  onNavigateToMutasi?: () => void;
+}
+
+export const TabEmasView: React.FC<TabEmasViewProps> = ({
+  standalone = false,
+  onNavigateToDashboard,
+  onNavigateToTransferGold,
+  onNavigateToMutasi,
+}) => {
   const {
     currentAccount,
     goldMarketConfig,
@@ -417,6 +432,58 @@ export const TabEmasView: React.FC = () => {
 
   return (
     <div className="space-y-6 text-slate-100">
+      {/* Standalone Top Quick Navigation & Account Context Bar when accessed right beside M-Banking */}
+      {(standalone || onNavigateToTransferGold) && (
+        <div className="rounded-2xl bg-[#0B0E14] border border-amber-500/30 p-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+              <Crown className="w-5 h-5 text-amber-400" />
+              <span>Brankas &amp; Investasi Emas 24K Real-Time</span>
+            </h1>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {currentAccount.fullName} · Saldo Rekening:{' '}
+              <span className="font-mono text-emerald-300 font-semibold">
+                {isUnlimitedNumber(currentAccount.balance)
+                  ? 'Rp ∞ (Tak Terbatas)'
+                  : formatRupiah(currentAccount.balance)}
+              </span>
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {onNavigateToDashboard && (
+              <button
+                type="button"
+                onClick={onNavigateToDashboard}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>M-Banking</span>
+              </button>
+            )}
+            {onNavigateToTransferGold && (
+              <button
+                type="button"
+                onClick={onNavigateToTransferGold}
+                className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Transfer Emas (Bebas 5%)</span>
+              </button>
+            )}
+            {onNavigateToMutasi && (
+              <button
+                type="button"
+                onClick={onNavigateToMutasi}
+                className="px-3 py-1.5 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <History className="w-3.5 h-3.5" />
+                <span>Mutasi Emas</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Real-time Tanggal 1 Celebration / Notification Banner */}
       {goldMarketConfig.lastMonthlyEventBanner && (
         <div className="rounded-2xl bg-[#14120A] border border-amber-400/50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">

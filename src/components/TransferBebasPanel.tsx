@@ -4,7 +4,7 @@
  * pemotongan biaya admin 5% dari nominal yang dikirim (contoh kirim 10jt -> penerima terima 9,5jt),
  * otorisasi PIN Kartu 6 digit, struk digital rinci, dan pencatatan Mutasi Rekening otomatis.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -25,14 +25,21 @@ import { formatIndoDate, formatRupiah, isUnlimitedNumber } from '../utils/bankUt
 
 interface TransferBebasPanelProps {
   onNavigateToMutasi?: () => void;
+  initialAssetMode?: TransferBebasAssetMode;
 }
 
 export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   onNavigateToMutasi,
+  initialAssetMode,
 }) => {
   const { accounts, currentAccount, goldMarketConfig, transferBebas } = useBank();
 
-  const [assetMode, setAssetMode] = useState<TransferBebasAssetMode>('uang');
+  const [assetMode, setAssetMode] = useState<TransferBebasAssetMode>(initialAssetMode || 'uang');
+  useEffect(() => {
+    if (initialAssetMode) {
+      setAssetMode(initialAssetMode);
+    }
+  }, [initialAssetMode]);
   const [recipientSource, setRecipientSource] = useState<'registered' | 'manual'>('registered');
 
   const otherAccounts = useMemo(

@@ -4,8 +4,11 @@
  */
 import React, { useState, useEffect } from 'react';
 import { BankProvider, useBank } from './context/BankContext';
-import { Navbar } from './components/Navbar';
-import { CustomerDashboard } from './components/CustomerDashboard';
+import { Navbar, AppNavView } from './components/Navbar';
+import { CustomerDashboard, DashboardTab } from './components/CustomerDashboard';
+import { TransferWorkspace } from './components/TransferWorkspace';
+import { TabEmasView } from './components/TabEmasView';
+import { TransferBebasAssetMode } from './types/bank';
 import { AtmSimulator } from './components/AtmSimulator';
 import { AdminPortal } from './components/AdminPortal';
 import { InformationGuide } from './components/InformationGuide';
@@ -37,9 +40,16 @@ import {
 
 function BankAppContent() {
   const { adminUnlocked, setAdminUnlocked, resetAllData, googleUser } = useBank();
-  const [activeView, setActiveView] = useState<
-    'dashboard' | 'jobs' | 'spin_wheel' | 'empire' | 'atm' | 'admin' | 'guide' | 'chat' | 'updates'
-  >('dashboard');
+  const [activeView, setActiveView] = useState<AppNavView>('dashboard');
+  const [requestedDashboardTab, setRequestedDashboardTab] = useState<{
+    tab: DashboardTab;
+    nonce: number;
+  } | null>(null);
+  const [transferRouteContext, setTransferRouteContext] = useState<{
+    mode: 'reguler' | 'bebas';
+    assetMode?: TransferBebasAssetMode;
+    key: number;
+  }>({ mode: 'reguler', key: 0 });
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState<boolean>(false);
   const [showAdminPinModal, setShowAdminPinModal] = useState<boolean>(false);
   const [adminViewDuringOnboarding, setAdminViewDuringOnboarding] = useState<boolean>(false);
@@ -162,16 +172,61 @@ function BankAppContent() {
       <WebsiteSystemNotificationModal />
       <GlobalChatAndNotificationLayer />
 
-      {/* Top Navbar (Includes Lowongan Kerja, Panduan & Riwayat Update) */}
+      {/* Top Navbar (Includes Transfer & Emas 24K between Mobile Banking & Lowongan Kerja on Desktop) */}
       <Navbar
         activeView={activeView}
-        setActiveView={setActiveView}
+        setActiveView={(view) => {
+          if (view === 'transfer') {
+            setTransferRouteContext({ mode: 'reguler', assetMode: undefined, key: Date.now() });
+          }
+          setActiveView(view);
+        }}
         onOpenRegisterModal={() => setIsRegisterModalOpen(true)}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {activeView === 'dashboard' && <CustomerDashboard />}
+        {activeView === 'dashboard' && (
+          <CustomerDashboard requestedSubTab={requestedDashboardTab} />
+        )}
+        {activeView === 'transfer' && (
+          <TransferWorkspace
+            standalone
+            initialMode={transferRouteContext.mode}
+            initialBebasAssetMode={transferRouteContext.assetMode}
+            routeKey={transferRouteContext.key}
+            onNavigateToDashboard={() => {
+              setRequestedDashboardTab({ tab: 'ringkasan', nonce: Date.now() });
+              setActiveView('dashboard');
+            }}
+            onNavigateToGold={() => setActiveView('emas')}
+            onNavigateToMutasi={() => {
+              setRequestedDashboardTab({ tab: 'mutasi', nonce: Date.now() });
+              setActiveView('dashboard');
+            }}
+          />
+        )}
+        {activeView === 'emas' && (
+          <TabEmasView
+            standalone
+            onNavigateToDashboard={() => {
+              setRequestedDashboardTab({ tab: 'ringkasan', nonce: Date.now() });
+              setActiveView('dashboard');
+            }}
+            onNavigateToTransferGold={() => {
+              setTransferRouteContext({
+                mode: 'bebas',
+                assetMode: 'emas',
+                key: Date.now(),
+              });
+              setActiveView('transfer');
+            }}
+            onNavigateToMutasi={() => {
+              setRequestedDashboardTab({ tab: 'mutasi', nonce: Date.now() });
+              setActiveView('dashboard');
+            }}
+          />
+        )}
         {activeView === 'jobs' && <JobVacancyView />}
         {activeView === 'spin_wheel' && <SpinTheWheelView />}
         {activeView === 'empire' && <SultanEmpireView />}
@@ -186,7 +241,12 @@ function BankAppContent() {
         )}
         {activeView === 'guide' && (
           <InformationGuide
-            onNavigateToTab={(tab) => setActiveView(tab)}
+            onNavigateToTab={(tab, subTab) => {
+              if (tab === 'dashboard' && subTab) {
+                setRequestedDashboardTab({ tab: subTab as DashboardTab, nonce: Date.now() });
+              }
+              setActiveView(tab);
+            }}
             onOpenRegisterModal={() => setIsRegisterModalOpen(true)}
           />
         )}

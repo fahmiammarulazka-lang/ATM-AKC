@@ -22,34 +22,28 @@ import {
   Mic,
   GraduationCap,
   Cpu,
+  Send,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
 import { VerifiedBadge } from './VerifiedBadge';
 
+export type AppNavView =
+  | 'dashboard'
+  | 'transfer'
+  | 'emas'
+  | 'jobs'
+  | 'spin_wheel'
+  | 'empire'
+  | 'atm'
+  | 'admin'
+  | 'guide'
+  | 'chat'
+  | 'updates';
+
 interface NavbarProps {
-  activeView:
-    | 'dashboard'
-    | 'jobs'
-    | 'spin_wheel'
-    | 'empire'
-    | 'atm'
-    | 'admin'
-    | 'guide'
-    | 'chat'
-    | 'updates';
-  setActiveView: (
-    view:
-      | 'dashboard'
-      | 'jobs'
-      | 'spin_wheel'
-      | 'empire'
-      | 'atm'
-      | 'admin'
-      | 'guide'
-      | 'chat'
-      | 'updates'
-  ) => void;
+  activeView: AppNavView;
+  setActiveView: (view: AppNavView) => void;
   onOpenRegisterModal: () => void;
 }
 
@@ -108,10 +102,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Center Nav Views */}
-        <nav className="hidden md:flex items-center gap-1 text-xs font-semibold">
+        <nav className="hidden md:flex flex-1 min-w-0 items-center gap-1 overflow-x-auto text-xs font-semibold py-1">
           <button
             onClick={() => setActiveView('dashboard')}
-            className={`px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeView === 'dashboard'
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-slate-900'
@@ -121,9 +115,35 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Mobile Banking</span>
           </button>
 
+          {/* Tab Transfer tepat di sebelah Mobile Banking */}
+          <button
+            onClick={() => setActiveView('transfer')}
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              activeView === 'transfer'
+                ? 'bg-emerald-600 text-white font-bold shadow-md'
+                : 'text-emerald-300 hover:text-white hover:bg-slate-900 border border-emerald-500/35'
+            }`}
+          >
+            <Send className="w-4 h-4 text-emerald-300" />
+            <span>Transfer</span>
+          </button>
+
+          {/* Tab Emas 24K tepat di sebelah Transfer & Mobile Banking */}
+          <button
+            onClick={() => setActiveView('emas')}
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              activeView === 'emas'
+                ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-md'
+                : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/40'
+            }`}
+          >
+            <Crown className="w-4 h-4" />
+            <span>Emas 24K</span>
+          </button>
+
           <button
             onClick={() => setActiveView('jobs')}
-            className={`px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeView === 'jobs'
                 ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-md'
                 : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/40'
@@ -139,7 +159,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Tombol Spin the Wheel tepat di sebelah tombol Lowongan Pekerjaan */}
           <button
             onClick={() => setActiveView('spin_wheel')}
-            className={`px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeView === 'spin_wheel'
                 ? 'bg-gradient-to-r from-fuchsia-500 via-amber-400 to-yellow-500 text-slate-950 font-black shadow-md'
                 : 'text-fuchsia-300 hover:text-white hover:bg-slate-900 border border-fuchsia-500/40'
@@ -148,26 +168,26 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Sparkles className="w-4 h-4 text-amber-400" />
             <span>Spin the Wheel</span>
             <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 font-mono text-[10px] font-bold">
-              🪙 {(currentAccount?.spinCoins ?? 0).toLocaleString('id-ID')}
+              {(currentAccount?.spinCoins ?? 0).toLocaleString('id-ID')}
             </span>
           </button>
 
           {/* Tombol Fitur Baru Pengganti Kerajaan: Mining Kripto, Lelang Supercar & Cyber Vault tepat di sebelah Spin the Wheel */}
           <button
             onClick={() => setActiveView('empire')}
-            className={`px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeView === 'empire'
                 ? 'bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 text-slate-950 font-black shadow-md'
                 : 'text-cyan-300 hover:text-white hover:bg-slate-900 border border-cyan-400/40'
             }`}
           >
             <Cpu className="w-4 h-4 text-cyan-400" />
-            <span>💎 Mining &amp; Lelang VIP</span>
+            <span>Mining &amp; Lelang VIP</span>
           </button>
 
           <button
             onClick={() => setActiveView('chat')}
-            className={`px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeView === 'chat'
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-slate-900'
@@ -179,39 +199,39 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={() => setActiveView('atm')}
-            className={`px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeView === 'atm'
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-slate-900'
             }`}
           >
             <Monitor className="w-4 h-4 text-emerald-400" />
-            <span>Simulator Mesin ATM</span>
+            <span>Mesin ATM</span>
           </button>
 
           <button
             onClick={() => setActiveView('guide')}
-            className={`px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeView === 'guide'
                 ? 'bg-blue-600 text-white shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-slate-900'
             }`}
           >
             <BookOpen className="w-4 h-4 text-purple-400" />
-            <span>Panduan (60 Bab)</span>
+            <span>Panduan</span>
           </button>
 
           {/* Riwayat Update tepat di sebelah Panduan (Sesuai permintaan user) */}
           <button
             onClick={() => setActiveView('updates')}
-            className={`px-3 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               activeView === 'updates'
                 ? 'bg-emerald-600 text-white shadow-md'
                 : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-emerald-500/30'
             }`}
           >
             <History className="w-4 h-4 text-emerald-400" />
-            <span>Riwayat Update</span>
+            <span>Update</span>
             <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold">
               {currentUpdateVersion}
             </span>
@@ -458,17 +478,17 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Mobile Sub-Navigation Bar */}
-      <div className="md:hidden flex items-center justify-around bg-slate-900 border-t border-slate-800 px-2 py-2 text-[11px] font-medium">
+      <div className="md:hidden flex items-center gap-4 overflow-x-auto bg-slate-900 border-t border-slate-800 px-3 py-2 text-[11px] font-medium">
         <button
           onClick={() => setActiveView('dashboard')}
-          className={`flex flex-col items-center gap-0.5 ${activeView === 'dashboard' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'dashboard' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
         >
           <Building className="w-4 h-4" />
           <span>M-Banking</span>
         </button>
         <button
           onClick={() => setActiveView('jobs')}
-          className={`flex flex-col items-center gap-0.5 cursor-pointer ${
+          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${
             activeView === 'jobs' ? 'text-amber-400 font-bold' : 'text-amber-300/80'
           }`}
         >
@@ -477,7 +497,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
         <button
           onClick={() => setActiveView('spin_wheel')}
-          className={`flex flex-col items-center gap-0.5 cursor-pointer ${
+          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${
             activeView === 'spin_wheel' ? 'text-fuchsia-400 font-bold' : 'text-fuchsia-300/80'
           }`}
         >
@@ -486,7 +506,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
         <button
           onClick={() => setActiveView('empire')}
-          className={`flex flex-col items-center gap-0.5 cursor-pointer ${
+          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${
             activeView === 'empire' ? 'text-cyan-400 font-bold' : 'text-cyan-300/80'
           }`}
         >
@@ -495,35 +515,35 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
         <button
           onClick={() => setActiveView('chat')}
-          className={`flex flex-col items-center gap-0.5 ${activeView === 'chat' ? 'text-cyan-400 font-bold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'chat' ? 'text-cyan-400 font-bold' : 'text-slate-400'}`}
         >
           <MessageSquare className="w-4 h-4" />
           <span>PayChat</span>
         </button>
         <button
           onClick={() => setActiveView('atm')}
-          className={`flex flex-col items-center gap-0.5 ${activeView === 'atm' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'atm' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
         >
           <Monitor className="w-4 h-4" />
           <span>Mesin ATM</span>
         </button>
         <button
           onClick={() => setActiveView('guide')}
-          className={`flex flex-col items-center gap-0.5 cursor-pointer ${activeView === 'guide' ? 'text-purple-400 font-bold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'guide' ? 'text-purple-400 font-bold' : 'text-slate-400'}`}
         >
           <BookOpen className="w-4 h-4" />
-          <span>Panduan (60)</span>
+          <span>Panduan</span>
         </button>
         <button
           onClick={() => setActiveView('updates')}
-          className={`flex flex-col items-center gap-0.5 cursor-pointer ${activeView === 'updates' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'updates' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
         >
           <History className="w-4 h-4 text-emerald-400" />
           <span>Update</span>
         </button>
         <button
           onClick={() => setIsAiBotModalOpen(true)}
-          className="flex flex-col items-center gap-0.5 cursor-pointer text-cyan-300 font-bold"
+          className="flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer text-cyan-300 font-bold"
         >
           <Bot className="w-4 h-4 text-cyan-400" />
           <span>Bot AI Suara</span>
