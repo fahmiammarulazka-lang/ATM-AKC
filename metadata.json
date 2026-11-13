@@ -1,0 +1,6 @@
+{
+  "name": "Bank Nusantara - Sistem Perbankan & ATM Digital",
+  "description": "Aplikasi lengkap Bank Nusantara mencakup pendaftaran kartu & persetujuan admin, simulator mesin ATM interaktif, transfer antar rekening, pinjaman online, dan panduan keamanan perbankan.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
