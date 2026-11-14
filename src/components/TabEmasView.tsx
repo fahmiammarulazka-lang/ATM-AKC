@@ -29,6 +29,8 @@ import {
 import { useBank } from '../context/BankContext';
 import { GoldFormType, GoldMotifType } from '../types/bank';
 import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
+import goldBarLyingImg from '../assets/images/gold_bar_lying_1794640523357.jpg';
+import goldJewelryStoreImg from '../assets/images/pure_gold_jewelry_store_1794640522936.jpg';
 
 const getTodayDateKey = (): string => {
   const d = new Date();
@@ -88,6 +90,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
     currentAccount?.goldPreferredMotif || 'klasik'
   );
   const [isFlippedBack, setIsFlippedBack] = useState<boolean>(false);
+  const [barImgError, setBarImgError] = useState<boolean>(false);
   const [certiImgError, setCertiImgError] = useState<boolean>(false);
   const [tiltPos, setTiltPos] = useState<{ x: number; y: number; active: boolean }>({
     x: 50,
@@ -533,8 +536,8 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
               Investasi &amp; Koleksi Emas 24K Real-Time
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
-              Pilih tampilan <strong className="text-amber-200">Emas Batangan</strong> tebal atau{' '}
-              <strong className="text-amber-200">Emas Perhiasan</strong> tipis elegan, atur nominal mulai{' '}
+              Pilih tampilan <strong className="text-amber-200">Emas Batangan (Tiduran)</strong> atau{' '}
+              <strong className="text-amber-200">Emas Perhiasan (Murni Toko)</strong> mewah berlatar Obsidian, atur nominal mulai{' '}
               <span className="font-mono text-amber-300">Rp 1.000</span> hingga tak terbatas, dan pantau kenaikan harga otomatis setiap tanggal 1 bulan baru.
             </p>
           </div>
@@ -708,7 +711,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
               </p>
             </div>
 
-            {/* Form Switcher: Batangan Tebal vs Perhiasan Tipis */}
+            {/* Form Switcher: Batangan Tiduran vs Perhiasan Murni Toko */}
             <div className="flex items-center gap-1 p-1 bg-[#11151E] border border-slate-800 rounded-xl text-xs">
               <button
                 type="button"
@@ -719,7 +722,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                     : 'text-slate-300 hover:text-white'
                 }`}
               >
-                Emas Batangan (Tebal)
+                Emas Batangan (Tiduran)
               </button>
               <button
                 type="button"
@@ -730,7 +733,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                     : 'text-slate-300 hover:text-white'
                 }`}
               >
-                Emas Perhiasan (Tipis)
+                Emas Perhiasan (Murni Toko)
               </button>
             </div>
           </div>
@@ -738,7 +741,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
           {/* Interactive Single-Piece Gold Object Stage */}
           <div className="flex-1 flex flex-col items-center justify-center py-3 space-y-5">
             <div
-              className={`relative flex flex-col items-center justify-center transition-transform duration-300 ${goldScaleTier.scaleClass}`}
+              className={`relative w-full flex flex-col items-center justify-center transition-transform duration-300 ${goldScaleTier.scaleClass}`}
               onMouseMove={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -759,106 +762,85 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
               />
 
               {isBatangan ? (
-                /* EMAS BATANGAN (HANYA 1 BIJI — SINGLE 3D CAST BULLION INGOT) */
+                /* EMAS BATANGAN TIDURAN (HANYA 1 BIJI — HORIZONTAL 16:9 STUDIO PHOTO) */
                 <div
-                  className="relative w-56 sm:w-64 h-80 sm:h-[340px] transition-transform duration-500"
+                  className="relative w-full max-w-[480px] aspect-[16/9] transition-transform duration-500"
                   style={{
                     transformStyle: 'preserve-3d',
                     transform: `rotateY(${isFlippedBack ? 180 : 0}deg) ${
                       tiltPos.active && !isFlippedBack
-                        ? `rotateX(${(50 - tiltPos.y) * 0.16}deg) rotateY(${(tiltPos.x - 50) * 0.18}deg)`
+                        ? `rotateX(${(50 - tiltPos.y) * 0.14}deg) rotateY(${(tiltPos.x - 50) * 0.16}deg)`
                         : ''
                     }`,
                   }}
                 >
-                  {/* FRONT FACE: Single Thick 3D Cast Gold Ingot */}
+                  {/* FRONT FACE: Single Horizontal Lying 24K Bullion Bar Photo on Obsidian */}
                   <div
-                    className="absolute inset-0"
-                    style={{ backfaceVisibility: 'hidden' }}
+                    className={`absolute inset-0 rounded-2xl border-2 ${motifSurface.border} ${motifSurface.frameAccent} overflow-hidden p-1.5 flex items-center justify-center`}
+                    style={{
+                      backfaceVisibility: 'hidden',
+                      boxShadow: goldScaleTier.glowStyle,
+                    }}
                   >
-                    {/* 3D Extruded Side & Bottom Cast Thickness Shell (Right + Bottom Bevel) */}
+                    {!barImgError ? (
+                      <img
+                        src={goldBarLyingImg}
+                        alt="Emas Batangan 24K Fine Gold 999.9 Tiduran Mewah"
+                        referrerPolicy="no-referrer"
+                        onError={() => setBarImgError(true)}
+                        className="w-full h-full object-cover rounded-xl select-none"
+                      />
+                    ) : (
+                      <div
+                        className="w-full h-full rounded-xl flex items-center justify-between px-8 py-5"
+                        style={{ background: motifSurface.gradient }}
+                      >
+                        <div className={`space-y-1 ${motifSurface.engraving}`}>
+                          <div className="text-[11px] font-bold tracking-[0.25em] uppercase opacity-75">
+                            BANK NUSANTARA
+                          </div>
+                          <div className="text-2xl sm:text-3xl font-black tracking-[0.14em]">
+                            FINE GOLD
+                          </div>
+                          <div className="font-mono tabular-nums text-xl font-black tracking-widest">
+                            999.9
+                          </div>
+                        </div>
+                        <div className={`text-right ${motifSurface.engraving}`}>
+                          <div className="text-[11px] font-bold tracking-[0.22em] uppercase opacity-75">
+                            NET WT
+                          </div>
+                          <div className="font-mono tabular-nums text-2xl font-black">
+                            {totalGrams > 0 ? `${totalGrams.toFixed(2)} g` : '1000 g'}
+                          </div>
+                          <div className="text-[10px] font-mono font-bold tracking-widest opacity-75">
+                            24K · {motifSurface.motifName.toUpperCase()}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Nusantara Micro Motif subtle border shimmer */}
+                    {goldMotif === 'nusantara' && (
+                      <div
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-0 rounded-2xl border-2 border-amber-300/35"
+                      />
+                    )}
+
+                    {/* Specular cursor glare over obsidian studio shot */}
                     <div
-                      aria-hidden="true"
-                      className="absolute inset-0 translate-x-3 translate-y-3.5 rounded-[24px] border border-amber-700/70"
+                      className="pointer-events-none absolute inset-0 transition-opacity duration-200"
                       style={{
-                        background: `linear-gradient(155deg, ${motifSurface.castEdgeColor} 0%, #3E2A02 55%, #1E1400 100%)`,
-                        boxShadow: '0 22px 42px rgba(0,0,0,0.75)',
+                        opacity: tiltPos.active ? 0.48 : 0.16,
+                        background: `radial-gradient(circle at ${tiltPos.x}% ${tiltPos.y}%, rgba(255,248,220,0.68) 0%, rgba(255,255,255,0.08) 34%, transparent 64%)`,
                       }}
                     />
-
-                    {/* Main Top Polished Cast Gold Bar Face */}
-                    <div
-                      className={`relative w-full h-full rounded-[22px] border-2 ${motifSurface.border} overflow-hidden flex flex-col items-center justify-between px-6 py-7`}
-                      style={{
-                        background: motifSurface.gradient,
-                        boxShadow: `${goldScaleTier.glowStyle}, inset 0 2px 10px rgba(255,255,255,0.65), inset 0 -10px 18px rgba(102,68,0,0.45)`,
-                      }}
-                    >
-                      {/* Specular cursor glare */}
-                      <div
-                        className="pointer-events-none absolute inset-0 transition-opacity duration-200"
-                        style={{
-                          opacity: tiltPos.active ? 0.65 : 0.28,
-                          background: `radial-gradient(circle at ${tiltPos.x}% ${tiltPos.y}%, rgba(255,255,255,0.82) 0%, rgba(255,255,255,0.14) 34%, transparent 66%)`,
-                        }}
-                      />
-
-                      {/* Inner Chamfered Die Groove */}
-                      <div className="pointer-events-none absolute inset-3 rounded-[16px] border border-[#6E4D04]/35 shadow-[inset_0_2px_6px_rgba(0,0,0,0.18)]" />
-
-                      {/* Nusantara Micro Motif */}
-                      {goldMotif === 'nusantara' && (
-                        <div
-                          className="pointer-events-none absolute inset-0 opacity-15"
-                          style={{
-                            backgroundImage:
-                              'radial-gradient(circle at 14px 14px, #4A2F00 2px, transparent 2px)',
-                            backgroundSize: '28px 28px',
-                          }}
-                        />
-                      )}
-
-                      {/* Top Embossed Fine Gold Assay Stamp */}
-                      <div
-                        className={`relative z-10 text-center space-y-2 pt-2 ${motifSurface.engraving}`}
-                      >
-                        <div className="text-[11px] font-bold tracking-[0.28em] uppercase opacity-75">
-                          BANK NUSANTARA
-                        </div>
-                        <div className="leading-none">
-                          <div className="text-xl sm:text-2xl font-black tracking-[0.18em]">
-                            FINE
-                          </div>
-                          <div className="text-3xl sm:text-4xl font-black tracking-[0.12em] mt-0.5">
-                            GOLD
-                          </div>
-                        </div>
-                        <div className="w-24 h-[2px] mx-auto bg-current opacity-45" />
-                        <div className="font-mono tabular-nums text-xl sm:text-2xl font-black tracking-widest">
-                          999.9
-                        </div>
-                      </div>
-
-                      {/* Bottom Embossed Net Weight Stamp */}
-                      <div
-                        className={`relative z-10 text-center pb-2 ${motifSurface.engraving}`}
-                      >
-                        <div className="text-[11px] font-bold tracking-[0.25em] uppercase opacity-75">
-                          NET WT
-                        </div>
-                        <div className="font-mono tabular-nums text-2xl sm:text-3xl font-black mt-0.5">
-                          {totalGrams > 0 ? `${totalGrams.toFixed(2)} g` : '1000 g'}
-                        </div>
-                        <div className="text-[10px] font-mono font-bold tracking-widest opacity-70 mt-1">
-                          24K · {motifSurface.motifName.toUpperCase()}
-                        </div>
-                      </div>
-                    </div>
                   </div>
 
-                  {/* BACK FACE (FLIPPED 180°) */}
+                  {/* BACK FACE (FLIPPED 180° — Seri & Assay Emas Batangan) */}
                   <div
-                    className={`absolute inset-0 rounded-[22px] border-2 ${motifSurface.border} overflow-hidden flex flex-col justify-between p-6`}
+                    className={`absolute inset-0 rounded-2xl border-2 ${motifSurface.border} overflow-hidden flex flex-col justify-between p-5 sm:p-6`}
                     style={{
                       backfaceVisibility: 'hidden',
                       transform: 'rotateY(180deg)',
@@ -872,8 +854,8 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                       </span>
                       <ShieldCheck className="w-5 h-5" />
                     </div>
-                    <div className={`space-y-3 text-xs ${motifSurface.engraving}`}>
-                      <div className="border-y border-current/25 py-3 text-center">
+                    <div className={`space-y-2.5 text-xs ${motifSurface.engraving}`}>
+                      <div className="border-y border-current/25 py-2.5 text-center">
                         <div className="text-[10px] uppercase tracking-widest opacity-75">
                           Nomor Seri Bullion
                         </div>
@@ -896,9 +878,9 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                   </div>
                 </div>
               ) : (
-                /* EMAS PERHIASAN (HANYA 1 BIJI — FOTO CERTICARD FINE GOLD 999.9 ASLI) */
+                /* EMAS PERHIASAN MURNI ALA TOKO EMAS MEWAH (4:3 STUDIO PHOTO ON OBSIDIAN) */
                 <div
-                  className="relative w-60 sm:w-64 h-80 sm:h-[360px] transition-transform duration-500"
+                  className="relative w-full max-w-[440px] aspect-[4/3] transition-transform duration-500"
                   style={{
                     transformStyle: 'preserve-3d',
                     transform: `rotateY(${isFlippedBack ? 180 : 0}deg) ${
@@ -908,9 +890,9 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                     }`,
                   }}
                 >
-                  {/* FRONT FACE: Attached CertiCard Fine Gold 999.9 Photo (Sleek, Single Unit, Unobstructed Stamps) */}
+                  {/* FRONT FACE: Pure 24K Gold Jewelry Boutique Display Photograph */}
                   <div
-                    className={`absolute inset-0 rounded-2xl border-2 ${motifSurface.border} ${motifSurface.frameAccent} overflow-hidden p-2 flex flex-col items-center justify-center`}
+                    className={`absolute inset-0 rounded-2xl border-2 ${motifSurface.border} ${motifSurface.frameAccent} overflow-hidden p-1.5 flex flex-col items-center justify-center`}
                     style={{
                       backfaceVisibility: 'hidden',
                       boxShadow: goldScaleTier.glowStyle,
@@ -918,8 +900,8 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                   >
                     {!certiImgError ? (
                       <img
-                        src="/assets/aistudio/Screenshot-2026-09-14-090239-2622848781_29080416.webp"
-                        alt="Emas Perhiasan CertiCard Fine Gold 999.9"
+                        src={goldJewelryStoreImg}
+                        alt="Emas Perhiasan Murni 24K Showcase Toko Emas Mewah"
                         referrerPolicy="no-referrer"
                         onError={() => setCertiImgError(true)}
                         className="w-full h-full object-cover rounded-xl select-none"
@@ -931,26 +913,26 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                       >
                         <div className={`space-y-1.5 ${motifSurface.engraving}`}>
                           <div className="text-xs font-bold tracking-widest uppercase">
-                            LOGAM MULIA
+                            TOKO EMAS MURNI 24K
                           </div>
-                          <div className="text-2xl font-black">FINE GOLD</div>
+                          <div className="text-2xl font-black">FINE GOLD JEWELRY</div>
                           <div className="font-mono text-xl font-black">999.9</div>
                           <div className="font-mono text-xs font-bold">{serialNumber}</div>
                         </div>
                       </div>
                     )}
 
-                    {/* Specular cursor sheen overlay over CertiCard blister */}
+                    {/* Specular cursor sheen overlay over jewelry boutique glass display */}
                     <div
                       className="pointer-events-none absolute inset-0 transition-opacity duration-200"
                       style={{
-                        opacity: tiltPos.active ? 0.42 : 0.14,
-                        background: `radial-gradient(circle at ${tiltPos.x}% ${tiltPos.y}%, rgba(255,255,255,0.65) 0%, rgba(255,255,255,0.08) 34%, transparent 64%)`,
+                        opacity: tiltPos.active ? 0.44 : 0.15,
+                        background: `radial-gradient(circle at ${tiltPos.x}% ${tiltPos.y}%, rgba(255,248,220,0.65) 0%, rgba(255,255,255,0.08) 34%, transparent 64%)`,
                       }}
                     />
                   </div>
 
-                  {/* BACK FACE (FLIPPED 180° — Seri & Assay Perhiasan CertiCard) */}
+                  {/* BACK FACE (FLIPPED 180° — Sertifikat Toko Emas Murni 24K) */}
                   <div
                     className={`absolute inset-0 rounded-2xl border-2 ${motifSurface.border} overflow-hidden flex flex-col justify-between p-6`}
                     style={{
@@ -962,14 +944,14 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                   >
                     <div className={`flex items-center justify-between ${motifSurface.engraving}`}>
                       <span className="text-[11px] font-extrabold uppercase tracking-wider">
-                        CERTICARD ASSAY · 999.9
+                        SERTIFIKAT TOKO EMAS 24K · 999.9
                       </span>
                       <ShieldCheck className="w-5 h-5" />
                     </div>
                     <div className={`space-y-3 text-xs ${motifSurface.engraving}`}>
                       <div className="border-y border-current/25 py-3 text-center">
                         <div className="text-[10px] uppercase tracking-widest opacity-75">
-                          Serial Sertifikat Perhiasan
+                          Serial Sertifikat Perhiasan Murni
                         </div>
                         <div className="font-mono font-black text-base mt-0.5">{serialNumber}</div>
                       </div>
@@ -985,7 +967,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                       </div>
                     </div>
                     <div className={`text-[11px] text-center font-semibold opacity-85 ${motifSurface.engraving}`}>
-                      Sertifikasi Keaslian Fine Gold 24K · PT Bank Nusantara Tbk.
+                      Perhiasan Emas Murni 24K Terverifikasi PT Bank Nusantara Tbk.
                     </div>
                   </div>
                 </div>
