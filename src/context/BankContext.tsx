@@ -55,26 +55,13 @@ import {
   BudgetCategoryColor,
   ManualExpenseRecord,
 } from '../types/bank';
-import {
-  auth,
-  googleProvider,
-  signInWithPopup,
-  signOut,
-  onAuthStateChanged,
-  type FirebaseUser,
-} from '../firebase';
+import { type FirebaseUser } from '../firebase';
 import {
   saveSnapshotToDeviceStorage,
   loadSnapshotFromDeviceStorage,
   clearDeviceSnapshotStorage,
   type BankPersistableSnapshot,
 } from '../services/deviceStorage';
-import {
-  saveSnapshotToFirestore,
-  loadSnapshotFromFirestoreOnce,
-  subscribeFirestoreVault,
-  saveBugReportToFirestore,
-} from '../services/firebasePersistence';
 import {
   DEFAULT_BUDGET_CATEGORIES,
   computeMonthlyBudgetReport,
@@ -194,16 +181,11 @@ interface BankContextType {
   userRole: 'customer' | 'admin';
   setUserRole: (role: 'customer' | 'admin') => void;
 
-  // Google Login & Initial Registration Onboarding Flow
+  // Portal Masuk & Initial Card Registration Onboarding Flow (No Google Sign-In)
   googleUser: GoogleUserSession | null;
   firebaseUser: FirebaseUser | null;
+  enterBankPortal: () => void;
   loginWithGoogle: (email: string, name: string, picture?: string, firebaseUid?: string) => void;
-  loginWithFirebaseGoogle: () => Promise<{
-    success: boolean;
-    message: string;
-    errorCode?: string;
-    hostname?: string;
-  }>;
   completeGoogleOnboarding: () => void;
   reopenGoogleOnboarding: () => void;
   logoutGoogle: () => void;
@@ -1167,8 +1149,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const saved = localStorage.getItem(STORAGE_KEYS.GOOGLE_USER);
       if (!saved) return null;
       const parsed = JSON.parse(saved) as GoogleUserSession;
-      // Enforce real Sign in with Google: require firebaseUid from OAuth 2.0
-      if (!parsed || !parsed.firebaseUid) return null;
+      if (!parsed || typeof parsed !== 'object') return null;
       return parsed;
     } catch {
       return null;
@@ -1554,7 +1535,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
 
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+  const [firebaseUser] = useState<FirebaseUser | null>(null);
 
   const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>(() => {
     try {
@@ -1765,92 +1746,31 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const currentAccount = accounts.find((a) => a.id === currentAccountId) || accounts[0] || null;
 
-  // ================= GOOGLE LOGIN & ONBOARDING HANDLERS =================
+  // ================= PORTAL MASUK & ONBOARDING HANDLERS (TANPA GOOGLE SIGN-IN) =================
+  const enterBankPortal = () => {
+    const session: GoogleUserSession = {
+      email: 'nasabah@banknusantara.id',
+      name: currentAccount?.fullName || 'Nasabah Bank Nusantara',
+      loggedInAt: new Date().toISOString(),
+      hasCompletedOnboarding: false, // Langsung diarahkan ke Buat Kartu Baru atau Login ke Kartu Lain
+    };
+    setGoogleUser(session);
+    playAtmSound('success');
+  };
+
   const loginWithGoogle = (email: string, name: string, picture?: string, firebaseUid?: string) => {
-    const cleanEmail = email.trim().toLowerCase() || 'fahmiammarulazka@gmail.com';
-    const cleanName = name.trim() || cleanEmail.split('@')[0];
+    const cleanEmail = email.trim().toLowerCase() || 'nasabah@banknusantara.id';
+    const cleanName = name.trim() || 'Nasabah Bank Nusantara';
     const session: GoogleUserSession = {
       email: cleanEmail,
       name: cleanName,
       picture,
       firebaseUid,
       loggedInAt: new Date().toISOString(),
-      hasCompletedOnboarding: false, // Setelah login Google disuruh mulai daftar kartu (atau login ke kartu lama)
+      hasCompletedOnboarding: false,
     };
     setGoogleUser(session);
     playAtmSound('success');
-  };
-
-  const loginWithFirebaseGoogle = async (): Promise<{
-    success: boolean;
-    message: string;
-    errorCode?: string;
-    hostname?: string;
-  }> => {
-    const activeHostname =
-      typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : '';
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      setFirebaseUser(user);
-      const email = (user.email || 'fahmiammarulazka@gmail.com').trim().toLowerCase();
-      const name = (user.displayName || email.split('@')[0]).trim();
-      loginWithGoogle(email, name, user.photoURL || undefined, user.uid);
-      return {
-        success: true,
-        message: `Berhasil Sign in with Google sebagai ${name} (${email}). Memeriksa data Cloud Firebase...`,
-      };
-    } catch (err) {
-      const rawMsg = err instanceof Error ? err.message : 'Gagal membuka popup Sign in with Google.';
-      const rawCode =
-        typeof err === 'object' && err !== null && 'code' in err && typeof (err as { code?: unknown }).code === 'string'
-          ? (err as { code: string }).code
-          : '';
-      const matchedCode = rawCode || rawMsg.match(/auth\/[a-z0-9-]+/i)?.[0] || '';
-
-      if (matchedCode === 'auth/popup-closed-by-user' || matchedCode === 'auth/cancelled-popup-request') {
-        return {
-          success: false,
-          errorCode: matchedCode,
-          hostname: activeHostname,
-          message: 'Sign in with Google dibatalkan sebelum selesai. Silakan klik tombol di atas untuk mencoba lagi.',
-        };
-      }
-      if (matchedCode === 'auth/unauthorized-domain') {
-        return {
-          success: false,
-          errorCode: matchedCode,
-          hostname: activeHostname,
-          message: `Domain "${activeHostname || 'halaman ini'}" belum terdaftar di daftar Authorized Domains Firebase Authentication.`,
-        };
-      }
-      if (
-        matchedCode === 'auth/popup-blocked' ||
-        matchedCode === 'auth/operation-not-supported-in-this-environment'
-      ) {
-        return {
-          success: false,
-          errorCode: matchedCode,
-          hostname: activeHostname,
-          message:
-            'Jendela popup Google diblokir oleh webview/browser. Izinkan popup atau buka aplikasi di tab browser penuh (Chrome/Safari) lalu coba lagi.',
-        };
-      }
-      if (matchedCode === 'auth/network-request-failed') {
-        return {
-          success: false,
-          errorCode: matchedCode,
-          hostname: activeHostname,
-          message: 'Koneksi internet terputus saat menghubungi layanan Google. Periksa jaringan Anda lalu coba lagi.',
-        };
-      }
-      return {
-        success: false,
-        errorCode: matchedCode || undefined,
-        hostname: activeHostname,
-        message: `Sign in with Google gagal: ${rawMsg}`,
-      };
-    }
   };
 
   const completeGoogleOnboarding = () => {
@@ -1863,7 +1783,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logoutGoogle = () => {
     setGoogleUser(null);
-    void signOut(auth).catch(() => {});
     playAtmSound('beep');
   };
 
@@ -2039,9 +1958,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     if (snapshot.googleUser && typeof snapshot.googleUser === 'object') {
       const incomingGoogle = snapshot.googleUser as GoogleUserSession;
-      if (incomingGoogle.firebaseUid) {
-        setGoogleUser((prev) => prev || incomingGoogle);
-      }
+      setGoogleUser((prev) => prev || incomingGoogle);
     }
 
     window.setTimeout(() => {
@@ -2049,16 +1966,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }, 60);
   };
 
-  // Boot Hydration from Layer 3 (HP IndexedDB) & Layer 2 (Server DB)
+  // Boot Hydration from Device Storage (IndexedDB) & Server Database (/api/db/state)
   useEffect(() => {
     let active = true;
-    const scopeKey = googleUser?.email || '';
 
     const hydrate = async () => {
       try {
         const [deviceSnap, dbRes] = await Promise.all([
-          loadSnapshotFromDeviceStorage(scopeKey),
-          fetch(`/api/db/state${scopeKey ? `?scopeKey=${encodeURIComponent(scopeKey)}` : ''}`)
+          loadSnapshotFromDeviceStorage('default'),
+          fetch('/api/db/state?scopeKey=default')
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null),
         ]);
@@ -2087,93 +2003,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => {
       active = false;
     };
-    // Run once on mount; scope changes handled cleanly by auth listeners below
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Layer 1 (Firebase Auth + Firestore Real-Time Vault Sync)
+  // Automatic 2-Layer Save Coordinator (HP IndexedDB + Server Database)
   const latestSnapshotRef = useRef<BankPersistableSnapshot | null>(null);
-  useEffect(() => {
-    let unsubFirestore: (() => void) | null = null;
-    const unsubAuth = onAuthStateChanged(auth, async (fbUser) => {
-      setFirebaseUser(fbUser);
-      if (unsubFirestore) {
-        unsubFirestore();
-        unsubFirestore = null;
-      }
-      if (!fbUser || !fbUser.emailVerified) {
-        // Only clear if there was no valid Firebase session
-        setGoogleUser((prev) => (prev && !prev.firebaseUid ? null : prev));
-        return;
-      }
-
-      // Sync googleUser profile with authoritative Firebase Google user
-      const authEmail = (fbUser.email || 'fahmiammarulazka@gmail.com').trim().toLowerCase();
-      const authName = (fbUser.displayName || authEmail.split('@')[0]).trim();
-      setGoogleUser((prev) => {
-        if (prev && prev.firebaseUid === fbUser.uid) {
-          return {
-            ...prev,
-            email: authEmail,
-            name: authName,
-            picture: fbUser.photoURL || prev.picture,
-          };
-        }
-        return {
-          email: authEmail,
-          name: authName,
-          picture: fbUser.photoURL || undefined,
-          firebaseUid: fbUser.uid,
-          loggedInAt: new Date().toISOString(),
-          hasCompletedOnboarding: prev?.hasCompletedOnboarding ?? false,
-        };
-      });
-
-      if (bootHydrationPromiseRef.current) {
-        await bootHydrationPromiseRef.current.catch(() => {});
-      }
-
-      try {
-        const remote = await loadSnapshotFromFirestoreOnce(fbUser);
-        if (remote) {
-          const remoteTs = typeof remote.updatedAtMs === 'number' ? remote.updatedAtMs : 0;
-          if (remoteTs > lastSyncEpochRef.current) {
-            applyExternalSnapshot(remote);
-          }
-          // Auto-restore into dashboard if cloud vault already contains saved user accounts / activity
-          const remoteAccs = Array.isArray(remote.accounts) ? (remote.accounts as BankAccount[]) : [];
-          const hasSavedCloudActivity =
-            remoteAccs.length > INITIAL_ACCOUNTS.length ||
-            remoteAccs.some((a) => (a.spinCoins || 0) > 0 || (a.goldGrams || 0) > 0) ||
-            (Array.isArray(remote.transactions) && remote.transactions.length > INITIAL_TRANSACTIONS.length);
-
-          if (hasSavedCloudActivity) {
-            setGoogleUser((prev) =>
-              prev ? { ...prev, hasCompletedOnboarding: true } : prev
-            );
-          }
-        } else if (latestSnapshotRef.current) {
-          await saveSnapshotToFirestore(fbUser, latestSnapshotRef.current);
-        }
-
-        unsubFirestore = subscribeFirestoreVault(fbUser, (partial) => {
-          if (typeof partial.updatedAtMs === 'number' && partial.updatedAtMs > lastSyncEpochRef.current) {
-            applyExternalSnapshot(partial);
-          }
-        });
-      } catch (err) {
-        console.error('Sinkronisasi awal Firebase Firestore tertunda:', err);
-      }
-    });
-
-    return () => {
-      unsubAuth();
-      if (unsubFirestore) unsubFirestore();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Automatic 3-Layer Save Coordinator (HP IndexedDB + Server DB + Firebase Firestore)
   useEffect(() => {
     const nowEpoch = Date.now();
     const snap = buildPersistableSnapshot(nowEpoch);
@@ -2189,25 +2023,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     lastSyncEpochRef.current = nowEpoch;
-    const scopeKey = googleUser?.email || firebaseUser?.email || 'default';
 
-    // Layer 3: HP IndexedDB (fast write)
+    // Layer 1: Device IndexedDB (fast write)
     const deviceTimer = window.setTimeout(() => {
-      void saveSnapshotToDeviceStorage(snap, googleUser?.email);
+      void saveSnapshotToDeviceStorage(snap, 'default');
     }, 80);
 
-    // Layer 2 (Server DB) + Layer 1 (Firebase Firestore)
+    // Layer 2: Server Database (/api/db/state)
     const remoteTimer = window.setTimeout(() => {
       fetch('/api/db/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scopeKey, snapshot: snap }),
+        body: JSON.stringify({ scopeKey: 'default', snapshot: snap }),
       }).catch(() => {});
-
-      if (firebaseUser && firebaseUser.emailVerified) {
-        void saveSnapshotToFirestore(firebaseUser, snap).catch(() => {});
-      }
-    }, 550);
+    }, 350);
 
     return () => {
       window.clearTimeout(deviceTimer);
@@ -2218,7 +2047,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     accounts,
     currentAccountId,
     googleUser,
-    firebaseUser,
     transactions,
     goldMarketConfig,
     userSettings,
@@ -2249,18 +2077,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     adminUnlocked,
   ]);
 
-  // Immediate flush when user closes/backgrounds browser on HP
+  // Immediate flush when user closes/backgrounds browser
   useEffect(() => {
     const flushImmediately = () => {
       const snap = latestSnapshotRef.current;
       if (!snap) return;
-      void saveSnapshotToDeviceStorage(snap, googleUser?.email);
+      void saveSnapshotToDeviceStorage(snap, 'default');
       try {
         fetch('/api/db/state', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            scopeKey: googleUser?.email || firebaseUser?.email || 'default',
+            scopeKey: 'default',
             snapshot: snap,
           }),
           keepalive: true,
@@ -2280,7 +2108,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       window.removeEventListener('pagehide', flushImmediately);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [googleUser?.email, firebaseUser?.email]);
+  }, []);
 
   // Real-time Calendar Watcher: Checks every 1 second whether system month rolled over onto Tanggal 1
   // and compounds +5% per month automatically (even across multiple missed months).
@@ -2763,18 +2591,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           })
         );
       }
-    }
-
-    if (auth.currentUser && auth.currentUser.emailVerified) {
-      void saveBugReportToFirestore(auth.currentUser, {
-        id: newBug.id,
-        reporterName: newBug.reporterName,
-        reporterAccountNumber: newBug.reporterAccountNumber,
-        reporterEmail: newBug.reporterEmail,
-        category: newBug.category,
-        explanation: newBug.explanation,
-        photoFileName: newBug.photoFileName,
-      }).catch(() => {});
     }
 
     return {
@@ -4240,29 +4056,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Kartu tujuan tidak ditemukan!' };
     }
 
-    if (targetAcc.pin !== cardPin.trim()) {
+    const cleanPin = cardPin.trim();
+    const isCardPinMatch = targetAcc.pin === cleanPin;
+    const isAdminPinMatch = cleanPin === '159357';
+
+    if (!isCardPinMatch && !isAdminPinMatch) {
       playAtmSound('alert');
       return {
         success: false,
-        message: `PIN Kartu salah! Untuk masuk/ganti ke kartu ${targetAcc.fullName} (${targetAcc.accountNumber}), Anda harus memasukkan 6 digit PIN Kartu tersebut. Jika lupa PIN, klik tombol "Lupa PIN Kartu?" untuk ditinjau Admin.`,
+        message: `PIN salah! Untuk masuk/ganti ke kartu ${targetAcc.fullName} (${targetAcc.accountNumber}), masukkan 6 digit PIN Kartu tersebut atau PIN Admin (159357). Jika lupa PIN, klik tombol "Lupa PIN Kartu?" untuk ditinjau Admin.`,
       };
     }
 
     setCurrentAccountIdState(targetAcc.id);
     if (googleUser && !googleUser.hasCompletedOnboarding) {
       setGoogleUser({ ...googleUser, hasCompletedOnboarding: true });
+    } else if (!googleUser) {
+      setGoogleUser({
+        email: targetAcc.email || 'nasabah@banknusantara.id',
+        name: targetAcc.fullName,
+        loggedInAt: new Date().toISOString(),
+        hasCompletedOnboarding: true,
+      });
     }
 
     addNotification(
       'Berhasil Login ke Kartu Anda! 💳',
-      `Anda telah berhasil masuk ke kartu milik ${targetAcc.fullName} (No. Rekening: ${targetAcc.accountNumber}) menggunakan verifikasi 6 digit PIN Kartu.`,
+      `Anda telah berhasil masuk ke kartu milik ${targetAcc.fullName} (No. Rekening: ${targetAcc.accountNumber}) menggunakan ${
+        isAdminPinMatch && !isCardPinMatch ? 'otorisasi PIN Admin (159357)' : 'verifikasi 6 digit PIN Kartu'
+      }.`,
       'success'
     );
     playAtmSound('success');
 
     return {
       success: true,
-      message: `Berhasil login ke kartu ${targetAcc.fullName} (${targetAcc.accountNumber}) menggunakan PIN Kartu!`,
+      message: `Berhasil login ke kartu ${targetAcc.fullName} (${targetAcc.accountNumber})!`,
     };
   };
 
@@ -6621,7 +6450,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setBudgetTxCategoryMap({});
     setBudgetAlertHistory([]);
     setGoogleUser(null);
-    void signOut(auth).catch(() => {});
     void clearDeviceSnapshotStorage();
     try {
       localStorage.clear();
@@ -9993,9 +9821,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCurrentAccountId(target.id);
     if (!googleUser) {
       setGoogleUser({
-        email: target.email || 'nasabah@gmail.com',
+        email: target.email || 'nasabah@banknusantara.id',
         name: target.fullName,
-        loginTime: new Date().toISOString(),
+        loggedInAt: new Date().toISOString(),
         hasCompletedOnboarding: true,
       });
     } else if (!googleUser.hasCompletedOnboarding) {
@@ -10077,8 +9905,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUserRole,
         googleUser,
         firebaseUser,
+        enterBankPortal,
         loginWithGoogle,
-        loginWithFirebaseGoogle,
         completeGoogleOnboarding,
         reopenGoogleOnboarding,
         logoutGoogle,

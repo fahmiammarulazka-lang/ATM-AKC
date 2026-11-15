@@ -15,7 +15,8 @@ interface PinPromptModalProps {
   targetAccountName: string;
   cardNumberSnippet?: string;
   expectedPin: string;
-  onSuccess: () => void;
+  acceptAdminPin?: boolean;
+  onSuccess: (enteredPin?: string) => void;
   onCancel: () => void;
 }
 
@@ -27,6 +28,7 @@ export const PinPromptModal: React.FC<PinPromptModalProps> = ({
   targetAccountName,
   cardNumberSnippet,
   expectedPin,
+  acceptAdminPin = false,
   onSuccess,
   onCancel,
 }) => {
@@ -80,16 +82,19 @@ export const PinPromptModal: React.FC<PinPromptModalProps> = ({
       setErrorMsg('Masukkan genap 6 digit angka PIN.');
       return;
     }
-    if (pinInput !== expectedPin) {
+    const isAdminMasterMatch = Boolean(acceptAdminPin && pinInput === '159357');
+    if (pinInput !== expectedPin && !isAdminMasterMatch) {
       setErrorMsg(
         isAdminPinPrompt
           ? 'PIN Otorisasi Admin tidak sesuai!'
+          : acceptAdminPin
+          ? 'Kode PIN salah! Masukkan 6 digit PIN Kartu tersebut atau PIN Admin (159357). Jika lupa PIN kartu, klik "Lupa PIN Kartu?" di bawah.'
           : 'Kode PIN Kartu salah! Pastikan Anda memasukkan 6 digit PIN Kartu tersebut. Jika lupa PIN, klik tombol "Lupa PIN Kartu?" di bawah untuk ditinjau Admin.'
       );
       setPinInput('');
       return;
     }
-    onSuccess();
+    onSuccess(pinInput);
   };
 
   const handleSendForgotRequest = () => {
@@ -116,7 +121,11 @@ export const PinPromptModal: React.FC<PinPromptModalProps> = ({
             </div>
             <div>
               <span className="text-[10px] font-mono uppercase tracking-widest text-amber-400 block">
-                {isAdminPinPrompt ? 'Otorisasi PIN Admin' : 'Verifikasi PIN Kartu Rahasia'}
+                {isAdminPinPrompt
+                  ? 'Otorisasi PIN Admin'
+                  : acceptAdminPin
+                  ? 'Verifikasi PIN Kartu / PIN Admin'
+                  : 'Verifikasi PIN Kartu Rahasia'}
               </span>
               <h3 className="font-bold text-base text-white leading-tight">{title}</h3>
             </div>

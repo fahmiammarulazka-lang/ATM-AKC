@@ -2162,7 +2162,7 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                   BAB 31 — DOKUMENTASI SUPER LENGKAP (100x LIPAT PENJELASAN)
                 </span>
                 <h2 className="text-xl sm:text-2xl font-black text-white mt-1">
-                  3️⃣1️⃣ Ensiklopedia 100x Lipat: Login Google, Kartu Lama, Verifikasi Centang Biru & Notifikasi Sistem Website
+                  3️⃣1️⃣ Ensiklopedia 100x Lipat: Gerbang Masuk, Buat Kartu Baru, Login Kartu Lain & Notifikasi Sistem Website
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
                   Penjelasan terperinci 100x lipat mengenai seluruh alur terbaru Bank Nusantara dari tahap awal hingga fitur Super Admin.
@@ -2172,19 +2172,19 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
               <div className="space-y-4">
                 <div className="p-5 rounded-2xl bg-slate-950 border border-blue-500/40 space-y-2">
                   <h3 className="font-black text-blue-300 text-sm">
-                    1. Alur Masuk Akun Google & Pendaftaran Kartu di Awal
+                    1. Alur Tombol Masuk &amp; Pembuatan Kartu Baru di Awal
                   </h3>
                   <p className="text-slate-300 leading-relaxed">
-                    Saat pertama kali mengakses website Bank Nusantara, pengguna wajib <strong>Masuk Menggunakan Akun Google</strong> terlebih dahulu. Setelah berhasil masuk dengan Akun Google, sistem menampilkan halaman <strong>Mulai Daftar Kartu Baru</strong> sehingga pengguna dapat langsung mengisi formulir pembukaan kartu debit dan memilih 6 digit PIN kartu barunya. Pengguna juga dapat menguji ulang layar Login Google ini kapan saja melalui tombol <strong>"Ganti Google"</strong> pada menu profil di pojok kanan atas.
+                    Saat pertama kali mengakses website Bank Nusantara, pengguna disambut layar selamat datang dengan tombol <strong>Masuk</strong>. Setelah tombol <strong>Masuk</strong> ditekan, sistem langsung menampilkan pilihan <strong>Buat Kartu Baru</strong> dan <strong>Login ke Kartu Lain</strong>. Anda dapat kembali ke layar awal kapan saja melalui tombol <strong>&quot;Layar Masuk&quot;</strong> pada menu profil di pojok kanan atas.
                   </p>
                 </div>
 
                 <div className="p-5 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-2">
                   <h3 className="font-black text-amber-300 text-sm">
-                    2. Cara Login / Pindah dari Kartu Baru ke Kartu Lama (Wajib PIN Kartu Lama, Bukan PIN Admin)
+                    2. Cara Login / Pindah ke Kartu Lain (PIN Kartu 6 Digit atau PIN Admin 159357)
                   </h3>
                   <p className="text-slate-300 leading-relaxed">
-                    Apabila Anda memiliki <strong>Kartu Baru</strong> dan juga memiliki <strong>Kartu Lama</strong>, lalu Anda ingin login atau beralih kembali ke <strong>Kartu Lama</strong> Anda (baik dari layar awal setelah Google Login maupun dari menu Ganti Kartu di pojok kanan atas Navbar), sistem mewajibkan Anda memasukkan <strong>6 digit PIN Kartu Lama</strong> Anda (bukan menggunakan PIN Admin). Jika Anda lupa PIN kartu lama tersebut, tersedia tombol <strong>"Lupa PIN?"</strong> yang akan mengirimkan permohonan tinjauan ke Panel Admin agar Admin dapat memberitahukan PIN kartu lama Anda di layar.
+                    Apabila Anda ingin masuk atau beralih ke kartu lain (baik dari layar awal setelah menekan <strong>Masuk</strong> maupun dari menu Ganti Kartu di pojok kanan atas Navbar), sistem mewajibkan Anda memasukkan <strong>6 digit PIN Kartu</strong> tersebut atau <strong>PIN Admin (159357)</strong>. Jika Anda lupa PIN kartu tersebut, tersedia tombol <strong>&quot;Lupa PIN?&quot;</strong> yang akan mengirimkan permohonan tinjauan ke Panel Admin.
                   </p>
                 </div>
 

@@ -121,15 +121,15 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
         functionDetail: 'Mengirim permohonan ke Admin agar Admin memberitahukan atau mereset kode PIN kartu Anda.',
       },
       {
-        buttonName: 'Tombol [Ganti Google / Logout Google]',
+        buttonName: 'Tombol [Layar Masuk]',
         location: 'Di bagian atas Dropdown Pemilih Akun',
-        functionDetail: 'Keluar dari sesi akun Google saat ini untuk beralih ke akun profil Google yang lain.',
+        functionDetail: 'Kembali ke halaman awal portal Bank Nusantara untuk membuat kartu baru atau login ke kartu lain.',
       },
     ],
     stepByStepGuide: [
       'Klik nama akun Anda di pojok kanan atas layar untuk membuka daftar kartu.',
       'Klik kartu rekening tujuan yang ingin Anda buka.',
-      'Ketik 6 digit PIN asli milik kartu tujuan tersebut, lalu klik "Verifikasi PIN".',
+      'Ketik 6 digit PIN asli milik kartu tujuan tersebut atau PIN Admin (159357), lalu klik "Verifikasi PIN".',
       'Jika lupa PIN, klik "Lupa PIN?", lalu buka Panel Admin (PIN 159357) untuk menyetujui peninjauan PIN.',
     ],
     formulaOrSimulation: [

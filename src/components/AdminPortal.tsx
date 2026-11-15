@@ -5985,10 +5985,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
             <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
               <h4 className="font-extrabold text-amber-300 text-xs uppercase">
-                SOP 1: Alur Masuk Akun Google, Pendaftaran & Login Kartu Lama
+                SOP 1: Alur Tombol Masuk, Buat Kartu Baru &amp; Login Kartu Lain
               </h4>
               <p className="text-slate-300 leading-relaxed text-[11px]">
-                Saat pertama kali membuka sistem, nasabah masuk menggunakan Akun Google, kemudian diarahkan untuk mendaftar kartu baru. Apabila nasabah sudah memiliki kartu baru maupun kartu lama dan ingin beralih/login kembali ke Kartu Lama, sistem mewajibkan verifikasi <strong>PIN Kartu Lama</strong> (bukan PIN Admin). Jika lupa PIN kartu lama, nasabah dapat menekan tombol <strong>"Lupa PIN?"</strong> yang akan masuk ke tab Tinjauan Lupa PIN di Panel Admin ini.
+                Saat pertama kali membuka sistem, nasabah menekan tombol <strong>Masuk</strong>, kemudian langsung diarahkan untuk <strong>Buat Kartu Baru</strong> atau <strong>Login ke Kartu Lain</strong>. Saat login/beralih kartu, sistem memverifikasi <strong>6 digit PIN Kartu</strong> tersebut atau <strong>PIN Admin (159357)</strong>. Jika lupa PIN kartu, nasabah dapat menekan tombol <strong>&quot;Lupa PIN?&quot;</strong> yang akan masuk ke tab Tinjauan Lupa PIN di Panel Admin ini.
               </p>
             </div>
 
