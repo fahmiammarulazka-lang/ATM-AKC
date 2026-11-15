@@ -202,6 +202,33 @@ export function formatRupiah(amount: number): string {
 }
 
 /**
+ * Validates a 6-digit PIN against weak patterns (sequential, repeated, or patterned digits)
+ */
+export function validateStrongPin(pin: string): { valid: boolean; reason?: string } {
+  if (!/^\d{6}$/.test(pin)) {
+    return { valid: false, reason: 'PIN harus terdiri dari tepat 6 digit angka.' };
+  }
+  if (/^(\d)\1{5}$/.test(pin)) {
+    return { valid: false, reason: 'Jangan gunakan angka yang sama seluruhnya (misal 111111).' };
+  }
+  const seqAsc = '0123456789';
+  const seqDesc = '9876543210';
+  if (seqAsc.includes(pin) || seqDesc.includes(pin)) {
+    return { valid: false, reason: 'Jangan gunakan kombinasi angka berurutan (misal 123456 atau 654321).' };
+  }
+  if (pin.slice(0, 2) === pin.slice(2, 4) && pin.slice(2, 4) === pin.slice(4, 6)) {
+    return { valid: false, reason: 'Jangan gunakan pola pasangan berulang (misal 121212).' };
+  }
+  if (pin.slice(0, 3) === pin.slice(3, 6)) {
+    return { valid: false, reason: 'Jangan gunakan pola 3 angka berulang (misal 123123).' };
+  }
+  if (/^(\d)\1(\d)\2(\d)\3$/.test(pin)) {
+    return { valid: false, reason: 'Hindari pola angka berpasangan sederhana (misal 112233).' };
+  }
+  return { valid: true };
+}
+
+/**
  * Formats Date to Indonesian standard format
  */
 export function formatIndoDate(dateString: string): string {

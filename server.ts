@@ -57,10 +57,24 @@ export interface ServerBugReport {
   updatedAt?: string;
 }
 
+export interface ServerPushAlert {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'alert';
+  category: 'transaction' | 'loan' | 'security' | 'promo';
+  targetView?: string;
+  targetDashboardTab?: string;
+  accountId?: string;
+  referenceId?: string;
+  timestamp: string;
+}
+
 interface PersistedGlobalState {
   globalChats: ServerGlobalChatMessage[];
   websitePopups: ServerPopupNotification[];
   bugReports: ServerBugReport[];
+  pushAlerts: ServerPushAlert[];
   sharedBankData: Record<string, unknown>;
   userSnapshotsByScope: Record<string, Record<string, unknown>>;
   lastUpdated: number;
@@ -95,6 +109,7 @@ const DEFAULT_STATE: PersistedGlobalState = {
   ],
   sharedBankData: {},
   userSnapshotsByScope: {},
+  pushAlerts: [],
   lastUpdated: Date.now(),
 };
 
@@ -115,6 +130,7 @@ function loadPersistedState(): PersistedGlobalState {
           : DEFAULT_STATE.globalChats,
         websitePopups: Array.isArray(parsed.websitePopups) ? parsed.websitePopups : [],
         bugReports: Array.isArray(parsed.bugReports) ? parsed.bugReports : DEFAULT_STATE.bugReports,
+        pushAlerts: Array.isArray(parsed.pushAlerts) ? parsed.pushAlerts : [],
         sharedBankData: parsed.sharedBankData || {},
         userSnapshotsByScope:
           parsed.userSnapshotsByScope && typeof parsed.userSnapshotsByScope === 'object'
@@ -178,6 +194,7 @@ async function startServer() {
             globalChats: serverState.globalChats,
             websitePopups: serverState.websitePopups,
             bugReports: serverState.bugReports,
+            pushAlerts: serverState.pushAlerts,
             sharedBankData: serverState.sharedBankData,
             connectedDevices: clients.size,
             lastUpdated: serverState.lastUpdated,
@@ -202,6 +219,8 @@ async function startServer() {
           handleNewPopup(msg.payload);
         } else if (msg.type === 'bug_report:send' && msg.payload) {
           handleNewBugReport(msg.payload);
+        } else if (msg.type === 'push_alert:send' && msg.payload) {
+          handleNewPushAlert(msg.payload);
         } else if (msg.type === 'bank_data:sync' && msg.payload) {
           serverState.sharedBankData = {
             ...serverState.sharedBankData,
@@ -355,16 +374,62 @@ async function startServer() {
     return newBug;
   }
 
+  function handleNewPushAlert(input: Partial<ServerPushAlert>) {
+    const cleanTitle = String(input.title || '').trim();
+    const cleanMessage = String(input.message || '').trim();
+    if (!cleanTitle || !cleanMessage) return null;
+
+    const alertId = input.id || `push-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const existing = serverState.pushAlerts.find((a) => a.id === alertId);
+    if (existing) return existing;
+
+    const newAlert: ServerPushAlert = {
+      id: alertId,
+      title: cleanTitle,
+      message: cleanMessage,
+      type: (input.type as ServerPushAlert['type']) || 'info',
+      category: (input.category as ServerPushAlert['category']) || 'transaction',
+      targetView: input.targetView ? String(input.targetView) : 'dashboard',
+      targetDashboardTab: input.targetDashboardTab ? String(input.targetDashboardTab) : 'mutasi',
+      accountId: input.accountId ? String(input.accountId) : undefined,
+      referenceId: input.referenceId ? String(input.referenceId) : undefined,
+      timestamp: input.timestamp || new Date().toISOString(),
+    };
+
+    serverState.pushAlerts = [newAlert, ...serverState.pushAlerts].slice(0, 120);
+    savePersistedState();
+
+    broadcastToAll({
+      type: 'push_alert:new',
+      payload: {
+        alert: newAlert,
+        lastUpdated: serverState.lastUpdated,
+      },
+    });
+
+    return newAlert;
+  }
+
   // ==================== REST API ROUTES ====================
   app.get('/api/global-chat', (_req, res) => {
     res.json({
       globalChats: serverState.globalChats,
       websitePopups: serverState.websitePopups,
       bugReports: serverState.bugReports,
+      pushAlerts: serverState.pushAlerts,
       sharedBankData: serverState.sharedBankData,
       connectedDevices: Math.max(1, clients.size),
       lastUpdated: serverState.lastUpdated,
     });
+  });
+
+  app.post('/api/push-alert', (req, res) => {
+    const created = handleNewPushAlert(req.body || {});
+    if (!created) {
+      res.status(400).json({ success: false, message: 'Judul dan pesan notifikasi wajib diisi.' });
+      return;
+    }
+    res.json({ success: true, alert: created, pushAlerts: serverState.pushAlerts });
   });
 
   app.post('/api/global-chat', (req, res) => {
@@ -570,11 +635,8 @@ Berikut adalah Ensiklopedia Lengkap Aplikasi Bank Nusantara yang wajib Anda kuas
    - Di bagian paling bawah aplikasi (Footer) juga terdapat tombol "🎓 Tutorial Aplikasi" khusus bagi kartu yang sudah disetujui Admin. Setiap ada penambahan fitur baru, isi Tutorial otomatis ikut bertambah.
 
 2. PIN PENTING DI APLIKASI:
-   - Kode PIN Otorisasi Panel Admin: 159357 (Digunakan untuk membuka Panel Admin di paling bawah halaman, membuka fitur yang dikunci PIN Admin, atau Ganti Jenis Kartu Instan).
-   - PIN Kartu Default Raden Satrio (1029384756): 123456.
-   - PIN Kartu Default Siti Aminah (1098765432): 654321.
-   - PIN Kartu Default Budi Santoso (1056781234): 112233.
-   - PIN Kartu Admin Sultan Nusantara (9999999999): 159357 (Saldo Tak Terbatas / Infinity ∞).
+   - Kode PIN Otorisasi Panel Admin bersifat rahasia dan hanya diketahui Administrator.
+   - PIN Kartu Default dapat diatur dan diubah oleh nasabah di menu Keamanan Kartu.
 
 3. 5 KASTA KARTU DEBIT BANK NUSANTARA:
    - Kartu 1: Nusantara Reguler (Silver) - Limit Tarik Rp 5.000.000/hari.
@@ -606,13 +668,12 @@ Berikut adalah Ensiklopedia Lengkap Aplikasi Bank Nusantara yang wajib Anda kuas
    - PayChat: Chat antar nomor rekening / nomor HP dan kirim uang langsung di gelembung chat.
    - Simulator ATM: Mesin ATM fisik interaktif dengan 11 fitur utama, suara bip asli, struk cetak, dan fitur Lupa PIN (ditinjau Admin).
    - Buku Panduan (60 Bab Ensiklopedia) & Riwayat Update (Di sebelah Panduan, otomatis terisi setiap aplikasi di-update).
-   - Tombol Notifikasi (🔔) & Bot AI Khusus Aplikasi (🤖 Voice Chat & Tanya Jawab Lengkap di sebelah tombol Notifikasi).
+   - Tombol Notifikasi (🔔) dengan dukungan filter kategori Transaksi, Pinjaman, dan Keamanan.
 
 5. TOMBOL-TOMBOL DI PALING BAWAH (FOOTER):
    - Lapor Bug: Kirim penjelasan bug (wajib) + foto tangkapan layar (opsional).
    - Minta Tolong ke Admin (Mintol Admin): Di sebelah tombol Lapor Bug. Pesan wajib diisi + bisa memilih 35+ Fitur Mintol (Suntik Saldo, Bagi Koin Spin, Naikkan ke Level 50, Buka Banned, Centang Biru, Upgrade Kartu Admin ∞, ACC Semua Transaksi, dll) yang bisa langsung dikabulkan 1-klik oleh Admin!
-   - Tutorial Aplikasi: Khusus bagi kartu yang sudah disetujui Admin, menjelaskan seluruh tombol dan otomatis bertambah saat ada fitur baru.
-   - Panel Admin (PIN 159357): Berisi persetujuan kartu/transaksi, manajemen Riwayat Update, kontrol Spin Wheel, kontrol Kerajaan Sultan, antrean Mintol, dan 56+ Super Tools Ga Kaleng-Kaleng.
+   - Panel Admin: Portal otoritas khusus Administrator yang dilindungi akses rahasia.
 `;
 
   function buildLocalSmartAnswer(question: string, botPersona?: string, contextSummary?: string): string {
@@ -624,14 +685,14 @@ Berikut adalah Ensiklopedia Lengkap Aplikasi Bank Nusantara yang wajib Anda kuas
         ? '🎡 **[Bot Spesialis Spin the Wheel & Koin Jackpot]**\n\n'
         : botPersona === 'admin'
         ? '🛡️ **[Bot Spesialis Otoritas Panel Admin & 56 Super Tools]**\n\n'
-        : '🤖 **[Bot AI Utama Bank Nusantara — Gemini 1.5 Flash]**\n\n';
+        : '🤖 **[Asisten Informasi Bank Nusantara]**\n\n';
 
     if (q.includes('tutorial') || (q.includes('kartu') && (q.includes('baru') || q.includes('setuju') || q.includes('acc')))) {
-      return `${prefix}**Penjelasan Lengkap Fitur Tutorial & Persetujuan Kartu Baru:**\n\n1. **Wajib Disetujui Admin Dulu:** Setiap kali Anda membuat kartu baru, status awalnya adalah **PENDING (Menunggu Persetujuan Admin)**.\n2. **Cara Menyetujui Kartu:** Buka **Panel Admin** di bagian paling bawah halaman (masukkan PIN Admin **159357**), lalu klik tombol **"Setujui Kartu"** pada tab Persetujuan Kartu, atau gunakan tombol **"Minta Tolong ke Admin (Mintol)"** di sebelah Lapor Bug.\n3. **Tutorial Terbuka Otomatis:** Begitu kartu Anda disetujui Admin dan berstatus **AKTIF**, jendela **🎓 Tutorial Lengkap Aplikasi** langsung terbuka otomatis!\n4. **Tombol Tutorial di Paling Bawah:** Bagi kartu yang sudah disetujui Admin, Anda bisa membuka kembali tutorial kapan saja lewat tombol **"🎓 Tutorial Aplikasi"** di bagian paling bawah (Footer).\n5. **Otomatis Bertambah:** Setiap kali aplikasi mendapatkan fitur atau update baru, modul penjelasan di dalam Tutorial otomatis ikut bertambah!`;
+      return `${prefix}**Penjelasan Lengkap Persetujuan Kartu Baru:**\n\n1. **Wajib Disetujui Admin Dulu:** Setiap kali Anda membuat kartu baru, status awalnya adalah **PENDING (Menunggu Persetujuan Admin)**.\n2. **Proses Verifikasi Admin:** Admin memverifikasi data dan melakukan persetujuan kartu pada antrean resmi.\n3. **Status Aktif:** Begitu kartu disetujui Admin, nomor rekening 10 digit diterbitkan otomatis dan saldo awal masuk ke rekening.`;
     }
 
     if (q.includes('kerajaan') || q.includes('sultan') || q.includes('level 50') || q.includes('lv 50') || q.includes('bisnis') || q.includes('bursa')) {
-      return `${prefix}**Penjelasan Lengkap Fitur Kerajaan Bisnis & Bursa Sultan (Khusus Level 50):**\n\n1. **Syarat Level 50:** Fitur **👑 Kerajaan Sultan** (di sebelah tombol Spin the Wheel) dikhususkan bagi nasabah yang telah mencapai **Level Pekerjaan 50**.\n2. **Cara Cepat Mencapai Level 50:**\n   - Di halaman Kerajaan Sultan yang terkunci, Anda bisa klik **"Naik +1 Level (Rp 1.000.000)"**, **"Pakai Voucher Level"**, atau tombol **"Buka Instan Level 50 (Bayar Sekaligus)"**.\n   - Bisa juga meminta bantuan lewat tombol **"🙏 Minta Tolong ke Admin"** di paling bawah atau lewat **Panel Admin (PIN 159357) ➔ Super Tools #1**.\n3. **Isi Fitur Kerajaan Sultan:**\n   - **12 Aset Kerajaan Bisnis:** Mulai dari Kedai Kopi Nusantara hingga Pulau Finansial & Bank Sentral yang menghasilkan uang tunai pasif + bonus Koin Spin.\n   - **Bursa Trading Real-Time:** Jual/beli 6 aset (Emas 24K, Saham BNUS, Bitcoin, Berlian, Sukuk Negara, Nikel EV) dengan grafik harga per 3 detik.\n   - **5 Brankas Misteri Sultan:** Buka peti harta karun berhadiah uang tunai hingga Rp 1 Miliar, Koin Spin, dan Voucher Level.`;
+      return `${prefix}**Penjelasan Lengkap Fitur Kerajaan Bisnis & Bursa Sultan (Khusus Level 50):**\n\n1. **Syarat Level 50:** Fitur **👑 Kerajaan Sultan** (di sebelah tombol Spin the Wheel) dikhususkan bagi nasabah yang telah mencapai **Level Pekerjaan 50**.\n2. **Cara Cepat Mencapai Level 50:**\n   - Di halaman Kerajaan Sultan yang terkunci, Anda bisa klik **"Naik +1 Level (Rp 1.000.000)"**, **"Pakai Voucher Level"**, atau tombol **"Buka Instan Level 50 (Bayar Sekaligus)"**.\n   - Bisa juga meminta bantuan lewat tombol **"🙏 Minta Tolong ke Admin"** di paling bawah.\n3. **Isi Fitur Kerajaan Sultan:**\n   - **12 Aset Kerajaan Bisnis:** Mulai dari Kedai Kopi Nusantara hingga Pulau Finansial & Bank Sentral yang menghasilkan uang tunai pasif + bonus Koin Spin.\n   - **Bursa Trading Real-Time:** Jual/beli 6 aset (Emas 24K, Saham BNUS, Bitcoin, Berlian, Sukuk Negara, Nikel EV) dengan grafik harga per 3 detik.\n   - **5 Brankas Misteri Sultan:** Buka peti harta karun berhadiah uang tunai hingga Rp 1 Miliar, Koin Spin, dan Voucher Level.`;
     }
 
     if (q.includes('lowongan') || q.includes('kerja') || q.includes('gaji') || q.includes('suit') || q.includes('klik') || q.includes('voucher level')) {
@@ -639,18 +700,18 @@ Berikut adalah Ensiklopedia Lengkap Aplikasi Bank Nusantara yang wajib Anda kuas
     }
 
     if (q.includes('spin') || q.includes('wheel') || q.includes('koin') || q.includes('kuadriliun') || q.includes('20 juta') || q.includes('15 juta')) {
-      return `${prefix}**Penjelasan Lengkap Fitur Spin the Wheel & 100 Paket Koin:**\n\n1. **Lokasi Tombol:** Berada di Navbar atas tepat di sebelah tombol **Lowongan Kerja**.\n2. **20 Hadiah Spin:** Mulai dari Rp 100.000, Rp 500.000, Rp 750.000, Rp 1.000.000 (peluang 1%), Rp 1.500.000, Rp 2.000.000, naik per Rp 500.000 hingga Rp 7.500.000, Rp 10.000.000, serta **Rp 15.000.000 & Rp 20.000.000** (peluang **0,000000000001%** atau **1 dari 1.000 Kuadriliun**).\n3. **Biaya & Multi-Spin:** 1x Spin membutuhkan **100 Koin** (setara Rp 1.000.000). Tersedia tombol Spin **1x, 3x, 5x, 7x, dan 10x**.\n4. **Cara Beli Koin:** Klik tombol **[+]** pada bar koin di kanan atas halaman Spin the Wheel. Tersedia **100 Pilihan Pembelian Koin** dari **1 Koin s/d 1.000.000 Koin** (1 Koin = Rp 10.000 + recehan desimal).\n5. **Diskon & Boost Admin:** Di Panel Admin (PIN 159357), Admin bisa memberi diskon harga koin, diskon biaya spin, hingga memperbesar peluang menang jackpot!`;
+      return `${prefix}**Penjelasan Lengkap Fitur Spin the Wheel & 100 Paket Koin:**\n\n1. **Lokasi Tombol:** Berada di Navbar atas tepat di sebelah tombol **Lowongan Kerja**.\n2. **20 Hadiah Spin:** Mulai dari Rp 100.000, Rp 500.000, Rp 750.000, Rp 1.000.000 (peluang 1%), Rp 1.500.000, Rp 2.000.000, naik per Rp 500.000 hingga Rp 7.500.000, Rp 10.000.000, serta **Rp 15.000.000 & Rp 20.000.000** (peluang **0,000000000001%** atau **1 dari 1.000 Kuadriliun**).\n3. **Biaya & Multi-Spin:** 1x Spin membutuhkan **100 Koin** (setara Rp 1.000.000). Tersedia tombol Spin **1x, 3x, 5x, 7x, dan 10x**.\n4. **Cara Beli Koin:** Klik tombol **[+]** pada bar koin di kanan atas halaman Spin the Wheel. Tersedia **100 Pilihan Pembelian Koin** dari **1 Koin s/d 1.000.000 Koin**.\n5. **Diskon & Boost Admin:** Admin dapat mengatur diskon harga koin maupun biaya spin di Panel Admin.`;
     }
 
     if (q.includes('mintol') || q.includes('minta tolong') || q.includes('lapor') || q.includes('bug')) {
-      return `${prefix}**Penjelasan Lengkap Tombol Paling Bawah (Lapor Bug, Mintol Admin & Tutorial):**\n\n1. **🐞 Lapor Bug:** Mengirim laporan kendala (penjelasan wajib diisi + foto bebas opsional) langsung ke Panel Admin.\n2. **🙏 Minta Tolong ke Admin (Mintol Admin):** Terletak di sebelah tombol Lapor Bug. Anda wajib mengisi pesan permohonan dan dapat memilih dari **35+ Fitur Mintol** (seperti Minta Saldo, Minta Koin Spin, Naik Level 50, Buka Banned Kartu, Minta Centang Biru, Minta Kartu Admin Infinity ∞, dll). Admin dapat mengabulkan dan mengeksekusi permintaan Anda hanya dengan 1 klik!\n3. **🎓 Tutorial Aplikasi:** Terletak di sebelahnya untuk membuka panduan interaktif seluruh tombol bagi kartu yang sudah disetujui Admin.`;
+      return `${prefix}**Penjelasan Lengkap Tombol Paling Bawah (Lapor Bug & Mintol Admin):**\n\n1. **🐞 Lapor Bug:** Mengirim laporan kendala (penjelasan wajib diisi + foto bebas opsional) langsung ke Panel Admin.\n2. **🙏 Minta Tolong ke Admin (Mintol Admin):** Terletak di sebelah tombol Lapor Bug. Anda wajib mengisi pesan permohonan dan dapat memilih dari **35+ Fitur Mintol** (seperti Minta Saldo, Minta Koin Spin, Naik Level 50, Buka Banned Kartu, Minta Centang Biru, dll).`;
     }
 
-    if (q.includes('pin') || q.includes('admin') || q.includes('super tool') || q.includes('159357')) {
-      return `${prefix}**Penjelasan Lengkap PIN & Panel Admin (56+ Super Tools):**\n\n1. **Kode PIN Panel Admin:** **159357** (Klik tombol "Buka Panel Admin" di bagian paling bawah aplikasi).\n2. **PIN Kartu Default Nasabah:**\n   - Raden Satrio (\`1029384756\`): **123456**\n   - Siti Aminah (\`1098765432\`): **654321**\n   - Budi Santoso (\`1056781234\`): **112233**\n   - Sultan Nusantara Admin (\`9999999999\`): **159357**\n3. **Fitur Panel Admin:** Menyetujui pembuatan kartu baru (agar Tutorial terbuka), menyetujui transaksi, mengatur Riwayat Update, mengatur diskon Spin Wheel & Kerajaan Sultan, mengabulkan Mintol nasabah, serta mengeksekusi **56+ Super Tools Ga Kaleng-Kaleng** (Hujan Saldo, Auto-Level 50, Banned/Unban, Centang Biru, dll).`;
+    if (q.includes('pin') || q.includes('admin') || q.includes('super tool')) {
+      return `${prefix}**Penjelasan Lengkap Keamanan PIN & Otoritas Admin:**\n\n1. **Kerahasiaan PIN:** PIN Admin bersifat rahasia dan tidak ditampilkan kepada umum.\n2. **PIN Kartu Nasabah:** Masing-masing kartu memiliki 6 digit PIN rahasia. Jika lupa, gunakan fitur "Lupa PIN Kartu?" pada modal PIN.\n3. **Fitur Panel Admin:** Menyetujui pembuatan kartu baru, menyetujui transaksi, mengatur Riwayat Update, kontrol Spin Wheel & Mining, serta mengabulkan Mintol nasabah.`;
     }
 
-    return `${prefix}**Panduan Lengkap Aplikasi Bank Nusantara:**\n\nHalo! Saya siap membantu Anda menjelaskan seluruh tombol dan fitur di aplikasi **PT Bank Nusantara (Persero) Tbk**:\n\n- **📱 Mobile Banking:** Beranda, Transfer Instan, Kartu 3D (5 Kasta termasuk Kartu Admin ∞), Katalog 136+ Fitur Pembayaran, Tarik Tunai Tanpa Kartu, Pinjaman, Deposito, Celengan, Tukar Kode, & Lacak Resi COD.\n- **💼 Lowongan Kerja:** 9 Gaji (Rp 100.000 s/d Rp 2.000.000) dengan target klik 200 s/d 2.000 klik + Arena Suit lawan Komputer Medium berhadiah Voucher Level & Rp 300.000.\n- **🎡 Spin the Wheel:** Hadiah Rp 100.000 s/d Rp 20.000.000 + Toko 100 Paket Koin (1 s/d 1 Juta Koin).\n- **👑 Kerajaan Sultan (Khusus Level 50):** 12 Bisnis Pasif, Bursa Saham/Emas/Bitcoin Real-Time, & 5 Brankas Misteri.\n- **🎓 Tutorial Lengkap:** Otomatis aktif setelah pembuatan kartu baru Anda disetujui Admin, dan tersedia di tombol paling bawah!\n- **🔐 PIN Admin:** **159357**.\n${contextSummary ? `\n📌 **Info Akun Anda Saat Ini:** ${contextSummary}` : ''}\n\nSilakan tanyakan detail tombol atau fitur mana saja (bisa ketik atau gunakan **🎙️ Voice Chat / Suara**)!`;
+    return `${prefix}**Panduan Lengkap Aplikasi Bank Nusantara:**\n\nHalo! Berikut ringkasan fitur utama **PT Bank Nusantara (Persero) Tbk**:\n\n- **📱 Mobile Banking:** Beranda, Transfer Instan, Kartu 3D, Katalog 136+ Fitur Pembayaran, Tarik Tunai Tanpa Kartu, Pinjaman, Deposito, Celengan, Tukar Kode, & Lacak Resi COD.\n- **💼 Lowongan Kerja:** 9 Gaji (Rp 100.000 s/d Rp 2.000.000) + Arena Suit lawan Komputer Medium.\n- **🎡 Spin the Wheel:** Hadiah Rp 100.000 s/d Rp 20.000.000 + Toko Paket Koin.\n- **🔔 Pusat Notifikasi:** Peringatan push transaksi, pinjaman, dan keamanan kartu secara real-time.\n${contextSummary ? `\n📌 **Info Akun Anda Saat Ini:** ${contextSummary}` : ''}`;
   }
 
   app.post('/api/ai-assistant', async (req, res) => {
@@ -680,12 +741,12 @@ Berikut adalah Ensiklopedia Lengkap Aplikasi Bank Nusantara yang wajib Anda kuas
 
       const personaInstruction =
         botPersona === 'career'
-          ? 'Fokus utama Anda sebagai Bot Spesialis Karir, Level & Kerajaan Sultan Lv.50 adalah menjelaskan Lowongan Pekerjaan (9 Gaji & Target Klik), Suit Komputer Medium, dan Kerajaan Bisnis & Bursa Sultan (khusus Level 50), namun tetap bisa menjawab semua fitur aplikasi.'
+          ? 'Fokus utama Anda sebagai Spesialis Karir, Level & Kerajaan Sultan Lv.50 adalah menjelaskan Lowongan Pekerjaan (9 Gaji & Target Klik), Suit Komputer Medium, dan Kerajaan Bisnis & Bursa Sultan (khusus Level 50), namun tetap bisa menjawab semua fitur aplikasi.'
           : botPersona === 'spin'
-          ? 'Fokus utama Anda sebagai Bot Spesialis Spin the Wheel & Koin adalah menjelaskan 20 hadiah Spin Wheel, peluang 1% untuk 1 Juta dan 0,000000000001% (1 dari 1.000 Kuadriliun) untuk 15 & 20 Juta, 100 paket koin, serta diskon admin, namun tetap bisa menjawab semua fitur aplikasi.'
+          ? 'Fokus utama Anda sebagai Spesialis Spin the Wheel & Koin adalah menjelaskan 20 hadiah Spin Wheel, peluang 1% untuk 1 Juta dan 0,000000000001% (1 dari 1.000 Kuadriliun) untuk 15 & 20 Juta, 100 paket koin, serta diskon admin, namun tetap bisa menjawab semua fitur aplikasi.'
           : botPersona === 'admin'
-          ? 'Fokus utama Anda sebagai Bot Spesialis Otoritas Panel Admin & 56 Super Tools adalah menjelaskan PIN Admin 159357, persetujuan kartu baru sebelum tutorial terbuka, Mintol Admin 35+ fitur, dan 56 Super Tools, namun tetap bisa menjawab semua fitur aplikasi.'
-          : 'Anda adalah Bot AI Utama Ensiklopedia Bank Nusantara yang menjelaskan seluruh tombol, menu, dan fitur aplikasi secara sangat lengkap.';
+          ? 'Fokus utama Anda adalah menjelaskan prosedur layanan Bank Nusantara tanpa pernah membocorkan PIN Admin rahasia kepada publik.'
+          : 'Anda adalah asisten informasi resmi Bank Nusantara yang menjelaskan fitur aplikasi tanpa pernah membocorkan PIN rahasia.';
 
       const recentHistoryText = Array.isArray(history)
         ? history

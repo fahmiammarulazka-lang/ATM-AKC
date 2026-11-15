@@ -2,7 +2,7 @@
  * Bank Nusantara — Gerbang Masuk Portal Nasabah & Pendaftaran / Login Kartu
  * Alur 2 Tahap Tanpa Sign in with Google:
  * 1. Layar Awal: Tombol utama "Masuk".
- * 2. Setelah "Masuk" ditekan: Langsung tampil pilihan "Buat Kartu Baru" atau "Login ke Kartu Lain (Pakai PIN Kartu / PIN Admin 159357)".
+ * 2. Setelah "Masuk" ditekan: Langsung tampil pilihan "Buat Kartu Baru" atau "Login ke Kartu Lain".
  */
 import React, { useState } from 'react';
 import {
@@ -15,8 +15,6 @@ import {
   AlertCircle,
   Lock,
   ArrowLeft,
-  ShieldAlert,
-  HelpCircle,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CardTier, BankAccount } from '../types/bank';
@@ -26,13 +24,7 @@ import { VerifiedBadge } from './VerifiedBadge';
 import { AllowNotificationFooterButton } from './GlobalChatAndNotificationLayer';
 import { GoogleMapsAddressPicker } from './GoogleMapsAddressPicker';
 
-interface GoogleAuthOnboardingGateProps {
-  onOpenAdminPanel?: () => void;
-}
-
-export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> = ({
-  onOpenAdminPanel,
-}) => {
+export const GoogleAuthOnboardingGate: React.FC = () => {
   const {
     googleUser,
     enterBankPortal,
@@ -160,19 +152,9 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
               <span>Akses PIN 6 Digit</span>
             </div>
 
-            {onOpenAdminPanel && (
-              <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800/60">
-                <AllowNotificationFooterButton />
-                <button
-                  type="button"
-                  onClick={onOpenAdminPanel}
-                  className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-rose-500/40 text-rose-300 font-semibold flex items-center gap-1.5 cursor-pointer text-[11px]"
-                >
-                  <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
-                  <span>Panel Admin (Butuh PIN)</span>
-                </button>
-              </div>
-            )}
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800/60">
+              <AllowNotificationFooterButton />
+            </div>
           </div>
         </div>
       </div>
@@ -205,7 +187,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
                 <span className="text-[11px] font-mono text-emerald-400">Server DB &amp; Perangkat Aktif</span>
               </div>
               <span className="text-[11px] text-slate-400 block">
-                Silakan buat kartu baru atau login ke kartu lain dengan PIN Kartu / PIN Admin.
+                Silakan buat kartu baru atau login ke kartu lain dengan PIN Kartu Anda.
               </span>
             </div>
           </div>
@@ -228,12 +210,12 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
           <h2 className="text-xl sm:text-2xl font-black text-white">
             {onboardingTab === 'register'
               ? 'Buat Kartu ATM Baru Anda'
-              : 'Login ke Kartu Lain (Pakai PIN Kartu / PIN Admin)'}
+              : 'Login ke Kartu Lain (Pakai PIN Kartu 6 Digit)'}
           </h2>
           <p className="text-xs text-slate-300 leading-relaxed">
             {onboardingTab === 'register'
               ? 'Isi identitas lengkap di bawah ini untuk membuat kartu ATM Bank Nusantara baru dan tentukan PIN 6 digit Anda. Jika sudah memiliki kartu, pilih tab "Login ke Kartu Lain".'
-              : 'Pilih kartu tujuan di bawah ini lalu masukkan 6 digit PIN Kartu tersebut atau PIN Admin (159357). Jika lupa PIN kartu, tersedia tombol "Lupa PIN Kartu?" di layar PIN.'}
+              : 'Pilih kartu tujuan di bawah ini lalu masukkan 6 digit PIN Kartu tersebut. Jika lupa PIN kartu, tersedia tombol "Lupa PIN Kartu?" di layar PIN.'}
           </p>
 
           {/* Two Mode Buttons */}
@@ -271,7 +253,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
                   2. Login ke Kartu Lain
                 </span>
                 <span className="text-[10px] opacity-80 block">
-                  Masukkan PIN Kartu 6 digit atau PIN Admin (159357)
+                  Masukkan 6 digit PIN Kartu Anda
                 </span>
               </div>
             </button>
@@ -454,7 +436,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
         )}
 
         {/* =====================================================================
-            TAB B: LOGIN KE KARTU LAIN (PAKAI PIN KARTU ATAU PIN ADMIN 159357)
+            TAB B: LOGIN KE KARTU LAIN (PAKAI 6 DIGIT PIN KARTU)
            ===================================================================== */}
         {onboardingTab === 'login_old' && (
           <div className="space-y-4 text-xs border-t border-slate-800 pt-5">
@@ -462,10 +444,10 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
               <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div>
                 <strong className="text-white block">
-                  Verifikasi Login Kartu: PIN Kartu 6 Digit atau PIN Admin (159357)
+                  Verifikasi Login Kartu: PIN Kartu 6 Digit
                 </strong>
                 <p className="text-[11px] text-slate-300 mt-0.5">
-                  Pilih kartu mana saja di bawah ini, lalu masukkan <strong>6 digit PIN Kartu</strong> tersebut atau gunakan <strong>PIN Admin (159357)</strong> untuk langsung masuk. Jika lupa PIN kartu, klik tombol <strong>&quot;Lupa PIN Kartu?&quot;</strong> di modal PIN.
+                  Pilih kartu mana saja di bawah ini, lalu masukkan <strong>6 digit PIN Kartu</strong> tersebut untuk langsung masuk. Jika lupa PIN kartu, klik tombol <strong>&quot;Lupa PIN Kartu?&quot;</strong> di modal PIN.
                 </p>
               </div>
             </div>
@@ -525,34 +507,19 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
           </div>
         )}
 
-        {/* Footer Shortcut to Izinkan Notifikasi & Admin Panel */}
-        {onOpenAdminPanel && (
-          <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
-              <span>Izinkan notifikasi atau buka Panel Admin di bawah ini:</span>
-            </span>
-            <div className="flex flex-wrap items-center gap-2">
-              <AllowNotificationFooterButton />
-              <button
-                type="button"
-                onClick={onOpenAdminPanel}
-                className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-rose-500/40 text-rose-300 font-semibold flex items-center gap-1.5 cursor-pointer"
-              >
-                <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
-                <span>Panel Admin (Butuh PIN)</span>
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Footer Shortcut to Izinkan Notifikasi */}
+        <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400">
+          <span>Aktifkan notifikasi latar belakang agar pembaruan transaksi &amp; keamanan masuk real-time:</span>
+          <AllowNotificationFooterButton />
+        </div>
       </div>
 
-      {/* Modal PIN Kartu / PIN Admin saat mau login ke Kartu Lain */}
+      {/* Modal PIN Kartu saat mau login ke Kartu Lain */}
       {selectedOldCard && (
         <PinPromptModal
           isOpen={true}
           title={`Login ke Kartu: ${selectedOldCard.fullName}`}
-          description={`Masukkan 6 digit PIN Kartu milik "${selectedOldCard.fullName}" (No. Rek: ${selectedOldCard.accountNumber}) atau PIN Admin (159357) untuk masuk ke kartu ini. Jika lupa PIN, klik "Lupa PIN Kartu?" di bawah.`}
+          description={`Masukkan 6 digit PIN Kartu milik "${selectedOldCard.fullName}" (No. Rek: ${selectedOldCard.accountNumber}) untuk masuk ke kartu ini. Jika lupa PIN, klik "Lupa PIN Kartu?" di bawah.`}
           targetAccountId={selectedOldCard.id}
           targetAccountName={selectedOldCard.fullName}
           cardNumberSnippet={selectedOldCard.cardNumber}

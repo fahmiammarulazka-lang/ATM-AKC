@@ -3264,7 +3264,7 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
     highlights: [
       'Simulator Mesin ATM Fisik dengan slot kartu interaktif, keypad PIN 6 digit, layar CRT/LCD, dan struk cetak.',
       '11 Fitur Utama ATM: Cek Saldo, Tarik Tunai, Setor Tunai, Transfer, Beli Pulsa, Token PLN, PDAM, Ganti PIN, Mutasi, Tarik Tanpa Kartu, & Info Kurs.',
-      'Portal Admin dengan proteksi PIN rahasia (159357) di bagian bawah halaman.',
+      'Portal Admin dengan proteksi PIN otoritas rahasia khusus Administrator.',
     ],
     isCurrent: false,
     categoryBadge: 'Rilis Perdana',

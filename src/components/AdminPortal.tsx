@@ -45,6 +45,9 @@ import {
   Zap,
   Crown,
   HelpCircle,
+  Bell,
+  BellRing,
+  BellOff,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -62,6 +65,8 @@ import {
   COIN_PURCHASE_PACKAGES_300,
   calculateCoinPackagePrice,
   calculateSpinCost,
+  calculateCashSpinCost,
+  splitRupiahRecehParts,
   formatRupiahWithDecimals,
 } from '../data/spinWheelCatalog';
 import {
@@ -207,6 +212,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     adminRejectMintolRequest,
     adminDeleteMintolRequest,
     adminClearMintolRequests,
+    notificationsEnabled,
+    backgroundAutoNotifEnabled,
+    setBackgroundAutoNotifEnabled,
+    sendBulkNotifications,
+    sendTestNotificationNow,
   } = useBank();
 
   const [activeAdminTab, setActiveAdminTab] = useState<
@@ -417,8 +427,16 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   const [newRedeemMaxClaims, setNewRedeemMaxClaims] = useState<number>(5);
   const [newRedeemDurationMins, setNewRedeemDurationMins] = useState<number>(60);
   const [newRedeemRequirePin, setNewRedeemRequirePin] = useState<boolean>(false);
+  const [newRedeemSendNotif, setNewRedeemSendNotif] = useState<boolean>(true);
   const [redeemFeedback, setRedeemFeedback] = useState<string>('');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [bulkNotifTitle, setBulkNotifTitle] = useState<string>(
+    '🎉 Promo & Informasi Resmi Bank Nusantara'
+  );
+  const [bulkNotifBody, setBulkNotifBody] = useState<string>(
+    'Nasabah Yth, nikmati promo pembelian Koin Spin lebih murah 0,50% (receh unik Rp xxx.XXX), kode redeem spesial, dan notifikasi real-time!'
+  );
+  const [bulkNotifFeedback, setBulkNotifFeedback] = useState<string>('');
 
   // Rejection Modals
   const [rejectCardModalId, setRejectCardModalId] = useState<string | null>(null);
@@ -521,6 +539,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
       maxClaims: newRedeemMaxClaims,
       durationMinutes: newRedeemDurationMins,
       requireAdminPin: newRedeemRequirePin,
+      sendNotification: newRedeemSendNotif,
     });
     setRedeemFeedback(res.message);
     if (res.success) {
@@ -571,7 +590,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping"></span>
             <span className="text-xs uppercase font-mono tracking-widest text-rose-400 font-bold">
-              PANEL OTORITAS PUSAT • ADMIN BANK NUSANTARA (PIN: 159357)
+              PANEL OTORITAS PUSAT • ADMIN BANK NUSANTARA
             </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-black text-white mt-1">
@@ -778,7 +797,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           }`}
         >
           <MessageSquare className="w-4 h-4" />
-          <span>💬 Chat Global Khusus Admin ({globalChats.length})</span>
+          <span>💬 Broadcast &amp; Notif Banyak ({globalChats.length})</span>
         </button>
 
         <button
@@ -1057,26 +1076,42 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   </div>
                 </div>
 
-                {/* Live Preview of Coin Package Prices in Rp xxx.xxx */}
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1 text-[10px] font-mono">
+                {/* Live Preview of Coin Package Prices in Rp xxx.XXX */}
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1.5 text-[10px] font-mono">
                   <span className="text-amber-300 font-bold block">
-                    Pratinjau Harga Koin (Format Rp xxx.xxx):
+                    Pratinjau Harga Koin (Lebih Murah 0,50% + Receh Rp xxx.XXX):
                   </span>
                   {[1, 100, 100_000, 1_000_000, 10_000_000].map((coinQty) => {
                     const pkg = COIN_PURCHASE_PACKAGES_300.find((p) => p.coins === coinQty);
                     if (!pkg) return null;
                     const priceInfo = calculateCoinPackagePrice(pkg, spinWheelConfig);
+                    const parts = splitRupiahRecehParts(priceInfo.finalPrice);
                     return (
-                      <div key={coinQty} className="flex items-center justify-between">
-                        <span className="text-slate-300">
+                      <div key={coinQty} className="flex items-center justify-between gap-2">
+                        <span className="text-slate-300 tabular-nums">
                           • {coinQty.toLocaleString('id-ID')} Koin:
                         </span>
-                        <span className="text-emerald-400 font-bold">
-                          {formatRupiahWithDecimals(priceInfo.finalPrice)}
+                        <span className="font-bold tabular-nums">
+                          <span className="text-emerald-400">
+                            {parts.prefix}
+                            {parts.mainPart}
+                          </span>
+                          <span className="text-amber-300 underline decoration-amber-400/50">
+                            {parts.recehPart}
+                          </span>
+                          <span className="text-slate-400 ml-1">
+                            (-{priceInfo.totalSavingsVsCashPercent}%)
+                          </span>
                         </span>
                       </div>
                     );
                   })}
+                  <div className="pt-1.5 border-t border-slate-800 flex items-center justify-between text-cyan-300">
+                    <span>• Tarif 1x Spin Uang Langsung:</span>
+                    <span className="font-bold tabular-nums">
+                      {formatRupiahWithDecimals(calculateCashSpinCost(1, spinWheelConfig).finalRupiah)}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -1908,7 +1943,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         </div>
       )}
 
-      {/* ================= ADMIN TAB: CHAT GLOBAL (HANYA BISA DIKIRIM OLEH ADMIN LEWAT PANEL ADMIN) ================= */}
+      {/* ================= ADMIN TAB: CHAT GLOBAL & KIRIM BANYAK NOTIFIKASI LATAR BELAKANG ================= */}
       {activeAdminTab === 'global_chat' && (
         <div className="bg-slate-900/90 border-2 border-amber-400/60 rounded-3xl p-6 shadow-2xl space-y-6 text-xs">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
@@ -1922,11 +1957,108 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               </div>
               <h3 className="text-lg sm:text-xl font-black text-white mt-1.5 flex items-center gap-2">
                 <MessageSquare className="w-5 h-5 text-amber-400" />
-                <span>Chat Global Khusus Admin — Kirim &quot;Pesan dari Admin&quot; ke Semua HP</span>
+                <span>Chat Global &amp; Pusat Notifikasi Latar Belakang Massal</span>
               </h3>
               <p className="text-slate-300 text-xs mt-1 max-w-3xl leading-relaxed">
-                Sesuai permintaan Anda: <strong>Global Chat hanya bisa dikirim oleh Admin melalui Panel Admin ini</strong> (Sahabat/Nasabah tidak bisa mengirim pesan). Saat Anda mengirim pesan, di semua HP akan muncul jendela pop-up sistem website bertuliskan <strong className="text-amber-300">&quot;Pesan dari Admin&quot;</strong> beserta isi pesan Anda!
+                Kirim pesan pop-up ke semua HP atau kirim <strong>banyak notifikasi latar belakang sekaligus</strong> ke seluruh perangkat (Banner Push + Service Worker Browser + Lonceng Notifikasi).
               </p>
+            </div>
+          </div>
+
+          {/* KONTROL NOTIFIKASI LATAR BELAKANG & KIRIM BANYAK NOTIFIKASI (5x / 10x / 15x) */}
+          <div className="p-5 rounded-3xl bg-slate-950 border-2 border-indigo-500/50 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <BellRing className="w-4 h-4 text-amber-400" />
+                  <h4 className="font-black text-white text-sm sm:text-base">
+                    Notifikasi Latar Belakang &amp; Kirim Banyak Notifikasi (Massal)
+                  </h4>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Status Izin Perangkat: <strong className={notificationsEnabled ? 'text-emerald-400' : 'text-amber-300'}>{notificationsEnabled ? 'Aktif' : 'Belum diizinkan'}</strong> • Notif Otomatis Berkala (Promo, Keamanan, Spin, Redeem): <strong className={backgroundAutoNotifEnabled ? 'text-emerald-400' : 'text-rose-400'}>{backgroundAutoNotifEnabled ? 'Aktif' : 'Nonaktif'}</strong>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setBackgroundAutoNotifEnabled(!backgroundAutoNotifEnabled)}
+                  className={`px-3.5 py-2 rounded-xl font-black text-xs cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                    backgroundAutoNotifEnabled
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/50'
+                      : 'bg-slate-800 text-slate-300 border border-slate-700'
+                  }`}
+                >
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>{backgroundAutoNotifEnabled ? 'Notif Berkala: AKTIF' : 'Notif Berkala: MATI'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    sendTestNotificationNow();
+                    setBulkNotifFeedback('1 Notifikasi tes latar belakang langsung dikirim!');
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-400/40 font-bold text-xs cursor-pointer whitespace-nowrap"
+                >
+                  Tes 1 Notif Latar Belakang
+                </button>
+              </div>
+            </div>
+
+            {bulkNotifFeedback && (
+              <div className="p-3 rounded-xl bg-emerald-950/90 border border-emerald-400 text-emerald-200 font-bold flex items-center justify-between">
+                <span>✅ {bulkNotifFeedback}</span>
+                <button
+                  type="button"
+                  onClick={() => setBulkNotifFeedback('')}
+                  className="text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">
+                  Judul Notifikasi Massal:
+                </label>
+                <input
+                  type="text"
+                  value={bulkNotifTitle}
+                  onChange={(e) => setBulkNotifTitle(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-semibold"
+                />
+              </div>
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">
+                  Isi Pesan Notifikasi Massal:
+                </label>
+                <input
+                  type="text"
+                  value={bulkNotifBody}
+                  onChange={(e) => setBulkNotifBody(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-semibold"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {([1, 5, 10, 15] as const).map((batchCount) => (
+                <button
+                  key={batchCount}
+                  type="button"
+                  onClick={() => {
+                    const res = sendBulkNotifications(batchCount, bulkNotifTitle, bulkNotifBody);
+                    setBulkNotifFeedback(res.message);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 text-white font-black text-xs shadow-lg cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <BellRing className="w-3.5 h-3.5" />
+                  <span>Kirim {batchCount} Notifikasi Sekaligus</span>
+                </button>
+              ))}
             </div>
           </div>
 
@@ -4609,7 +4741,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 Daftar Lengkap Layanan Bank Nusantara (Bebas Atur PIN Admin &amp; Persetujuan)
               </h3>
               <p className="text-slate-400 text-xs mt-1 max-w-2xl">
-                Sesuai permintaan Anda: Di sini terdapat <strong>semua fitur</strong> aplikasi. Anda bebas mengatur apakah setiap fitur <strong>Memakai PIN Admin (159357) atau Tidak</strong> saat diakses nasabah, serta apakah fitur tersebut <strong>Wajib Persetujuan Admin atau Langsung Otomatis</strong>.
+                Di sini terdapat <strong>semua fitur</strong> aplikasi. Anda bebas mengatur apakah setiap fitur <strong>Memakai PIN Admin atau Tidak</strong> saat diakses nasabah, serta apakah fitur tersebut <strong>Wajib Persetujuan Admin atau Langsung Otomatis</strong>.
               </p>
             </div>
 
@@ -4739,7 +4871,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                       checked={customFeatPin}
                       onChange={(e) => setCustomFeatPin(e.target.checked)}
                     />
-                    <span>Wajib PIN Admin (159357)</span>
+                    <span>Wajib PIN Admin</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer text-slate-300">
                     <input
@@ -5108,6 +5240,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 />
               </div>
 
+              {/* TOGGLE: ADA NOTIFIKASI ATAU TIDAK SAAT BUAT KODE REDEEM */}
+              <div className="p-3 rounded-xl bg-slate-950 border border-indigo-500/40 flex items-center justify-between gap-3">
+                <div>
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    {newRedeemSendNotif ? (
+                      <BellRing className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <BellOff className="w-4 h-4 text-slate-400 shrink-0" />
+                    )}
+                    <span>Kirim Notifikasi Saat Kode Redeem Dibuat?</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                    {newRedeemSendNotif
+                      ? 'Ada Notifikasi: Kirim notifikasi lonceng & latar belakang ke seluruh perangkat nasabah.'
+                      : 'Tanpa Notifikasi: Kode redeem dibuat secara senyap tanpa mengirim notifikasi apa pun.'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNewRedeemSendNotif((prev) => !prev)}
+                  className={`px-3 py-1.5 rounded-xl font-black text-[11px] cursor-pointer whitespace-nowrap shrink-0 transition-all ${
+                    newRedeemSendNotif
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/60'
+                      : 'bg-slate-800 text-slate-300 border border-slate-700'
+                  }`}
+                >
+                  {newRedeemSendNotif ? 'Ada Notifikasi' : 'Tanpa Notif'}
+                </button>
+              </div>
+
               <button
                 type="submit"
                 className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-bold rounded-xl shadow-lg shadow-amber-500/20 cursor-pointer flex items-center justify-center gap-1.5"
@@ -5160,9 +5322,28 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span
-                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 whitespace-nowrap ${
+                            rdm.sendNotification !== false
+                              ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-400/40'
+                              : 'bg-slate-800 text-slate-400 border border-slate-700'
+                          }`}
+                        >
+                          {rdm.sendNotification !== false ? (
+                            <>
+                              <BellRing className="w-3 h-3" />
+                              <span>Ada Notif</span>
+                            </>
+                          ) : (
+                            <>
+                              <BellOff className="w-3 h-3" />
+                              <span>Tanpa Notif</span>
+                            </>
+                          )}
+                        </span>
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${
                             isFunctional
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                               : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
@@ -5950,7 +6131,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 <span>Monitoring Brankas Kas Mesin ATM #JKT-042 & Ensiklopedia SOP Admin 100x Lipat</span>
               </h3>
               <p className="text-slate-400 text-[11px] mt-0.5">
-                Dokumentasi komprehensif tata kelola Otoritas Admin Bank Nusantara (PIN Otoritas: 159357).
+                Dokumentasi komprehensif tata kelola Otoritas Admin Bank Nusantara.
               </p>
             </div>
             <span className="text-emerald-400 font-mono font-bold bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30">
@@ -5988,7 +6169,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 SOP 1: Alur Tombol Masuk, Buat Kartu Baru &amp; Login Kartu Lain
               </h4>
               <p className="text-slate-300 leading-relaxed text-[11px]">
-                Saat pertama kali membuka sistem, nasabah menekan tombol <strong>Masuk</strong>, kemudian langsung diarahkan untuk <strong>Buat Kartu Baru</strong> atau <strong>Login ke Kartu Lain</strong>. Saat login/beralih kartu, sistem memverifikasi <strong>6 digit PIN Kartu</strong> tersebut atau <strong>PIN Admin (159357)</strong>. Jika lupa PIN kartu, nasabah dapat menekan tombol <strong>&quot;Lupa PIN?&quot;</strong> yang akan masuk ke tab Tinjauan Lupa PIN di Panel Admin ini.
+                Saat pertama kali membuka sistem, nasabah menekan tombol <strong>Masuk</strong>, kemudian langsung diarahkan untuk <strong>Buat Kartu Baru</strong> atau <strong>Login ke Kartu Lain</strong>. Saat login/beralih kartu, sistem memverifikasi <strong>6 digit PIN Kartu</strong> tersebut. Jika lupa PIN kartu, nasabah dapat menekan tombol <strong>&quot;Lupa PIN?&quot;</strong> yang akan masuk ke tab Tinjauan Lupa PIN di Panel Admin ini.
               </p>
             </div>
 

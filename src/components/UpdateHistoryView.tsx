@@ -22,13 +22,11 @@ import {
 import { useBank } from '../context/BankContext';
 
 interface UpdateHistoryViewProps {
-  onNavigateToView: (view: 'dashboard' | 'atm' | 'admin' | 'guide' | 'chat' | 'updates') => void;
-  onOpenAdminUpdateManager?: () => void;
+  onNavigateToView: (view: 'dashboard' | 'atm' | 'admin' | 'guide' | 'chat' | 'updates' | 'simulasi_rekening') => void;
 }
 
 export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({
   onNavigateToView,
-  onOpenAdminUpdateManager,
 }) => {
   const { appUpdates, featureConfigs } = useBank();
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -76,17 +74,6 @@ export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({
             <BookOpen className="w-4 h-4" />
             <span>← Buku Panduan (60 Bab)</span>
           </button>
-
-          {onOpenAdminUpdateManager && (
-            <button
-              type="button"
-              onClick={onOpenAdminUpdateManager}
-              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 text-slate-950 font-black text-xs cursor-pointer flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all"
-            >
-              <Wrench className="w-4 h-4" />
-              <span>Isi / Tambah Update di Panel Admin</span>
-            </button>
-          )}
         </div>
       </div>
 

@@ -18,17 +18,17 @@ import {
   Briefcase,
   Sparkles,
   Crown,
-  Bot,
-  Mic,
-  GraduationCap,
   Cpu,
   Send,
   PieChart,
+  FileCheck2,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
 import { VerifiedBadge } from './VerifiedBadge';
 import { computeMonthlyBudgetReport, getCurrentMonthKey } from '../utils/budgetUtils';
+import { useSecretAdminSequence } from '../utils/useSecretAdminSequence';
+import { NotificationCategory } from '../types/bank';
 
 export type AppNavView =
   | 'dashboard'
@@ -42,18 +42,21 @@ export type AppNavView =
   | 'admin'
   | 'guide'
   | 'chat'
-  | 'updates';
+  | 'updates'
+  | 'simulasi_rekening';
 
 interface NavbarProps {
   activeView: AppNavView;
   setActiveView: (view: AppNavView) => void;
   onOpenRegisterModal: () => void;
+  onSecretAdminTrigger: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeView,
   setActiveView,
   onOpenRegisterModal,
+  onSecretAdminTrigger,
 }) => {
   const {
     accounts,
@@ -61,11 +64,14 @@ export const Navbar: React.FC<NavbarProps> = ({
     loginToCardWithPin,
     notifications,
     unreadNotificationCount,
+    markNotificationAsRead,
     markAllNotificationsAsRead,
+    notificationsEnabled,
+    notificationPermissionStatus,
+    requestAndEnableNotifications,
+    sendTestNotificationNow,
     logoutGoogle,
     appUpdates,
-    setIsAiBotModalOpen,
-    setIsTutorialModalOpen,
     budgetCategories,
     transactions,
     manualExpenses,
@@ -91,14 +97,42 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const [showUserDropdown, setShowUserDropdown] = useState<boolean>(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState<boolean>(false);
+  const [notifCategoryFilter, setNotifCategoryFilter] = useState<'all' | NotificationCategory>('all');
   const [pendingSwitchAccountId, setPendingSwitchAccountId] = useState<string | null>(null);
 
+  const { handleBankClick, handleNusantaraClick } = useSecretAdminSequence(onSecretAdminTrigger);
+
   const pendingTargetAccount = accounts.find((a) => a.id === pendingSwitchAccountId) || null;
+
+  const filteredNotifications =
+    notifCategoryFilter === 'all'
+      ? notifications
+      : notifications.filter((n) => (n.category || 'promo') === notifCategoryFilter);
+
+  const getCategoryBadge = (cat?: NotificationCategory) => {
+    if (cat === 'transaction') return { label: 'Transaksi', cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+    if (cat === 'loan') return { label: 'Pinjaman', cls: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
+    if (cat === 'security') return { label: 'Keamanan', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/30' };
+    return { label: 'Info & Promo', cls: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' };
+  };
+
+  const handleNotificationItemClick = (n: typeof notifications[number]) => {
+    markNotificationAsRead(n.id);
+    setShowNotifDropdown(false);
+    window.dispatchEvent(
+      new CustomEvent('bn:navigate', {
+        detail: {
+          targetView: n.targetView || 'dashboard',
+          targetDashboardTab: n.targetDashboardTab || 'mutasi',
+        },
+      })
+    );
+  };
 
   return (
     <header className="sticky top-0 z-40 w-full bg-slate-950/90 backdrop-blur-md border-b border-slate-800 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-        {/* Brand Logo */}
+        {/* Brand Logo (Stealth 4-stage trigger attached cleanly with zero visual cues) */}
         <div
           onClick={() => setActiveView('dashboard')}
           className="flex items-center gap-3 cursor-pointer select-none shrink-0"
@@ -109,7 +143,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div>
             <div className="flex items-center gap-1.5">
               <span className="font-mono font-extrabold text-white text-base tracking-wider">
-                BANK NUSANTARA
+                <span onClick={handleBankClick}>BANK</span>{' '}
+                <span onClick={handleNusantaraClick}>NUSANTARA</span>
               </span>
               <span className="text-[9px] bg-amber-400/20 text-amber-300 px-1.5 py-0.2 rounded font-mono font-semibold">
                 ID
@@ -259,7 +294,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Panduan</span>
           </button>
 
-          {/* Riwayat Update tepat di sebelah Panduan (Sesuai permintaan user) */}
+          {/* Riwayat Update tepat di sebelah Panduan */}
           <button
             onClick={() => setActiveView('updates')}
             className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
@@ -273,6 +308,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold">
               {currentUpdateVersion}
             </span>
+          </button>
+
+          {/* Simulasi Interaktif Pembukaan Rekening */}
+          <button
+            onClick={() => setActiveView('simulasi_rekening')}
+            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              activeView === 'simulasi_rekening'
+                ? 'bg-amber-500 text-slate-950 font-black shadow-md'
+                : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-500/30'
+            }`}
+          >
+            <FileCheck2 className="w-4 h-4 text-amber-400" />
+            <span>Simulasi Rekening</span>
           </button>
         </nav>
 
@@ -298,7 +346,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             {showNotifDropdown && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 z-50 text-xs space-y-2">
+              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 z-50 text-xs space-y-2.5">
                 <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                   <span className="font-black text-white flex items-center gap-1.5">
                     <Bell className="w-3.5 h-3.5 text-amber-400" />
@@ -313,43 +361,108 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </button>
                 </div>
 
-                <div className="max-h-72 overflow-y-auto space-y-1.5">
-                  {notifications.length === 0 ? (
-                    <p className="text-slate-400 text-center py-4">Belum ada notifikasi.</p>
+                {/* Background Notification Activation Bar */}
+                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[11px] font-bold text-white block truncate">
+                      {notificationsEnabled && notificationPermissionStatus === 'granted'
+                        ? 'Notif Latar Belakang Aktif'
+                        : 'Aktifkan Notif Latar Belakang'}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block truncate">
+                      {notificationPermissionStatus === 'granted'
+                        ? 'Service Worker & Push Browser aktif'
+                        : 'Izinkan notif saat tab diminimalkan'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => requestAndEnableNotifications()}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer whitespace-nowrap ${
+                        notificationPermissionStatus === 'granted'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                          : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
+                      }`}
+                    >
+                      {notificationPermissionStatus === 'granted' ? 'Aktif' : 'Izinkan'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => sendTestNotificationNow()}
+                      className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-[10px] font-bold cursor-pointer whitespace-nowrap"
+                    >
+                      Tes
+                    </button>
+                  </div>
+                </div>
+
+                {/* Category Filter Tabs */}
+                <div className="flex items-center gap-1 overflow-x-auto pb-1">
+                  {[
+                    { id: 'all' as const, label: 'Semua' },
+                    { id: 'transaction' as const, label: 'Transaksi' },
+                    { id: 'loan' as const, label: 'Pinjaman' },
+                    { id: 'security' as const, label: 'Keamanan' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setNotifCategoryFilter(tab.id)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
+                        notifCategoryFilter === tab.id
+                          ? 'bg-amber-500 text-slate-950'
+                          : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="max-h-72 overflow-y-auto space-y-1.5 pr-0.5">
+                  {filteredNotifications.length === 0 ? (
+                    <p className="text-slate-400 text-center py-4">Belum ada notifikasi di kategori ini.</p>
                   ) : (
-                    notifications.slice(0, 15).map((n) => (
-                      <div
-                        key={n.id}
-                        className={`p-2.5 rounded-xl border ${
-                          n.read
-                            ? 'bg-slate-950/60 border-slate-800 text-slate-400'
-                            : 'bg-slate-950 border-amber-500/40 text-slate-200'
-                        }`}
-                      >
-                        <div className="font-bold text-white text-[11px]">{n.title}</div>
-                        <div className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
-                          {n.message}
+                    filteredNotifications.slice(0, 30).map((n) => {
+                      const catBadge = getCategoryBadge(n.category);
+                      return (
+                        <div
+                          key={n.id}
+                          onClick={() => handleNotificationItemClick(n)}
+                          className={`p-2.5 rounded-xl border cursor-pointer transition-colors ${
+                            n.read
+                              ? 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-600'
+                              : 'bg-slate-950 border-amber-500/40 text-slate-200 hover:border-amber-400'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span
+                                className={`text-[9px] px-1.5 py-0.2 rounded border font-bold shrink-0 ${catBadge.cls}`}
+                              >
+                                {catBadge.label}
+                              </span>
+                              <div className="font-bold text-white text-[11px] truncate">{n.title}</div>
+                            </div>
+                            <span className="text-[9px] text-slate-500 font-mono shrink-0">
+                              {new Date(n.timestamp).toLocaleTimeString('id-ID', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                            {n.message}
+                          </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
             )}
           </div>
-
-          {/* 🤖 Tombol Bot AI Khusus Aplikasi + Voice Chat (Gemini 1.5 Flash) TEPAT DI SEBELAH TOMBOL NOTIFIKASI */}
-          <button
-            type="button"
-            onClick={() => setIsAiBotModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-xs shadow-md shadow-cyan-500/25 transition-all cursor-pointer border border-cyan-300/40"
-            title="Bot-Bot AI Khusus Aplikasi + Voice Chat / Suara (Gemini 1.5 Flash)"
-          >
-            <Bot className="w-4 h-4 text-amber-300 shrink-0" />
-            <span className="hidden lg:inline">Bot AI &amp; Suara</span>
-            <span className="lg:hidden">Bot AI</span>
-            <Mic className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-          </button>
 
           {/* Register Card Button */}
           <button
@@ -424,7 +537,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="px-2.5 py-1.5 text-[10px] text-slate-300 bg-blue-950/30 rounded-lg border border-blue-500/30 flex items-center gap-1.5">
                   <KeyRound className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span>
-                    Untuk masuk ke kartu lain, masukkan <strong>6 digit PIN Kartu</strong> tersebut atau <strong>PIN Admin (159357)</strong>.
+                    Untuk masuk ke kartu lain, masukkan <strong>6 digit PIN Kartu</strong> tersebut.
                   </span>
                 </div>
 
@@ -572,11 +685,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span>Update</span>
         </button>
         <button
-          onClick={() => setIsAiBotModalOpen(true)}
-          className="flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer text-cyan-300 font-bold"
+          onClick={() => setActiveView('simulasi_rekening')}
+          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'simulasi_rekening' ? 'text-amber-400 font-bold' : 'text-amber-300/80'}`}
         >
-          <Bot className="w-4 h-4 text-cyan-400" />
-          <span>Bot AI Suara</span>
+          <FileCheck2 className="w-4 h-4 text-amber-400" />
+          <span>Simulasi</span>
         </button>
       </div>
 
@@ -585,7 +698,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <PinPromptModal
           isOpen={Boolean(pendingTargetAccount)}
           title="Login ke Kartu Lain / Ganti Kartu"
-          description={`Masukkan 6 digit PIN Kartu ${pendingTargetAccount.fullName} atau PIN Admin (159357) untuk masuk ke kartu ini. Jika lupa PIN kartu, klik tombol "Lupa PIN?" di bawah.`}
+          description={`Masukkan 6 digit PIN Kartu ${pendingTargetAccount.fullName} untuk masuk ke kartu ini. Jika lupa PIN kartu, klik tombol "Lupa PIN?" di bawah.`}
           targetAccountId={pendingTargetAccount.id}
           targetAccountName={pendingTargetAccount.fullName}
           cardNumberSnippet={pendingTargetAccount.cardNumber}

@@ -303,6 +303,14 @@ const RAW_300_COIN_AMOUNTS: number[] = [
   ...TIER_4_MEGA_10JUTA_80,
 ];
 
+export const COIN_PURCHASE_SAVINGS_VS_CASH_PERCENT = 0.5;
+
+const computeDeterministicReceh3Digit = (id: number, coins: number): number => {
+  // Menghasilkan angka receh unik deterministik antara 001 sampai 999
+  const raw = (id * 137 + coins * 19 + 211) % 999;
+  return raw + 1;
+};
+
 export const COIN_PURCHASE_PACKAGES_300: CoinPackageOption[] = RAW_300_COIN_AMOUNTS.map(
   (coins, index) => {
     const id = index + 1;
@@ -328,12 +336,14 @@ export const COIN_PURCHASE_PACKAGES_300: CoinPackageOption[] = RAW_300_COIN_AMOU
         ? 'sultan_100k'
         : 'mega_1juta';
 
+    const extraRecehanRupiah = computeDeterministicReceh3Digit(id, coins);
+
     return {
       id,
       coins,
       label: `${coins.toLocaleString('id-ID')} Koin`,
       recehanDecimal: 0,
-      extraRecehanRupiah: 0,
+      extraRecehanRupiah,
       badge,
       category,
     };
@@ -344,36 +354,133 @@ export const COIN_PURCHASE_PACKAGES_300: CoinPackageOption[] = RAW_300_COIN_AMOU
 export const COIN_PURCHASE_PACKAGES_100: CoinPackageOption[] = COIN_PURCHASE_PACKAGES_300;
 
 /**
- * Menghitung harga paket koin dalam angka bulat Rupiah (format "Rp xxx.xxx"),
- * memperhitungkan harga dasar per 1 koin & diskon dari Panel Admin.
+ * Menghitung harga paket koin dalam format "Rp xxx.XXX":
+ * - Pembelian koin otomatis 0,50% lebih murah dibanding Spin melalui uang langsung.
+ * - Menyematkan receh unik 3 digit terakhir (001-999) tanpa koma desimal.
+ * - Tetap memotong diskon tambahan dari Panel Admin.
  */
 export function calculateCoinPackagePrice(
   pkg: CoinPackageOption,
   config: SpinWheelAdminConfig
 ): {
   normalPrice: number;
+  cashEquivalentPrice: number;
   finalPrice: number;
   discountPercent: number;
+  totalSavingsVsCashPercent: number;
+  savingsRupiahVsCash: number;
+  recehDigits: number;
 } {
   const baseUnit = config.baseCoinPriceRupiah ?? 10_000;
   const standardNormalPrice = Math.round(pkg.coins * 10_000);
-  const rawCurrentPrice = Math.round(pkg.coins * baseUnit);
+  const cashEquivalentPrice = Math.max(1, Math.round(pkg.coins * baseUnit));
 
-  const discountPct = Math.max(0, Math.min(99, config.coinPurchaseDiscountPercent || 0));
-  const discountedPrice =
-    discountPct > 0
-      ? Math.round(rawCurrentPrice * (1 - discountPct / 100))
-      : rawCurrentPrice;
+  // Potongan wajib 0,50% lebih murah dari harga Spin melalui uang langsung
+  const halfPercentDiscounted = cashEquivalentPrice * (1 - COIN_PURCHASE_SAVINGS_VS_CASH_PERCENT / 100);
+
+  const adminDiscountPct = Math.max(0, Math.min(99, config.coinPurchaseDiscountPercent || 0));
+  const afterAdminDiscount =
+    adminDiscountPct > 0
+      ? halfPercentDiscounted * (1 - adminDiscountPct / 100)
+      : halfPercentDiscounted;
+
+  const rawTarget = Math.max(1, Math.round(afterAdminDiscount));
+  const receh3 =
+    pkg.extraRecehanRupiah >= 1 && pkg.extraRecehanRupiah <= 999
+      ? pkg.extraRecehanRupiah
+      : computeDeterministicReceh3Digit(pkg.id, pkg.coins);
+
+  let finalPrice = rawTarget;
+
+  if (rawTarget >= 500_000) {
+    // Paket besar (>= Rp 500.000): ganti 3 digit terakhir persis ke receh unik 001..999
+    // di blok ribuan terdekat yang tetap menjaga hemat ~0,50% & di bawah tarif Spin Uang
+    const thousandsBase = Math.floor(rawTarget / 1000) * 1000;
+    const candLow = Math.max(1, thousandsBase - 1000 + receh3);
+    const candSame = thousandsBase + receh3;
+
+    const validSame = cashEquivalentPrice > 1 ? candSame < cashEquivalentPrice : true;
+    if (validSame && Math.abs(candSame - rawTarget) <= Math.abs(candLow - rawTarget)) {
+      finalPrice = candSame;
+    } else {
+      finalPrice = candLow;
+    }
+  } else if (rawTarget >= 2_000) {
+    // Paket kecil/menengah (misal 1 Koin Rp 9.95x): sisipkan variasi receh kecil
+    // agar 3 digit akhir tetap unik (001..999, tidak pernah 000) & tetap di kisaran -0,50%
+    const maxShift = Math.max(2, Math.min(45, Math.floor(rawTarget * 0.004)));
+    const signedOffset = ((receh3 % (maxShift * 2 + 1)) - maxShift) || 3;
+    let candidate = Math.max(1, rawTarget + signedOffset);
+    if (candidate % 1000 === 0) {
+      candidate = candidate > 10 ? candidate - 3 : candidate + 3;
+    }
+    if (cashEquivalentPrice > 1 && candidate >= cashEquivalentPrice) {
+      candidate = Math.max(1, cashEquivalentPrice - (1 + (receh3 % 9)));
+    }
+    if (candidate % 1000 === 0 && candidate > 1) {
+      candidate -= 1;
+    }
+    finalPrice = candidate;
+  } else {
+    finalPrice = Math.max(1, rawTarget);
+  }
+
+  const savingsRupiahVsCash = Math.max(0, cashEquivalentPrice - finalPrice);
+  const totalSavingsVsCashPercent =
+    cashEquivalentPrice > 0
+      ? Number(((savingsRupiahVsCash / cashEquivalentPrice) * 100).toFixed(2))
+      : 0;
 
   return {
     normalPrice: standardNormalPrice,
-    finalPrice: Math.max(1, discountedPrice),
-    discountPercent: discountPct,
+    cashEquivalentPrice,
+    finalPrice,
+    discountPercent: adminDiscountPct,
+    totalSavingsVsCashPercent,
+    savingsRupiahVsCash,
+    recehDigits: finalPrice % 1000,
   };
 }
 
 /**
- * Format angka Rupiah sesuai permintaan user: "Rp xxx.xxx" (bulat dengan pemisah titik ribuan).
+ * Memisahkan nominal Rupiah menjadi bagian utama dan 3 digit receh akhir ("Rp xxx." + "XXX")
+ * untuk penyorotan visual sesuai format Rp xxx.XXX.
+ */
+export function splitRupiahRecehParts(amount: number): {
+  prefix: string;
+  mainPart: string;
+  recehPart: string;
+  fullText: string;
+} {
+  if (!Number.isFinite(amount) || amount >= 900_000_000_000_000) {
+    return {
+      prefix: 'Rp ',
+      mainPart: '∞',
+      recehPart: '',
+      fullText: 'Rp ∞ (Tidak Terbatas)',
+    };
+  }
+  const rounded = Math.round(amount);
+  const formattedNumbers = rounded.toLocaleString('id-ID');
+  const lastDotIdx = formattedNumbers.lastIndexOf('.');
+  if (lastDotIdx === -1) {
+    return {
+      prefix: 'Rp ',
+      mainPart: '',
+      recehPart: formattedNumbers,
+      fullText: `Rp ${formattedNumbers}`,
+    };
+  }
+  return {
+    prefix: 'Rp ',
+    mainPart: formattedNumbers.slice(0, lastDotIdx + 1),
+    recehPart: formattedNumbers.slice(lastDotIdx + 1),
+    fullText: `Rp ${formattedNumbers}`,
+  };
+}
+
+/**
+ * Format angka Rupiah sesuai permintaan user: "Rp xxx.XXX" (bulat dengan pemisah titik ribuan tanpa koma).
  */
 export function formatRupiahWithDecimals(amount: number): string {
   if (!Number.isFinite(amount) || amount >= 900_000_000_000_000) return 'Rp ∞ (Tidak Terbatas)';
@@ -418,5 +525,38 @@ export function calculateSpinCost(
     normalRupiahEquivalent: Math.round(normalCoins * 10_000),
     finalRupiahEquivalent: Math.round(finalCoins * unitRupiah),
     totalDiscountPercent: combinedDiscountPercent,
+  };
+}
+
+/**
+ * Menghitung tarif Spin Pakai Uang Rekening Langsung (1x, 3x, 5x, 7x, 10x).
+ * Tarif Spin Uang menggunakan tarif penuh (tanpa potongan 0,50% pembelian koin),
+ * namun tetap menghormati diskon Spin dari Panel Admin.
+ */
+export function calculateCashSpinCost(
+  spinCount: 1 | 3 | 5 | 7 | 10,
+  config: SpinWheelAdminConfig
+): {
+  normalRupiah: number;
+  finalRupiah: number;
+  coinModeEstimatedRupiah: number;
+  coinSavingsRupiah: number;
+  totalDiscountPercent: number;
+} {
+  const coinCost = calculateSpinCost(spinCount, config);
+  const normalRupiah = coinCost.normalRupiahEquivalent;
+  const finalRupiah = coinCost.finalRupiahEquivalent;
+  const coinModeEstimatedRupiah = Math.max(
+    0,
+    Math.round(finalRupiah * (1 - COIN_PURCHASE_SAVINGS_VS_CASH_PERCENT / 100))
+  );
+  const coinSavingsRupiah = Math.max(0, finalRupiah - coinModeEstimatedRupiah);
+
+  return {
+    normalRupiah,
+    finalRupiah,
+    coinModeEstimatedRupiah,
+    coinSavingsRupiah,
+    totalDiscountPercent: coinCost.totalDiscountPercent,
   };
 }

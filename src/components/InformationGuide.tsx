@@ -55,7 +55,10 @@ import {
 import { formatRupiah, CARD_TIER_CONFIGS, LOAN_TIER_CONFIGS } from '../utils/bankUtils';
 
 interface InformationGuideProps {
-  onNavigateToTab: (tab: 'dashboard' | 'atm' | 'admin' | 'updates' | 'chat', subTab?: string) => void;
+  onNavigateToTab: (
+    tab: 'dashboard' | 'atm' | 'admin' | 'updates' | 'chat' | 'simulasi_rekening',
+    subTab?: string
+  ) => void;
   onOpenRegisterModal: () => void;
 }
 
@@ -151,7 +154,7 @@ const EXTRA_CHAPTERS_DATA: ExtraChapterContent[] = [
     sections: [
       {
         heading: 'Cara Mengirim Laporan Bug ke Panel Admin',
-        body: 'Gulir ke bagian paling bawah halaman (footer) tepat di sebelah tombol Panel Admin, lalu klik tombol "🐛 Lapor Bug". Formulir pelaporan dirancang agar mudah digunakan dari HP maupun komputer.',
+        body: 'Gulir ke bagian paling bawah halaman (footer), lalu klik tombol "🐛 Lapor Bug". Formulir pelaporan dirancang agar mudah digunakan dari HP maupun komputer.',
         bullets: [
           'Penjelasan Bug (Wajib Diisi): Jelaskan kendala atau saran perbaikan yang Anda temukan.',
           'Kirim Foto Bebas (Opsional): Anda bebas mengunggah foto tangkapan layar atau foto kamera apa saja sebagai bukti tambahan, atau mengosongkannya.',
@@ -490,13 +493,13 @@ const EXTRA_CHAPTERS_DATA: ExtraChapterContent[] = [
     id: 58,
     badge: 'BAB 58 — KONTROL PIN ADMIN PER FITUR',
     title: '5️⃣8️⃣ Panduan Konfigurasi Keamanan Layanan di Panel Admin (PIN Admin & Persetujuan)',
-    subtitle: 'Cara mengatur fitur mana yang memakai PIN Admin (159357) dan mana yang wajib tinjauan.',
+    subtitle: 'Cara mengatur fitur mana yang memakai PIN Admin dan mana yang wajib tinjauan.',
     color: 'text-rose-400',
     icon: SlidersIconFallback,
     sections: [
       {
         heading: 'Kendali Penuh Setiap Fitur Aplikasi',
-        body: 'Di Panel Admin (Tab: Kontrol Fitur), Admin dapat mengatur satu per satu atau secara massal terhadap seluruh layanan aplikasi: apakah layanan tersebut mewajibkan input PIN Admin (159357) saat dibuka nasabah, dan apakah pembayarannya wajib melalui persetujuan Admin atau langsung otomatis selesai. Admin bahkan dapat menambahkan fitur baru secara kustom!',
+        body: 'Di Panel Admin (Tab: Kontrol Fitur), Admin dapat mengatur satu per satu atau secara massal terhadap seluruh layanan aplikasi: apakah layanan tersebut mewajibkan input PIN Admin saat dibuka nasabah, dan apakah pembayarannya wajib melalui persetujuan Admin atau langsung otomatis selesai. Admin bahkan dapat menambahkan fitur baru secara kustom!',
       },
     ],
   },
@@ -814,10 +817,10 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                 Mesin ATM ➔
               </button>
               <button
-                onClick={() => onNavigateToTab('admin')}
-                className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-amber-300 text-[11px] text-center font-medium border border-amber-500/30 cursor-pointer"
+                onClick={() => onNavigateToTab('simulasi_rekening')}
+                className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-emerald-300 text-[11px] text-center font-medium border border-emerald-500/30 cursor-pointer"
               >
-                Panel Admin ➔
+                Simulasi Rekening ➔
               </button>
             </div>
           </div>
@@ -1068,6 +1071,24 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                     Permohonan ditolak dengan alasan resmi dari Admin (misal foto KTP buram). Anda dapat mengajukan ulang data yang benar.
                   </p>
                 </div>
+              </div>
+
+              <div className="pt-2 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => onNavigateToTab('simulasi_rekening')}
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-black text-xs cursor-pointer flex items-center gap-2 shadow-lg shadow-amber-500/20"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Coba Simulasi Interaktif Pembukaan Rekening ➔</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenRegisterModal}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer border border-slate-700"
+                >
+                  Buka Formulir Pendaftaran Cepat
+                </button>
               </div>
             </div>
           )}
@@ -1658,7 +1679,7 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                 <div className="p-4 rounded-2xl bg-slate-900 border border-slate-700 space-y-2">
                   <h4 className="font-bold text-emerald-400 text-sm">Cara Admin Memproses Antrean Keuangan:</h4>
                   <p className="text-slate-300">
-                    Admin masuk ke Panel Admin dengan PIN rahasia <strong>159357</strong> ➔ buka tab <strong>Tinjauan Keuangan Wajib Admin</strong> ➔ klik tombol <em>&quot;Terima & Eksekusi Dana&quot;</em> atau <em>&quot;Setujui Semua Transaksi Sekaligus&quot;</em>.
+                    Admin memverifikasi pada tab <strong>Tinjauan Keuangan Wajib Admin</strong> ➔ klik tombol <em>&quot;Terima &amp; Eksekusi Dana&quot;</em> atau <em>&quot;Setujui Semua Transaksi Sekaligus&quot;</em>.
                   </p>
                 </div>
               </div>
@@ -2181,10 +2202,10 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
 
                 <div className="p-5 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-2">
                   <h3 className="font-black text-amber-300 text-sm">
-                    2. Cara Login / Pindah ke Kartu Lain (PIN Kartu 6 Digit atau PIN Admin 159357)
+                    2. Cara Login / Pindah ke Kartu Lain (PIN Kartu 6 Digit)
                   </h3>
                   <p className="text-slate-300 leading-relaxed">
-                    Apabila Anda ingin masuk atau beralih ke kartu lain (baik dari layar awal setelah menekan <strong>Masuk</strong> maupun dari menu Ganti Kartu di pojok kanan atas Navbar), sistem mewajibkan Anda memasukkan <strong>6 digit PIN Kartu</strong> tersebut atau <strong>PIN Admin (159357)</strong>. Jika Anda lupa PIN kartu tersebut, tersedia tombol <strong>&quot;Lupa PIN?&quot;</strong> yang akan mengirimkan permohonan tinjauan ke Panel Admin.
+                    Apabila Anda ingin masuk atau beralih ke kartu lain (baik dari layar awal setelah menekan <strong>Masuk</strong> maupun dari menu Ganti Kartu di pojok kanan atas Navbar), sistem mewajibkan Anda memasukkan <strong>6 digit PIN Kartu</strong> tersebut. Jika Anda lupa PIN kartu tersebut, tersedia tombol <strong>&quot;Lupa PIN?&quot;</strong> yang akan mengirimkan permohonan tinjauan ke Admin.
                   </p>
                 </div>
 

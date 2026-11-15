@@ -287,7 +287,7 @@ export const CompleteSettingsView: React.FC = () => {
                   Keranjang Fitur Dihapus & Pemulihan Instan
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Semua fitur yang Anda hapus disimpan di sini. Fitur yang dihapus tidak akan tampil di menu pembayaran atau tutorial sampai dipulihkan.
+                  Semua fitur yang Anda hapus disimpan di sini. Fitur yang dihapus tidak akan tampil di menu pembayaran atau layanan perbankan sampai dipulihkan.
                 </p>
               </div>
               {deletedFeaturesList.length > 0 && (
@@ -449,7 +449,7 @@ export const CompleteSettingsView: React.FC = () => {
           >
             <div className="flex-1 w-full">
               <label className="block text-xs font-extrabold text-indigo-950 mb-1">
-                ➕ Tambah Fitur Baru Pengganti (Otomatis Masuk Katalog & Tutorial)
+                ➕ Tambah Fitur Baru Pengganti (Otomatis Masuk Katalog Layanan)
               </label>
               <input
                 type="text"
@@ -964,13 +964,13 @@ export const CompleteSettingsView: React.FC = () => {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 5: AUDIO ATM, SUARA HITUNG UANG & VOICE AI */}
+      {/* TAB 5: AUDIO ATM, SUARA HITUNG UANG & NOTIFIKASI LATAR BELAKANG */}
       {/* ===================================================================== */}
       {activeTab === 'audio' && (
         <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">
           <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
             <Volume2 className="w-5 h-5 text-indigo-600" />
-            Pengaturan Efek Suara Mesin ATM & Voice Chat Bot AI
+            Pengaturan Efek Suara Mesin ATM &amp; Notifikasi Latar Belakang
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {[
@@ -988,11 +988,6 @@ export const CompleteSettingsView: React.FC = () => {
                 key: 'voiceReceiptReadoutEnabled' as const,
                 title: 'Pembacaan Struk Transaksi dengan Suara Otomatis',
                 desc: 'Bacakan nominal transaksi berhasil menggunakan suara Bahasa Indonesia.',
-              },
-              {
-                key: 'aiVoiceAutoSpeak' as const,
-                title: 'Bot AI Otomatis Berbicara (Voice Chat Auto-Speak)',
-                desc: 'Bot AI langsung membacakan jawaban dengan suara saat Anda bertanya.',
               },
               {
                 key: 'notificationChimeSound' as const,
@@ -1023,19 +1018,55 @@ export const CompleteSettingsView: React.FC = () => {
             ))}
           </div>
 
-          <div className="pt-3 border-t border-slate-100 max-w-md">
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              Kecepatan Bicara Suara Bot AI ({userSettings.aiVoiceSpeechRate}x)
-            </label>
-            <input
-              type="range"
-              min={0.8}
-              max={1.5}
-              step={0.05}
-              value={userSettings.aiVoiceSpeechRate}
-              onChange={(e) => updateUserSettings({ aiVoiceSpeechRate: Number(e.target.value) })}
-              className="w-full accent-indigo-600"
-            />
+          <div className="pt-4 border-t border-slate-200 space-y-3">
+            <div>
+              <h4 className="text-sm font-black text-slate-900">
+                Preferensi Kategori Notifikasi Push Real-Time
+              </h4>
+              <p className="text-[11px] text-slate-500">
+                Pilih jenis peringatan yang dikirim melalui Service Worker, WebSocket, browser push, dan banner aplikasi.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {[
+                {
+                  key: 'pushTransactionAlerts' as const,
+                  title: 'Konfirmasi Transaksi & Mutasi Dana',
+                  desc: 'Transfer masuk/keluar, tarik tunai, setor tunai, dan persetujuan pembayaran (buka tab Mutasi).',
+                },
+                {
+                  key: 'pushLoanAlerts' as const,
+                  title: 'Pembaruan Status Pinjaman Online',
+                  desc: 'Pengajuan, persetujuan pencairan, penolakan, dan pembayaran angsuran (buka tab Pinjaman).',
+                },
+                {
+                  key: 'pushSecurityAlerts' as const,
+                  title: 'Peringatan Keamanan Kartu & PIN',
+                  desc: 'Penguncian/pembukaan kunci kartu, perubahan PIN, percobaan PIN gagal, dan status kartu (buka tab Keamanan).',
+                },
+                {
+                  key: 'pushPromoAlerts' as const,
+                  title: 'Info Layanan, Kode Redeem & Promo Berkala',
+                  desc: 'Pemberitahuan peluang Spin, Emas 24K, dan info berkala rekening.',
+                },
+              ].map((item) => (
+                <label
+                  key={item.key}
+                  className="flex items-center justify-between p-3.5 rounded-2xl bg-indigo-50/50 border border-indigo-200/70 cursor-pointer"
+                >
+                  <div className="pr-3">
+                    <p className="text-xs font-extrabold text-slate-900">{item.title}</p>
+                    <p className="text-[11px] text-slate-600">{item.desc}</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={userSettings[item.key] !== false}
+                    onChange={(e) => updateUserSettings({ [item.key]: e.target.checked })}
+                    className="w-4 h-4 accent-indigo-600"
+                  />
+                </label>
+              ))}
+            </div>
           </div>
         </div>
       )}

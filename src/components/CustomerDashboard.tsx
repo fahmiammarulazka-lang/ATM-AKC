@@ -88,8 +88,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ requestedS
     toggleScheduledPayment,
     deleteScheduledPayment,
     featureConfigs,
-    setIsTutorialModalOpen,
-    setIsAiBotModalOpen,
   } = useBank();
 
   // Active sub-tab in dashboard
@@ -264,65 +262,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ requestedS
           </div>
         </div>
       </div>
-
-      {/* BANNER STATUS TUTORIAL KARTU BARU (WAJIB DISETUJUI ADMIN DULU BARU ADA TUTORIALNYA) */}
-      {currentAccount.cardStatus === 'pending' ? (
-        <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/80 border-2 border-amber-500/60 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
-          <div className="space-y-1">
-            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[10px] font-black uppercase tracking-wider">
-              ⏳ MENUNGGU PERSETUJUAN ADMIN • TUTORIAL BELUM TERBUKA
-            </span>
-            <h3 className="text-sm sm:text-base font-black text-white">
-              Pembuatan Kartu Baru Harus Disetujui Admin Dulu Baru Ada Tutorialnya!
-            </h3>
-            <p className="text-xs text-slate-300">
-              Setujui pembuatan kartu ini di Panel Admin (PIN: <strong>159357</strong>) atau klik tombol di samping agar kartu Anda aktif dan langsung membuka Tutorial Lengkap seluruh tombol aplikasi.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setIsTutorialModalOpen(true)}
-            className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shrink-0 shadow-lg"
-          >
-            🔒 Lihat Status Persetujuan &amp; Tutorial
-          </button>
-        </div>
-      ) : (
-        <div className="bg-gradient-to-r from-emerald-950/80 via-slate-900 to-cyan-950/80 border border-emerald-500/40 rounded-3xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg">
-          <div className="space-y-0.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-black uppercase">
-                ✅ KARTU DISETUJUI ADMIN • TUTORIAL LENGKAP TERBUKA
-              </span>
-              <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 text-[10px] font-black uppercase">
-                🤖 BOT AI SUARA (GEMINI 1.5 FLASH)
-              </span>
-            </div>
-            <h3 className="text-xs sm:text-sm font-black text-white pt-1">
-              Ingin Penjelasan Lengkap Semua Tombol atau Tanya Jawab Pakai Suara?
-            </h3>
-            <p className="text-[11px] text-slate-300">
-              Panduan interaktif aplikasi siap membantu Anda kapan saja dan juga tersedia di tombol paling bawah halaman.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setIsTutorialModalOpen(true)}
-              className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs cursor-pointer shadow"
-            >
-              🎓 Buka Tutorial Lengkap
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsAiBotModalOpen(true)}
-              className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs cursor-pointer shadow"
-            >
-              🤖 Tanya Bot AI &amp; Voice Chat
-            </button>
-          </div>
-        </div>
-      )}
 
       {dashboardNotice && (
         <div className="p-3.5 rounded-2xl bg-emerald-950/90 border border-emerald-500/60 text-emerald-200 text-xs font-semibold flex items-center justify-between shadow-lg">

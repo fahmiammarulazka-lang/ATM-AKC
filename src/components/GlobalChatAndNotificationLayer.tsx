@@ -15,15 +15,12 @@ import {
   CheckSquare,
   Square,
   Search,
-  GraduationCap,
-  Lock,
-  Bot,
+  Bell,
+  BellRing,
+  Check,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { MINTOL_ADMIN_FEATURES_CATALOG } from '../data/empireAndMintolCatalog';
-import { formatRupiah } from '../utils/bankUtils';
-import { AppTutorialModal } from './AppTutorialModal';
-import { AppAiBotModal } from './AppAiBotModal';
 
 export const GlobalChatAndNotificationLayer: React.FC = () => {
   const {
@@ -37,6 +34,8 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
     isMintolModalOpen,
     setIsMintolModalOpen,
     submitMintolRequest,
+    activePushBanners,
+    dismissPushBanner,
   } = useBank();
 
   // State Lapor Bug
@@ -198,10 +197,91 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
     return matchCat && matchSearch;
   });
 
-  if (!isBugReportModalOpen && !isMintolModalOpen) return null;
+  if (!isBugReportModalOpen && !isMintolModalOpen && activePushBanners.length === 0) return null;
 
   return (
     <>
+      {/* FLOATING PUSH NOTIFICATION BANNERS (BACKGROUND + MULTI-EVENT STREAM) */}
+      {activePushBanners.length > 0 && (
+        <div className="fixed top-20 right-3 sm:right-5 z-[120] flex flex-col gap-2 w-[calc(100%-1.5rem)] max-w-sm pointer-events-none">
+          {activePushBanners.slice(0, 5).map((banner) => {
+            const accentClass =
+              banner.type === 'success'
+                ? 'border-emerald-400/70 bg-slate-950/95 text-emerald-100'
+                : banner.type === 'warning'
+                ? 'border-amber-400/70 bg-slate-950/95 text-amber-100'
+                : banner.type === 'alert'
+                ? 'border-rose-500/70 bg-slate-950/95 text-rose-100'
+                : 'border-cyan-400/60 bg-slate-950/95 text-slate-100';
+
+            const catLabel =
+              banner.category === 'transaction'
+                ? 'Konfirmasi Transaksi'
+                : banner.category === 'loan'
+                ? 'Status Pinjaman'
+                : banner.category === 'security'
+                ? 'Keamanan Kartu'
+                : 'Info Bank';
+
+            const catColor =
+              banner.category === 'transaction'
+                ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30'
+                : banner.category === 'loan'
+                ? 'text-amber-300 bg-amber-500/15 border-amber-500/30'
+                : banner.category === 'security'
+                ? 'text-rose-300 bg-rose-500/15 border-rose-500/30'
+                : 'text-cyan-300 bg-cyan-500/15 border-cyan-500/30';
+
+            return (
+              <div
+                key={banner.id}
+                onClick={() => {
+                  dismissPushBanner(banner.id);
+                  window.dispatchEvent(
+                    new CustomEvent('bn:navigate', {
+                      detail: {
+                        targetView: banner.targetView || 'dashboard',
+                        targetDashboardTab: banner.targetDashboardTab || 'mutasi',
+                      },
+                    })
+                  );
+                }}
+                className={`pointer-events-auto p-3.5 rounded-2xl border shadow-2xl backdrop-blur-md flex items-start justify-between gap-2.5 animate-in slide-in-from-right-4 duration-200 cursor-pointer hover:brightness-110 transition ${accentClass}`}
+              >
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-amber-400/15 border border-amber-400/40 flex items-center justify-center shrink-0 mt-0.5">
+                    <BellRing className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${catColor}`}>
+                        {catLabel}
+                      </span>
+                      <span className="text-[9px] text-slate-400">Ketuk untuk buka</span>
+                    </div>
+                    <div className="font-black text-xs text-white truncate">{banner.title}</div>
+                    <p className="text-[11px] text-slate-300 mt-0.5 leading-snug line-clamp-3">
+                      {banner.message}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    dismissPushBanner(banner.id);
+                  }}
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 shrink-0 cursor-pointer"
+                  aria-label="Tutup notifikasi"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* MODAL 1: LAPOR BUG */}
       {isBugReportModalOpen && (
         <div className="fixed inset-0 z-[105] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 md:p-6">
@@ -769,9 +849,6 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
         </div>
       )}
 
-      {/* Modal Tutorial Lengkap Aplikasi (Khusus Kartu yang Sudah Disetujui Admin) & Bot AI Suara */}
-      <AppTutorialModal />
-      <AppAiBotModal />
     </>
   );
 };
@@ -779,29 +856,38 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
 /**
  * Tombol di paling bawah (Footer):
  * 1. Lapor Bug (Kirim Foto Opsional + Penjelasan Wajib)
- * 2. Minta Tolong ke Admin / Mintol Admin (Pesan Wajib + 35 Fitur Lengkap)
- * 3. Tutorial Aplikasi (Bagi Kartu yang Sudah Disetujui Admin • Otomatis Bertambah Saat Ada Fitur Baru)
+ * 2. Minta Tolong ke Admin / Mintol Admin
+ * 3. Aktifkan Notifikasi Latar Belakang (Service Worker + Browser Push + Banner)
  */
 export const AllowNotificationFooterButton: React.FC = () => {
   const {
-    currentAccount,
     setIsBugReportModalOpen,
     bugReports,
     setIsMintolModalOpen,
     adminHelpRequests,
-    setIsTutorialModalOpen,
-    featureConfigs,
+    notificationPermissionStatus,
+    notificationsEnabled,
+    requestAndEnableNotifications,
+    sendTestNotificationNow,
   } = useBank();
 
-  const openBugCount = bugReports.filter((b) => b.status === 'open').length;
-  const pendingMintolCount = adminHelpRequests.filter((r) => r.status === 'pending').length;
-  const isCardApprovedByAdmin = currentAccount?.cardStatus === 'active';
+  const [notifFeedback, setNotifFeedback] = useState<string>('');
+  const openBugCount = bugReports.filter((b) => b.status === 'baru').length;
+  const pendingMintolCount = adminHelpRequests.filter((r) => r.status === 'menunggu').length;
+  const isBgActive = notificationsEnabled && notificationPermissionStatus === 'granted';
+
+  const handleEnableBgNotif = async () => {
+    const res = await requestAndEnableNotifications();
+    setNotifFeedback(res.message);
+    setTimeout(() => setNotifFeedback(''), 4500);
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       <button
+        type="button"
         onClick={() => setIsBugReportModalOpen(true)}
-        className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30 shadow-sm"
+        className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30 shadow-sm whitespace-nowrap shrink-0"
       >
         <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
         <span>Lapor Bug (Kirim Foto &amp; Penjelasan)</span>
@@ -813,12 +899,12 @@ export const AllowNotificationFooterButton: React.FC = () => {
       </button>
 
       <button
+        type="button"
         onClick={() => setIsMintolModalOpen(true)}
-        className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer bg-amber-400/20 text-amber-300 border border-amber-400/50 hover:bg-amber-400/30 shadow-sm"
+        className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer bg-amber-400/20 text-amber-300 border border-amber-400/50 hover:bg-amber-400/30 shadow-sm whitespace-nowrap shrink-0"
       >
         <HelpCircle className="w-3.5 h-3.5 text-amber-300" />
-        <Sparkles className="w-3 h-3 text-amber-400" />
-        <span>🙏 Minta Tolong ke Admin (Bantuan Cepat)</span>
+        <span>Minta Tolong ke Admin</span>
         {pendingMintolCount > 0 && (
           <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
             {pendingMintolCount}
@@ -826,31 +912,37 @@ export const AllowNotificationFooterButton: React.FC = () => {
         )}
       </button>
 
-      {/* Tombol Tutorial di Paling Bawah Bagi Kartunya yang Sudah Disetujui Admin */}
       <button
-        onClick={() => setIsTutorialModalOpen(true)}
-        className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer shadow-sm border ${
-          isCardApprovedByAdmin
+        type="button"
+        onClick={handleEnableBgNotif}
+        className={`px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer shadow-sm border whitespace-nowrap shrink-0 ${
+          isBgActive
             ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/50 hover:bg-emerald-500/30'
-            : 'bg-slate-800/80 text-amber-300 border-amber-500/40 hover:bg-slate-800'
+            : 'bg-cyan-500/20 text-cyan-300 border-cyan-400/50 hover:bg-cyan-500/30'
         }`}
-        title={
-          isCardApprovedByAdmin
-            ? 'Buka Tutorial Lengkap Seluruh Tombol & Fitur (Kartu Sudah Disetujui Admin)'
-            : 'Pembuatan kartu harus disetujui Admin dulu baru ada tutorialnya'
-        }
+        title={notifFeedback || 'Aktifkan notifikasi latar belakang agar notif tetap masuk walau tab diminimalkan'}
       >
-        {isCardApprovedByAdmin ? (
+        {isBgActive ? (
           <>
-            <GraduationCap className="w-3.5 h-3.5 text-emerald-400" />
-            <span>🎓 Tutorial Lengkap Aplikasi</span>
+            <Check className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Notif Latar Belakang Aktif</span>
           </>
         ) : (
           <>
-            <Lock className="w-3.5 h-3.5 text-amber-400" />
-            <span>🔒 Tutorial Aplikasi (Wajib Kartu Disetujui Admin Dulu)</span>
+            <Bell className="w-3.5 h-3.5 text-cyan-300" />
+            <span>Aktifkan Notif Latar Belakang</span>
           </>
         )}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => sendTestNotificationNow()}
+        className="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-700 whitespace-nowrap shrink-0"
+        title="Kirim tes notifikasi sekarang"
+      >
+        <BellRing className="w-3.5 h-3.5" />
+        <span>Tes Notif</span>
       </button>
     </div>
   );

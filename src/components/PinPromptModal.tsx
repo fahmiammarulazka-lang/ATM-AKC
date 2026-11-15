@@ -32,7 +32,7 @@ export const PinPromptModal: React.FC<PinPromptModalProps> = ({
   onSuccess,
   onCancel,
 }) => {
-  const { currentAccount, pinResetRequests, requestPinReset } = useBank();
+  const { currentAccount, pinResetRequests, requestPinReset, emitPinSecurityAlert } = useBank();
   const [pinInput, setPinInput] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [forgotReason, setForgotReason] = useState<string>('');
@@ -84,11 +84,12 @@ export const PinPromptModal: React.FC<PinPromptModalProps> = ({
     }
     const isAdminMasterMatch = Boolean(acceptAdminPin && pinInput === '159357');
     if (pinInput !== expectedPin && !isAdminMasterMatch) {
+      emitPinSecurityAlert(targetAccountName, title);
       setErrorMsg(
         isAdminPinPrompt
           ? 'PIN Otorisasi Admin tidak sesuai!'
           : acceptAdminPin
-          ? 'Kode PIN salah! Masukkan 6 digit PIN Kartu tersebut atau PIN Admin (159357). Jika lupa PIN kartu, klik "Lupa PIN Kartu?" di bawah.'
+          ? 'Kode PIN salah! Masukkan 6 digit PIN Kartu tersebut. Jika lupa PIN kartu, klik "Lupa PIN Kartu?" di bawah.'
           : 'Kode PIN Kartu salah! Pastikan Anda memasukkan 6 digit PIN Kartu tersebut. Jika lupa PIN, klik tombol "Lupa PIN Kartu?" di bawah untuk ditinjau Admin.'
       );
       setPinInput('');

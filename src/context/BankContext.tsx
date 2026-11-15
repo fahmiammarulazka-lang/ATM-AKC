@@ -17,6 +17,7 @@ import {
   ScheduledPayment,
   FavoriteAccount,
   AppNotification,
+  NotificationCategory,
   ChatMessage,
   CardTier,
   CardStatus,
@@ -95,6 +96,7 @@ import {
   COIN_PURCHASE_PACKAGES_300,
   calculateCoinPackagePrice,
   calculateSpinCost,
+  calculateCashSpinCost,
   formatRupiahWithDecimals,
 } from '../data/spinWheelCatalog';
 import {
@@ -228,13 +230,22 @@ interface BankContextType {
   adminDeleteBugReport: (id: string) => Promise<void>;
   adminClearBugReports: () => Promise<void>;
 
-  // Legacy Notification State (Dinonaktifkan sesuai permintaan user)
+  // Background & Multi-Channel Notification System (Service Worker + Browser + Banner + Bell)
   notificationsEnabled: boolean;
+  setNotificationsEnabled: (enabled: boolean) => void;
+  backgroundAutoNotifEnabled: boolean;
+  setBackgroundAutoNotifEnabled: (enabled: boolean) => void;
   notificationPermissionStatus: 'default' | 'granted' | 'denied';
   requestAndEnableNotifications: () => Promise<{ success: boolean; message: string }>;
   sendTestNotificationNow: () => void;
+  sendBulkNotifications: (
+    count: number,
+    customTitle?: string,
+    customMessage?: string
+  ) => { success: boolean; message: string; sentCount: number };
   activePushBanners: MobilePushBannerToast[];
   dismissPushBanner: (id: string) => void;
+  emitPinSecurityAlert: (targetAccountName?: string, contextLabel?: string) => void;
 
   // Admin PIN Gate (Strictly 159357)
   adminUnlocked: boolean;
@@ -266,7 +277,7 @@ interface BankContextType {
     nik?: string;
   }) => { success: boolean; message: string };
 
-  // Redeem Codes (Tukar Kode Redeem dibuat di Panel Admin dengan kuota & durasi)
+  // Redeem Codes (Tukar Kode Redeem dibuat di Panel Admin dengan kuota, durasi & opsi notifikasi)
   redeemCodes: RedeemCode[];
   createRedeemCode: (input: {
     code: string;
@@ -275,6 +286,7 @@ interface BankContextType {
     maxClaims: number;
     durationMinutes: number;
     requireAdminPin?: boolean;
+    sendNotification?: boolean;
   }) => { success: boolean; message: string; redeemCode?: RedeemCode };
   deleteRedeemCode: (id: string) => void;
   toggleRedeemCodeActive: (id: string) => void;
@@ -381,7 +393,19 @@ interface BankContextType {
   unreadNotificationCount: number;
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead: () => void;
-  addNotification: (title: string, message: string, type?: 'info' | 'success' | 'warning' | 'alert') => void;
+  addNotification: (
+    title: string,
+    message: string,
+    type?: 'info' | 'success' | 'warning' | 'alert',
+    meta?: {
+      category?: NotificationCategory;
+      targetView?: string;
+      targetDashboardTab?: string;
+      accountId?: string;
+      referenceId?: string;
+      skipServerBroadcast?: boolean;
+    }
+  ) => void;
 
   // Receipts for ATM reprint
   reprintReceipts: Transaction[];
@@ -696,10 +720,15 @@ interface BankContextType {
     paidAmount?: number;
     newCoinBalance?: number;
   };
-  spinTheWheel: (spinCount: 1 | 3 | 5 | 7 | 10) => {
+  spinTheWheel: (
+    spinCount: 1 | 3 | 5 | 7 | 10,
+    paymentMethod?: 'coins' | 'cash'
+  ) => {
     success: boolean;
     message: string;
+    paymentMethod?: 'coins' | 'cash';
     coinsSpent?: number;
+    rupiahSpent?: number;
     results?: { segment: SpinPrizeSegment; index: number }[];
     totalWonAmount?: number;
     newCoinBalance?: number;
@@ -783,15 +812,6 @@ interface BankContextType {
   ) => { success: boolean; message: string };
   adminDeleteMintolRequest: (requestId: string) => void;
   adminClearMintolRequests: () => void;
-
-  // Tutorial Aplikasi (Wajib Kartu Disetujui Admin Dulu Baru Terbuka + Auto-Tambah Setiap Ada Fitur Baru)
-  isTutorialModalOpen: boolean;
-  setIsTutorialModalOpen: (open: boolean) => void;
-  markTutorialCompleted: (accountId?: string) => void;
-
-  // Bot-Bot AI Khusus Aplikasi + Voice Chat / Suara (Gemini 1.5 Flash) di sebelah tombol Notifikasi
-  isAiBotModalOpen: boolean;
-  setIsAiBotModalOpen: (open: boolean) => void;
 
   // Tab Emas Mewah 24K Real-Time & Transfer Bebas (Admin 5% - Uang, Coin, Emas, Gabungan)
   goldMarketConfig: GoldAndTransferMarketConfig;
@@ -1127,6 +1147,10 @@ export const DEFAULT_USER_APP_SETTINGS: UserAppSettings = {
   workClickVisualEffect: true,
   confirmBeforeCoinPurchase: false,
   autoRedeemPulsaTokenNotif: true,
+  pushTransactionAlerts: true,
+  pushLoanAlerts: true,
+  pushSecurityAlerts: true,
+  pushPromoAlerts: true,
 };
 
 export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -1301,13 +1325,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [isBugReportModalOpen, setIsBugReportModalOpen] = useState<boolean>(false);
   const [isMintolModalOpen, setIsMintolModalOpen] = useState<boolean>(false);
-  const [isTutorialModalOpen, setIsTutorialModalOpen] = useState<boolean>(false);
-  const [isAiBotModalOpen, setIsAiBotModalOpen] = useState<boolean>(false);
   const [isGlobalChatModalOpen, setIsGlobalChatModalOpen] = useState<boolean>(false);
   const [connectedDevicesCount, setConnectedDevicesCount] = useState<number>(1);
   const [activePushBanners, setActivePushBanners] = useState<MobilePushBannerToast[]>([]);
 
-  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('bank_nusantara_notif_enabled_v2');
+      if (saved === 'false') return false;
+    } catch { /* empty */ }
+    return true;
+  });
+
+  const notificationsEnabledRef = useRef<boolean>(notificationsEnabled);
+  notificationsEnabledRef.current = notificationsEnabled;
+
+  const [backgroundAutoNotifEnabled, setBackgroundAutoNotifEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('bank_nusantara_bg_auto_notif_v2');
+      if (saved === 'false') return false;
+    } catch { /* empty */ }
+    return true;
+  });
 
   const [notificationPermissionStatus, setNotificationPermissionStatus] = useState<
     'default' | 'granted' | 'denied'
@@ -1393,6 +1432,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     return DEFAULT_USER_APP_SETTINGS;
   });
+
+  const userSettingsRef = useRef<UserAppSettings>(userSettings);
+  userSettingsRef.current = userSettings;
 
   // Active features exclude any feature ID in deletedFeatureIds
   const featureConfigs = rawFeatureConfigs.filter((f) => !deletedFeatureIds.includes(f.id));
@@ -2194,25 +2236,336 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
-  // Notification feature disabled per user request ("Hapus global chat dan juga fitur notifikasi")
-  const triggerMobileAndNativeNotification = (
-    _title: string,
-    _message: string,
-    _type: 'info' | 'success' | 'warning' | 'alert' | 'admin_chat' = 'info'
-  ) => {
-    // No push banners or browser notifications
-  };
+  useEffect(() => {
+    try {
+      localStorage.setItem('bank_nusantara_notif_enabled_v2', String(notificationsEnabled));
+    } catch { /* empty */ }
+  }, [notificationsEnabled]);
 
-  const requestAndEnableNotifications = async (): Promise<{ success: boolean; message: string }> => {
-    setNotificationsEnabled(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem('bank_nusantara_bg_auto_notif_v2', String(backgroundAutoNotifEnabled));
+    } catch { /* empty */ }
+  }, [backgroundAutoNotifEnabled]);
+
+  const inferNotificationMeta = (
+    title: string,
+    message: string,
+    explicit?: {
+      category?: NotificationCategory;
+      targetView?: string;
+      targetDashboardTab?: string;
+      accountId?: string;
+      referenceId?: string;
+      skipServerBroadcast?: boolean;
+    }
+  ): {
+    category: NotificationCategory;
+    targetView: string;
+    targetDashboardTab: string;
+    accountId?: string;
+    referenceId?: string;
+    skipServerBroadcast?: boolean;
+  } => {
+    const text = `${title} ${message}`.toLowerCase();
+    let category: NotificationCategory = explicit?.category || 'promo';
+    if (!explicit?.category) {
+      if (text.includes('pinjam') || text.includes('angsuran') || text.includes('kredit')) {
+        category = 'loan';
+      } else if (
+        text.includes('kunci') ||
+        text.includes('blokir') ||
+        text.includes('freeze') ||
+        text.includes('banned') ||
+        text.includes('unban') ||
+        text.includes('pin') ||
+        text.includes('keamanan') ||
+        text.includes('nomor rekening') ||
+        text.includes('kartu')
+      ) {
+        category = 'security';
+      } else if (
+        text.includes('transfer') ||
+        text.includes('tarik') ||
+        text.includes('setor') ||
+        text.includes('transaksi') ||
+        text.includes('pesanan') ||
+        text.includes('pembeli') ||
+        text.includes('mutasi') ||
+        text.includes('emas') ||
+        text.includes('deposito') ||
+        text.includes('tagihan') ||
+        text.includes('pulsa') ||
+        text.includes('token')
+      ) {
+        category = 'transaction';
+      } else {
+        category = 'promo';
+      }
+    }
+
+    const defaultView =
+      category === 'promo' ? 'dashboard' : 'dashboard';
+    const defaultTab =
+      category === 'loan'
+        ? 'pinjaman'
+        : category === 'security'
+        ? 'keamanan'
+        : category === 'transaction'
+        ? 'mutasi'
+        : 'ringkasan';
+
     return {
-      success: false,
-      message: 'Fitur notifikasi telah dinonaktifkan.',
+      category,
+      targetView: explicit?.targetView || defaultView,
+      targetDashboardTab: explicit?.targetDashboardTab || defaultTab,
+      accountId: explicit?.accountId,
+      referenceId: explicit?.referenceId,
+      skipServerBroadcast: explicit?.skipServerBroadcast,
     };
   };
 
+  const isCategoryAlertEnabled = (category: NotificationCategory): boolean => {
+    const currentSettings = userSettingsRef.current;
+    if (category === 'transaction') return currentSettings.pushTransactionAlerts !== false;
+    if (category === 'loan') return currentSettings.pushLoanAlerts !== false;
+    if (category === 'security') return currentSettings.pushSecurityAlerts !== false;
+    return currentSettings.pushPromoAlerts !== false;
+  };
+
+  const triggerMobileAndNativeNotification = (
+    title: string,
+    message: string,
+    type: 'info' | 'success' | 'warning' | 'alert' | 'admin_chat' = 'info',
+    meta?: {
+      category?: NotificationCategory;
+      targetView?: string;
+      targetDashboardTab?: string;
+      accountId?: string;
+      referenceId?: string;
+    }
+  ) => {
+    if (!notificationsEnabledRef.current) return;
+
+    const resolvedMeta = inferNotificationMeta(title, message, meta);
+    const bannerId = `push-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const newBanner: MobilePushBannerToast = {
+      id: bannerId,
+      title,
+      message,
+      type,
+      category: resolvedMeta.category,
+      targetView: resolvedMeta.targetView,
+      targetDashboardTab: resolvedMeta.targetDashboardTab,
+      accountId: resolvedMeta.accountId,
+      referenceId: resolvedMeta.referenceId,
+      timestamp: new Date().toISOString(),
+    };
+
+    setActivePushBanners((prev) => [newBanner, ...prev].slice(0, 5));
+    setTimeout(() => {
+      setActivePushBanners((prev) => prev.filter((b) => b.id !== bannerId));
+    }, 6500);
+
+    try {
+      if (userSettingsRef.current.notificationChimeSound) {
+        playAtmSound('beep');
+      }
+    } catch { /* empty */ }
+
+    // Background OS / Browser Notification via Service Worker + Fallback Notification API
+    try {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        const tag = `bn-${resolvedMeta.category}-${type}-${Date.now()}`;
+        const deepUrl = `/?notifView=${encodeURIComponent(resolvedMeta.targetView)}&notifTab=${encodeURIComponent(
+          resolvedMeta.targetDashboardTab
+        )}`;
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready
+            .then((reg) => {
+              if (reg && typeof reg.showNotification === 'function') {
+                return reg.showNotification(title, {
+                  body: message,
+                  tag,
+                  data: {
+                    url: deepUrl,
+                    targetView: resolvedMeta.targetView,
+                    targetDashboardTab: resolvedMeta.targetDashboardTab,
+                    category: resolvedMeta.category,
+                  },
+                });
+              }
+              if (reg && reg.active) {
+                reg.active.postMessage({
+                  type: 'SHOW_BANK_NOTIFICATION',
+                  title,
+                  body: message,
+                  tag,
+                  url: deepUrl,
+                  targetView: resolvedMeta.targetView,
+                  targetDashboardTab: resolvedMeta.targetDashboardTab,
+                  category: resolvedMeta.category,
+                });
+              }
+              return undefined;
+            })
+            .catch(() => {
+              try {
+                new Notification(title, { body: message, tag });
+              } catch { /* empty */ }
+            });
+        } else {
+          new Notification(title, { body: message, tag });
+        }
+      }
+    } catch { /* empty */ }
+  };
+
+  const requestAndEnableNotifications = async (): Promise<{ success: boolean; message: string }> => {
+    setNotificationsEnabled(true);
+    setBackgroundAutoNotifEnabled(true);
+
+    try {
+      if (typeof window === 'undefined' || !('Notification' in window)) {
+        triggerMobileAndNativeNotification(
+          'Notifikasi Aplikasi Aktif',
+          'Banner push & lonceng Bank Nusantara aktif. Perangkat ini tidak mendukung native browser push.',
+          'info'
+        );
+        return {
+          success: true,
+          message: 'Notifikasi banner aplikasi & lonceng aktif (browser tidak mendukung native OS push).',
+        };
+      }
+
+      if (Notification.permission === 'granted') {
+        setNotificationPermissionStatus('granted');
+        triggerMobileAndNativeNotification(
+          'Notifikasi Latar Belakang Aktif 🔔',
+          'Semua transaksi, Spin the Wheel, promo berkala, dan kode redeem siap dikirim ke layar Anda.',
+          'success'
+        );
+        return {
+          success: true,
+          message: 'Izin notifikasi latar belakang sudah aktif! Notifikasi siap diterima kapan saja.',
+        };
+      }
+
+      const permission = await Notification.requestPermission();
+      setNotificationPermissionStatus(permission);
+
+      if (permission === 'granted') {
+        triggerMobileAndNativeNotification(
+          'Notifikasi Latar Belakang Diaktifkan 🔔',
+          'Bank Nusantara kini dapat mengirim notifikasi meski tab ditutup atau diminimalkan.',
+          'success'
+        );
+        return {
+          success: true,
+          message: 'Berhasil! Izin notifikasi latar belakang browser & Service Worker telah diaktifkan.',
+        };
+      }
+
+      triggerMobileAndNativeNotification(
+        'Mode Banner Aplikasi Aktif',
+        'Izin browser belum diberikan, notifikasi tetap muncul melalui lonceng dan banner di dalam aplikasi.',
+        'warning'
+      );
+      return {
+        success: permission !== 'denied',
+        message:
+          permission === 'denied'
+            ? 'Izin browser diblokir oleh perangkat, namun notifikasi banner aplikasi & lonceng tetap berjalan aktif.'
+            : 'Permintaan izin ditutup. Notifikasi dalam aplikasi tetap aktif.',
+      };
+    } catch {
+      triggerMobileAndNativeNotification(
+        'Notifikasi Aplikasi Aktif',
+        'Banner push & lonceng Bank Nusantara aktif untuk seluruh aktivitas rekening.',
+        'info'
+      );
+      return {
+        success: true,
+        message: 'Notifikasi banner aplikasi & lonceng aktif.',
+      };
+    }
+  };
+
   const sendTestNotificationNow = () => {
-    // Disabled
+    addNotification(
+      'Tes Notifikasi Latar Belakang Berhasil 🔔',
+      'Notifikasi Bank Nusantara aktif di lonceng aplikasi, push banner, dan Service Worker latar belakang.',
+      'success'
+    );
+  };
+
+  const sendBulkNotifications = (
+    count: number,
+    customTitle?: string,
+    customMessage?: string
+  ): { success: boolean; message: string; sentCount: number } => {
+    const safeCount = Math.max(1, Math.min(25, Math.floor(count || 5)));
+    const templates: Array<{
+      title: string;
+      message: string;
+      type: 'info' | 'success' | 'warning' | 'alert';
+    }> = [
+      {
+        title: 'Promo Hemat 0,50% Koin Spin 🪙',
+        message: 'Beli paket koin Spin (Rp xxx.XXX) lebih murah 0,50% dibanding Spin Pakai Uang Langsung!',
+        type: 'success',
+      },
+      {
+        title: 'Jackpot Spin Rp 20.000.000 Menanti 🎡',
+        message: 'Putar Spin the Wheel 1x, 3x, 5x, 7x, atau 10x langsung pakai Koin maupun Saldo Rekening.',
+        type: 'info',
+      },
+      {
+        title: 'Pantau Mutasi & Saldo Rekening Real-Time 💳',
+        message: 'Semua transaksi keluar-masuk tersimpan aman di Server Database & Penyimpanan Perangkat.',
+        type: 'info',
+      },
+      {
+        title: 'Tabungan Emas 24K & Transfer Bebas 🪙',
+        message: 'Cek pergerakan harga Emas 24K hari ini dan nikmati Transfer Bebas lintas aset.',
+        type: 'success',
+      },
+      {
+        title: 'Pengingat Keamanan PIN Kartu 6 Digit 🔐',
+        message: 'Jangan bagikan PIN 6 digit kartu Anda kepada siapa pun demi keamanan dana.',
+        type: 'warning',
+      },
+      {
+        title: 'Info Kode Redeem Bank Nusantara 🎁',
+        message: 'Segera tukarkan Kode Redeem aktif sebelum kuota klaim atau durasi waktunya habis!',
+        type: 'info',
+      },
+      {
+        title: 'Peluang Gaji Lowongan Kerja & Arena Suit 💼',
+        message: 'Tingkatkan level pekerjaan dan menangkan Voucher Level untuk membuka penghasilan lebih tinggi.',
+        type: 'success',
+      },
+    ];
+
+    for (let i = 0; i < safeCount; i++) {
+      const tpl = templates[i % templates.length];
+      const title = customTitle?.trim()
+        ? safeCount > 1
+          ? `${customTitle.trim()} (#${i + 1})`
+          : customTitle.trim()
+        : `${tpl.title} • #${i + 1}`;
+      const message = customMessage?.trim() ? customMessage.trim() : tpl.message;
+
+      setTimeout(() => {
+        addNotification(title, message, tpl.type);
+      }, i * 220);
+    }
+
+    return {
+      success: true,
+      sentCount: safeCount,
+      message: `${safeCount} notifikasi latar belakang & banner aplikasi sedang dikirim bertahap ke nasabah!`,
+    };
   };
 
   // Real-time WebSocket + HTTP Sync across ALL Phones ("di semua HP")
@@ -2220,6 +2573,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const seenChatIdsRef = useRef<Set<string>>(new Set(globalChats.map((c) => c.id)));
   const seenPopupIdsRef = useRef<Set<string>>(new Set(websitePopups.map((p) => p.id)));
   const seenBugIdsRef = useRef<Set<string>>(new Set(bugReports.map((b) => b.id)));
+  const seenPushIdsRef = useRef<Set<string>>(new Set(notifications.map((n) => n.id)));
 
   useEffect(() => {
     globalChats.forEach((c) => seenChatIdsRef.current.add(c.id));
@@ -2332,6 +2686,46 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (Array.isArray(data.bugReports)) {
           setBugReports(data.bugReports);
         }
+
+        if (Array.isArray(data.pushAlerts)) {
+          const incomingAlerts: AppNotification[] = data.pushAlerts;
+          incomingAlerts.forEach((incomingAlert) => {
+            if (!incomingAlert || !incomingAlert.id) return;
+            if (isInitial) {
+              seenPushIdsRef.current.add(incomingAlert.id);
+              return;
+            }
+            if (!seenPushIdsRef.current.has(incomingAlert.id)) {
+              seenPushIdsRef.current.add(incomingAlert.id);
+              const resolvedMeta = inferNotificationMeta(incomingAlert.title, incomingAlert.message, {
+                category: incomingAlert.category,
+                targetView: incomingAlert.targetView,
+                targetDashboardTab: incomingAlert.targetDashboardTab,
+              });
+              if (isCategoryAlertEnabled(resolvedMeta.category)) {
+                setNotifications((prev) => {
+                  if (prev.some((n) => n.id === incomingAlert.id)) return prev;
+                  return [
+                    {
+                      ...incomingAlert,
+                      category: resolvedMeta.category,
+                      targetView: resolvedMeta.targetView,
+                      targetDashboardTab: resolvedMeta.targetDashboardTab,
+                      read: false,
+                    },
+                    ...prev,
+                  ].slice(0, 180);
+                });
+                triggerMobileAndNativeNotification(
+                  incomingAlert.title,
+                  incomingAlert.message,
+                  incomingAlert.type || 'info',
+                  resolvedMeta
+                );
+              }
+            }
+          });
+        }
       } catch {
         // ignore offline
       }
@@ -2373,6 +2767,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               if (Array.isArray(msg.payload.bugReports)) {
                 setBugReports(msg.payload.bugReports);
               }
+              if (Array.isArray(msg.payload.pushAlerts)) {
+                msg.payload.pushAlerts.forEach((pa: AppNotification) => seenPushIdsRef.current.add(pa.id));
+              }
               if (typeof msg.payload.connectedDevices === 'number') {
                 setConnectedDevicesCount(Math.max(1, msg.payload.connectedDevices));
               }
@@ -2388,6 +2785,37 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               setGlobalChats([]);
             } else if (msg.type === 'website_popup:new' && msg.payload?.popup) {
               handleIncomingPopup(msg.payload.popup, true);
+            } else if (msg.type === 'push_alert:new' && msg.payload?.alert) {
+              const incomingAlert = msg.payload.alert as AppNotification;
+              if (incomingAlert.id && !seenPushIdsRef.current.has(incomingAlert.id)) {
+                seenPushIdsRef.current.add(incomingAlert.id);
+                const resolvedMeta = inferNotificationMeta(incomingAlert.title, incomingAlert.message, {
+                  category: incomingAlert.category,
+                  targetView: incomingAlert.targetView,
+                  targetDashboardTab: incomingAlert.targetDashboardTab,
+                });
+                if (isCategoryAlertEnabled(resolvedMeta.category)) {
+                  setNotifications((prev) => {
+                    if (prev.some((n) => n.id === incomingAlert.id)) return prev;
+                    return [
+                      {
+                        ...incomingAlert,
+                        category: resolvedMeta.category,
+                        targetView: resolvedMeta.targetView,
+                        targetDashboardTab: resolvedMeta.targetDashboardTab,
+                        read: false,
+                      },
+                      ...prev,
+                    ].slice(0, 180);
+                  });
+                  triggerMobileAndNativeNotification(
+                    incomingAlert.title,
+                    incomingAlert.message,
+                    incomingAlert.type || 'info',
+                    resolvedMeta
+                  );
+                }
+              }
             } else if (msg.type === 'bug_report:new' && msg.payload?.bugReport) {
               const incomingBug: BugReportRecord = msg.payload.bugReport;
               seenBugIdsRef.current.add(incomingBug.id);
@@ -2678,19 +3106,168 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const unreadNotificationCount = notifications.filter((n) => !n.read).length;
 
-  const addNotification = (title: string, message: string, type: 'info' | 'success' | 'warning' | 'alert' = 'info') => {
+  const addNotification = (
+    title: string,
+    message: string,
+    type: 'info' | 'success' | 'warning' | 'alert' = 'info',
+    meta?: {
+      category?: NotificationCategory;
+      targetView?: string;
+      targetDashboardTab?: string;
+      accountId?: string;
+      referenceId?: string;
+      skipServerBroadcast?: boolean;
+    }
+  ) => {
+    const resolvedMeta = inferNotificationMeta(title, message, meta);
+    if (!isCategoryAlertEnabled(resolvedMeta.category)) {
+      return;
+    }
+
+    const notifId = `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    seenPushIdsRef.current.add(notifId);
+
     const newNotif: AppNotification = {
-      id: `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: notifId,
       title,
       message,
       type,
+      category: resolvedMeta.category,
+      targetView: resolvedMeta.targetView,
+      targetDashboardTab: resolvedMeta.targetDashboardTab,
+      accountId: resolvedMeta.accountId,
+      referenceId: resolvedMeta.referenceId,
       timestamp: new Date().toISOString(),
       read: false,
     };
-    setNotifications((prev) => [newNotif, ...prev]);
-    // Also show top mobile push banner & native browser notification!
-    triggerMobileAndNativeNotification(title, message, type);
+    setNotifications((prev) => [newNotif, ...prev].slice(0, 180));
+
+    // Also show top mobile push banner & background Service Worker / native browser notification!
+    triggerMobileAndNativeNotification(title, message, type, resolvedMeta);
+
+    // Broadcast real-time push alert across WebSocket server if connected
+    if (!meta?.skipServerBroadcast) {
+      try {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              type: 'push_alert:send',
+              payload: newNotif,
+            })
+          );
+        }
+      } catch {
+        // ignore WS send error
+      }
+    }
   };
+
+  const emitPinSecurityAlert = (targetAccountName?: string, contextLabel?: string) => {
+    addNotification(
+      'Peringatan Keamanan: Percobaan PIN Gagal 🚨',
+      `Terdeteksi percobaan memasukkan kode PIN yang salah${targetAccountName ? ` pada akun ${targetAccountName}` : ''}${contextLabel ? ` (${contextLabel})` : ''}. Segera periksa keamanan kartu Anda.`,
+      'alert',
+      {
+        category: 'security',
+        targetView: 'dashboard',
+        targetDashboardTab: 'keamanan',
+        skipServerBroadcast: true,
+      }
+    );
+  };
+
+  // Background Periodic & Tab-Hidden Multi-Notification Scheduler
+  const bgNotifTickRef = useRef<number>(0);
+  useEffect(() => {
+    if (!notificationsEnabled || !backgroundAutoNotifEnabled || !googleUser?.hasCompletedOnboarding) {
+      return;
+    }
+
+    const bgEvents: Array<{
+      title: string;
+      getBody: () => string;
+      type: 'info' | 'success' | 'warning';
+      category: NotificationCategory;
+      targetDashboardTab: string;
+    }> = [
+      {
+        title: 'Hemat 0,50% Beli Koin Spin 🪙',
+        getBody: () =>
+          `Beli 100 Koin hanya sekitar Rp 994.xxx–995.xxx (lebih murah 0,50% dari Spin Uang Langsung).`,
+        type: 'success',
+        category: 'promo',
+        targetDashboardTab: 'ringkasan',
+      },
+      {
+        title: 'Ringkasan Rekening Bank Nusantara 💳',
+        getBody: () =>
+          `Rekening ${currentAccount?.fullName || 'Anda'} aktif • Koin Spin: ${(
+            currentAccount?.spinCoins || 0
+          ).toLocaleString('id-ID')} Koin.`,
+        type: 'info',
+        category: 'transaction',
+        targetDashboardTab: 'mutasi',
+      },
+      {
+        title: 'Peluang Spin Berhadiah s/d Rp 20 Juta 🎡',
+        getBody: () =>
+          'Coba keberuntungan Anda sekarang pakai Koin Spin atau langsung pakai Saldo Uang Rekening.',
+        type: 'info',
+        category: 'promo',
+        targetDashboardTab: 'ringkasan',
+      },
+      {
+        title: 'Keamanan Akun & Proteksi PIN 🔐',
+        getBody: () =>
+          'Notifikasi latar belakang terus memantau penguncian kartu, PIN, dan aktivitas rekening Anda.',
+        type: 'warning',
+        category: 'security',
+        targetDashboardTab: 'keamanan',
+      },
+      {
+        title: 'Pantau Pinjaman & Kode Redeem 🎁',
+        getBody: () =>
+          'Cek status pengajuan pinjaman online atau klaim Kode Redeem yang dibagikan Admin sebelum kuota penuh!',
+        type: 'success',
+        category: 'loan',
+        targetDashboardTab: 'pinjaman',
+      },
+    ];
+
+    const dispatchBackgroundRound = () => {
+      const idx = bgNotifTickRef.current % bgEvents.length;
+      bgNotifTickRef.current += 1;
+      const item = bgEvents[idx];
+      addNotification(item.title, item.getBody(), item.type, {
+        category: item.category,
+        targetView: 'dashboard',
+        targetDashboardTab: item.targetDashboardTab,
+        skipServerBroadcast: true,
+      });
+    };
+
+    const intervalId = window.setInterval(() => {
+      dispatchBackgroundRound();
+    }, 32_000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        dispatchBackgroundRound();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [
+    notificationsEnabled,
+    backgroundAutoNotifEnabled,
+    googleUser?.hasCompletedOnboarding,
+    currentAccount?.id,
+    currentAccount?.spinCoins,
+  ]);
 
   const markNotificationAsRead = (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
@@ -2739,6 +3316,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     maxClaims: number;
     durationMinutes: number;
     requireAdminPin?: boolean;
+    sendNotification?: boolean;
   }) => {
     const cleanCode = input.code.trim().toUpperCase().replace(/\s+/g, '');
     if (!cleanCode || cleanCode.length < 3) {
@@ -2751,6 +3329,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Nominal, kuota orang, dan durasi harus lebih dari 0!' };
     }
 
+    const shouldNotify = input.sendNotification !== false;
     const now = Date.now();
     const newRedeem: RedeemCode = {
       id: `rdm-${now}`,
@@ -2764,18 +3343,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       durationMinutes: input.durationMinutes,
       active: true,
       requireAdminPin: input.requireAdminPin || false,
+      sendNotification: shouldNotify,
     };
 
     setRedeemCodes((prev) => [newRedeem, ...prev]);
-    addNotification(
-      'Kode Redeem Baru Dibuat 🎁',
-      `Kode "${cleanCode}" senilai Rp ${input.rewardAmount.toLocaleString('id-ID')} aktif untuk ${input.maxClaims} orang selama ${input.durationMinutes} menit.`,
-      'success'
-    );
+    if (shouldNotify) {
+      addNotification(
+        'Kode Redeem Baru Dibuat 🎁',
+        `Kode "${cleanCode}" senilai Rp ${input.rewardAmount.toLocaleString('id-ID')} aktif untuk ${input.maxClaims} orang selama ${input.durationMinutes} menit.`,
+        'success'
+      );
+    }
     playAtmSound('success');
     return {
       success: true,
-      message: `Kode Redeem "${cleanCode}" berhasil dibuat! Berlaku untuk ${input.maxClaims} orang selama ${input.durationMinutes} menit.`,
+      message: `Kode Redeem "${cleanCode}" berhasil dibuat (${
+        shouldNotify ? 'dengan notifikasi ke nasabah' : 'mode senyap tanpa notifikasi'
+      })! Berlaku untuk ${input.maxClaims} orang selama ${input.durationMinutes} menit.`,
       redeemCode: newRedeem,
     };
   };
@@ -3863,32 +4447,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     addNotification(
       'Permohonan Kartu Baru Menunggu Persetujuan Admin ⏳',
-      `Pembuatan ${CARD_TIER_CONFIGS[finalTier].nameIndo} atas nama ${data.fullName} berhasil diajukan! Pembuatan kartu harus disetujui Admin terlebih dahulu di Panel Admin sebelum Tutorial Lengkap Aplikasi terbuka.`,
-      'info'
+      `Pembuatan ${CARD_TIER_CONFIGS[finalTier].nameIndo} atas nama ${data.fullName} berhasil diajukan dan sedang menunggu persetujuan Admin.`,
+      'info',
+      {
+        category: 'security',
+        targetView: 'simulasi_rekening',
+        targetDashboardTab: 'keamanan',
+        accountId: newAccount.id,
+      }
     );
 
     return {
       success: true,
       message:
-        'Permohonan kartu baru berhasil dikirim! Pembuatan kartu harus disetujui Admin dulu di Panel Admin baru Tutorial Lengkap terbuka.',
+        'Permohonan kartu baru berhasil dikirim dan sedang menunggu persetujuan Admin.',
       accountId: newAccount.id,
     };
-  };
-
-  const markTutorialCompleted = (accountId?: string) => {
-    const targetId = accountId || currentAccount?.id;
-    if (!targetId) return;
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === targetId
-          ? {
-              ...acc,
-              hasCompletedTutorial: true,
-              tutorialApprovedByAdmin: true,
-            }
-          : acc
-      )
-    );
   };
 
   const adminApproveCard = (accountId: string) => {
@@ -3908,7 +4482,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             balance: acc.initialDeposit,
             rejectionReason: undefined,
             tutorialApprovedByAdmin: true,
-            hasCompletedTutorial: false,
+            hasCompletedTutorial: true,
           };
         }
         return acc;
@@ -3932,13 +4506,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setTransactions((prev) => [depositTx, ...prev]);
 
     addNotification(
-      '🎓 Kartu Disetujui Admin & Tutorial Lengkap Terbuka! 🎉',
-      `Selamat! Pembuatan ${CARD_TIER_CONFIGS[target.cardTier].nameIndo} (${finalAccountNumber}) telah disetujui Admin. Tutorial Lengkap Seluruh Tombol & Fitur kini terbuka untuk kartu Anda!`,
-      'success'
+      'Kartu Disetujui Admin & Siap Digunakan! 🎉',
+      `Selamat! Pembuatan ${CARD_TIER_CONFIGS[target.cardTier].nameIndo} (${finalAccountNumber}) telah disetujui Admin dan kini aktif digunakan.`,
+      'success',
+      {
+        category: 'security',
+        targetView: 'simulasi_rekening',
+        targetDashboardTab: 'keamanan',
+        accountId,
+      }
     );
-
-    // Otomatis buka Tutorial Lengkap begitu pembuatan kartu disetujui Admin!
-    setIsTutorialModalOpen(true);
 
     try {
       confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
@@ -3947,7 +4524,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     return {
       success: true,
-      message: `Kartu ${target.fullName} berhasil disetujui Admin & Tutorial Lengkap Aplikasi telah dibuka!`,
+      message: `Kartu ${target.fullName} berhasil disetujui Admin dan kini aktif digunakan!`,
     };
   };
 
@@ -3971,7 +4548,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     addNotification(
       'Permohonan Kartu Ditolak ❌',
       `Permohonan kartu Anda belum dapat disetujui. Alasan: ${reason}. Anda dapat memperbaiki data dan mengajukan kembali.`,
-      'alert'
+      'alert',
+      {
+        category: 'security',
+        targetView: 'simulasi_rekening',
+        targetDashboardTab: 'keamanan',
+        accountId,
+      }
     );
 
     playAtmSound('alert');
@@ -3984,6 +4567,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (target.pin !== pin) {
       playAtmSound('alert');
+      emitPinSecurityAlert(target.fullName, 'Penguncian/Pembukaan Kunci Kartu');
       return { success: false, message: 'Kode PIN kartu salah! Tindakan keamanan dibatalkan.' };
     }
 
@@ -4001,7 +4585,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       addNotification(
         'Kartu Berhasil Dikunci 🔐',
         'Kartu ATM Mandiri Debit Anda berhasil dikunci sementara dengan verifikasi PIN.',
-        'warning'
+        'warning',
+        {
+          category: 'security',
+          targetView: 'dashboard',
+          targetDashboardTab: 'keamanan',
+          accountId,
+        }
       );
       playAtmSound('alert');
       return { success: true, message: 'Kartu ATM Debit berhasil dikunci sementara!', newStatus: nextStatus };
@@ -4009,7 +4599,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       addNotification(
         'Blokir Kartu Dibuka 🔓',
         'Kartu ATM Mandiri Debit Anda telah dibuka blokirnya dengan verifikasi PIN.',
-        'success'
+        'success',
+        {
+          category: 'security',
+          targetView: 'dashboard',
+          targetDashboardTab: 'keamanan',
+          accountId,
+        }
       );
       playAtmSound('success');
       return { success: true, message: 'Blokir kartu berhasil dibuka!', newStatus: nextStatus };
@@ -4019,9 +4615,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const regenerateAccountNumberWithPin = (accountId: string, pin: string) => {
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Akun tidak ditemukan' };
-    // Terima PIN Kartu ATAU Kode Admin (159357)
+    // Terima PIN Kartu ATAU Kode Admin
     if (target.pin !== pin && pin !== '159357') {
       playAtmSound('alert');
+      emitPinSecurityAlert(target.fullName, 'Acak Ulang Nomor Rekening');
       return { success: false, message: 'Kode PIN / Kode Admin salah!' };
     }
 
@@ -4035,7 +4632,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     addNotification(
       'Nomor Rekening Baru Diterbitkan 🔄',
       `Sistem Bank Nusantara telah secara otomatis mengacak nomor rekening baru Anda: ${newNumber}.`,
-      'info'
+      'info',
+      {
+        category: 'security',
+        targetView: 'dashboard',
+        targetDashboardTab: 'keamanan',
+        accountId,
+      }
     );
 
     playAtmSound('success');
@@ -4043,11 +4646,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   /**
-  /**
    * LOGIN / PINDAH KE KARTU LAMA MENGGUNAKAN PIN KARTU LAMA (6 DIGIT PIN KARTU, BUKAN PIN ADMIN!)
-   * Sesuai permintaan user:
-   * "Jika kita lupa, untuk ganti contohnya aku kan mau ganti ke kartu ku yang lama, itu tuh pakai pin kartu bukan pakai pin admin, tapi pakai pin kartu kita yang lama.
-   * Contohnya aku kan punya kartu baru dan juga kartu lama. Nah, kartu barunya aku mau aku login. Nah, aku mau login ke kartu lama. Nah, itu juga kita membutuhkan kita harus tahu pin kartu lama kita."
    */
   const loginToCardWithPin = (targetAccountId: string, cardPin: string) => {
     const targetAcc = accounts.find((a) => a.id === targetAccountId);
@@ -4062,9 +4661,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (!isCardPinMatch && !isAdminPinMatch) {
       playAtmSound('alert');
+      emitPinSecurityAlert(targetAcc.fullName, 'Login Ganti Kartu');
       return {
         success: false,
-        message: `PIN salah! Untuk masuk/ganti ke kartu ${targetAcc.fullName} (${targetAcc.accountNumber}), masukkan 6 digit PIN Kartu tersebut atau PIN Admin (159357). Jika lupa PIN, klik tombol "Lupa PIN Kartu?" untuk ditinjau Admin.`,
+        message: `PIN salah! Untuk masuk/ganti ke kartu ${targetAcc.fullName} (${targetAcc.accountNumber}), masukkan 6 digit PIN Kartu tersebut atau PIN Admin. Jika lupa PIN, klik tombol "Lupa PIN Kartu?" untuk ditinjau Admin.`,
       };
     }
 
@@ -4083,9 +4683,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     addNotification(
       'Berhasil Login ke Kartu Anda! 💳',
       `Anda telah berhasil masuk ke kartu milik ${targetAcc.fullName} (No. Rekening: ${targetAcc.accountNumber}) menggunakan ${
-        isAdminPinMatch && !isCardPinMatch ? 'otorisasi PIN Admin (159357)' : 'verifikasi 6 digit PIN Kartu'
+        isAdminPinMatch && !isCardPinMatch ? 'otorisasi PIN Admin' : 'verifikasi 6 digit PIN Kartu'
       }.`,
-      'success'
+      'success',
+      {
+        category: 'security',
+        targetView: 'dashboard',
+        targetDashboardTab: 'keamanan',
+        accountId: targetAcc.id,
+      }
     );
     playAtmSound('success');
 
@@ -4302,7 +4908,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ? ' Status Banned Permanen tidak dapat diajukan tinjauan ulang oleh nasabah, namun tetap bisa dibuka di Panel Admin.'
           : ' Kartu akan otomatis terbuka begitu hitung mundur waktu selesai.'
       }`,
-      'alert'
+      'alert',
+      {
+        category: 'security',
+        targetView: 'dashboard',
+        targetDashboardTab: 'keamanan',
+        accountId: target.id,
+      }
     );
 
     playAtmSound('alert');
@@ -4348,7 +4960,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     addNotification(
       '🔓 Sistem Website: Banned Kartu Telah Dibuka!',
       `Status BANNED pada kartu ${target.fullName} (${target.accountNumber}) telah dibuka. Kartu kini kembali AKTIF.`,
-      'success'
+      'success',
+      {
+        category: 'security',
+        targetView: 'dashboard',
+        targetDashboardTab: 'keamanan',
+        accountId: target.id,
+      }
     );
     try {
       confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
@@ -5014,6 +5632,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return { ...acc, cardStatus: freeze ? 'frozen' : 'active' };
       })
     );
+    addNotification(
+      freeze ? 'Peringatan Keamanan: Kunci Kartu Massal 🔐' : 'Keamanan Kartu: Kunci Massal Dibuka 🔓',
+      freeze
+        ? 'Seluruh kartu reguler nasabah telah dikunci sementara (Frozen) oleh Administrator demi keamanan.'
+        : 'Seluruh kartu nasabah yang terkunci telah dibuka kembali (Active) dan siap digunakan.',
+      freeze ? 'warning' : 'success',
+      {
+        category: 'security',
+        targetView: 'dashboard',
+        targetDashboardTab: 'keamanan',
+      }
+    );
     playAtmSound('success');
     return {
       success: true,
@@ -5337,7 +5967,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     addNotification(
       'PIN Kartu Berhasil Diubah 🛡️',
       'Kode PIN kartu ATM Anda telah berhasil diperbarui.',
-      'success'
+      'success',
+      {
+        category: 'security',
+        targetView: 'dashboard',
+        targetDashboardTab: 'keamanan',
+        accountId,
+      }
     );
     playAtmSound('success');
     return { success: true, message: 'PIN berhasil diubah!' };
@@ -6081,7 +6717,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     setLoans((prev) => [newLoan, ...prev]);
-    addNotification('Pengajuan Pinjaman Sedang Diproses 📋', `Permohonan ${config.title} sebesar Rp ${input.amount.toLocaleString('id-ID')} sedang diproses oleh sistem Bank Nusantara.`, 'info');
+    addNotification(
+      'Pengajuan Pinjaman Sedang Diproses 📋',
+      `Permohonan ${config.title} sebesar Rp ${input.amount.toLocaleString('id-ID')} sedang diproses oleh sistem Bank Nusantara.`,
+      'info',
+      {
+        category: 'loan',
+        targetView: 'dashboard',
+        targetDashboardTab: 'pinjaman',
+        accountId: currentAccount.id,
+        referenceId: newLoan.id,
+      }
+    );
     return {
       success: true,
       message: 'Permohonan pinjaman online berhasil diajukan dan saat ini sedang diproses!',
@@ -6131,7 +6778,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     setTransactions((prev) => [disburseTx, ...prev]);
 
-    addNotification('Pinjaman Disetujui & Cair! 💸', `Pinjaman Anda sebesar Rp ${loan.amount.toLocaleString('id-ID')} telah disetujui Admin dan dana telah langsung masuk ke rekening Anda.`, 'success');
+    addNotification(
+      'Pinjaman Disetujui & Cair! 💸',
+      `Pinjaman Anda sebesar Rp ${loan.amount.toLocaleString('id-ID')} telah disetujui Admin dan dana telah langsung masuk ke rekening Anda.`,
+      'success',
+      {
+        category: 'loan',
+        targetView: 'dashboard',
+        targetDashboardTab: 'pinjaman',
+        accountId: targetAccount.id,
+        referenceId: loanId,
+      }
+    );
     try {
       confetti({ particleCount: 80, spread: 70, origin: { y: 0.5 } });
     } catch { /* empty */ }
@@ -6156,7 +6814,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       )
     );
 
-    addNotification('Pengajuan Pinjaman Ditolak ⚠️', `Pengajuan pinjaman Anda belum dapat disetujui. Alasan: ${reason}.`, 'alert');
+    addNotification(
+      'Pengajuan Pinjaman Ditolak ⚠️',
+      `Pengajuan pinjaman Anda belum dapat disetujui. Alasan: ${reason}.`,
+      'alert',
+      {
+        category: 'loan',
+        targetView: 'dashboard',
+        targetDashboardTab: 'pinjaman',
+        accountId: loan.accountId,
+        referenceId: loanId,
+      }
+    );
     return { success: true, message: 'Pengajuan pinjaman telah ditolak.' };
   };
 
@@ -7986,7 +8655,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { segment: SPIN_WHEEL_PRIZES[lastIdx], index: lastIdx };
   };
 
-  const spinTheWheel = (spinCount: 1 | 3 | 5 | 7 | 10) => {
+  const spinTheWheel = (
+    spinCount: 1 | 3 | 5 | 7 | 10,
+    paymentMethod: 'coins' | 'cash' = 'coins'
+  ) => {
     if (!currentAccount) {
       return { success: false, message: 'Silakan login ke kartu rekening terlebih dahulu.' };
     }
@@ -7997,19 +8669,41 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    const { finalCoins } = calculateSpinCost(spinCount, spinWheelConfig);
     const currentCoins = currentAccount.spinCoins || 0;
+    const isAdminCard =
+      currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
 
-    if (currentCoins < finalCoins) {
-      playAtmSound('error');
-      return {
-        success: false,
-        message: `Koin Spin Anda belum mencukupi untuk ${spinCount}x Spin! Dibutuhkan ${finalCoins.toLocaleString(
-          'id-ID'
-        )} Koin (Koin Anda saat ini: ${currentCoins.toLocaleString(
-          'id-ID'
-        )} Koin). Silakan klik tombol [+] di sebelah gambar koin di atas untuk membeli koin!`,
-      };
+    let coinsToSpend = 0;
+    let rupiahToSpend = 0;
+
+    if (paymentMethod === 'cash') {
+      const cashCost = calculateCashSpinCost(spinCount, spinWheelConfig);
+      rupiahToSpend = cashCost.finalRupiah;
+      if (!isAdminCard && currentAccount.balance < rupiahToSpend) {
+        playAtmSound('error');
+        return {
+          success: false,
+          message: `Saldo rekening Anda tidak mencukupi untuk ${spinCount}x Spin Pakai Uang Langsung! Dibutuhkan ${formatRupiahWithDecimals(
+            rupiahToSpend
+          )} (Saldo Anda: ${formatRupiahWithDecimals(
+            currentAccount.balance
+          )}). Tip: Beli Koin Spin lebih murah 0,50%!`,
+        };
+      }
+    } else {
+      const { finalCoins } = calculateSpinCost(spinCount, spinWheelConfig);
+      coinsToSpend = finalCoins;
+      if (currentCoins < coinsToSpend) {
+        playAtmSound('error');
+        return {
+          success: false,
+          message: `Koin Spin Anda belum mencukupi untuk ${spinCount}x Spin! Dibutuhkan ${coinsToSpend.toLocaleString(
+            'id-ID'
+          )} Koin (Koin Anda saat ini: ${currentCoins.toLocaleString(
+            'id-ID'
+          )} Koin). Beli koin di tombol [+] (lebih murah 0,50%) atau pilih Spin Pakai Uang Langsung!`,
+        };
+      }
     }
 
     const results: { segment: SpinPrizeSegment; index: number }[] = [];
@@ -8021,12 +8715,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       totalWonAmount += picked.segment.amount;
     }
 
-    const newCoinBalance = Math.max(0, currentCoins - finalCoins);
-    const isAdminCard =
-      currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+    const newCoinBalance =
+      paymentMethod === 'coins' ? Math.max(0, currentCoins - coinsToSpend) : currentCoins;
     const newAccountBalance = isAdminCard
       ? UNLIMITED_BALANCE
-      : currentAccount.balance + totalWonAmount;
+      : Math.max(0, Math.round(currentAccount.balance - rupiahToSpend + totalWonAmount));
 
     const updatedAccountsAfterSpin = accounts.map((a) =>
       a.id === currentAccount.id
@@ -8050,28 +8743,45 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       accountId: currentAccount.id,
       accountName: currentAccount.fullName,
       spinCount,
-      coinsSpent: finalCoins,
+      paymentMethod,
+      coinsSpent: coinsToSpend,
+      rupiahSpent: rupiahToSpend,
       prizesWon: results.map((r) => ({ amount: r.segment.amount, label: r.segment.label })),
       totalWonAmount,
       timestamp: new Date().toISOString(),
     };
     setSpinHistory((prev) => [historyItem, ...prev.slice(0, 49)]);
 
+    const spendLabel =
+      paymentMethod === 'cash'
+        ? `Uang Rekening ${formatRupiahWithDecimals(rupiahToSpend)}`
+        : `${coinsToSpend.toLocaleString('id-ID')} Koin`;
+
     const newTx: Transaction = {
       id: `tx-spinwin-${Date.now()}`,
       accountId: currentAccount.id,
       type: 'setor',
-      title: `Hadiah Spin the Wheel (${spinCount}x Spin): +${formatRupiah(totalWonAmount)}`,
+      title: `Hadiah Spin (${spinCount}x ${
+        paymentMethod === 'cash' ? 'Uang Langsung' : 'Koin'
+      }): +${formatRupiah(totalWonAmount)}`,
       amount: totalWonAmount,
-      description: `Memutar Spin the Wheel ${spinCount}x menggunakan ${finalCoins.toLocaleString(
-        'id-ID'
-      )} Koin. Rincian hadiah: ${results.map((r) => r.segment.label).join(', ')}.`,
+      description: `Memutar Spin the Wheel ${spinCount}x menggunakan ${spendLabel}. Rincian hadiah: ${results
+        .map((r) => r.segment.label)
+        .join(', ')}.`,
       status: 'success',
       referenceNo: `SPIN-${Date.now().toString().slice(-6)}`,
       timestamp: new Date().toISOString(),
       category: 'redeem',
     };
     setTransactions((prev) => [newTx, ...prev]);
+
+    addNotification(
+      `🎡 Menang Spin +${formatRupiah(totalWonAmount)}!`,
+      `Putaran ${spinCount}x (${spendLabel}) berhasil! Hadiah ${formatRupiah(
+        totalWonAmount
+      )} langsung masuk ke saldo rekening.`,
+      'success'
+    );
 
     playAtmSound('cash');
     try {
@@ -8086,12 +8796,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return {
       success: true,
-      message: `Selamat! Dari ${spinCount}x Spin (${finalCoins.toLocaleString(
-        'id-ID'
-      )} Koin), Anda memenangkan total hadiah ${formatRupiah(
+      message: `Selamat! Dari ${spinCount}x Spin (${spendLabel}), Anda memenangkan total hadiah ${formatRupiah(
         totalWonAmount
       )} yang langsung masuk ke saldo rekening Anda!`,
-      coinsSpent: finalCoins,
+      paymentMethod,
+      coinsSpent: coinsToSpend,
+      rupiahSpent: rupiahToSpend,
       results,
       totalWonAmount,
       newCoinBalance,
@@ -9929,11 +10639,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminDeleteBugReport,
         adminClearBugReports,
         notificationsEnabled,
+        setNotificationsEnabled,
+        backgroundAutoNotifEnabled,
+        setBackgroundAutoNotifEnabled,
         notificationPermissionStatus,
         requestAndEnableNotifications,
         sendTestNotificationNow,
+        sendBulkNotifications,
         activePushBanners,
         dismissPushBanner,
+        emitPinSecurityAlert,
         adminUnlocked,
         setAdminUnlocked,
         featureConfigs,
@@ -10122,11 +10837,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminRejectMintolRequest,
         adminDeleteMintolRequest,
         adminClearMintolRequests,
-        isTutorialModalOpen,
-        setIsTutorialModalOpen,
-        markTutorialCompleted,
-        isAiBotModalOpen,
-        setIsAiBotModalOpen,
         goldMarketConfig,
         buyGold,
         sellGold,

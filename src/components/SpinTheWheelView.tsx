@@ -31,13 +31,17 @@ import {
   ShieldCheck,
   Coins,
   RotateCw,
+  Wallet,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
   SPIN_WHEEL_PRIZES,
   COIN_PURCHASE_PACKAGES_300,
+  COIN_PURCHASE_SAVINGS_VS_CASH_PERCENT,
   calculateCoinPackagePrice,
   calculateSpinCost,
+  calculateCashSpinCost,
+  splitRupiahRecehParts,
   formatRupiahWithDecimals,
 } from '../data/spinWheelCatalog';
 import { formatRupiah } from '../utils/bankUtils';
@@ -63,10 +67,13 @@ export const SpinTheWheelView: React.FC = () => {
   const [isSpinning, setIsSpinning] = useState<boolean>(false);
   const [wheelRotationDeg, setWheelRotationDeg] = useState<number>(0);
   const [selectedSpinCount, setSelectedSpinCount] = useState<1 | 3 | 5 | 7 | 10>(1);
+  const [spinPaymentMethod, setSpinPaymentMethod] = useState<'coins' | 'cash'>('coins');
 
   const [lastSpinResult, setLastSpinResult] = useState<{
     spinCount: number;
+    paymentMethod: 'coins' | 'cash';
     coinsSpent: number;
+    rupiahSpent?: number;
     prizes: SpinPrizeSegment[];
     totalWonAmount: number;
     message: string;
@@ -110,7 +117,21 @@ export const SpinTheWheelView: React.FC = () => {
     setFeedback(null);
 
     const { finalCoins } = calculateSpinCost(spinCount, spinWheelConfig);
-    if (userCoins < finalCoins) {
+    const cashCost = calculateCashSpinCost(spinCount, spinWheelConfig);
+
+    if (spinPaymentMethod === 'cash') {
+      const isUnlimitedBal = currentAccount.balance >= 900_000_000_000_000;
+      if (!isUnlimitedBal && currentAccount.balance < cashCost.finalRupiah) {
+        setFeedback({
+          type: 'error',
+          title: `Saldo Rekening Kurang (Butuh ${formatRupiahWithDecimals(cashCost.finalRupiah)})`,
+          message: `Untuk ${spinCount}x Spin Pakai Uang Langsung dibutuhkan ${formatRupiahWithDecimals(
+            cashCost.finalRupiah
+          )}. Tips hemat: beli Koin di Toko Koin karena lebih murah ${COIN_PURCHASE_SAVINGS_VS_CASH_PERCENT.toLocaleString('id-ID')}% dibanding Spin pakai Uang!`,
+        });
+        return;
+      }
+    } else if (userCoins < finalCoins) {
       setFeedback({
         type: 'error',
         title: `Koin Spin Kurang (Butuh ${finalCoins.toLocaleString('id-ID')} Koin)`,
@@ -118,12 +139,12 @@ export const SpinTheWheelView: React.FC = () => {
           'id-ID'
         )} Koin, sedangkan Koin Anda saat ini ${userCoins.toLocaleString(
           'id-ID'
-        )} Koin. Silakan pencet tombol [+] di sebelah gambar koin di atas untuk membeli koin!`,
+        )} Koin. Pencet tombol [+] di atas untuk beli koin (lebih murah 0,50% dari Spin uang!) atau ganti ke mode Putar Pakai Uang Langsung.`,
       });
       return;
     }
 
-    const res = spinTheWheel(spinCount);
+    const res = spinTheWheel(spinCount, spinPaymentMethod);
     if (!res.success || !res.results || res.results.length === 0) {
       setFeedback({
         type: 'error',
@@ -139,15 +160,12 @@ export const SpinTheWheelView: React.FC = () => {
     )[0];
     const targetIndex = bestResult.index;
 
-    // Pointer is at the top (0 deg / 270 deg in SVG coordinates).
-    // Segment i center angle from top clockwise is: targetIndex * sliceAngle + sliceAngle / 2
     const segmentCenterClockwise = targetIndex * sliceAngle + sliceAngle / 2;
     const desiredFinalMod = (360 - segmentCenterClockwise) % 360;
     const currentMod = ((wheelRotationDeg % 360) + 360) % 360;
     let delta = desiredFinalMod - currentMod;
     if (delta < 0) delta += 360;
 
-    // Spin 6 to 8 full rotations + exact landing angle
     const fullSpins = (6 + Math.floor(Math.random() * 2)) * 360;
     const nextRotation = wheelRotationDeg + fullSpins + delta;
 
@@ -159,7 +177,9 @@ export const SpinTheWheelView: React.FC = () => {
       setIsSpinning(false);
       setLastSpinResult({
         spinCount,
-        coinsSpent: res.coinsSpent || finalCoins,
+        paymentMethod: res.paymentMethod || spinPaymentMethod,
+        coinsSpent: res.coinsSpent ?? (spinPaymentMethod === 'coins' ? finalCoins : 0),
+        rupiahSpent: res.rupiahSpent ?? (spinPaymentMethod === 'cash' ? cashCost.finalRupiah : 0),
         prizes: res.results!.map((r) => r.segment),
         totalWonAmount: res.totalWonAmount || 0,
         message: res.message,
@@ -225,7 +245,7 @@ export const SpinTheWheelView: React.FC = () => {
               🎡 Spin the Wheel Berhadiah Rp 100.000 s/d Rp 20.000.000
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-              1 kali Spin membutuhkan <strong>{calculateSpinCost(1, spinWheelConfig).finalCoins} Koin</strong> (normal <strong>100 Koin = Rp 1.000.000</strong>). Klik tombol <strong>[+]</strong> di sebelah gambar koin di kanan atas untuk membeli koin (tersedia <strong>300 pilihan pembelian dari 1 Koin sampai 10.000.000 Koin</strong> dengan harga 1 Koin = {formatRupiah(spinWheelConfig.baseCoinPriceRupiah)}).
+              Pilih putar pakai <strong>Koin Spin</strong> ({calculateSpinCost(1, spinWheelConfig).finalCoins} Koin) atau langsung pakai <strong>Uang Rekening</strong>! Pembelian koin di Toko Koin otomatis <strong>lebih murah 0,50%</strong> dibanding Spin pakai uang langsung, lengkap dengan angka receh unik format <strong className="text-amber-300 font-mono">Rp xxx.XXX</strong>.
             </p>
           </div>
 
@@ -283,8 +303,11 @@ export const SpinTheWheelView: React.FC = () => {
         {/* Quick Promo Strip if Admin Discount or Boost is Active */}
         <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-amber-300 font-mono font-bold">
+            <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-amber-300 font-mono font-bold tabular-nums">
               🪙 Harga Dasar 1 Koin: {formatRupiahWithDecimals(spinWheelConfig.baseCoinPriceRupiah)}
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-mono font-bold">
+              💎 Beli Koin Lebih Murah 0,50% vs Spin Uang (Receh Unik Rp xxx.XXX)
             </span>
             {spinWheelConfig.coinPurchaseDiscountPercent > 0 && (
               <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-mono font-bold">
@@ -377,7 +400,10 @@ export const SpinTheWheelView: React.FC = () => {
                   🪙 TOKO RESMI KOIN SPIN THE WHEEL • 300 PILIHAN PEMBELIAN
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-mono text-[10px] font-bold">
-                  1 Koin = {formatRupiahWithDecimals(spinWheelConfig.baseCoinPriceRupiah)}
+                  Lebih Murah 0,50% dari Spin Uang
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-400/40 font-mono text-[10px] font-bold">
+                  Format Receh Unik: Rp xxx.XXX
                 </span>
                 {spinWheelConfig.coinPurchaseDiscountPercent > 0 && (
                   <span className="px-2.5 py-0.5 rounded-full bg-rose-500 text-white font-mono text-[10px] font-black">
@@ -389,7 +415,7 @@ export const SpinTheWheelView: React.FC = () => {
                 300 Pilihan Pembelian Koin (Mulai 1 Koin hingga 10.000.000 Koin)
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Pilih paket koin di bawah ini mulai dari <strong>1 Koin sampai 10.000.000 Koin</strong> dengan format harga <strong>{formatRupiahWithDecimals(spinWheelConfig.baseCoinPriceRupiah)}</strong> per koin serta otomatis memotong diskon Panel Admin.
+                Semua paket koin otomatis <strong className="text-emerald-300">lebih murah 0,50% daripada Spin langsung pakai uang</strong> dengan 3 digit receh akhir unik <strong className="text-amber-300 font-mono">001–999</strong> (contoh <span className="font-mono text-amber-300">Rp 994.375</span>).
               </p>
             </div>
 
@@ -445,9 +471,15 @@ export const SpinTheWheelView: React.FC = () => {
           {/* Grid 300 Pilihan Pembelian Koin */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[520px] overflow-y-auto pr-1">
             {filteredCoinPackages.map((pkg) => {
-              const { normalPrice, finalPrice, discountPercent } =
-                calculateCoinPackagePrice(pkg, spinWheelConfig);
-              const isPriceReduced = finalPrice < normalPrice;
+              const {
+                cashEquivalentPrice,
+                finalPrice,
+                discountPercent,
+                totalSavingsVsCashPercent,
+                savingsRupiahVsCash,
+              } = calculateCoinPackagePrice(pkg, spinWheelConfig);
+              const priceParts = splitRupiahRecehParts(finalPrice);
+              const isCheaperThanCash = finalPrice < cashEquivalentPrice;
 
               return (
                 <div
@@ -475,7 +507,7 @@ export const SpinTheWheelView: React.FC = () => {
                         🪙
                       </div>
                       <div>
-                        <span className="font-black text-white text-sm sm:text-base font-mono block leading-tight">
+                        <span className="font-black text-white text-sm sm:text-base font-mono tabular-nums block leading-tight">
                           {pkg.coins.toLocaleString('id-ID')} Koin
                         </span>
                         <span className="text-[10px] text-slate-400 block">
@@ -484,23 +516,32 @@ export const SpinTheWheelView: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="mt-2.5 p-2 rounded-xl bg-slate-900/90 border border-slate-800/90">
+                    <div className="mt-2.5 p-2.5 rounded-xl bg-slate-900/90 border border-slate-800/90 space-y-0.5">
                       <span className="text-[9px] font-mono uppercase text-slate-400 block">
-                        Harga Paket Koin:
+                        Harga Koin (vs Spin Uang):
                       </span>
-                      {isPriceReduced && (
-                        <span className="text-[10px] font-mono text-slate-500 line-through block">
-                          {formatRupiahWithDecimals(normalPrice)}
+                      {isCheaperThanCash && (
+                        <span className="text-[10px] font-mono tabular-nums text-slate-500 line-through block">
+                          Tarif Uang: {formatRupiahWithDecimals(cashEquivalentPrice)}
                         </span>
                       )}
-                      <span className="text-xs sm:text-sm font-black text-emerald-400 font-mono block">
-                        {formatRupiahWithDecimals(finalPrice)}
-                      </span>
-                      {discountPercent > 0 && (
-                        <span className="text-[9px] font-mono text-amber-300 font-bold">
-                          Hemat Diskon {discountPercent}%
+                      <span className="text-xs sm:text-sm font-black font-mono tabular-nums block">
+                        <span className="text-emerald-400">
+                          {priceParts.prefix}
+                          {priceParts.mainPart}
                         </span>
-                      )}
+                        <span
+                          className="text-amber-300 underline decoration-amber-400/60"
+                          title="3 digit angka receh unik (XXX)"
+                        >
+                          {priceParts.recehPart}
+                        </span>
+                      </span>
+                      <span className="inline-block text-[9px] font-mono text-emerald-300 font-bold">
+                        Hemat {totalSavingsVsCashPercent.toLocaleString('id-ID')}% vs Spin Uang
+                        {savingsRupiahVsCash > 0 ? ` (-${formatRupiahWithDecimals(savingsRupiahVsCash)})` : ''}
+                        {discountPercent > 0 ? ` • Admin ${discountPercent}%` : ''}
+                      </span>
                     </div>
                   </div>
 
@@ -618,14 +659,18 @@ export const SpinTheWheelView: React.FC = () => {
           {/* Last Spin Result Celebration Box */}
           {lastSpinResult && (
             <div className="w-full p-4 rounded-2xl bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-950 border-2 border-emerald-400 space-y-2.5 shadow-xl">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <span className="text-xs font-black uppercase text-emerald-300 flex items-center gap-1.5">
                   <Trophy className="w-4 h-4 text-amber-400" />
                   <span>
-                    HASIL {lastSpinResult.spinCount}x SPIN ({lastSpinResult.coinsSpent.toLocaleString('id-ID')} KOIN):
+                    HASIL {lastSpinResult.spinCount}x SPIN (
+                    {lastSpinResult.paymentMethod === 'cash'
+                      ? `UANG LANGSUNG ${formatRupiahWithDecimals(lastSpinResult.rupiahSpent || 0)}`
+                      : `${lastSpinResult.coinsSpent.toLocaleString('id-ID')} KOIN`}
+                    ):
                   </span>
                 </span>
-                <span className="px-2.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-mono font-black text-xs">
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-mono font-black text-xs tabular-nums">
                   +{formatRupiah(lastSpinResult.totalWonAmount)}
                 </span>
               </div>
@@ -643,21 +688,59 @@ export const SpinTheWheelView: React.FC = () => {
             </div>
           )}
 
-          {/* 5 SPIN OPTIONS: 1x, 3x, 5x, 7x, 10x SPIN */}
-          <div className="w-full space-y-2.5">
-            <div className="flex items-center justify-between text-xs">
+          {/* MODE PEMBAYARAN SPIN: KOIN (HEMAT 0,50%) VS UANG REKENING LANGSUNG */}
+          <div className="w-full space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-1.5 rounded-2xl bg-slate-950 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSpinPaymentMethod('coins')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                  spinPaymentMethod === 'coins'
+                    ? 'bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 shadow-lg'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-900'
+                }`}
+              >
+                <Coins className="w-4 h-4 shrink-0" />
+                <span>Putar Pakai Koin (Hemat 0,50%)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSpinPaymentMethod('cash')}
+                className={`py-2.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                  spinPaymentMethod === 'cash'
+                    ? 'bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 shadow-lg'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-900'
+                }`}
+              >
+                <Wallet className="w-4 h-4 shrink-0" />
+                <span>Putar Pakai Uang Langsung</span>
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between text-xs gap-2 flex-wrap">
               <span className="font-black text-amber-300 uppercase tracking-wider">
                 Pilih Jumlah Putaran Spin (1x, 3x, 5x, 7x, atau 10x):
               </span>
-              <span className="text-[11px] text-slate-400 font-mono">
-                Koin Anda: <strong className="text-white">{userCoins.toLocaleString('id-ID')} 🪙</strong>
-              </span>
+              {spinPaymentMethod === 'coins' ? (
+                <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                  Koin Anda: <strong className="text-white">{userCoins.toLocaleString('id-ID')} 🪙</strong>
+                </span>
+              ) : (
+                <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                  Saldo Rekening: <strong className="text-emerald-400">{formatRupiahWithDecimals(currentAccount.balance)}</strong>
+                </span>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
               {SPIN_COUNTS.map((cnt) => {
                 const cost = calculateSpinCost(cnt, spinWheelConfig);
-                const canAfford = userCoins >= cost.finalCoins;
+                const cashCost = calculateCashSpinCost(cnt, spinWheelConfig);
+                const isCashMode = spinPaymentMethod === 'cash';
+                const canAfford = isCashMode
+                  ? currentAccount.balance >= 900_000_000_000_000 ||
+                    currentAccount.balance >= cashCost.finalRupiah
+                  : userCoins >= cost.finalCoins;
 
                 return (
                   <button
@@ -669,40 +752,74 @@ export const SpinTheWheelView: React.FC = () => {
                       isSpinning
                         ? 'bg-slate-900 border-slate-800 opacity-60 cursor-wait'
                         : canAfford
-                        ? 'bg-gradient-to-b from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 border-yellow-200 shadow-lg shadow-amber-500/20'
+                        ? isCashMode
+                          ? 'bg-gradient-to-b from-emerald-400 via-emerald-500 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 border-emerald-200 shadow-lg shadow-emerald-500/20'
+                          : 'bg-gradient-to-b from-amber-400 via-amber-500 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 border-yellow-200 shadow-lg shadow-amber-500/20'
                         : 'bg-slate-950 hover:bg-slate-900 text-slate-300 border-slate-800'
                     }`}
                   >
-                    <span className="font-black text-sm sm:text-base tracking-tight flex items-center gap-1">
-                      <RotateCw className={`w-4 h-4 ${isSpinning && selectedSpinCount === cnt ? 'animate-spin' : ''}`} />
+                    <span className="font-black text-sm sm:text-base tracking-tight flex items-center gap-1 whitespace-nowrap">
+                      <RotateCw
+                        className={`w-4 h-4 ${
+                          isSpinning && selectedSpinCount === cnt ? 'animate-spin' : ''
+                        }`}
+                      />
                       <span>SPIN {cnt}x</span>
                     </span>
 
-                    <div className="text-center">
-                      {cost.totalDiscountPercent > 0 && (
+                    {isCashMode ? (
+                      <div className="text-center">
+                        {cashCost.totalDiscountPercent > 0 && (
+                          <span
+                            className={`text-[10px] font-mono tabular-nums line-through block ${
+                              canAfford ? 'text-slate-800' : 'text-slate-500'
+                            }`}
+                          >
+                            {formatRupiahWithDecimals(cashCost.normalRupiah)}
+                          </span>
+                        )}
                         <span
-                          className={`text-[10px] font-mono line-through block ${
-                            canAfford ? 'text-slate-800' : 'text-slate-500'
+                          className={`font-mono tabular-nums font-black text-[11px] block ${
+                            canAfford ? 'text-slate-950' : 'text-emerald-300'
                           }`}
                         >
-                          {cost.normalCoins.toLocaleString('id-ID')} Koin
+                          {formatRupiahWithDecimals(cashCost.finalRupiah)}
                         </span>
-                      )}
-                      <span
-                        className={`font-mono font-black text-xs block ${
-                          canAfford ? 'text-slate-950' : 'text-amber-300'
-                        }`}
-                      >
-                        🪙 {cost.finalCoins.toLocaleString('id-ID')} Koin
-                      </span>
-                      <span
-                        className={`text-[9px] font-mono block ${
-                          canAfford ? 'text-slate-900 font-bold' : 'text-slate-400'
-                        }`}
-                      >
-                        ({formatRupiah(cost.finalRupiahEquivalent)})
-                      </span>
-                    </div>
+                        <span
+                          className={`text-[9px] font-mono block ${
+                            canAfford ? 'text-slate-900 font-bold' : 'text-slate-400'
+                          }`}
+                        >
+                          Potong Saldo Langsung
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="text-center">
+                        {cost.totalDiscountPercent > 0 && (
+                          <span
+                            className={`text-[10px] font-mono tabular-nums line-through block ${
+                              canAfford ? 'text-slate-800' : 'text-slate-500'
+                            }`}
+                          >
+                            {cost.normalCoins.toLocaleString('id-ID')} Koin
+                          </span>
+                        )}
+                        <span
+                          className={`font-mono tabular-nums font-black text-xs block ${
+                            canAfford ? 'text-slate-950' : 'text-amber-300'
+                          }`}
+                        >
+                          🪙 {cost.finalCoins.toLocaleString('id-ID')} Koin
+                        </span>
+                        <span
+                          className={`text-[9px] font-mono block ${
+                            canAfford ? 'text-slate-900 font-bold' : 'text-emerald-400'
+                          }`}
+                        >
+                          Hemat 0,50% vs Uang
+                        </span>
+                      </div>
+                    )}
 
                     {cost.totalDiscountPercent > 0 && (
                       <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white font-mono font-black text-[9px]">
@@ -808,13 +925,17 @@ export const SpinTheWheelView: React.FC = () => {
                   >
                     <div>
                       <span className="font-bold text-white">
-                        {item.spinCount}x Spin ({item.coinsSpent} Koin)
+                        {item.spinCount}x Spin (
+                        {item.paymentMethod === 'cash'
+                          ? `Uang ${formatRupiahWithDecimals(item.rupiahSpent || 0)}`
+                          : `${item.coinsSpent.toLocaleString('id-ID')} Koin`}
+                        )
                       </span>
                       <span className="text-[10px] text-slate-400 block truncate max-w-[200px]">
                         {item.prizesWon.map((p) => p.label).join(', ')}
                       </span>
                     </div>
-                    <span className="font-mono font-black text-emerald-400">
+                    <span className="font-mono tabular-nums font-black text-emerald-400">
                       +{formatRupiah(item.totalWonAmount)}
                     </span>
                   </div>

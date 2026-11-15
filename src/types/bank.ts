@@ -210,11 +210,18 @@ export interface GlobalChatMessage {
   isPinned?: boolean;
 }
 
+export type NotificationCategory = 'transaction' | 'loan' | 'security' | 'promo';
+
 export interface MobilePushBannerToast {
   id: string;
   title: string;
   message: string;
   type: 'info' | 'success' | 'warning' | 'alert' | 'admin_chat';
+  category?: NotificationCategory;
+  targetView?: string;
+  targetDashboardTab?: string;
+  accountId?: string;
+  referenceId?: string;
   timestamp: string;
 }
 
@@ -298,7 +305,9 @@ export interface SpinHistoryRecord {
   accountId: string;
   accountName: string;
   spinCount: 1 | 3 | 5 | 7 | 10;
+  paymentMethod?: 'coins' | 'cash';
   coinsSpent: number;
+  rupiahSpent?: number;
   prizesWon: { amount: number; label: string }[];
   totalWonAmount: number;
   timestamp: string;
@@ -497,6 +506,11 @@ export interface AppNotification {
   title: string;
   message: string;
   type: 'info' | 'success' | 'warning' | 'alert';
+  category?: NotificationCategory;
+  targetView?: string;
+  targetDashboardTab?: string;
+  accountId?: string;
+  referenceId?: string;
   timestamp: string;
   read: boolean;
   actionUrl?: string;
@@ -617,6 +631,7 @@ export interface RedeemCode {
   durationMinutes: number;
   active: boolean;
   requireAdminPin?: boolean;
+  sendNotification?: boolean;
 }
 
 export interface PurchasedVoucherCode {
@@ -698,6 +713,12 @@ export interface UserAppSettings {
   workClickVisualEffect: boolean;
   confirmBeforeCoinPurchase: boolean;
   autoRedeemPulsaTokenNotif: boolean;
+
+  // 6. Preferensi Kategori Notifikasi Push
+  pushTransactionAlerts: boolean;
+  pushLoanAlerts: boolean;
+  pushSecurityAlerts: boolean;
+  pushPromoAlerts: boolean;
 }
 
 export type BudgetCategoryIcon =

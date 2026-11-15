@@ -1,6 +1,5 @@
 /**
  * Bank Nusantara — Aplikasi Perbankan & ATM Digital Terpadu
- * Fully updated with Footer Admin PIN Authentication (159357) and Nusantara PayChat
  */
 import React, { useState, useEffect } from 'react';
 import { BankProvider, useBank } from './context/BankContext';
@@ -18,6 +17,7 @@ import { JobVacancyView } from './components/JobVacancyView';
 import { SpinTheWheelView } from './components/SpinTheWheelView';
 import { SultanEmpireView } from './components/SultanEmpireView';
 import { CardRegistrationModal } from './components/CardRegistrationModal';
+import { AccountOpeningSimulationView } from './components/AccountOpeningSimulationView';
 import { NusantaraChat } from './components/NusantaraChat';
 import { AdminPinModal } from './components/AdminPinModal';
 import { GoogleAuthOnboardingGate } from './components/GoogleAuthOnboardingGate';
@@ -62,6 +62,84 @@ function BankAppContent() {
     return () => window.removeEventListener('gmp-quota-exceeded', handler);
   }, []);
 
+  // Handle tap-to-navigate deep links from Push Banners, Notification Bell, URL query, & Service Worker
+  useEffect(() => {
+    const applyDeepLink = (targetView?: string, targetDashboardTab?: string) => {
+      const validViews: AppNavView[] = [
+        'dashboard',
+        'transfer',
+        'emas',
+        'anggaran',
+        'jobs',
+        'spin_wheel',
+        'empire',
+        'atm',
+        'guide',
+        'chat',
+        'updates',
+        'simulasi_rekening',
+      ];
+      const safeView: AppNavView = validViews.includes(targetView as AppNavView)
+        ? (targetView as AppNavView)
+        : 'dashboard';
+      setActiveView(safeView);
+      if (safeView === 'dashboard' && targetDashboardTab) {
+        setRequestedDashboardTab({
+          tab: targetDashboardTab as DashboardTab,
+          nonce: Date.now(),
+        });
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const qView = params.get('notifView');
+      const qTab = params.get('notifTab');
+      if (qView || qTab) {
+        applyDeepLink(qView || 'dashboard', qTab || 'mutasi');
+      }
+    } catch { /* empty */ }
+
+    const handleCustomNav = (e: Event) => {
+      const custom = e as CustomEvent<{ targetView?: string; targetDashboardTab?: string }>;
+      if (custom.detail) {
+        applyDeepLink(custom.detail.targetView, custom.detail.targetDashboardTab);
+      }
+    };
+
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'NAVIGATE_FROM_NOTIFICATION') {
+        applyDeepLink(event.data.targetView, event.data.targetDashboardTab);
+      }
+    };
+
+    window.addEventListener('bn:navigate', handleCustomNav);
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    }
+
+    return () => {
+      window.removeEventListener('bn:navigate', handleCustomNav);
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+      }
+    };
+  }, []);
+
+  const handleSecretAdminTrigger = () => {
+    if (adminUnlocked) {
+      if (!googleUser || !googleUser.hasCompletedOnboarding) {
+        setAdminViewDuringOnboarding(true);
+      } else {
+        setActiveView('admin');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      setShowAdminPinModal(true);
+    }
+  };
+
   const handleAdminAuthSuccess = () => {
     setAdminUnlocked(true);
     setShowAdminPinModal(false);
@@ -98,15 +176,7 @@ function BankAppContent() {
         )}
         <WebsiteSystemNotificationModal />
         <GlobalChatAndNotificationLayer />
-        <GoogleAuthOnboardingGate
-          onOpenAdminPanel={() => {
-            if (adminUnlocked) {
-              setAdminViewDuringOnboarding(true);
-            } else {
-              setShowAdminPinModal(true);
-            }
-          }}
-        />
+        <GoogleAuthOnboardingGate />
         <AdminPinModal
           isOpen={showAdminPinModal}
           onSuccess={handleAdminAuthSuccess}
@@ -183,6 +253,7 @@ function BankAppContent() {
           setActiveView(view);
         }}
         onOpenRegisterModal={() => setIsRegisterModalOpen(true)}
+        onSecretAdminTrigger={handleSecretAdminTrigger}
       />
 
       {/* Main Container */}
@@ -247,7 +318,16 @@ function BankAppContent() {
               if (tab === 'dashboard' && subTab) {
                 setRequestedDashboardTab({ tab: subTab as DashboardTab, nonce: Date.now() });
               }
-              setActiveView(tab);
+              setActiveView(tab as AppNavView);
+            }}
+            onOpenRegisterModal={() => setIsRegisterModalOpen(true)}
+          />
+        )}
+        {activeView === 'simulasi_rekening' && (
+          <AccountOpeningSimulationView
+            onNavigateToDashboard={() => {
+              setRequestedDashboardTab({ tab: 'ringkasan', nonce: Date.now() });
+              setActiveView('dashboard');
             }}
             onOpenRegisterModal={() => setIsRegisterModalOpen(true)}
           />
@@ -255,14 +335,6 @@ function BankAppContent() {
         {activeView === 'updates' && (
           <UpdateHistoryView
             onNavigateToView={(view) => setActiveView(view)}
-            onOpenAdminUpdateManager={() => {
-              if (adminUnlocked) {
-                setActiveView('admin');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              } else {
-                setShowAdminPinModal(true);
-              }
-            }}
           />
         )}
       </main>
@@ -271,9 +343,14 @@ function BankAppContent() {
       <CardRegistrationModal
         isOpen={isRegisterModalOpen}
         onClose={() => setIsRegisterModalOpen(false)}
+        onOpenSimulationPage={() => {
+          setIsRegisterModalOpen(false);
+          setActiveView('simulasi_rekening');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
       />
 
-      {/* Admin Authorization PIN Modal (Secret PIN: 159357 - Not revealed on screen) */}
+      {/* Admin Authorization PIN Modal */}
       <AdminPinModal
         isOpen={showAdminPinModal}
         onSuccess={handleAdminAuthSuccess}
@@ -332,25 +409,8 @@ function BankAppContent() {
 
             <span className="text-slate-800">•</span>
 
-            {/* Tombol Izinkan Notifikasi tepat di sebelah tombol Panel Admin di paling bawah */}
+            {/* Tombol Izinkan Notifikasi di paling bawah */}
             <AllowNotificationFooterButton />
-
-            {/* Restricted Admin Panel Access Button (Scroll Paling Bawah) */}
-            <button
-              onClick={() => {
-                if (adminUnlocked) {
-                  setActiveView('admin');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                } else {
-                  setShowAdminPinModal(true);
-                }
-              }}
-              className="text-slate-400 hover:text-rose-400 font-semibold flex items-center gap-1.5 transition-colors cursor-pointer px-3 py-1.5 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-rose-500/40"
-              title="Akses Terbatas Khusus Administrator (Butuh PIN)"
-            >
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
-              <span>Panel Admin (Butuh PIN)</span>
-            </button>
           </div>
         </div>
       </footer>

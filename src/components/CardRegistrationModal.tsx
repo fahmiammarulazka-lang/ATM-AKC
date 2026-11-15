@@ -17,17 +17,24 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
-import { CARD_TIER_CONFIGS, formatRupiah } from '../utils/bankUtils';
+import { CARD_TIER_CONFIGS, formatRupiah, validateStrongPin } from '../utils/bankUtils';
 import { CardTier } from '../types/bank';
 import { GoogleMapsAddressPicker } from './GoogleMapsAddressPicker';
 
 interface CardRegistrationModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenSimulationPage?: () => void;
 }
 
-export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ isOpen, onClose }) => {
-  const { registerCard, accounts, currentAccount } = useBank();
+const SELECTABLE_TIERS: CardTier[] = ['regular', 'gold', 'premium', 'platinum'];
+
+export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
+  isOpen,
+  onClose,
+  onOpenSimulationPage,
+}) => {
+  const { registerCard, adminApproveCard, adminRejectCard, accounts } = useBank();
 
   // Step wizard: 1 (Data Diri), 2 (Buat PIN), 3 (Pilih Jenis Kartu), 4 (Konfirmasi & Kirim), 5 (Status Permohonan)
   const [step, setStep] = useState<number>(1);
@@ -45,10 +52,9 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
 
   if (!isOpen) return null;
 
-  // Check if current user is in pending or rejected state
-  const pendingOrRejectedAccount = accounts.find(
-    (a) => a.id === submittedAccountId || (currentAccount && (currentAccount.cardStatus === 'pending' || currentAccount.cardStatus === 'rejected'))
-  );
+  const trackedAccount = submittedAccountId
+    ? accounts.find((a) => a.id === submittedAccountId) || null
+    : null;
 
   const handleStep1Submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,8 +62,8 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
       setErrorMsg('Harap lengkapi seluruh formulir identitas.');
       return;
     }
-    if (nik.length < 16) {
-      setErrorMsg('Nomor Identitas KTP (NIK) harus terdiri dari 16 digit.');
+    if (!/^\d{16}$/.test(nik.trim())) {
+      setErrorMsg('Nomor Identitas KTP (NIK) harus terdiri dari tepat 16 digit angka.');
       return;
     }
     setErrorMsg('');
@@ -66,8 +72,9 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
 
   const handleStep2Submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin.length !== 6 || !/^\d{6}$/.test(pin)) {
-      setErrorMsg('Kode PIN harus terdiri dari tepat 6 digit angka rahasia.');
+    const check = validateStrongPin(pin);
+    if (!check.valid) {
+      setErrorMsg(check.reason || 'Kode PIN harus terdiri dari tepat 6 digit angka rahasia.');
       return;
     }
     if (pin !== confirmPin) {
@@ -79,8 +86,6 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
   };
 
   const handleStep3Submit = () => {
-    // Sesuai permintaan pengguna: pembuatan kartu baru wajib Kartu Biasa (Reguler)
-    setSelectedTier('regular');
     setStep(4);
   };
 
@@ -92,7 +97,7 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
       email: email || `${fullName.toLowerCase().replace(/\s+/g, '.')}@gmail.com`,
       address,
       pin,
-      cardTier: 'regular', // Bikin kartu yang biasa (Reguler Biru)
+      cardTier: selectedTier,
       initialDeposit,
     });
 
@@ -131,12 +136,23 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
               <p className="text-xs text-slate-400">Formulir Pembukaan Rekening & Penerbitan Kartu Baru</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenSimulationPage && (
+              <button
+                type="button"
+                onClick={onOpenSimulationPage}
+                className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 text-amber-300 font-bold text-[11px] cursor-pointer whitespace-nowrap"
+              >
+                Simulasi Penuh ➔
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Step Indicator */}
@@ -313,42 +329,31 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
           </form>
         )}
 
-        {/* ================= STEP 3: TENTUKAN JENIS KARTU ================= */}
+        {/* ================= STEP 3: PILIH JENIS KARTU (SEMUA TIER NASABAH) ================= */}
         {step === 3 && (
           <div className="space-y-4 text-xs">
             <div>
               <span className="text-amber-400 font-bold uppercase tracking-wider block text-[11px] mb-1">
-                Langkah 3 — Tentukan Jenis Kartu yang Diinginkan
+                Langkah 3 — Pilih Jenis Kartu yang Diinginkan
               </span>
               <p className="text-slate-300 text-xs font-medium">
-                Penerbitan kartu baru dimulai dari <strong className="text-blue-400">Kartu Biasa (Reguler Biru)</strong>. Untuk beralih ke kartu tingkat di atasnya, permohonan dapat diajukan dan akan diproses oleh sistem bank.
+                Pilih langsung jenis kartu Bank Nusantara sesuai kebutuhan Anda: <strong>Reguler</strong>, <strong>Emas</strong>, <strong>Premium</strong>, atau <strong>Platinum</strong>.
               </p>
             </div>
 
-            {/* Notice Banner */}
-            <div className="p-3.5 bg-blue-950/40 border border-blue-500/40 rounded-2xl flex items-start gap-2.5 text-blue-200">
-              <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div className="text-[11px] space-y-1">
-                <span className="font-bold text-white block">Ketentuan Pembuatan Kartu Bank Nusantara (5 Jenis Kartu):</span>
-                <p className="text-slate-300">
-                  Kartu perdana yang otomatis diterbitkan adalah <strong>Kartu Biasa (Reguler Biru)</strong>. Fitur Upgrade Kartu ke <strong>Kartu Emas</strong>, <strong>Kartu Premium</strong>, <strong>Kartu Platinum</strong>, atau <strong>Kartu Admin (∞)</strong> dapat diajukan melalui menu Layanan Kartu.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-h-64 overflow-y-auto pr-1">
-              {Object.values(CARD_TIER_CONFIGS).map((tier) => {
-                const isRegular = tier.tier === 'regular';
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-72 overflow-y-auto pr-1">
+              {SELECTABLE_TIERS.map((tierKey) => {
+                const tier = CARD_TIER_CONFIGS[tierKey];
+                const isSelected = selectedTier === tierKey;
                 return (
-                  <div
+                  <button
                     key={tier.tier}
-                    onClick={() => {
-                      if (isRegular) setSelectedTier('regular');
-                    }}
-                    className={`p-4 rounded-2xl border transition-all ${
-                      isRegular
-                        ? 'border-blue-400 bg-blue-500/10 shadow-lg scale-[1.02] ring-2 ring-blue-500/30'
-                        : 'border-slate-800 bg-slate-950/40 opacity-75 cursor-not-allowed'
+                    type="button"
+                    onClick={() => setSelectedTier(tier.tier)}
+                    className={`p-4 rounded-2xl border text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? 'border-amber-400 bg-amber-500/10 shadow-lg ring-2 ring-amber-400/30'
+                        : 'border-slate-800 bg-slate-950/60 hover:border-slate-600'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -357,16 +362,6 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
                         {tier.colorName}
                       </span>
                     </div>
-
-                    {isRegular ? (
-                      <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-md font-bold block mb-2 text-center">
-                        ✓ Kartu Standar Perdana
-                      </span>
-                    ) : (
-                      <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded-md font-bold block mb-2 text-center">
-                        ⏳ Melalui Proses Upgrade
-                      </span>
-                    )}
 
                     <div className="space-y-1.5 text-slate-300 text-[11px]">
                       <div>
@@ -384,7 +379,7 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
                         <span className="text-emerald-300 font-semibold">{tier.idealFor}</span>
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -466,32 +461,91 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({ is
           </div>
         )}
 
-        {/* ================= STEP 5: STATUS PERMOHONAN KARTU (Bab 2) ================= */}
+        {/* ================= STEP 5: STATUS PERMOHONAN KARTU LIVE (Bab 2) ================= */}
         {step === 5 && (
           <div className="space-y-4 text-center py-3">
-            <div className="w-16 h-16 rounded-full bg-amber-500/20 border-2 border-amber-400 text-amber-400 flex items-center justify-center mx-auto animate-pulse">
-              <Clock className="w-8 h-8" />
-            </div>
+            {(!trackedAccount || trackedAccount.cardStatus === 'pending') && (
+              <>
+                <div className="w-16 h-16 rounded-full bg-amber-500/20 border-2 border-amber-400 text-amber-400 flex items-center justify-center mx-auto animate-pulse">
+                  <Clock className="w-8 h-8" />
+                </div>
 
-            <div>
-              <h3 className="text-lg font-bold text-white">Langkah 5 — Permohonan Sedang Diproses</h3>
-              <p className="text-xs text-amber-300 font-semibold mt-1">Status: ⏳ Sedang Diproses</p>
-              <p className="text-xs text-slate-300 max-w-md mx-auto mt-2 leading-relaxed">
-                Permohonan pendaftaran kartu Anda sudah diterima dan sedang diproses oleh sistem Bank Nusantara.
-              </p>
-            </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">
+                    Langkah 5 — Menunggu Persetujuan Admin
+                  </h3>
+                  <p className="text-xs text-amber-300 font-semibold mt-1">
+                    Status: ⏳ Menunggu Persetujuan
+                  </p>
+                  <p className="text-xs text-slate-300 max-w-md mx-auto mt-2 leading-relaxed">
+                    Permohonan pendaftaran <strong>{activeTierConfig.nameIndo}</strong> Anda telah masuk ke antrean verifikasi Admin Bank Nusantara.
+                  </p>
+                </div>
 
-            <div className="p-3 bg-blue-950/60 border border-blue-500/30 rounded-xl text-left text-xs text-blue-200 max-w-md mx-auto">
-              <span className="font-bold text-amber-300 block mb-1">Informasi Proses Penerbitan Kartu:</span>
-              <p>
-                Begitu proses verifikasi kartu selesai:
-              </p>
-              <ul className="list-disc list-inside mt-1 text-[11px] space-y-0.5">
-                <li>Kartu akan langsung aktif dan siap digunakan di mesin ATM</li>
-                <li>Nomor rekening 10 digit akan dibuatkan secara otomatis dan diacak oleh sistem</li>
-                <li>Saldo setoran awal Rp {initialDeposit.toLocaleString('id-ID')} langsung masuk ke rekening</li>
-              </ul>
-            </div>
+                {trackedAccount && (
+                  <div className="grid grid-cols-2 gap-2 max-w-md mx-auto">
+                    <button
+                      type="button"
+                      onClick={() => adminApproveCard(trackedAccount.id)}
+                      className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] cursor-pointer"
+                    >
+                      Uji Setujui Admin
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        adminRejectCard(
+                          trackedAccount.id,
+                          'Foto KTP atau data identitas belum sesuai syarat verifikasi.'
+                        )
+                      }
+                      className="py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] cursor-pointer"
+                    >
+                      Uji Tolak Admin
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {trackedAccount && trackedAccount.cardStatus === 'active' && (
+              <>
+                <div className="w-16 h-16 rounded-full bg-emerald-500/20 border-2 border-emerald-400 text-emerald-400 flex items-center justify-center mx-auto">
+                  <CheckCircle2 className="w-8 h-8" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Permohonan Disetujui Admin!</h3>
+                  <p className="text-xs text-emerald-300 font-semibold mt-1">
+                    No. Rekening: <span className="font-mono">{trackedAccount.accountNumber}</span> • Saldo{' '}
+                    <span className="font-mono">{formatRupiah(trackedAccount.balance)}</span>
+                  </p>
+                </div>
+              </>
+            )}
+
+            {trackedAccount && trackedAccount.cardStatus === 'rejected' && (
+              <>
+                <div className="w-16 h-16 rounded-full bg-rose-500/20 border-2 border-rose-400 text-rose-400 flex items-center justify-center mx-auto">
+                  <XCircle className="w-8 h-8" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Permohonan Ditolak Admin</h3>
+                  <p className="text-xs text-rose-300 mt-1">
+                    {trackedAccount.rejectionReason || 'Dokumen belum memenuhi verifikasi.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubmittedAccountId(null);
+                    setStep(1);
+                  }}
+                  className="px-4 py-2 bg-amber-500 text-slate-950 font-black rounded-xl text-xs cursor-pointer"
+                >
+                  Perbaiki Data &amp; Ajukan Ulang
+                </button>
+              </>
+            )}
 
             <div className="flex gap-2 pt-2">
               <button
