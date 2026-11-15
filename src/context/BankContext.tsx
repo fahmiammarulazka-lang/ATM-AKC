@@ -198,7 +198,12 @@ interface BankContextType {
   googleUser: GoogleUserSession | null;
   firebaseUser: FirebaseUser | null;
   loginWithGoogle: (email: string, name: string, picture?: string, firebaseUid?: string) => void;
-  loginWithFirebaseGoogle: () => Promise<{ success: boolean; message: string }>;
+  loginWithFirebaseGoogle: () => Promise<{
+    success: boolean;
+    message: string;
+    errorCode?: string;
+    hostname?: string;
+  }>;
   completeGoogleOnboarding: () => void;
   reopenGoogleOnboarding: () => void;
   logoutGoogle: () => void;
@@ -1776,7 +1781,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
   };
 
-  const loginWithFirebaseGoogle = async (): Promise<{ success: boolean; message: string }> => {
+  const loginWithFirebaseGoogle = async (): Promise<{
+    success: boolean;
+    message: string;
+    errorCode?: string;
+    hostname?: string;
+  }> => {
+    const activeHostname =
+      typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : '';
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
@@ -1789,12 +1801,54 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         message: `Berhasil Sign in with Google sebagai ${name} (${email}). Memeriksa data Cloud Firebase...`,
       };
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Gagal membuka popup Sign in with Google.';
+      const rawMsg = err instanceof Error ? err.message : 'Gagal membuka popup Sign in with Google.';
+      const rawCode =
+        typeof err === 'object' && err !== null && 'code' in err && typeof (err as { code?: unknown }).code === 'string'
+          ? (err as { code: string }).code
+          : '';
+      const matchedCode = rawCode || rawMsg.match(/auth\/[a-z0-9-]+/i)?.[0] || '';
+
+      if (matchedCode === 'auth/popup-closed-by-user' || matchedCode === 'auth/cancelled-popup-request') {
+        return {
+          success: false,
+          errorCode: matchedCode,
+          hostname: activeHostname,
+          message: 'Sign in with Google dibatalkan sebelum selesai. Silakan klik tombol di atas untuk mencoba lagi.',
+        };
+      }
+      if (matchedCode === 'auth/unauthorized-domain') {
+        return {
+          success: false,
+          errorCode: matchedCode,
+          hostname: activeHostname,
+          message: `Domain "${activeHostname || 'halaman ini'}" belum terdaftar di daftar Authorized Domains Firebase Authentication.`,
+        };
+      }
+      if (
+        matchedCode === 'auth/popup-blocked' ||
+        matchedCode === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        return {
+          success: false,
+          errorCode: matchedCode,
+          hostname: activeHostname,
+          message:
+            'Jendela popup Google diblokir oleh webview/browser. Izinkan popup atau buka aplikasi di tab browser penuh (Chrome/Safari) lalu coba lagi.',
+        };
+      }
+      if (matchedCode === 'auth/network-request-failed') {
+        return {
+          success: false,
+          errorCode: matchedCode,
+          hostname: activeHostname,
+          message: 'Koneksi internet terputus saat menghubungi layanan Google. Periksa jaringan Anda lalu coba lagi.',
+        };
+      }
       return {
         success: false,
-        message: errMsg.includes('popup-closed-by-user')
-          ? 'Sign in with Google dibatalkan sebelum selesai.'
-          : `Sign in with Google gagal: ${errMsg}`,
+        errorCode: matchedCode || undefined,
+        hostname: activeHostname,
+        message: `Sign in with Google gagal: ${rawMsg}`,
       };
     }
   };

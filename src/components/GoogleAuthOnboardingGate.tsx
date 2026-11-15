@@ -17,7 +17,12 @@ import {
   LogOut,
   ShieldAlert,
   HelpCircle,
+  Copy,
+  Check,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
+import firebaseConfig from '../../firebase-applet-config.json';
 import { useBank } from '../context/BankContext';
 import { CardTier, BankAccount } from '../types/bank';
 import { CARD_TIER_CONFIGS, formatRupiah } from '../utils/bankUtils';
@@ -43,9 +48,14 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
   } = useBank();
 
   // Stage 1: Official Google OAuth 2.0 Sign-In State
-  const [googleError, setGoogleError] = useState<string>('');
+  const [googleError, setGoogleError] = useState<{
+    message: string;
+    errorCode?: string;
+    hostname?: string;
+  } | null>(null);
   const [firebasePopupLoading, setFirebasePopupLoading] = useState<boolean>(false);
   const [avatarImgError, setAvatarImgError] = useState<boolean>(false);
+  const [copiedDomain, setCopiedDomain] = useState<boolean>(false);
 
   // Stage 2: Post-Google Login Mode ('register' = Mulai Daftar Kartu Baru, 'login_old' = Login ke Kartu Lama Pakai PIN Kartu Lama)
   const [onboardingTab, setOnboardingTab] = useState<'register' | 'login_old'>('register');
@@ -74,15 +84,33 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
 
   // Handle Official Firebase Google Popup Sign-In
   const handleFirebaseGooglePopup = async () => {
-    setGoogleError('');
+    setGoogleError(null);
+    setCopiedDomain(false);
     setFirebasePopupLoading(true);
     try {
       const res = await loginWithFirebaseGoogle();
       if (!res.success) {
-        setGoogleError(res.message);
+        setGoogleError({
+          message: res.message,
+          errorCode: res.errorCode,
+          hostname:
+            res.hostname ||
+            (typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : ''),
+        });
       }
     } finally {
       setFirebasePopupLoading(false);
+    }
+  };
+
+  const handleCopyHostname = async (hostname: string) => {
+    if (!hostname) return;
+    try {
+      await navigator.clipboard.writeText(hostname);
+      setCopiedDomain(true);
+      window.setTimeout(() => setCopiedDomain(false), 2500);
+    } catch {
+      setCopiedDomain(false);
     }
   };
 
@@ -195,9 +223,98 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
             </button>
 
             {googleError && (
-              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                <span>{googleError}</span>
+              <div className="p-3.5 rounded-xl bg-rose-500/12 border border-rose-500/40 text-rose-200 text-xs space-y-3">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <div className="font-semibold text-rose-200">{googleError.message}</div>
+                    {googleError.errorCode && (
+                      <div className="font-mono text-[10px] text-rose-300/80">
+                        Kode: {googleError.errorCode}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {googleError.errorCode === 'auth/unauthorized-domain' && (
+                  <div className="p-3 rounded-lg bg-[#090B10] border border-amber-500/35 space-y-2.5 text-[11px] text-slate-300">
+                    <div className="font-semibold text-amber-300">
+                      Cara Mengizinkan Domain Ini di Firebase Console:
+                    </div>
+
+                    {googleError.hostname && (
+                      <div className="flex items-center justify-between gap-2 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5">
+                        <code className="font-mono text-[11px] text-emerald-300 truncate select-all">
+                          {googleError.hostname}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyHostname(googleError.hostname || '')}
+                          className="shrink-0 px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-semibold text-[10px] flex items-center gap-1 cursor-pointer"
+                        >
+                          {copiedDomain ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-400" />
+                              <span className="text-emerald-300">Tersalin</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>Salin Domain</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-400 leading-relaxed">
+                      <li>Salin domain aktif di atas.</li>
+                      <li>
+                        Buka <strong className="text-slate-200">Authentication → Settings → Authorized domains</strong> di Firebase Console lalu klik <strong className="text-slate-200">Add domain</strong>.
+                      </li>
+                      <li>Tempel domain tersebut, simpan, lalu tekan tombol coba lagi di bawah.</li>
+                    </ol>
+
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <a
+                        href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/settings`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] inline-flex items-center gap-1.5"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Buka Authorized Domains</span>
+                      </a>
+                      <button
+                        type="button"
+                        disabled={firebasePopupLoading}
+                        onClick={handleFirebaseGooglePopup}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-100 font-semibold text-[11px] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Coba Login Google Lagi</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {(googleError.errorCode === 'auth/popup-blocked' ||
+                  googleError.errorCode === 'auth/operation-not-supported-in-this-environment') && (
+                  <div className="p-2.5 rounded-lg bg-[#090B10] border border-slate-700 space-y-2 text-[11px] text-slate-300">
+                    <p className="text-slate-400 leading-relaxed">
+                      Jika Anda membuka aplikasi di dalam webview/iframe yang memblokir jendela baru, aktifkan izin popup browser atau buka tautan aplikasi langsung di tab browser Chrome/Safari.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={firebasePopupLoading}
+                      onClick={handleFirebaseGooglePopup}
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-100 font-semibold text-[11px] inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Coba Buka Popup Lagi</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
