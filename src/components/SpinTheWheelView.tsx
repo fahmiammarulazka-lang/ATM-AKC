@@ -1,11 +1,11 @@
 /**
  * Bank Nusantara — Fitur Spin the Wheel (Rp 100.000 s/d Rp 20.000.000)
- * & Toko Pembelian 100 Pilihan Koin (1 Koin s/d 100.000 Koin s/d 1.000.000 Koin)
+ * & Toko Pembelian 300 Pilihan Koin (1 Koin s/d 10.000.000 Koin)
  *
  * Sesuai spesifikasi lengkap user:
- * - Di bagian atas ada Gambar Koin (🪙), angka jumlah koin (mulai dari 0), dan tombol Plus (+).
- * - Ketika tombol (+) dipencet, muncul 100 pilihan pembelian koin mulai dari 1 Koin, 100.000 Koin, hingga 1.000.000 Koin.
- * - Harga 1 Koin = Rp 10.000 (dikalikan jumlah koin + ada recehan & desimalnya, contoh Rp 10.000,12).
+ * - Di bagian atas ada Gambar Koin (🪙), angka jumlah koin, dan tombol Plus (+).
+ * - Ketika tombol (+) dipencet, muncul 300 pilihan pembelian koin mulai dari 1 Koin hingga 10.000.000 Koin.
+ * - Harga 1 Koin = Rp 10.000 dengan format bulat Rp xxx.xxx.
  * - Harga koin masih bisa dimurahin & dikasih diskon di Panel Admin.
  * - Pilihan Spin: 1 kali, 3 kali, 5 kali, 7 kali, 10 kali.
  * - Harga 1 kali Spin = 100 Koin (setara Rp 1.000.000), dan bisa dikasih diskon di Panel Admin.
@@ -35,7 +35,7 @@ import {
 import { useBank } from '../context/BankContext';
 import {
   SPIN_WHEEL_PRIZES,
-  COIN_PURCHASE_PACKAGES_100,
+  COIN_PURCHASE_PACKAGES_300,
   calculateCoinPackagePrice,
   calculateSpinCost,
   formatRupiahWithDecimals,
@@ -91,7 +91,7 @@ export const SpinTheWheelView: React.FC = () => {
   const sliceAngle = 360 / numSegments; // 18 derajat per segmen
 
   const filteredCoinPackages = useMemo(() => {
-    return COIN_PURCHASE_PACKAGES_100.filter((pkg) => {
+    return COIN_PURCHASE_PACKAGES_300.filter((pkg) => {
       if (coinFilterTab !== 'all' && pkg.category !== coinFilterTab) return false;
       if (coinSearchQuery.trim()) {
         const q = coinSearchQuery.trim().toLowerCase();
@@ -225,7 +225,7 @@ export const SpinTheWheelView: React.FC = () => {
               🎡 Spin the Wheel Berhadiah Rp 100.000 s/d Rp 20.000.000
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-              1 kali Spin membutuhkan <strong>{calculateSpinCost(1, spinWheelConfig).finalCoins} Koin</strong> (normal <strong>100 Koin = Rp 1.000.000</strong>). Klik tombol <strong>[+]</strong> di sebelah gambar koin di kanan atas untuk membeli koin (tersedia <strong>100 pilihan pembelian dari 1 Koin sampai 1.000.000 Koin</strong> dengan harga 1 Koin = {formatRupiah(spinWheelConfig.baseCoinPriceRupiah)} + recehan desimal).
+              1 kali Spin membutuhkan <strong>{calculateSpinCost(1, spinWheelConfig).finalCoins} Koin</strong> (normal <strong>100 Koin = Rp 1.000.000</strong>). Klik tombol <strong>[+]</strong> di sebelah gambar koin di kanan atas untuk membeli koin (tersedia <strong>300 pilihan pembelian dari 1 Koin sampai 10.000.000 Koin</strong> dengan harga 1 Koin = {formatRupiah(spinWheelConfig.baseCoinPriceRupiah)}).
             </p>
           </div>
 
@@ -267,12 +267,12 @@ export const SpinTheWheelView: React.FC = () => {
                 </span>
               </div>
 
-              {/* Tombol Plus (+) untuk Membeli Koin (1 s/d 1.000.000 Koin - 100 Pilihan) */}
+              {/* Tombol Plus (+) untuk Membeli Koin (1 s/d 10.000.000 Koin - 300 Pilihan) */}
               <button
                 type="button"
                 onClick={() => setIsCoinShopOpen((prev) => !prev)}
                 className="w-10 h-10 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 font-black flex items-center justify-center shadow-lg shadow-emerald-500/30 cursor-pointer transition-transform active:scale-95"
-                title="Klik [+] untuk Membeli Koin Spin (100 Pilihan: 1 Koin s/d 1.000.000 Koin)"
+                title="Klik [+] untuk Membeli Koin Spin (300 Pilihan: 1 Koin s/d 10.000.000 Koin)"
               >
                 <Plus className="w-6 h-6 stroke-[3]" />
               </button>
@@ -284,7 +284,7 @@ export const SpinTheWheelView: React.FC = () => {
         <div className="mt-4 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px]">
           <div className="flex flex-wrap items-center gap-2">
             <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-amber-300 font-mono font-bold">
-              🪙 Harga Dasar 1 Koin: {formatRupiahWithDecimals(spinWheelConfig.baseCoinPriceRupiah + 0.12)}
+              🪙 Harga Dasar 1 Koin: {formatRupiahWithDecimals(spinWheelConfig.baseCoinPriceRupiah)}
             </span>
             {spinWheelConfig.coinPurchaseDiscountPercent > 0 && (
               <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/50 text-emerald-300 font-mono font-bold">
@@ -316,8 +316,8 @@ export const SpinTheWheelView: React.FC = () => {
             <Coins className="w-3.5 h-3.5" />
             <span>
               {isCoinShopOpen
-                ? 'Tutup Toko 100 Pilihan Koin'
-                : 'Buka Toko Pembelian Koin (+ 100 Pilihan: 1 s/d 1 Juta Koin)'}
+                ? 'Tutup Toko 300 Pilihan Koin'
+                : 'Buka Toko Pembelian Koin (+ 300 Pilihan: 1 s/d 10.000.000 Koin)'}
             </span>
           </button>
         </div>
@@ -350,7 +350,7 @@ export const SpinTheWheelView: React.FC = () => {
                   className="mt-2 px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer inline-flex items-center gap-1.5"
                 >
                   <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                  <span>Buka Pembelian Koin Sekarang (1 s/d 1.000.000 Koin)</span>
+                  <span>Buka Pembelian Koin Sekarang (1 s/d 10.000.000 Koin)</span>
                 </button>
               )}
             </div>
@@ -366,7 +366,7 @@ export const SpinTheWheelView: React.FC = () => {
       )}
 
       {/* =====================================================================
-          MODAL / DRAWER TOKO PEMBELIAN 100 PILIHAN KOIN (SAAT TOMBOL [+] DIPENCET)
+          MODAL / DRAWER TOKO PEMBELIAN 300 PILIHAN KOIN (SAAT TOMBOL [+] DIPENCET)
          ===================================================================== */}
       {isCoinShopOpen && (
         <div className="bg-slate-900/95 border-2 border-amber-400 rounded-3xl p-5 sm:p-6 shadow-2xl space-y-5">
@@ -374,10 +374,10 @@ export const SpinTheWheelView: React.FC = () => {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase">
-                  🪙 TOKO RESMI KOIN SPIN THE WHEEL • 100 PILIHAN PEMBELIAN
+                  🪙 TOKO RESMI KOIN SPIN THE WHEEL • 300 PILIHAN PEMBELIAN
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-mono text-[10px] font-bold">
-                  1 Koin = {formatRupiah(spinWheelConfig.baseCoinPriceRupiah)} (+ Recehan Desimal)
+                  1 Koin = {formatRupiahWithDecimals(spinWheelConfig.baseCoinPriceRupiah)}
                 </span>
                 {spinWheelConfig.coinPurchaseDiscountPercent > 0 && (
                   <span className="px-2.5 py-0.5 rounded-full bg-rose-500 text-white font-mono text-[10px] font-black">
@@ -386,10 +386,10 @@ export const SpinTheWheelView: React.FC = () => {
                 )}
               </div>
               <h2 className="text-lg sm:text-xl font-black text-white mt-1">
-                100 Pilihan Pembelian Koin (Mulai 1 Koin, 100.000 Koin, hingga 1.000.000 Koin)
+                300 Pilihan Pembelian Koin (Mulai 1 Koin hingga 10.000.000 Koin)
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Pilih paket koin di bawah ini. Harga dikalikan dari <strong>1 Koin = Rp 10.000</strong> lengkap dengan <strong>angka recehan &amp; desimalnya</strong>, serta otomatis memotong diskon apabila diberikan di Panel Admin.
+                Pilih paket koin di bawah ini mulai dari <strong>1 Koin sampai 10.000.000 Koin</strong> dengan format harga <strong>{formatRupiahWithDecimals(spinWheelConfig.baseCoinPriceRupiah)}</strong> per koin serta otomatis memotong diskon Panel Admin.
               </p>
             </div>
 
@@ -403,16 +403,16 @@ export const SpinTheWheelView: React.FC = () => {
             </button>
           </div>
 
-          {/* Filter Kategori & Pencarian dari 100 Pilihan */}
+          {/* Filter Kategori & Pencarian dari 300 Pilihan */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1.5">
               {(
                 [
-                  { id: 'all', label: 'Semua (100 Pilihan)' },
-                  { id: 'satuan', label: '#1–#25: 1 s/d 95 Koin' },
-                  { id: 'paket_spin', label: '#26–#50: 100 s/d 5.000 Koin' },
-                  { id: 'sultan_100k', label: '#51–#75: 6.000 s/d 100.000 Koin' },
-                  { id: 'mega_1juta', label: '#76–#100: 110.000 s/d 1 Juta Koin' },
+                  { id: 'all', label: 'Semua (300 Pilihan)' },
+                  { id: 'satuan', label: '#1–#60: 1 s/d 99 Koin' },
+                  { id: 'paket_spin', label: '#61–#140: 100 s/d 10.000 Koin' },
+                  { id: 'sultan_100k', label: '#141–#220: 10.500 s/d 500.000 Koin' },
+                  { id: 'mega_1juta', label: '#221–#300: 520.000 s/d 10.000.000 Koin' },
                 ] as const
               ).map((tab) => (
                 <button
@@ -436,13 +436,13 @@ export const SpinTheWheelView: React.FC = () => {
                 type="text"
                 value={coinSearchQuery}
                 onChange={(e) => setCoinSearchQuery(e.target.value)}
-                placeholder="Cari jumlah koin (misal: 1, 100, 100000, 1000000)..."
+                placeholder="Cari koin (misal: 1, 1000000, 10000000)..."
                 className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white focus:outline-none focus:border-amber-400"
               />
             </div>
           </div>
 
-          {/* Grid 100 Pilihan Pembelian Koin */}
+          {/* Grid 300 Pilihan Pembelian Koin */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[520px] overflow-y-auto pr-1">
             {filteredCoinPackages.map((pkg) => {
               const { normalPrice, finalPrice, discountPercent } =
@@ -461,7 +461,7 @@ export const SpinTheWheelView: React.FC = () => {
                   <div>
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">
-                        Pilihan #{pkg.id}/100
+                        Pilihan #{pkg.id}/300
                       </span>
                       {pkg.badge && (
                         <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 uppercase">
@@ -486,7 +486,7 @@ export const SpinTheWheelView: React.FC = () => {
 
                     <div className="mt-2.5 p-2 rounded-xl bg-slate-900/90 border border-slate-800/90">
                       <span className="text-[9px] font-mono uppercase text-slate-400 block">
-                        Harga (+ Recehan Desimal):
+                        Harga Paket Koin:
                       </span>
                       {isPriceReduced && (
                         <span className="text-[10px] font-mono text-slate-500 line-through block">

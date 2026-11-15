@@ -458,7 +458,7 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
       {
         buttonName: 'Tombol [+] (Di sebelah gambar Koin di atas)',
         location: 'Header Halaman Spin the Wheel',
-        functionDetail: 'Membuka Toko 100 Pilihan Paket Pembelian Koin Spin (mulai dari 1 Koin sampai 1.000.000 Koin).',
+        functionDetail: 'Membuka Toko 300 Pilihan Paket Pembelian Koin Spin (mulai dari 1 Koin sampai 10.000.000 Koin).',
       },
     ],
     stepByStepGuide: [
@@ -478,23 +478,23 @@ const COMPREHENSIVE_TUTORIAL_CHAPTERS: TutorialChapter[] = [
     chapterNumber: 11,
     category: 'Hiburan & Jackpot',
     icon: '🪙',
-    title: 'Toko 100 Pilihan Paket Pembelian Koin Spin (1 Koin = Rp 10.000, Recehan Desimal & Diskon)',
-    subtitle: 'Penjelasan rumus harga koin, recehan desimal unik di setiap paket, dan cara memurahkan harga di Panel Admin',
+    title: 'Toko 300 Pilihan Paket Pembelian Koin Spin (1 Koin – 10.000.000 Koin, Format Rp xxx.xxx)',
+    subtitle: 'Penjelasan rumus harga koin bulat Rp xxx.xxx dan cara memurahkan harga di Panel Admin',
     deepExplanationParagraphs: [
-      'Ketika Anda menekan tombol [+] di sebelah gambar koin di bagian atas halaman Spin the Wheel, sistem akan menampilkan Katalog Lengkap 100 Pilihan Paket Pembelian Koin Spin mulai dari Paket #1 (1 Koin) hingga Paket #100 (1.000.000 Koin)!',
-      'Harga dasar 1 Koin adalah sebesar Rp 10.000, dan dikali lipatkan sesuai jumlah koin di paket tersebut ditambah nilai recehan dan angka desimal unik (contoh: Rp 10.012,25 untuk 1 Koin, Rp 1.000.045,75 untuk 100 Koin, dst.).',
+      'Ketika Anda menekan tombol [+] di sebelah gambar koin di bagian atas halaman Spin the Wheel, sistem akan menampilkan Katalog Lengkap 300 Pilihan Paket Pembelian Koin Spin mulai dari Paket #1 (1 Koin) hingga Paket #300 (10.000.000 Koin)!',
+      'Harga dasar 1 Koin adalah sebesar Rp 10.000, dan dikali lipatkan sesuai jumlah koin di paket tersebut dengan format Rupiah bulat bersih "Rp xxx.xxx" (contoh: Rp 10.000 untuk 1 Koin, Rp 1.000.000 untuk 100 Koin, dst.).',
       'Di Panel Admin, harga dasar 1 Koin masih bisa dimurahkan lagi (misalnya diturunkan dari Rp 10.000 menjadi Rp 1.000 atau Rp 100 per koin) dan bisa ditambah Diskon Persentase hingga 99%!',
     ],
     buttonsAndInputs: [
       {
         buttonName: 'Tombol [+ Beli Koin] (Di bar Koin Atas)',
         location: 'Pojok Kanan Atas Halaman Spin the Wheel',
-        functionDetail: 'Menampilkan atau menyembunyikan katalog 100 paket pembelian koin spin.',
+        functionDetail: 'Menampilkan atau menyembunyikan katalog 300 paket pembelian koin spin.',
       },
       {
-        buttonName: 'Filter Kategori [Semua 100 Paket / Satuan / Paket Spin / Sultan 100rb / Mega 1 Juta]',
-        location: 'Di atas Katalog 100 Paket Koin',
-        functionDetail: 'Memudahkan pencarian paket koin dari nominal kecil hingga 1 juta koin.',
+        buttonName: 'Filter Kategori [Semua 300 Paket / Satuan & Puluhan / Ratusan–10rb / Sultan 10.5rb–500rb / Mega 520rb–10 Juta]',
+        location: 'Di atas Katalog 300 Paket Koin',
+        functionDetail: 'Memudahkan pencarian paket koin dari nominal kecil hingga 10 juta koin.',
       },
     ],
     stepByStepGuide: [

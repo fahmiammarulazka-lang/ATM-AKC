@@ -59,7 +59,7 @@ import { CardTier, FeatureSecurityConfig } from '../types/bank';
 import { JOB_VACANCIES_CATALOG } from '../data/featuresCatalog';
 import {
   SPIN_WHEEL_PRIZES,
-  COIN_PURCHASE_PACKAGES_100,
+  COIN_PURCHASE_PACKAGES_300,
   calculateCoinPackagePrice,
   calculateSpinCost,
   formatRupiahWithDecimals,
@@ -929,13 +929,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
                 <span className="px-3 py-1 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase tracking-wider inline-block">
-                  🎡 PUSAT KONTROL ADMIN SPIN THE WHEEL &amp; 100 PAKET KOIN
+                  🎡 PUSAT KONTROL ADMIN SPIN THE WHEEL &amp; 300 PAKET KOIN
                 </span>
                 <h2 className="text-xl sm:text-2xl font-black text-white mt-1.5">
                   Atur Diskon Spin (1x, 3x, 5x, 7x, 10x), Murahin Harga Koin &amp; Perbesar Kemungkinan Menang
                 </h2>
                 <p className="text-xs text-slate-300 mt-1">
-                  Sesuai permintaan Anda: Di sini Admin bisa memberikan diskon biaya Spin (1x, 3x, 5x, 7x, 10x), memurahkan harga dasar 1 Koin (normal Rp 10.000 + recehan desimal), memberi diskon pada 100 pilihan pembelian koin (1 s/d 1.000.000 Koin), serta memperbesar kemungkinan pendapatan saat nyepin!
+                  Di sini Admin bisa memberikan diskon biaya Spin (1x, 3x, 5x, 7x, 10x), memurahkan harga dasar 1 Koin (normal Rp 10.000), memberi diskon pada 300 pilihan pembelian koin (1 s/d 10.000.000 Koin, format harga Rp xxx.xxx), serta memperbesar kemungkinan pendapatan saat nyepin!
                 </p>
               </div>
               <button
@@ -968,13 +968,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               <div className="p-5 rounded-2xl bg-slate-950/90 border border-amber-500/40 space-y-4">
                 <div>
                   <span className="text-[10px] font-mono uppercase text-amber-400 font-bold block">
-                    1. HARGA KOIN &amp; DISKON 100 PILIHAN KOIN
+                    1. HARGA KOIN &amp; DISKON 300 PILIHAN KOIN
                   </span>
                   <h3 className="text-sm font-black text-white mt-0.5">
                     Murahin Harga 1 Koin &amp; Diskon Beli Koin
                   </h3>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Normal: <strong>1 Koin = Rp 10.000</strong> (+ recehan desimal). Bisa dimurahin dan dikasih diskon untuk seluruh 100 pilihan (1 s/d 1 Juta Koin).
+                    Normal: <strong>1 Koin = Rp 10.000</strong> (format bulat Rp xxx.xxx). Bisa dimurahin dan dikasih diskon untuk seluruh 300 pilihan (1 s/d 10 Juta Koin).
                   </p>
                 </div>
 
@@ -1016,7 +1016,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 <div className="space-y-1.5 pt-2 border-t border-slate-800">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-bold text-slate-300">
-                      Diskon Pembelian Koin (100 Pilihan):
+                      Diskon Pembelian Koin (300 Pilihan):
                     </label>
                     <span className="font-mono font-black text-emerald-400 text-xs">
                       {spinWheelConfig.coinPurchaseDiscountPercent}% OFF
@@ -1057,13 +1057,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   </div>
                 </div>
 
-                {/* Live Preview of Coin Package Prices with Recehan Decimals */}
+                {/* Live Preview of Coin Package Prices in Rp xxx.xxx */}
                 <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1 text-[10px] font-mono">
                   <span className="text-amber-300 font-bold block">
-                    Pratinjau Harga Koin (+ Recehan Desimal):
+                    Pratinjau Harga Koin (Format Rp xxx.xxx):
                   </span>
-                  {[1, 100, 100_000, 1_000_000].map((coinQty) => {
-                    const pkg = COIN_PURCHASE_PACKAGES_100.find((p) => p.coins === coinQty);
+                  {[1, 100, 100_000, 1_000_000, 10_000_000].map((coinQty) => {
+                    const pkg = COIN_PURCHASE_PACKAGES_300.find((p) => p.coins === coinQty);
                     if (!pkg) return null;
                     const priceInfo = calculateCoinPackagePrice(pkg, spinWheelConfig);
                     return (

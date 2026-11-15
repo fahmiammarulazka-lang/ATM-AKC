@@ -1,7 +1,7 @@
 /**
  * Bank Nusantara Layer 3 Persistence: Penyimpanan HP / Device Storage
  * Menggabungkan IndexedDB berkapasitas besar (tahan hingga ratusan MB di HP Android/iOS)
- * dengan sinkronisasi localStorage dan Persistent Storage API agar data nasabah tidak hilang.
+ * dengan Persistent Storage API agar data nasabah & koin Spin tidak pernah hilang.
  */
 
 const IDB_NAME = 'bank_nusantara_device_db';
@@ -130,17 +130,19 @@ export async function saveSnapshotToDeviceStorage(
 ): Promise<void> {
   void requestPersistentDeviceStorage();
 
-  // 1. IndexedDB (High-capacity HP/Browser storage)
+  // Remove old duplicate full-snapshot key from localStorage so localStorage quota is never exhausted for accounts/coins
+  try {
+    if (localStorage.getItem(DEVICE_FULL_SNAPSHOT_LS_KEY) !== null) {
+      localStorage.removeItem(DEVICE_FULL_SNAPSHOT_LS_KEY);
+    }
+  } catch {
+    // ignore
+  }
+
+  // IndexedDB (High-capacity HP/Browser storage)
   await idbSet(FULL_SNAPSHOT_KEY, snapshot);
   if (scopeEmail) {
     await idbSet(`scope:${scopeEmail.trim().toLowerCase()}`, snapshot);
-  }
-
-  // 2. Fast localStorage mirror (best effort)
-  try {
-    localStorage.setItem(DEVICE_FULL_SNAPSHOT_LS_KEY, JSON.stringify(snapshot));
-  } catch {
-    // Quota exceeded on tiny localStorage; IndexedDB still safely holds complete data
   }
 }
 
@@ -163,6 +165,7 @@ export async function loadSnapshotFromDeviceStorage(
     const raw = localStorage.getItem(DEVICE_FULL_SNAPSHOT_LS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as BankPersistableSnapshot;
+      localStorage.removeItem(DEVICE_FULL_SNAPSHOT_LS_KEY);
       if (parsed && typeof parsed.updatedAtMs === 'number') {
         return parsed;
       }

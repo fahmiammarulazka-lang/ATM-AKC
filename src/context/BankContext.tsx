@@ -105,7 +105,7 @@ import {
 import {
   INITIAL_SPIN_WHEEL_CONFIG,
   SPIN_WHEEL_PRIZES,
-  COIN_PURCHASE_PACKAGES_100,
+  COIN_PURCHASE_PACKAGES_300,
   calculateCoinPackagePrice,
   calculateSpinCost,
   formatRupiahWithDecimals,
@@ -983,6 +983,62 @@ const STORAGE_KEYS = {
   MANUAL_EXPENSES: 'bank_nusantara_manual_expenses_v1',
   BUDGET_TX_MAP: 'bank_nusantara_budget_tx_map_v1',
   BUDGET_ALERTS: 'bank_nusantara_budget_alerts_v1',
+  SPIN_VAULT: 'bank_nusantara_spin_vault_v1',
+};
+
+interface SpinVaultEntry {
+  spinCoins: number;
+  totalSpinsPlayed?: number;
+  totalSpinWinnings?: number;
+  updatedAtMs: number;
+}
+
+const readSpinVaultMap = (): Record<string, SpinVaultEntry> => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.SPIN_VAULT);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, SpinVaultEntry>) : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeSpinVaultFromAccounts = (accs: BankAccount[], nowMs: number = Date.now()) => {
+  try {
+    const nextVault: Record<string, SpinVaultEntry> = {};
+    for (const acc of accs) {
+      nextVault[acc.id] = {
+        spinCoins: typeof acc.spinCoins === 'number' && Number.isFinite(acc.spinCoins) ? Math.max(0, acc.spinCoins) : 0,
+        totalSpinsPlayed: acc.totalSpinsPlayed || 0,
+        totalSpinWinnings: acc.totalSpinWinnings || 0,
+        updatedAtMs: nowMs,
+      };
+    }
+    localStorage.setItem(STORAGE_KEYS.SPIN_VAULT, JSON.stringify(nextVault));
+  } catch {
+    // ignore
+  }
+};
+
+const mergeAccountsWithSpinVault = (accs: BankAccount[]): BankAccount[] => {
+  const vault = readSpinVaultMap();
+  if (Object.keys(vault).length === 0) return accs;
+  return accs.map((acc) => {
+    const entry = vault[acc.id];
+    if (!entry) return acc;
+    const accCoins = typeof acc.spinCoins === 'number' ? acc.spinCoins : 0;
+    // Restore non-zero spinCoins if localStorage accounts dropped them
+    if (accCoins === 0 && entry.spinCoins > 0) {
+      return {
+        ...acc,
+        spinCoins: entry.spinCoins,
+        totalSpinsPlayed: Math.max(acc.totalSpinsPlayed || 0, entry.totalSpinsPlayed || 0),
+        totalSpinWinnings: Math.max(acc.totalSpinWinnings || 0, entry.totalSpinWinnings || 0),
+      };
+    }
+    return acc;
+  });
 };
 
 const getLocalDateKey = (d: Date = new Date()): string => {
@@ -1093,18 +1149,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (saved) {
         const parsed: BankAccount[] = JSON.parse(saved);
         const missing = INITIAL_ACCOUNTS.filter((initAcc) => !parsed.some((p) => p.id === initAcc.id));
-        return [...parsed, ...missing];
+        return mergeAccountsWithSpinVault([...parsed, ...missing]);
       }
-      return INITIAL_ACCOUNTS;
+      return mergeAccountsWithSpinVault(INITIAL_ACCOUNTS);
     } catch {
-      return INITIAL_ACCOUNTS;
+      return mergeAccountsWithSpinVault(INITIAL_ACCOUNTS);
     }
   });
 
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.GOOGLE_USER);
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const parsed = JSON.parse(saved) as GoogleUserSession;
+      // Enforce real Sign in with Google: require firebaseUid from OAuth 2.0
+      if (!parsed || !parsed.firebaseUid) return null;
+      return parsed;
     } catch {
       return null;
     }
@@ -1536,10 +1596,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   });
 
-  // Sync to local storage
+  // Sync to local storage + Spin Vault
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
+      writeSpinVaultFromAccounts(accounts);
     } catch { /* empty */ }
   }, [accounts]);
 
@@ -1725,15 +1786,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       loginWithGoogle(email, name, user.photoURL || undefined, user.uid);
       return {
         success: true,
-        message: `Berhasil masuk sebagai ${name} (${email}). Sinkronisasi Firebase aktif.`,
+        message: `Berhasil Sign in with Google sebagai ${name} (${email}). Memeriksa data Cloud Firebase...`,
       };
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Gagal membuka popup login Google Firebase.';
+      const errMsg = err instanceof Error ? err.message : 'Gagal membuka popup Sign in with Google.';
       return {
         success: false,
         message: errMsg.includes('popup-closed-by-user')
-          ? 'Login Google dibatalkan sebelum selesai.'
-          : `Login Google Firebase gagal: ${errMsg}`,
+          ? 'Sign in with Google dibatalkan sebelum selesai.'
+          : `Sign in with Google gagal: ${errMsg}`,
       };
     }
   };
@@ -1811,6 +1872,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const lastSyncEpochRef = useRef<number>(0);
   const isApplyingExternalSnapshotRef = useRef<boolean>(false);
   const hasBootHydratedRef = useRef<boolean>(false);
+  const didMountSaveEffectRef = useRef<boolean>(false);
+  const bootHydrationPromiseRef = useRef<Promise<void> | null>(null);
 
   const buildPersistableSnapshot = (epochMs: number): BankPersistableSnapshot => ({
     version: 1,
@@ -1862,7 +1925,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (Array.isArray(snapshot.accounts) && snapshot.accounts.length > 0) {
       const parsed = snapshot.accounts as BankAccount[];
       const missing = INITIAL_ACCOUNTS.filter((initAcc) => !parsed.some((p) => p.id === initAcc.id));
-      setAccounts([...parsed, ...missing]);
+      const mergedAccounts = mergeAccountsWithSpinVault([...parsed, ...missing]);
+      setAccounts(mergedAccounts);
+      writeSpinVaultFromAccounts(mergedAccounts, incomingTs);
     }
     if (typeof snapshot.currentAccountId === 'string' && snapshot.currentAccountId) {
       setCurrentAccountIdState(snapshot.currentAccountId);
@@ -1919,12 +1984,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setBudgetAlertHistory(snapshot.budgetAlertHistory);
     }
     if (snapshot.googleUser && typeof snapshot.googleUser === 'object') {
-      setGoogleUser((prev) => prev || (snapshot.googleUser as GoogleUserSession));
+      const incomingGoogle = snapshot.googleUser as GoogleUserSession;
+      if (incomingGoogle.firebaseUid) {
+        setGoogleUser((prev) => prev || incomingGoogle);
+      }
     }
 
     window.setTimeout(() => {
       isApplyingExternalSnapshotRef.current = false;
-    }, 50);
+    }, 60);
   };
 
   // Boot Hydration from Layer 3 (HP IndexedDB) & Layer 2 (Server DB)
@@ -1960,7 +2028,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     };
 
-    void hydrate();
+    const p = hydrate();
+    bootHydrationPromiseRef.current = p;
     return () => {
       active = false;
     };
@@ -1978,12 +2047,57 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         unsubFirestore();
         unsubFirestore = null;
       }
-      if (!fbUser || !fbUser.emailVerified) return;
+      if (!fbUser || !fbUser.emailVerified) {
+        // Only clear if there was no valid Firebase session
+        setGoogleUser((prev) => (prev && !prev.firebaseUid ? null : prev));
+        return;
+      }
+
+      // Sync googleUser profile with authoritative Firebase Google user
+      const authEmail = (fbUser.email || 'fahmiammarulazka@gmail.com').trim().toLowerCase();
+      const authName = (fbUser.displayName || authEmail.split('@')[0]).trim();
+      setGoogleUser((prev) => {
+        if (prev && prev.firebaseUid === fbUser.uid) {
+          return {
+            ...prev,
+            email: authEmail,
+            name: authName,
+            picture: fbUser.photoURL || prev.picture,
+          };
+        }
+        return {
+          email: authEmail,
+          name: authName,
+          picture: fbUser.photoURL || undefined,
+          firebaseUid: fbUser.uid,
+          loggedInAt: new Date().toISOString(),
+          hasCompletedOnboarding: prev?.hasCompletedOnboarding ?? false,
+        };
+      });
+
+      if (bootHydrationPromiseRef.current) {
+        await bootHydrationPromiseRef.current.catch(() => {});
+      }
 
       try {
         const remote = await loadSnapshotFromFirestoreOnce(fbUser);
-        if (remote && typeof remote.updatedAtMs === 'number' && remote.updatedAtMs > lastSyncEpochRef.current) {
-          applyExternalSnapshot(remote);
+        if (remote) {
+          const remoteTs = typeof remote.updatedAtMs === 'number' ? remote.updatedAtMs : 0;
+          if (remoteTs > lastSyncEpochRef.current) {
+            applyExternalSnapshot(remote);
+          }
+          // Auto-restore into dashboard if cloud vault already contains saved user accounts / activity
+          const remoteAccs = Array.isArray(remote.accounts) ? (remote.accounts as BankAccount[]) : [];
+          const hasSavedCloudActivity =
+            remoteAccs.length > INITIAL_ACCOUNTS.length ||
+            remoteAccs.some((a) => (a.spinCoins || 0) > 0 || (a.goldGrams || 0) > 0) ||
+            (Array.isArray(remote.transactions) && remote.transactions.length > INITIAL_TRANSACTIONS.length);
+
+          if (hasSavedCloudActivity) {
+            setGoogleUser((prev) =>
+              prev ? { ...prev, hasCompletedOnboarding: true } : prev
+            );
+          }
         } else if (latestSnapshotRef.current) {
           await saveSnapshotToFirestore(fbUser, latestSnapshotRef.current);
         }
@@ -2011,7 +2125,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const snap = buildPersistableSnapshot(nowEpoch);
     latestSnapshotRef.current = snap;
 
-    if (isApplyingExternalSnapshotRef.current) {
+    // Never advance lastSyncEpochRef on initial render or before boot hydration finishes!
+    if (!didMountSaveEffectRef.current) {
+      didMountSaveEffectRef.current = true;
+      return;
+    }
+    if (!hasBootHydratedRef.current || isApplyingExternalSnapshotRef.current) {
       return;
     }
 
@@ -2021,11 +2140,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Layer 3: HP IndexedDB (fast write)
     const deviceTimer = window.setTimeout(() => {
       void saveSnapshotToDeviceStorage(snap, googleUser?.email);
-    }, 150);
+    }, 80);
 
     // Layer 2 (Server DB) + Layer 1 (Firebase Firestore)
     const remoteTimer = window.setTimeout(() => {
-      if (!hasBootHydratedRef.current) return;
       fetch('/api/db/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2035,7 +2153,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (firebaseUser && firebaseUser.emailVerified) {
         void saveSnapshotToFirestore(firebaseUser, snap).catch(() => {});
       }
-    }, 650);
+    }, 550);
 
     return () => {
       window.clearTimeout(deviceTimer);
@@ -7837,7 +7955,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // ============================================================================
-  // SPIN THE WHEEL & 100 PILIHAN PEMBELIAN KOIN SPIN + PANEL ADMIN KONTROL
+  // SPIN THE WHEEL & 300 PILIHAN PEMBELIAN KOIN SPIN + PANEL ADMIN KONTROL
   // ============================================================================
   const buySpinCoins = (packageId: number) => {
     if (!currentAccount) {
@@ -7850,7 +7968,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    const pkg = COIN_PURCHASE_PACKAGES_100.find((p) => p.id === packageId);
+    const pkg = COIN_PURCHASE_PACKAGES_300.find((p) => p.id === packageId);
     if (!pkg) {
       return { success: false, message: 'Paket koin tidak ditemukan.' };
     }
@@ -7860,7 +7978,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
 
     if (!isAdminCard && currentAccount.balance < finalPrice) {
-      playAtmSound('error');
+      playAtmSound('alert');
       return {
         success: false,
         message: `Saldo rekening tidak mencukupi untuk membeli Paket #${pkg.id} (${pkg.coins.toLocaleString(
@@ -7875,19 +7993,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const newCoinBalance = currentCoins + pkg.coins;
     const newAccountBalance = isAdminCard
       ? UNLIMITED_BALANCE
-      : Number((currentAccount.balance - finalPrice).toFixed(2));
+      : Math.max(0, Math.round(currentAccount.balance - finalPrice));
 
-    setAccounts((prev) =>
-      prev.map((a) =>
-        a.id === currentAccount.id
-          ? {
-              ...a,
-              balance: newAccountBalance,
-              spinCoins: newCoinBalance,
-            }
-          : a
-      )
+    const updatedAccounts = accounts.map((a) =>
+      a.id === currentAccount.id
+        ? {
+            ...a,
+            balance: newAccountBalance,
+            spinCoins: newCoinBalance,
+          }
+        : a
     );
+    setAccounts(updatedAccounts);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(updatedAccounts));
+      writeSpinVaultFromAccounts(updatedAccounts, Date.now());
+    } catch { /* empty */ }
 
     const newTx: Transaction = {
       id: `tx-buycoin-${Date.now()}`,
@@ -8025,19 +8146,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ? UNLIMITED_BALANCE
       : currentAccount.balance + totalWonAmount;
 
-    setAccounts((prev) =>
-      prev.map((a) =>
-        a.id === currentAccount.id
-          ? {
-              ...a,
-              balance: newAccountBalance,
-              spinCoins: newCoinBalance,
-              totalSpinsPlayed: (a.totalSpinsPlayed || 0) + spinCount,
-              totalSpinWinnings: (a.totalSpinWinnings || 0) + totalWonAmount,
-            }
-          : a
-      )
+    const updatedAccountsAfterSpin = accounts.map((a) =>
+      a.id === currentAccount.id
+        ? {
+            ...a,
+            balance: newAccountBalance,
+            spinCoins: newCoinBalance,
+            totalSpinsPlayed: (a.totalSpinsPlayed || 0) + spinCount,
+            totalSpinWinnings: (a.totalSpinWinnings || 0) + totalWonAmount,
+          }
+        : a
     );
+    setAccounts(updatedAccountsAfterSpin);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(updatedAccountsAfterSpin));
+      writeSpinVaultFromAccounts(updatedAccountsAfterSpin, Date.now());
+    } catch { /* empty */ }
 
     const historyItem: SpinHistoryRecord = {
       id: `spinhist-${Date.now()}`,
@@ -8132,9 +8256,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextCoins =
       mode === 'add' ? (target.spinCoins || 0) + cleanCoins : cleanCoins;
 
-    setAccounts((prev) =>
-      prev.map((a) => (a.id === accountId ? { ...a, spinCoins: nextCoins } : a))
+    const updatedAdjustedAccounts = accounts.map((a) =>
+      a.id === accountId ? { ...a, spinCoins: nextCoins } : a
     );
+    setAccounts(updatedAdjustedAccounts);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(updatedAdjustedAccounts));
+      writeSpinVaultFromAccounts(updatedAdjustedAccounts, Date.now());
+    } catch { /* empty */ }
     playAtmSound('success');
     return {
       success: true,
@@ -8146,12 +8275,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const adminMassSpinCoinRain = (coins: number) => {
     const cleanCoins = Math.max(1, Math.floor(coins));
-    setAccounts((prev) =>
-      prev.map((a) => ({
-        ...a,
-        spinCoins: (a.spinCoins || 0) + cleanCoins,
-      }))
-    );
+    const updatedRainAccounts = accounts.map((a) => ({
+      ...a,
+      spinCoins: (a.spinCoins || 0) + cleanCoins,
+    }));
+    setAccounts(updatedRainAccounts);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(updatedRainAccounts));
+      writeSpinVaultFromAccounts(updatedRainAccounts, Date.now());
+    } catch { /* empty */ }
     playAtmSound('cash');
     return {
       success: true,

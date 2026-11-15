@@ -1,24 +1,19 @@
 /**
- * Bank Nusantara — Initial Google Sign-In & Card Registration / Old Card Login Gate
+ * Bank Nusantara — Exclusive Google Sign-In (Sign in with Google) & Card Registration / Old Card Login Gate
  * Sesuai permintaan user:
- * 1. "Diawal awal disuruh masuk menggunakan akun Google"
- * 2. "Setelah menggunakan akun Google itu disuruh daftar ya, mulai daftar."
- * 3. "Jika kita lupa, untuk ganti contohnya aku kan mau ganti ke kartu ku yang lama, itu tuh pakai pin kartu bukan pakai pin admin, tapi pakai pin kartu kita yang lama.
- *    Contohnya aku kan punya kartu baru dan juga kartu lama. Nah, kartu barunya aku mau aku login. Nah, aku mau login ke kartu lama. Nah, itu juga kita membutuhkan kita harus tahu pin kartu lama kita."
+ * 1. Hanya bisa Login dengan Google (Sign in with Google) — tanpa "masuk cepat" atau input email manual.
+ * 2. Setelah masuk menggunakan Akun Google, otomatis sinkronisasi Cloud Firebase atau mulai daftar kartu baru / login ke kartu lama dengan PIN 6 digit.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CreditCard,
   ShieldCheck,
   UserCheck,
   KeyRound,
   LogIn,
-  PlusCircle,
   CheckCircle2,
   AlertCircle,
-  Sparkles,
   Lock,
-  ArrowRight,
   LogOut,
   ShieldAlert,
   HelpCircle,
@@ -35,30 +30,11 @@ interface GoogleAuthOnboardingGateProps {
   onOpenAdminPanel?: () => void;
 }
 
-const PRESET_GOOGLE_ACCOUNTS = [
-  {
-    email: 'fahmiammarulazka@gmail.com',
-    name: 'Fahmi Ammarul Azka',
-    badge: 'Akun Google Utama Anda',
-  },
-  {
-    email: 'raden.satrio.nusantara@gmail.com',
-    name: 'Raden Satrio',
-    badge: 'Akun Google Nasabah',
-  },
-  {
-    email: 'putri.maharani.vip@gmail.com',
-    name: 'Putri Maharani Ningrum',
-    badge: 'Akun Google Prioritas',
-  },
-];
-
 export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> = ({
   onOpenAdminPanel,
 }) => {
   const {
     googleUser,
-    loginWithGoogle,
     loginWithFirebaseGoogle,
     logoutGoogle,
     accounts,
@@ -66,12 +42,10 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
     loginToCardWithPin,
   } = useBank();
 
-  // Stage 1: Google Login State
-  const [showCustomGoogleForm, setShowCustomGoogleForm] = useState<boolean>(false);
-  const [customGoogleEmail, setCustomGoogleEmail] = useState<string>('');
-  const [customGoogleName, setCustomGoogleName] = useState<string>('');
+  // Stage 1: Official Google OAuth 2.0 Sign-In State
   const [googleError, setGoogleError] = useState<string>('');
   const [firebasePopupLoading, setFirebasePopupLoading] = useState<boolean>(false);
+  const [avatarImgError, setAvatarImgError] = useState<boolean>(false);
 
   // Stage 2: Post-Google Login Mode ('register' = Mulai Daftar Kartu Baru, 'login_old' = Login ke Kartu Lama Pakai PIN Kartu Lama)
   const [onboardingTab, setOnboardingTab] = useState<'register' | 'login_old'>('register');
@@ -91,7 +65,14 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
   const [selectedOldCard, setSelectedOldCard] = useState<BankAccount | null>(null);
   const [oldCardSearch, setOldCardSearch] = useState<string>('');
 
-  // Handle real Firebase Google Popup Sign-In
+  useEffect(() => {
+    if (googleUser?.name) {
+      setFullName((prev) => prev || googleUser.name);
+    }
+    setAvatarImgError(false);
+  }, [googleUser]);
+
+  // Handle Official Firebase Google Popup Sign-In
   const handleFirebaseGooglePopup = async () => {
     setGoogleError('');
     setFirebasePopupLoading(true);
@@ -103,30 +84,6 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
     } finally {
       setFirebasePopupLoading(false);
     }
-  };
-
-  // Handle selecting a preset Google account
-  const handleSelectGoogleAccount = (email: string, name: string) => {
-    setFullName(name);
-    loginWithGoogle(email, name);
-  };
-
-  // Handle custom Google account login
-  const handleCustomGoogleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setGoogleError('');
-    const cleanEmail = customGoogleEmail.trim();
-    const cleanName = customGoogleName.trim();
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      setGoogleError('Masukkan alamat email Akun Google yang valid (contoh: nama@gmail.com).');
-      return;
-    }
-    if (!cleanName || cleanName.length < 2) {
-      setGoogleError('Masukkan nama lengkap Akun Google Anda.');
-      return;
-    }
-    setFullName(cleanName);
-    loginWithGoogle(cleanEmail, cleanName);
   };
 
   // Handle New Card Registration after Google Login
@@ -173,7 +130,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
   };
 
   // ============================================================================
-  // STAGE 1: MASUK MENGGUNAKAN AKUN GOOGLE (AWAL-AWAL BUKA WEBSITE)
+  // STAGE 1: HANYA BISA LOGIN DENGAN GOOGLE (SIGN IN WITH GOOGLE RESMI)
   // ============================================================================
   if (!googleUser) {
     return (
@@ -182,177 +139,80 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
         <div className="absolute -top-32 -left-32 w-96 h-96 bg-blue-600/15 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-amber-500/15 rounded-full blur-3xl pointer-events-none" />
 
-        <div className="max-w-md w-full bg-slate-900/95 border-2 border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative z-10">
+        <div className="max-w-md w-full bg-[#090B10] border border-amber-500/30 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative z-10">
           {/* Bank Logo & Header */}
-          <div className="text-center space-y-2">
+          <div className="text-center space-y-2.5">
             <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-600 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-amber-500/25">
               <CreditCard className="w-7 h-7 text-slate-950" />
             </div>
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[10px] font-mono uppercase tracking-widest">
-              <span>Langkah 1 dari 2 • Otentikasi Akun Google</span>
+            <div className="text-[11px] font-mono uppercase tracking-widest text-amber-300/90">
+              PT Bank Nusantara (Persero) Tbk · OAuth 2.0
             </div>
-            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Masuk Menggunakan Akun Google
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              Sign in with Google
             </h1>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Selamat datang di <strong>PT Bank Nusantara (Persero) Tbk</strong>. Silakan masuk menggunakan <strong>Akun Google</strong> Anda terlebih dahulu untuk melanjutkan ke pendaftaran kartu baru atau masuk ke kartu lama Anda.
+            <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+              Selamat datang di <strong className="text-white">Bank Nusantara</strong>. Untuk keamanan brankas dan sinkronisasi data otomatis, Anda hanya dapat masuk menggunakan <strong className="text-amber-300">Akun Google</strong> resmi Anda.
             </p>
           </div>
 
-          {/* Official Google Logo & Account Chooser */}
-          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-              <div className="flex items-center gap-2">
-                {/* Google "G" SVG Icon */}
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"
-                  />
-                </svg>
-                <span className="text-xs font-bold text-white">Pilih Akun Google untuk Masuk</span>
-              </div>
-              <span className="text-[10px] font-mono text-emerald-400">Google OAuth 2.0</span>
+          {/* Exclusive Official Sign in with Google Card */}
+          <div className="bg-[#11151E] border border-slate-800 rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800 pb-3">
+              <span className="font-semibold text-slate-200">Otentikasi Tunggal Google</span>
+              <span className="font-mono text-[11px] text-emerald-400">Cloud Sync Aktif</span>
             </div>
 
             <button
               type="button"
               disabled={firebasePopupLoading}
               onClick={handleFirebaseGooglePopup}
-              className="w-full py-3 px-4 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-bold text-xs flex items-center justify-center gap-2.5 shadow-md transition-all cursor-pointer disabled:opacity-60"
+              className="w-full py-3.5 px-5 rounded-xl bg-white hover:bg-slate-100 active:scale-[0.99] text-slate-900 font-bold text-sm flex items-center justify-center gap-3 shadow-lg transition-all cursor-pointer disabled:opacity-60"
             >
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z" />
-                <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z" />
-                <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z" />
-                <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z" />
+              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"
+                />
               </svg>
               <span>
                 {firebasePopupLoading
-                  ? 'Membuka Jendela Google...'
-                  : 'Masuk dengan Google (Sinkron Cloud Firebase)'}
+                  ? 'Membuka Jendela Sign in with Google...'
+                  : 'Sign in with Google'}
               </span>
             </button>
 
-            {googleError && !showCustomGoogleForm && (
-              <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[11px]">
-                {googleError}
+            {googleError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span>{googleError}</span>
               </div>
             )}
 
-            <div className="flex items-center gap-2 text-[10px] text-slate-500 pt-1">
-              <div className="flex-1 h-px bg-slate-800" />
-              <span>atau pilih akun cepat</span>
-              <div className="flex-1 h-px bg-slate-800" />
-            </div>
-
-            <div className="space-y-2">
-              {PRESET_GOOGLE_ACCOUNTS.map((acc) => (
-                <button
-                  key={acc.email}
-                  type="button"
-                  onClick={() => handleSelectGoogleAccount(acc.email, acc.name)}
-                  className="w-full p-3 rounded-xl bg-slate-900 hover:bg-blue-950/60 border border-slate-800 hover:border-blue-500/60 transition-all flex items-center justify-between gap-3 text-left cursor-pointer group"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black text-sm flex items-center justify-center shrink-0 shadow">
-                      {acc.name.charAt(0)}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-white text-xs truncate">{acc.name}</span>
-                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 font-semibold shrink-0">
-                          {acc.badge}
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-slate-400 font-mono truncate block">
-                        {acc.email}
-                      </span>
-                    </div>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all shrink-0" />
-                </button>
-              ))}
-            </div>
-
-            {/* Option to enter another custom Google Account */}
-            {!showCustomGoogleForm ? (
-              <button
-                type="button"
-                onClick={() => setShowCustomGoogleForm(true)}
-                className="w-full py-2.5 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all"
-              >
-                <PlusCircle className="w-4 h-4 text-amber-400" />
-                <span>Gunakan Akun Google Lainnya (Ketik Email Sendiri)</span>
-              </button>
-            ) : (
-              <form onSubmit={handleCustomGoogleSubmit} className="pt-2 border-t border-slate-800 space-y-2.5 text-xs">
-                <span className="font-bold text-amber-300 block">Masukkan Akun Google Anda:</span>
-                {googleError && (
-                  <div className="p-2 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[11px]">
-                    {googleError}
-                  </div>
-                )}
-                <div>
-                  <label className="text-slate-400 text-[11px] block mb-1">Nama Lengkap Google:</label>
-                  <input
-                    type="text"
-                    required
-                    value={customGoogleName}
-                    onChange={(e) => setCustomGoogleName(e.target.value)}
-                    placeholder="Contoh: Budi Santoso"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 text-[11px] block mb-1">Alamat Email Google (@gmail.com):</label>
-                  <input
-                    type="email"
-                    required
-                    value={customGoogleEmail}
-                    onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                    placeholder="nama.anda@gmail.com"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white font-mono text-xs"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="submit"
-                    className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl cursor-pointer"
-                  >
-                    Masuk dengan Google ➔
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowCustomGoogleForm(false)}
-                    className="px-3 py-2.5 bg-slate-800 text-slate-300 rounded-xl cursor-pointer"
-                  >
-                    Batal
-                  </button>
-                </div>
-              </form>
-            )}
+            <p className="text-[11px] text-slate-400 text-center leading-relaxed">
+              Seluruh saldo rekening, koin Spin the Wheel, emas 24K, dan anggaran tersimpan otomatis di Firebase Firestore, Server Database, serta Penyimpanan Perangkat Anda.
+            </p>
           </div>
 
           <div className="flex flex-col gap-2.5 text-[11px] text-slate-500 pt-3 border-t border-slate-800">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Terdaftar & Diawasi OJK</span>
+                <span>Terdaftar &amp; Diawasi OJK</span>
               </span>
-              <span>Setelah masuk Google ➔ Mulai Daftar Kartu</span>
+              <span>Otentikasi Resmi Google</span>
             </div>
 
             {onOpenAdminPanel && (
@@ -375,8 +235,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
   }
 
   // ============================================================================
-  // STAGE 2: SETELAH MASUK AKUN GOOGLE -> DISURUH MULAI DAFTAR KARTU BARU
-  //          ATAU LOGIN KE KARTU LAMA MENGGUNAKAN PIN KARTU LAMA (BUKAN PIN ADMIN)
+  // STAGE 2: SETELAH SIGN IN WITH GOOGLE -> DAFTAR KARTU BARU ATAU LOGIN KARTU LAMA
   // ============================================================================
   const filteredOldCards = accounts.filter(
     (a) =>
@@ -391,14 +250,25 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
         {/* Top Signed-in Google Account Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black text-sm flex items-center justify-center shrink-0">
-              {googleUser.name.charAt(0)}
-            </div>
+            {googleUser.picture && !avatarImgError ? (
+              <img
+                src={googleUser.picture}
+                alt={googleUser.name}
+                referrerPolicy="no-referrer"
+                onError={() => setAvatarImgError(true)}
+                className="w-10 h-10 rounded-full object-cover border border-amber-400/50 shrink-0"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black text-sm flex items-center justify-center shrink-0">
+                {googleUser.name.charAt(0)}
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
-                  ✓ Terhubung dengan Google
+                <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold">
+                  ✓ Signed in with Google
                 </span>
+                <span aria-hidden="true" className="text-slate-600">·</span>
                 <span className="text-xs font-bold text-white">{googleUser.name}</span>
               </div>
               <span className="text-[11px] font-mono text-slate-400 block">{googleUser.email}</span>
@@ -419,7 +289,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold">
-              LANGKAH 2 SETELAH LOGIN GOOGLE
+              LANGKAH 2 SETELAH SIGN IN WITH GOOGLE
             </span>
           </div>
           <h2 className="text-xl sm:text-2xl font-black text-white">
@@ -448,7 +318,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
               <div>
                 <span className="text-xs sm:text-sm block font-bold">1. Mulai Daftar Kartu Baru</span>
                 <span className="text-[10px] opacity-80 block">
-                  Buka rekening & buat PIN 6 digit baru
+                  Buka rekening &amp; buat PIN 6 digit baru
                 </span>
               </div>
             </button>
@@ -532,7 +402,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
               </div>
             </div>
 
-            {/* Ambil Alamat Langsung dari Google Maps (Tanpa Perlu Menulis Manual) */}
+            {/* Ambil Alamat Langsung dari Google Maps */}
             <GoogleMapsAddressPicker
               value={address}
               onChange={(newAddr) => setAddress(newAddr)}
@@ -632,7 +502,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/20 cursor-pointer flex items-center justify-center gap-2 transition-all"
             >
               <CheckCircle2 className="w-5 h-5" />
-              <span>Mulai Daftar & Buat Kartu Baru Sekarang ➔</span>
+              <span>Mulai Daftar &amp; Buat Kartu Baru Sekarang ➔</span>
             </button>
           </form>
         )}
@@ -677,7 +547,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300">
+                        <span className="text-[9px] font-mono text-amber-300">
                           Kartu #{idx + 1}
                         </span>
                         <span className="font-bold text-white truncate">{acc.fullName}</span>
@@ -687,7 +557,7 @@ export const GoogleAuthOnboardingGate: React.FC<GoogleAuthOnboardingGateProps> =
                         No. Rek: {acc.accountNumber}
                       </span>
                       <span className="text-[10px] text-slate-400 block">
-                        Jenis: {CARD_TIER_CONFIGS[acc.cardTier]?.nameIndo}
+                        Jenis: {CARD_TIER_CONFIGS[acc.cardTier]?.nameIndo} · Koin: {(acc.spinCoins || 0).toLocaleString('id-ID')}
                       </span>
                     </div>
 

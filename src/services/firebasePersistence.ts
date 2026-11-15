@@ -1,6 +1,7 @@
 /**
  * Bank Nusantara Layer 1 Persistence: Cloud Firestore Sync (Native Maps & Lists, No JSON Strings)
- * Menyimpan dan menyinkronkan data nasabah secara real-time sesuai firebase-blueprint.json & firestore.rules.
+ * Menyimpan dan menyinkronkan data nasabah secara real-time sesuai firebase-blueprint.json & firestore.rules
+ * dengan proteksi Single-Flight Mutex agar tidak terjadi bentrok penulisan (Missing or insufficient permissions).
  */
 import {
   doc,
@@ -15,6 +16,9 @@ import { db, handleFirestoreError, OperationType, type FirebaseUser } from '../f
 import type { BankPersistableSnapshot } from './deviceStorage';
 
 const knownVaultDocExists = new Set<string>();
+const inFlightProfileLocks = new Map<string, Promise<void>>();
+const inFlightVaultSaveLocks = new Map<string, Promise<void>>();
+const pendingVaultSnapshots = new Map<string, { user: FirebaseUser; snapshot: BankPersistableSnapshot }>();
 
 function sanitizeValueForFirestore(value: unknown, depth = 0): unknown {
   if (depth > 8 || value === undefined) return null;
@@ -51,7 +55,9 @@ function clampList(list: unknown[], maxLen: number): Record<string, unknown>[] {
   return list
     .slice(0, maxLen)
     .map((item) => sanitizeValueForFirestore(item))
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)));
+    .filter((item): item is Record<string, unknown> =>
+      Boolean(item && typeof item === 'object' && !Array.isArray(item))
+    );
 }
 
 function clampStringList(list: string[], maxLen: number): string[] {
@@ -65,34 +71,69 @@ function clampStringList(list: string[], maxLen: number): string[] {
 export async function ensureUserRootProfile(user: FirebaseUser): Promise<void> {
   if (!user || !user.uid || !user.emailVerified) return;
   const userPath = `users/${user.uid}`;
-  const userRef = doc(db, 'users', user.uid);
-  const displayName = (user.displayName || user.email?.split('@')[0] || 'Nasabah Nusantara').slice(0, 120);
-  const email = (user.email || 'nasabah@gmail.com').slice(0, 160);
-  const photoUrl = user.photoURL ? user.photoURL.slice(0, 512) : '';
 
-  try {
-    const snap = await getDoc(userRef);
-    if (!snap.exists()) {
-      await setDoc(userRef, {
-        uid: user.uid,
-        email,
-        displayName,
-        ...(photoUrl ? { photoUrl } : {}),
-        role: 'customer',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      await updateDoc(userRef, {
-        email,
-        displayName,
-        ...(photoUrl ? { photoUrl } : {}),
-        updatedAt: serverTimestamp(),
-      });
+  // Jika profil root sudah terverifikasi ada di sesi ini, tidak perlu menulis ulang setiap simpan snapshot
+  if (knownVaultDocExists.has(userPath)) {
+    return;
+  }
+
+  const existingLock = inFlightProfileLocks.get(user.uid);
+  if (existingLock) {
+    await existingLock;
+    return;
+  }
+
+  const task = (async () => {
+    const userRef = doc(db, 'users', user.uid);
+    const displayName = (
+      user.displayName ||
+      user.email?.split('@')[0] ||
+      'Nasabah Nusantara'
+    )
+      .trim()
+      .slice(0, 120) || 'Nasabah Nusantara';
+    const email = (user.email || 'nasabah@gmail.com').trim().slice(0, 160);
+    const photoUrl = user.photoURL ? user.photoURL.trim().slice(0, 512) : '';
+
+    try {
+      const snap = await getDoc(userRef);
+      if (!snap.exists()) {
+        await setDoc(userRef, {
+          uid: user.uid,
+          email,
+          displayName,
+          ...(photoUrl ? { photoUrl } : {}),
+          role: 'customer',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        const existingData = snap.data();
+        const needsUpdate =
+          existingData.email !== email ||
+          existingData.displayName !== displayName ||
+          (photoUrl && existingData.photoUrl !== photoUrl);
+
+        if (needsUpdate && existingData.uid === user.uid && existingData.role === 'customer' && existingData.createdAt) {
+          await updateDoc(userRef, {
+            email,
+            displayName,
+            ...(photoUrl ? { photoUrl } : {}),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      knownVaultDocExists.add(userPath);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, userPath);
     }
-    knownVaultDocExists.add(userPath);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, userPath);
+  })();
+
+  inFlightProfileLocks.set(user.uid, task);
+  try {
+    await task;
+  } finally {
+    inFlightProfileLocks.delete(user.uid);
   }
 }
 
@@ -133,15 +174,13 @@ async function upsertVaultDoc(
   }
 }
 
-export async function saveSnapshotToFirestore(
+async function performSaveSnapshotInternal(
   user: FirebaseUser,
   snapshot: BankPersistableSnapshot
 ): Promise<void> {
-  if (!user || !user.uid || !user.emailVerified) return;
-
   await ensureUserRootProfile(user);
 
-  const safeEmail = (user.email || 'nasabah@gmail.com').slice(0, 160);
+  const safeEmail = (user.email || 'nasabah@gmail.com').trim().slice(0, 160);
   const currentAccountId = String(snapshot.currentAccountId || 'acc-1').slice(0, 128);
   const updatedAtMs = typeof snapshot.updatedAtMs === 'number' ? snapshot.updatedAtMs : Date.now();
 
@@ -194,11 +233,50 @@ export async function saveSnapshotToFirestore(
   ]);
 }
 
+export async function saveSnapshotToFirestore(
+  user: FirebaseUser,
+  snapshot: BankPersistableSnapshot
+): Promise<void> {
+  if (!user || !user.uid || !user.emailVerified) return;
+
+  // Jika sedang ada penyimpanan berjalan untuk UID ini, simpan snapshot terbaru di antrean berikutnya
+  if (inFlightVaultSaveLocks.has(user.uid)) {
+    pendingVaultSnapshots.set(user.uid, { user, snapshot });
+    await inFlightVaultSaveLocks.get(user.uid);
+    return;
+  }
+
+  const runLoop = (async () => {
+    let currentPayload: { user: FirebaseUser; snapshot: BankPersistableSnapshot } | undefined = {
+      user,
+      snapshot,
+    };
+    while (currentPayload) {
+      const payloadToSave = currentPayload;
+      currentPayload = undefined;
+      await performSaveSnapshotInternal(payloadToSave.user, payloadToSave.snapshot);
+      const nextQueued = pendingVaultSnapshots.get(user.uid);
+      if (nextQueued) {
+        pendingVaultSnapshots.delete(user.uid);
+        currentPayload = nextQueued;
+      }
+    }
+  })();
+
+  inFlightVaultSaveLocks.set(user.uid, runLoop);
+  try {
+    await runLoop;
+  } finally {
+    inFlightVaultSaveLocks.delete(user.uid);
+  }
+}
+
 export async function loadSnapshotFromFirestoreOnce(
   user: FirebaseUser
 ): Promise<Partial<BankPersistableSnapshot> | null> {
   if (!user || !user.uid || !user.emailVerified) return null;
 
+  const userPath = `users/${user.uid}`;
   const corePath = `users/${user.uid}/vault/core`;
   const ledgerPath = `users/${user.uid}/vault/ledger`;
   const extrasPath = `users/${user.uid}/vault/extras`;
@@ -212,8 +290,12 @@ export async function loadSnapshotFromFirestoreOnce(
     if (!userSnap.exists()) {
       return null;
     }
+    const uData = userSnap.data();
+    if (uData.uid === user.uid && uData.role === 'customer' && uData.createdAt) {
+      knownVaultDocExists.add(userPath);
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+    handleFirestoreError(error, OperationType.GET, userPath);
   }
 
   try {

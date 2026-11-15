@@ -1,24 +1,7 @@
 /**
  * Bank Nusantara — Katalog Resmi Spin the Wheel (Rp 100.000 s/d Rp 20.000.000)
- * & 100 Pilihan Pembelian Koin Spin (Mulai dari 1 Koin, 100.000 Koin, hingga 1.000.000 Koin)
- *
- * Ketentuan User:
- * 1. Hadiah Spin the Wheel (20 Segmen):
- *    - Rp 100.000, Rp 500.000, Rp 750.000, Rp 1.000.000 (Kemungkinan 1 Juta = 1%, lalu semakin mengecil)
- *    - Setelah Rp 1.000.000 naik per Rp 500.000 sampai Rp 7.000.000:
- *      Rp 1.500.000, Rp 2.000.000, Rp 2.500.000, Rp 3.000.000, Rp 3.500.000,
- *      Rp 4.000.000, Rp 4.500.000, Rp 5.000.000, Rp 5.500.000, Rp 6.000.000,
- *      Rp 6.500.000, Rp 7.000.000
- *    - Setelah Rp 7.000.000 yaitu Rp 7.500.000, setelah itu Rp 10.000.000
- *    - Terus Rp 15.000.000 dan Rp 20.000.000 dengan kemungkinan 0,000000000001% (1 dari 1.000 Kuadriliun!)
- * 2. Pilihan Jumlah Spin:
- *    - Bisa Spin 1 kali, 3 kali, 5 kali, 7 kali, 10 kali.
- *    - Harga 1 kali Spin = 100 Koin (Setara Rp 1.000.000 karena 1 Koin = Rp 10.000).
- *    - Bisa dikasih diskon di Panel Admin.
- * 3. Pembelian Koin (Klik tombol + di sebelah gambar koin & angka 0 di bagian atas):
- *    - 1 Koin = Rp 10.000 (dikalikan jumlah koin + ada recehan & desimalnya).
- *    - Tersedia 100 pilihan pembelian mulai dari 1 Koin, 100.000 Koin, sampai 1.000.000 Koin (1 Juta Koin).
- *    - Harga bisa dimurahin & dikasih diskon di Panel Admin, serta kemungkinan pendapatan spin bisa diperbesar di Panel Admin.
+ * & 300 Pilihan Pembelian Koin Spin (Mulai dari 1 Koin s/d 10.000.000 Koin)
+ * dengan Format Harga Bulat "Rp xxx.xxx".
  */
 
 import { SpinPrizeSegment, CoinPackageOption, SpinWheelAdminConfig } from '../types/bank';
@@ -35,7 +18,7 @@ export const INITIAL_SPIN_WHEEL_CONFIG: SpinWheelAdminConfig = {
     7: 0,
     10: 0,
   },
-  luckMultiplier: 1, // 1x Normal (Bisa dinaikkan di Panel Admin agar kemungkinan hadiah besar meningkat)
+  luckMultiplier: 1, // 1x Normal (Bisa dinaikkan di Panel Admin)
   forceJackpotMode: 'none',
   customSegmentWeights: {},
 };
@@ -264,39 +247,65 @@ export const SPIN_WHEEL_PRIZES: SpinPrizeSegment[] = [
 ];
 
 /**
- * 100 Pilihan Pembelian Koin Spin:
- * Mulai dari 1 Koin, mencakup 1 s/d 100.000 Koin, hingga 1.000.000 Koin (1 Juta Koin)!
+ * 300 Pilihan Pembelian Koin Spin (#1 s/d #300):
+ * Mulai dari 1 Koin hingga 10.000.000 Koin (10 Juta Koin)!
  */
-const RAW_100_COIN_AMOUNTS: number[] = [
-  // #1 - #25: 1 Koin s/d 95 Koin (Satuan & Eceran)
+const TIER_1_SATUAN_60: number[] = [
+  // #1 - #60: 1 Koin s/d 99 Koin (60 Pilihan Satuan & Eceran)
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-  12, 15, 18, 20, 25, 30, 35, 40, 45, 50,
-  60, 70, 75, 85, 95,
-  // #26 - #50: 100 Koin (1x Spin) s/d 5.000 Koin (Paket Spin Populer)
-  100, 120, 150, 175, 200, 250, 300, 350, 400, 450,
-  500, 600, 700, 800, 900, 1_000, 1_250, 1_500, 1_750, 2_000,
-  2_500, 3_000, 3_500, 4_000, 5_000,
-  // #51 - #75: 6.000 Koin s/d 100.000 Koin (Paket Sultan 100 Ribu Koin)
-  6_000, 7_000, 7_500, 8_500, 10_000, 12_500, 15_000, 17_500, 20_000, 22_500,
-  25_000, 30_000, 35_000, 40_000, 45_000, 50_000, 55_000, 60_000, 65_000, 70_000,
-  75_000, 80_000, 85_000, 90_000, 100_000,
-  // #76 - #100: 110.000 Koin s/d 1.000.000 Koin (Paket Mega Triliuner 1 Juta Koin)
-  110_000, 125_000, 140_000, 150_000, 175_000, 200_000, 225_000, 250_000, 275_000, 300_000,
-  350_000, 400_000, 450_000, 500_000, 550_000, 600_000, 650_000, 700_000, 750_000, 800_000,
-  850_000, 900_000, 925_000, 950_000, 1_000_000,
+  11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+  21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+  31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+  42, 44, 45, 48, 50, 52, 55, 58, 60, 62,
+  65, 68, 70, 72, 75, 80, 85, 90, 95, 99,
 ];
 
-const RECEHAN_DECIMALS = [
-  0.12, 0.25, 0.37, 0.45, 0.58, 0.64, 0.75, 0.82, 0.88, 0.95,
-  0.19, 0.33, 0.49, 0.67, 0.79, 0.91, 0.15, 0.28, 0.53, 0.99,
+const TIER_2_PAKET_SPIN_80: number[] = [
+  // #61 - #140: 100 Koin (1x Spin) s/d 10.000 Koin (80 Pilihan Paket Spin Populer)
+  100, 110, 120, 130, 140, 150, 160, 175, 190, 200,
+  220, 240, 250, 275, 300, 325, 350, 375, 400, 425,
+  450, 475, 500, 550, 600, 650, 700, 750, 800, 850,
+  900, 950, 1_000, 1_100, 1_200, 1_300, 1_400, 1_500, 1_600, 1_750,
+  1_900, 2_000, 2_150, 2_300, 2_500, 2_700, 2_900, 3_000, 3_200, 3_400,
+  3_500, 3_750, 4_000, 4_250, 4_500, 4_750, 5_000, 5_250, 5_500, 5_750,
+  6_000, 6_250, 6_500, 6_750, 7_000, 7_250, 7_500, 7_750, 8_000, 8_250,
+  8_500, 8_750, 9_000, 9_200, 9_400, 9_500, 9_600, 9_800, 9_900, 10_000,
 ];
 
-export const COIN_PURCHASE_PACKAGES_100: CoinPackageOption[] = RAW_100_COIN_AMOUNTS.map(
+const TIER_3_SULTAN_80: number[] = [
+  // #141 - #220: 10.500 Koin s/d 500.000 Koin (80 Pilihan Paket Sultan)
+  10_500, 11_000, 11_500, 12_000, 12_500, 13_000, 14_000, 15_000, 16_000, 17_500,
+  19_000, 20_000, 22_000, 24_000, 25_000, 27_500, 30_000, 32_500, 35_000, 37_500,
+  40_000, 42_500, 45_000, 47_500, 50_000, 52_500, 55_000, 57_500, 60_000, 62_500,
+  65_000, 67_500, 70_000, 72_500, 75_000, 77_500, 80_000, 82_500, 85_000, 90_000,
+  95_000, 100_000, 105_000, 110_000, 115_000, 120_000, 125_000, 130_000, 140_000, 150_000,
+  160_000, 170_000, 175_000, 185_000, 200_000, 210_000, 225_000, 240_000, 250_000, 260_000,
+  275_000, 290_000, 300_000, 310_000, 325_000, 340_000, 350_000, 365_000, 375_000, 390_000,
+  400_000, 415_000, 425_000, 440_000, 450_000, 460_000, 475_000, 485_000, 495_000, 500_000,
+];
+
+const TIER_4_MEGA_10JUTA_80: number[] = [
+  // #221 - #300: 520.000 Koin s/d 10.000.000 Koin (80 Pilihan Paket Mega 1 Juta - 10 Juta Koin)
+  520_000, 540_000, 550_000, 575_000, 600_000, 625_000, 650_000, 675_000, 700_000, 725_000,
+  750_000, 775_000, 800_000, 825_000, 850_000, 875_000, 900_000, 925_000, 950_000, 975_000,
+  1_000_000, 1_050_000, 1_100_000, 1_150_000, 1_200_000, 1_250_000, 1_300_000, 1_400_000, 1_500_000, 1_600_000,
+  1_700_000, 1_750_000, 1_850_000, 2_000_000, 2_100_000, 2_250_000, 2_400_000, 2_500_000, 2_600_000, 2_750_000,
+  2_900_000, 3_000_000, 3_150_000, 3_250_000, 3_400_000, 3_500_000, 3_750_000, 4_000_000, 4_250_000, 4_500_000,
+  4_750_000, 5_000_000, 5_200_000, 5_400_000, 5_500_000, 5_750_000, 6_000_000, 6_250_000, 6_500_000, 6_750_000,
+  7_000_000, 7_250_000, 7_500_000, 7_750_000, 8_000_000, 8_200_000, 8_400_000, 8_500_000, 8_750_000, 9_000_000,
+  9_100_000, 9_200_000, 9_300_000, 9_400_000, 9_500_000, 9_600_000, 9_750_000, 9_850_000, 9_950_000, 10_000_000,
+];
+
+const RAW_300_COIN_AMOUNTS: number[] = [
+  ...TIER_1_SATUAN_60,
+  ...TIER_2_PAKET_SPIN_80,
+  ...TIER_3_SULTAN_80,
+  ...TIER_4_MEGA_10JUTA_80,
+];
+
+export const COIN_PURCHASE_PACKAGES_300: CoinPackageOption[] = RAW_300_COIN_AMOUNTS.map(
   (coins, index) => {
     const id = index + 1;
-    const recehanDecimal = RECEHAN_DECIMALS[index % RECEHAN_DECIMALS.length];
-    // Recehan rupiah unik (0 untuk 1 koin agar pas Rp 10.000,12, dan recehan unik untuk paket di atasnya)
-    const extraRecehanRupiah = coins === 1 ? 0 : ((index * 17 + 3) % 89) + 1;
 
     let badge: string | undefined;
     if (coins === 1) badge = 'MULAI DARI 1 KOIN';
@@ -306,14 +315,16 @@ export const COIN_PURCHASE_PACKAGES_100: CoinPackageOption[] = RAW_100_COIN_AMOU
     else if (coins === 700) badge = 'PAS UNTUK 7x SPIN';
     else if (coins === 1_000) badge = 'PAS UNTUK 10x SPIN';
     else if (coins === 100_000) badge = 'PAKET 100.000 KOIN';
-    else if (coins === 1_000_000) badge = 'MAKSIMAL 1 JUTA KOIN';
+    else if (coins === 1_000_000) badge = 'PAKET 1.000.000 KOIN';
+    else if (coins === 5_000_000) badge = 'PAKET 5.000.000 KOIN';
+    else if (coins === 10_000_000) badge = 'MAKSIMAL 10.000.000 KOIN';
 
     const category: CoinPackageOption['category'] =
-      id <= 25
+      id <= 60
         ? 'satuan'
-        : id <= 50
+        : id <= 140
         ? 'paket_spin'
-        : id <= 75
+        : id <= 220
         ? 'sultan_100k'
         : 'mega_1juta';
 
@@ -321,17 +332,20 @@ export const COIN_PURCHASE_PACKAGES_100: CoinPackageOption[] = RAW_100_COIN_AMOU
       id,
       coins,
       label: `${coins.toLocaleString('id-ID')} Koin`,
-      recehanDecimal,
-      extraRecehanRupiah,
+      recehanDecimal: 0,
+      extraRecehanRupiah: 0,
       badge,
       category,
     };
   }
 );
 
+// Backward-compatible export alias used by existing components
+export const COIN_PURCHASE_PACKAGES_100: CoinPackageOption[] = COIN_PURCHASE_PACKAGES_300;
+
 /**
- * Menghitung harga paket koin lengkap dengan perkalian + recehan & desimal,
- * serta memperhitungkan harga dasar per 1 koin & diskon dari Panel Admin.
+ * Menghitung harga paket koin dalam angka bulat Rupiah (format "Rp xxx.xxx"),
+ * memperhitungkan harga dasar per 1 koin & diskon dari Panel Admin.
  */
 export function calculateCoinPackagePrice(
   pkg: CoinPackageOption,
@@ -342,36 +356,29 @@ export function calculateCoinPackagePrice(
   discountPercent: number;
 } {
   const baseUnit = config.baseCoinPriceRupiah ?? 10_000;
-  // Harga asli dengan patokan Rp 10.000/koin + recehan rupiah + desimal sen
-  const standardNormalPrice =
-    pkg.coins * 10_000 + pkg.extraRecehanRupiah + pkg.recehanDecimal;
-
-  // Harga setelah harga dasar dimurahin di Panel Admin
-  const rawCurrentPrice =
-    pkg.coins * baseUnit + pkg.extraRecehanRupiah + pkg.recehanDecimal;
+  const standardNormalPrice = Math.round(pkg.coins * 10_000);
+  const rawCurrentPrice = Math.round(pkg.coins * baseUnit);
 
   const discountPct = Math.max(0, Math.min(99, config.coinPurchaseDiscountPercent || 0));
   const discountedPrice =
     discountPct > 0
-      ? Number((rawCurrentPrice * (1 - discountPct / 100)).toFixed(2))
-      : Number(rawCurrentPrice.toFixed(2));
+      ? Math.round(rawCurrentPrice * (1 - discountPct / 100))
+      : rawCurrentPrice;
 
   return {
-    normalPrice: Number(standardNormalPrice.toFixed(2)),
-    finalPrice: Math.max(0.01, discountedPrice),
+    normalPrice: standardNormalPrice,
+    finalPrice: Math.max(1, discountedPrice),
     discountPercent: discountPct,
   };
 }
 
 /**
- * Format angka Rupiah lengkap dengan recehan desimal 2 angka di belakang koma (contoh: Rp 10.000,12)
+ * Format angka Rupiah sesuai permintaan user: "Rp xxx.xxx" (bulat dengan pemisah titik ribuan).
  */
 export function formatRupiahWithDecimals(amount: number): string {
-  if (!Number.isFinite(amount)) return 'Rp ∞ (Tidak Terbatas)';
-  const fixed = amount.toFixed(2);
-  const [intPart, decPart] = fixed.split('.');
-  const formattedInt = Number(intPart).toLocaleString('id-ID');
-  return `Rp ${formattedInt},${decPart}`;
+  if (!Number.isFinite(amount) || amount >= 900_000_000_000_000) return 'Rp ∞ (Tidak Terbatas)';
+  const rounded = Math.round(amount);
+  return `Rp ${rounded.toLocaleString('id-ID')}`;
 }
 
 /**
@@ -408,8 +415,8 @@ export function calculateSpinCost(
   return {
     normalCoins,
     finalCoins,
-    normalRupiahEquivalent: normalCoins * 10_000,
-    finalRupiahEquivalent: finalCoins * unitRupiah,
+    normalRupiahEquivalent: Math.round(normalCoins * 10_000),
+    finalRupiahEquivalent: Math.round(finalCoins * unitRupiah),
     totalDiscountPercent: combinedDiscountPercent,
   };
 }

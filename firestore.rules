@@ -183,7 +183,7 @@ service cloud.firestore {
         data.id == reportId &&
         data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 && data.authorId.matches('^[a-zA-Z0-9_\\-]+$') &&
         data.reporterName is string && data.reporterName.size() >= 1 && data.reporterName.size() <= 120 &&
-        (!('reporterAccountNumber' in data) || (data.reporterAccountNumber is string && data.reporterAccountNumber.size() <= 32)) &&
+        (!('reporterAccountNumber' in data) || (data.reporterAccountNumber is string && data.reporterAccountNumber is string && data.reporterAccountNumber.size() <= 32)) &&
         (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 160)) &&
         data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
         data.explanation is string && data.explanation.size() >= 1 && data.explanation.size() <= 2000 &&
@@ -219,13 +219,13 @@ service cloud.firestore {
         isValidUserProfile(incoming(), userId) &&
         incoming().uid == existing().uid &&
         incoming().role == existing().role &&
-        incoming().createdAt == existing().createdAt &&
+        (incoming().createdAt == existing().createdAt || isValidTimestamp(incoming().createdAt)) &&
         isValidTimestamp(incoming().updatedAt) &&
         (
           isAdmin() ||
           (
             isOwner(userId) &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoUrl', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoUrl', 'createdAt', 'updatedAt'])
           )
         );
 
@@ -247,14 +247,14 @@ service cloud.firestore {
           isValidVaultCore(incoming(), userId) &&
           hasParentUser(userId) &&
           incoming().ownerId == existing().ownerId &&
-          incoming().createdAt == existing().createdAt &&
+          (incoming().createdAt == existing().createdAt || isValidTimestamp(incoming().createdAt)) &&
           isValidTimestamp(incoming().updatedAt) &&
           (
             isAdmin() ||
             (
               isOwner(userId) &&
               incoming().diff(existing()).affectedKeys().hasOnly([
-                'email', 'currentAccountId', 'accounts', 'goldMarketConfig', 'userSettings', 'updatedAtMs', 'updatedAt'
+                'email', 'currentAccountId', 'accounts', 'goldMarketConfig', 'userSettings', 'updatedAtMs', 'createdAt', 'updatedAt'
               ])
             )
           );
@@ -278,7 +278,7 @@ service cloud.firestore {
           isValidVaultLedger(incoming(), userId) &&
           hasParentUser(userId) &&
           incoming().ownerId == existing().ownerId &&
-          incoming().createdAt == existing().createdAt &&
+          (incoming().createdAt == existing().createdAt || isValidTimestamp(incoming().createdAt)) &&
           isValidTimestamp(incoming().updatedAt) &&
           (
             isAdmin() ||
@@ -288,7 +288,7 @@ service cloud.firestore {
                 'transactions', 'pockets', 'depositos', 'loans', 'scheduledPayments',
                 'favorites', 'notifications', 'cardlessTokens', 'cardUpgrades',
                 'pinResetRequests', 'redeemCodes', 'purchasedCodes', 'resiList',
-                'chats', 'updatedAtMs', 'updatedAt'
+                'chats', 'updatedAtMs', 'createdAt', 'updatedAt'
               ])
             )
           );
@@ -312,7 +312,7 @@ service cloud.firestore {
           isValidVaultExtras(incoming(), userId) &&
           hasParentUser(userId) &&
           incoming().ownerId == existing().ownerId &&
-          incoming().createdAt == existing().createdAt &&
+          (incoming().createdAt == existing().createdAt || isValidTimestamp(incoming().createdAt)) &&
           isValidTimestamp(incoming().updatedAt) &&
           (
             isAdmin() ||
@@ -322,7 +322,7 @@ service cloud.firestore {
                 'spinWheelConfig', 'spinHistory', 'sultanEmpireConfig',
                 'featureConfigs', 'deletedFeatureIds', 'adminHelpRequests', 'appUpdates',
                 'budgetCategories', 'manualExpenses', 'budgetTxCategoryMap', 'budgetAlertHistory',
-                'updatedAtMs', 'updatedAt'
+                'updatedAtMs', 'createdAt', 'updatedAt'
               ])
             )
           );
