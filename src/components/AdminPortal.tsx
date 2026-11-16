@@ -49,6 +49,8 @@ import {
   BellRing,
   BellOff,
   Dices,
+  MessageCircle,
+  Mail,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -126,6 +128,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     adminBanCard,
     adminUnbanCard,
     adminUnbanAllCards,
+    banSupportConfig,
+    adminUpdateBanSupportConfig,
+    adminReviewUnifiedBanAppeal,
     adminToggleVerifyAccount,
     adminVerifyAllAccounts,
     adminAdjustAccountBalance,
@@ -264,6 +269,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   // 10-Step Secure Account Deletion States
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
   const [deleteFeedback, setDeleteFeedback] = useState<string>('');
+
+  // Pengaturan Nomor WhatsApp & Email Tinjauan Akun Dibanned
+  const [waSupportInput, setWaSupportInput] = useState<string>(banSupportConfig.whatsappNumber || '');
+  const [emailSupportInput, setEmailSupportInput] = useState<string>(banSupportConfig.emailAddress || '');
+  const [supportSaveMsg, setSupportSaveMsg] = useState<string>('');
+  const [appealNoteMap, setAppealNoteMap] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setWaSupportInput(banSupportConfig.whatsappNumber || '');
+    setEmailSupportInput(banSupportConfig.emailAddress || '');
+  }, [banSupportConfig.whatsappNumber, banSupportConfig.emailAddress]);
 
 
   // States for Super Tools #27 to #56 (56+ Super Tools Ga Kaleng-Kaleng)
@@ -769,7 +785,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           }`}
         >
           <Gift className="w-4 h-4" />
-          <span>🎁 Hadiah &amp; Surat (58 Hadiah, Role &amp; Stempel) ({giftEvents.length})</span>
+          <span>🎁 Hadiah &amp; Surat (100 Hadiah, Role &amp; Stempel) ({giftEvents.length})</span>
         </button>
 
         <button
@@ -5830,6 +5846,76 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             </div>
           )}
 
+          {/* Pengaturan Nomor Telepon WhatsApp & Email Tinjauan Banned (Real-Time ke Layar Blokir Nasabah) */}
+          <div className="bg-slate-900/90 border border-amber-500/40 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div>
+                <span className="text-[10px] font-mono uppercase tracking-widest text-yellow-300 font-bold block">
+                  KONFIGURASI KONTAK TINJAUAN BANNED (DISARANKAN)
+                </span>
+                <h3 className="font-black text-white text-sm sm:text-base flex items-center gap-2 mt-0.5">
+                  <MessageCircle className="w-4 h-4 text-emerald-400" />
+                  <span>Pengaturan WhatsApp &amp; Email Resmi untuk Layar Blokir</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Nomor WhatsApp dan Email di bawah ini akan otomatis terhubung ke tombol <strong>Tinjau dengan WhatsApp</strong> &amp; <strong>Tinjau dengan Email</strong> di layar blokir nasabah secara real-time.
+                </p>
+              </div>
+              {supportSaveMsg && (
+                <span className="px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-400/50 text-emerald-200 font-bold text-[11px] shrink-0">
+                  {supportSaveMsg}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+              <div className="md:col-span-5">
+                <label className="text-slate-300 font-bold block mb-1 flex items-center gap-1.5">
+                  <MessageCircle className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Nomor WhatsApp Admin (Format 628... / 08...):</span>
+                </label>
+                <input
+                  type="text"
+                  value={waSupportInput}
+                  onChange={(e) => setWaSupportInput(e.target.value)}
+                  placeholder="Contoh: 6281234567890"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-emerald-400"
+                />
+              </div>
+
+              <div className="md:col-span-5">
+                <label className="text-slate-300 font-bold block mb-1 flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-sky-400" />
+                  <span>Alamat Email Support Admin:</span>
+                </label>
+                <input
+                  type="email"
+                  value={emailSupportInput}
+                  onChange={(e) => setEmailSupportInput(e.target.value)}
+                  placeholder="Contoh: support@banknusantara.id"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-sky-400"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const res = await adminUpdateBanSupportConfig({
+                      whatsappNumber: waSupportInput,
+                      emailAddress: emailSupportInput,
+                    });
+                    setSupportSaveMsg(res.message);
+                    setTimeout(() => setSupportSaveMsg(''), 4000);
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black cursor-pointer transition-all"
+                >
+                  Simpan Kontak
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Form Banned Kartu */}
             <form
@@ -6095,21 +6181,54 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                           )}
                         </div>
 
-                        {/* Jika Nasabah Mengajukan Tinjauan Banding (Hanya untuk Custom Duration) */}
-                        {!isPerm && bInfo?.appealStatus === 'pending' && (
-                          <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-400 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        {/* Jika Nasabah Mengajukan Tinjauan Banding ("Tinjau di Sini" / WA / Email) */}
+                        {bInfo?.appealStatus === 'pending' && (
+                          <div className="p-3.5 rounded-xl bg-amber-500/15 border-2 border-amber-400 space-y-2.5">
                             <div>
                               <span className="text-[10px] font-black uppercase text-amber-300 block">
-                                📩 Permohonan Tinjauan Banding dari Nasabah:
+                                📩 Permohonan Tinjauan Banding dari Nasabah ({bInfo.appealSource === 'whatsapp' ? 'via WhatsApp' : bInfo.appealSource === 'email' ? 'via Email' : 'Tinjau di Sini'}):
                               </span>
-                              <p className="text-white text-xs mt-0.5">"{bInfo.appealNote}"</p>
+                              <p className="text-white text-xs mt-0.5">&quot;{bInfo.appealNote}&quot;</p>
                             </div>
-                            <button
-                              onClick={() => handleUnbanCardClick(acc.id)}
-                              className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-xl text-xs cursor-pointer shrink-0"
-                            >
-                              Setujui Tinjauan & Buka Banned
-                            </button>
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <input
+                                type="text"
+                                value={appealNoteMap[acc.id] || ''}
+                                onChange={(e) =>
+                                  setAppealNoteMap((prev) => ({ ...prev, [acc.id]: e.target.value }))
+                                }
+                                placeholder="Catatan balasan Admin (opsional)..."
+                                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const res = await adminReviewUnifiedBanAppeal(
+                                    acc.id,
+                                    'approve',
+                                    appealNoteMap[acc.id]
+                                  );
+                                  setBanFeedback(res.message);
+                                }}
+                                className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs cursor-pointer shrink-0"
+                              >
+                                Setujui &amp; Buka Blokir
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const res = await adminReviewUnifiedBanAppeal(
+                                    acc.id,
+                                    'reject',
+                                    appealNoteMap[acc.id]
+                                  );
+                                  setBanFeedback(res.message);
+                                }}
+                                className="px-3.5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs cursor-pointer shrink-0"
+                              >
+                                Tolak Tinjauan
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>

@@ -104,15 +104,9 @@ export const AdminGiftEventPanel: React.FC = () => {
 
   // Custom Signature & Stamp settings for this event (or use Default Global)
   const [sealScope, setSealScope] = useState<'global' | 'custom'>('global');
-  const [customSealDraft, setCustomSealDraft] = useState<LetterSignatureStampConfig>(() => {
-    try {
-      const savedDraft = localStorage.getItem('bank_nusantara_custom_seal_draft_v1');
-      if (savedDraft) {
-        return { ...defaultLetterSealConfig, ...JSON.parse(savedDraft) };
-      }
-    } catch { /* empty */ }
-    return defaultLetterSealConfig;
-  });
+  const [customSealDraft, setCustomSealDraft] = useState<LetterSignatureStampConfig>(
+    defaultLetterSealConfig
+  );
   const [showSealStudio, setShowSealStudio] = useState<boolean>(true);
 
   // 20+ Advanced Admin Features State
@@ -578,9 +572,6 @@ export const AdminGiftEventPanel: React.FC = () => {
                 adminUpdateDefaultLetterSealConfig(nextCfg);
               } else {
                 setCustomSealDraft(nextCfg);
-                try {
-                  localStorage.setItem('bank_nusantara_custom_seal_draft_v1', JSON.stringify(nextCfg));
-                } catch { /* empty */ }
               }
             }}
           />
@@ -1704,6 +1695,17 @@ export const AdminGiftEventPanel: React.FC = () => {
           </div>
         </div>
 
+        {giftEvents.length === 0 ? (
+          <div className="p-8 rounded-2xl bg-slate-950/80 border border-slate-800 text-center space-y-2">
+            <Gift className="w-8 h-8 text-slate-500 mx-auto" />
+            <p className="text-sm font-black text-white">
+              Belum Ada Paket Hadiah &amp; Surat (0 Paket)
+            </p>
+            <p className="text-xs text-slate-400">
+              Seluruh paket yang telah dihapus tersimpan permanen di Cloud Firestore dan akan tetap kosong (0 paket) meski halaman di-refresh di HP maupun laptop.
+            </p>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 gap-4">
           {giftEvents.map((ev) => {
             const evMode = ev.deliveryContentMode || 'both';
@@ -2169,6 +2171,7 @@ export const AdminGiftEventPanel: React.FC = () => {
             );
           })}
         </div>
+        )}
       </div>
     </div>
   );

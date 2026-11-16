@@ -21,6 +21,7 @@ import { NusantaraChat } from './components/NusantaraChat';
 import { AdminPinModal } from './components/AdminPinModal';
 import { GoogleAuthOnboardingGate } from './components/GoogleAuthOnboardingGate';
 import { WebsiteSystemNotificationModal } from './components/WebsiteSystemNotificationModal';
+import { BanLockScreen } from './components/BanLockScreen';
 import {
   GlobalChatAndNotificationLayer,
   AllowNotificationFooterButton,
@@ -37,6 +38,7 @@ import {
   ShieldAlert,
   KeyRound,
   RotateCcw,
+  Cloud,
 } from 'lucide-react';
 
 function BankAppContent() {
@@ -47,6 +49,8 @@ function BankAppContent() {
     googleUser,
     enterBankPortal,
     completeGoogleOnboarding,
+    isCloudBootReady,
+    activeBanLockState,
   } = useBank();
   const [activeView, setActiveView] = useState<AppNavView>('dashboard');
   const [requestedDashboardTab, setRequestedDashboardTab] = useState<{
@@ -175,7 +179,35 @@ function BankAppContent() {
     }
   };
 
-  // Show Google Sign-In -> Card Registration / Old Card Login Onboarding Gate at the start
+  // 1. Wajib cek status akun & data Cloud Firestore terlebih dahulu sebelum membuka halaman utama
+  if (!isCloudBootReady) {
+    return (
+      <div className="min-h-screen bg-[#070c18] text-slate-100 flex flex-col items-center justify-center p-6">
+        <div className="max-w-sm w-full bg-[#0c111d] border border-amber-500/30 rounded-3xl p-6 text-center space-y-4 shadow-2xl">
+          <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-400/40 flex items-center justify-center text-amber-300">
+            <Cloud className="w-6 h-6 animate-pulse" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-base font-black text-white">Menghubungkan ke Cloud Real-Time...</h2>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Memeriksa status keamanan akun, saldo, dan sinkronisasi data terbaru dari Cloud Firestore.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Real-Time Ban Enforcement: Hentikan seluruh akses fitur jika akun berstatus banned di Cloud
+  if (
+    activeBanLockState.isBanned &&
+    !adminViewDuringOnboarding &&
+    !(adminUnlocked && activeView === 'admin')
+  ) {
+    return <BanLockScreen />;
+  }
+
+  // 3. Show Mandatory Google Sign-In -> Card Registration / Old Card Login Onboarding Gate at the start
   if ((!googleUser || !googleUser.hasCompletedOnboarding) && !adminViewDuringOnboarding) {
     return (
       <>

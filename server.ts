@@ -76,6 +76,8 @@ interface PersistedGlobalState {
   bugReports: ServerBugReport[];
   pushAlerts: ServerPushAlert[];
   giftEvents: unknown[];
+  deletedGiftEventIds: string[];
+  giftEventsInitialized: boolean;
   sharedBankData: Record<string, unknown>;
   userSnapshotsByScope: Record<string, Record<string, unknown>>;
   lastUpdated: number;
@@ -112,6 +114,8 @@ const DEFAULT_STATE: PersistedGlobalState = {
   userSnapshotsByScope: {},
   pushAlerts: [],
   giftEvents: [],
+  deletedGiftEventIds: [],
+  giftEventsInitialized: false,
   lastUpdated: Date.now(),
 };
 
@@ -134,6 +138,10 @@ function loadPersistedState(): PersistedGlobalState {
         bugReports: Array.isArray(parsed.bugReports) ? parsed.bugReports : DEFAULT_STATE.bugReports,
         pushAlerts: Array.isArray(parsed.pushAlerts) ? parsed.pushAlerts : [],
         giftEvents: Array.isArray(parsed.giftEvents) ? parsed.giftEvents : [],
+        deletedGiftEventIds: Array.isArray(parsed.deletedGiftEventIds)
+          ? parsed.deletedGiftEventIds.map((x: unknown) => String(x))
+          : [],
+        giftEventsInitialized: Boolean(parsed.giftEventsInitialized),
         sharedBankData: parsed.sharedBankData || {},
         userSnapshotsByScope:
           parsed.userSnapshotsByScope && typeof parsed.userSnapshotsByScope === 'object'
@@ -199,6 +207,8 @@ async function startServer() {
             bugReports: serverState.bugReports,
             pushAlerts: serverState.pushAlerts,
             giftEvents: serverState.giftEvents,
+            deletedGiftEventIds: serverState.deletedGiftEventIds,
+            giftEventsInitialized: serverState.giftEventsInitialized,
             sharedBankData: serverState.sharedBankData,
             connectedDevices: clients.size,
             lastUpdated: serverState.lastUpdated,
@@ -226,12 +236,25 @@ async function startServer() {
         } else if (msg.type === 'push_alert:send' && msg.payload) {
           handleNewPushAlert(msg.payload);
         } else if (msg.type === 'gift_events:sync' && Array.isArray(msg.payload?.giftEvents)) {
-          serverState.giftEvents = msg.payload.giftEvents;
+          if (Array.isArray(msg.payload?.deletedGiftEventIds)) {
+            serverState.deletedGiftEventIds = Array.from(
+              new Set([
+                ...serverState.deletedGiftEventIds,
+                ...msg.payload.deletedGiftEventIds.map((id: unknown) => String(id)),
+              ])
+            );
+          }
+          serverState.giftEvents = (msg.payload.giftEvents as Array<{ id?: string }>).filter(
+            (e) => !e?.id || !serverState.deletedGiftEventIds.includes(String(e.id))
+          );
+          serverState.giftEventsInitialized = true;
           savePersistedState();
           broadcastToAll({
             type: 'gift_events:updated',
             payload: {
               giftEvents: serverState.giftEvents,
+              deletedGiftEventIds: serverState.deletedGiftEventIds,
+              giftEventsInitialized: serverState.giftEventsInitialized,
               lastUpdated: serverState.lastUpdated,
             },
           });
@@ -432,6 +455,8 @@ async function startServer() {
       bugReports: serverState.bugReports,
       pushAlerts: serverState.pushAlerts,
       giftEvents: serverState.giftEvents,
+      deletedGiftEventIds: serverState.deletedGiftEventIds,
+      giftEventsInitialized: serverState.giftEventsInitialized,
       sharedBankData: serverState.sharedBankData,
       connectedDevices: Math.max(1, clients.size),
       lastUpdated: serverState.lastUpdated,
@@ -442,6 +467,8 @@ async function startServer() {
     res.json({
       success: true,
       giftEvents: serverState.giftEvents,
+      deletedGiftEventIds: serverState.deletedGiftEventIds,
+      giftEventsInitialized: serverState.giftEventsInitialized,
       lastUpdated: serverState.lastUpdated,
     });
   });
@@ -452,16 +479,35 @@ async function startServer() {
       res.status(400).json({ success: false, message: 'Daftar giftEvents tidak valid.' });
       return;
     }
-    serverState.giftEvents = incoming;
+    if (Array.isArray(req.body?.deletedGiftEventIds)) {
+      serverState.deletedGiftEventIds = Array.from(
+        new Set([
+          ...serverState.deletedGiftEventIds,
+          ...req.body.deletedGiftEventIds.map((id: unknown) => String(id)),
+        ])
+      );
+    }
+    serverState.giftEvents = (incoming as Array<{ id?: string }>).filter(
+      (e) => !e?.id || !serverState.deletedGiftEventIds.includes(String(e.id))
+    );
+    serverState.giftEventsInitialized = true;
     savePersistedState();
     broadcastToAll({
       type: 'gift_events:updated',
       payload: {
         giftEvents: serverState.giftEvents,
+        deletedGiftEventIds: serverState.deletedGiftEventIds,
+        giftEventsInitialized: serverState.giftEventsInitialized,
         lastUpdated: serverState.lastUpdated,
       },
     });
-    res.json({ success: true, giftEvents: serverState.giftEvents, lastUpdated: serverState.lastUpdated });
+    res.json({
+      success: true,
+      giftEvents: serverState.giftEvents,
+      deletedGiftEventIds: serverState.deletedGiftEventIds,
+      giftEventsInitialized: serverState.giftEventsInitialized,
+      lastUpdated: serverState.lastUpdated,
+    });
   });
 
   app.post('/api/push-alert', (req, res) => {

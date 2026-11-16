@@ -25,6 +25,7 @@ import {
   Coins,
   Zap,
   Lock,
+  Cloud,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
@@ -83,6 +84,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     manualExpenses,
     budgetTxCategoryMap,
     devRoles,
+    cloudSyncStatus,
+    googleUser,
   } = useBank();
 
   const activeDevRole = currentAccount?.devRoleId
@@ -365,6 +368,36 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           )}
 
+          {/* Indikator Status Koneksi Cloud Real-Time */}
+          <div
+            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[10px] font-mono font-bold whitespace-nowrap shrink-0 ${
+              cloudSyncStatus === 'synced'
+                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                : cloudSyncStatus === 'syncing'
+                ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+            }`}
+            title="Status koneksi & sinkronisasi real-time Cloud Firestore"
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                cloudSyncStatus === 'synced'
+                  ? 'bg-emerald-400'
+                  : cloudSyncStatus === 'syncing'
+                  ? 'bg-amber-400 animate-pulse'
+                  : 'bg-rose-400'
+              }`}
+            />
+            <Cloud className="w-3 h-3 shrink-0" />
+            <span>
+              {cloudSyncStatus === 'synced'
+                ? 'Tersinkronisasi'
+                : cloudSyncStatus === 'syncing'
+                ? 'Menyinkronkan...'
+                : 'Offline'}
+            </span>
+          </div>
+
           {/* Money & Coin Icon Indicator Bar */}
           {currentAccount && (
             <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700/80 whitespace-nowrap shrink-0 font-mono text-[11px] tabular-nums">
@@ -573,10 +606,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <span className="text-[10px] font-bold text-white block truncate">
-                      {currentAccount ? currentAccount.fullName : 'Nasabah Bank Nusantara'}
+                      {currentAccount ? currentAccount.fullName : googleUser?.name || 'Nasabah Bank Nusantara'}
                     </span>
                     <span className="text-[9px] font-mono text-emerald-400 block truncate">
-                      Tersimpan di Server DB &amp; Perangkat
+                      {googleUser?.email || 'Cloud Firestore Real-Time'}
                     </span>
                   </div>
                   <button
@@ -585,10 +618,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       logoutGoogle();
                     }}
                     className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-300 text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
-                    title="Kembali ke Layar Masuk Awal"
+                    title="Keluar Akun Google"
                   >
                     <LogOut className="w-3 h-3" />
-                    <span>Layar Masuk</span>
+                    <span>Keluar Akun</span>
                   </button>
                 </div>
 

@@ -35,10 +35,48 @@ export interface CardBanInfo {
   expiresAt?: string; // ISO string jika custom
   bannedUntil?: string; // Alias expiresAt
   // Jika durasi custom, nasabah masih bisa mengajukan tinjauan alasan ke Admin.
-  // Jika permanen, TIDAK DAPAT ditinjau lagi oleh nasabah (namun masih bisa dibuka banned-nya di Panel Admin).
-  appealStatus?: 'none' | 'pending' | 'rejected';
+  // Pada layar Banned Fullscreen, tersedia pula tombol Tinjau di Sini + WA + Email.
+  appealStatus?: 'none' | 'pending' | 'rejected' | 'approved';
   appealNote?: string;
   appealRequestedAt?: string;
+  appealAdminNote?: string;
+  appealSource?: 'in_app' | 'whatsapp' | 'email';
+}
+
+export type AccountCloudStatus = 'active' | 'banned';
+
+export type CloudSyncStatus = 'syncing' | 'synced' | 'offline' | 'error';
+
+export interface BanSupportConfig {
+  whatsappNumber: string; // Nomor WA Admin (misal: 6281234567890)
+  emailAddress: string; // Email Admin untuk tinjauan banding
+  updatedAt?: string;
+}
+
+export interface CloudUserRecord {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoUrl?: string;
+  photoURL?: string;
+  status: AccountCloudStatus;
+  banReason?: string;
+  bannedAt?: string;
+  banAppealStatus?: 'none' | 'pending' | 'rejected' | 'approved';
+  banAppealMessage?: string;
+  banAppealSubmittedAt?: string;
+  banAppealAdminNote?: string;
+  appealStatus?: 'none' | 'pending' | 'rejected' | 'approved';
+  appealNote?: string;
+  appealAdminNote?: string;
+  appealRequestedAt?: string;
+  appealSource?: 'in_app' | 'whatsapp' | 'email';
+  currentAccountId?: string;
+  lastAccountId?: string;
+  hasCompletedOnboarding?: boolean;
+  createdAt?: string;
+  updatedAtMs?: number;
+  updatedAt?: string;
 }
 
 export interface BankAccount {
@@ -48,6 +86,9 @@ export interface BankAccount {
   nik: string; // 16 digit ID
   phone: string; // phone number for chat & OTP
   email?: string;
+  firebaseUid?: string;
+  status?: AccountCloudStatus; // Status cloud real-time ('active' | 'banned')
+  banReason?: string; // Alasan banned terpusat di database
   address: string;
   pin: string; // 6 digit PIN
   balance: number;

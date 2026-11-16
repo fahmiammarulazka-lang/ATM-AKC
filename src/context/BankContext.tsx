@@ -10,8 +10,18 @@
  */
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import confetti from 'canvas-confetti';
-import { db } from '../services/firebase';
-import { doc, setDoc, onSnapshot } from 'firebase/firestore';
+import {
+  db,
+  auth,
+  onAuthStateChanged,
+  signOut,
+  signInWithGooglePopup,
+  testConnection,
+  handleFirestoreError,
+  OperationType,
+  type FirebaseUser,
+} from '../firebase';
+import { doc, getDoc, getDocFromServer, setDoc, onSnapshot } from 'firebase/firestore';
 import {
   BankAccount,
   Transaction,
@@ -69,6 +79,9 @@ import {
   DevRoleConfig,
   LetterSignatureStampConfig,
   AccountDeletionRequest,
+  BanSupportConfig,
+  CloudUserRecord,
+  CloudSyncStatus,
 } from '../types/bank';
 import {
   DEFAULT_ADMIN_GIFT_EVENTS,
@@ -78,11 +91,9 @@ import {
 } from '../data/giftRewardsCatalog';
 import { DEFAULT_DEV_ROLES_10 } from '../data/devRolesCatalog';
 import { rollGachaOutcome } from '../utils/gachaUtils';
-import { type FirebaseUser } from '../firebase';
 import {
-  saveSnapshotToDeviceStorage,
-  loadSnapshotFromDeviceStorage,
   clearDeviceSnapshotStorage,
+  wipeLegacyBrowserStorage,
   type BankPersistableSnapshot,
 } from '../services/deviceStorage';
 import {
@@ -205,9 +216,14 @@ interface BankContextType {
   userRole: 'customer' | 'admin';
   setUserRole: (role: 'customer' | 'admin') => void;
 
-  // Portal Masuk & Initial Card Registration Onboarding Flow (No Google Sign-In)
+  // Cloud Auth, Real-Time Sync & Onboarding Flow (Wajib Google Sign-In)
   googleUser: GoogleUserSession | null;
   firebaseUser: FirebaseUser | null;
+  isCloudBootReady: boolean;
+  cloudSyncStatus: CloudSyncStatus;
+  lastCloudSyncAt: string | null;
+  cloudUserStatus: CloudUserRecord | null;
+  loginWithGooglePopup: () => Promise<{ success: boolean; errorCode?: string; message: string }>;
   enterBankPortal: () => void;
   loginWithGoogle: (email: string, name: string, picture?: string, firebaseUid?: string) => void;
   completeGoogleOnboarding: () => void;
@@ -467,6 +483,27 @@ interface BankContextType {
   adminUnbanCard: (accountId: string) => { success: boolean; message: string };
   adminUnbanAllCards: () => { success: boolean; message: string; count: number };
   submitCardBanAppeal: (accountId: string, appealNote?: string) => { success: boolean; message: string };
+  activeBanLockState: {
+    isBanned: boolean;
+    reason: string;
+    bannedAt?: string;
+    durationLabel?: string;
+    expiresAt?: string;
+    appealStatus: 'none' | 'pending' | 'rejected' | 'approved';
+    appealNote?: string;
+    appealAdminNote?: string;
+  };
+  banSupportConfig: BanSupportConfig;
+  adminUpdateBanSupportConfig: (config: BanSupportConfig) => Promise<{ success: boolean; message: string }>;
+  submitUnifiedBanAppeal: (
+    message: string,
+    source?: 'in_app' | 'whatsapp' | 'email'
+  ) => Promise<{ success: boolean; message: string }>;
+  adminReviewUnifiedBanAppeal: (
+    accountId: string,
+    action: 'approve' | 'reject',
+    adminNote?: string
+  ) => Promise<{ success: boolean; message: string }>;
 
   // Admin Blue Checkmark Verification Badge (Centang Biru di Panel Admin)
   adminToggleVerifyAccount: (
@@ -1013,8 +1050,10 @@ interface BankContextType {
   resetAllData: () => void;
   startFromZero: () => void;
 
-  // Sistem Hadiah & Surat Spesial Admin (Tanggal Tertentu / 29 Januari Otomatis + Kirim Manual + Kunci Tanggal + 60 Hadiah & Trial + Transfer ke Teman)
+  // Sistem Hadiah & Surat Spesial Admin (Tanggal Tertentu / 29 Januari Otomatis + Kirim Manual + Kunci Tanggal + 100 Hadiah & Trial + Transfer ke Teman)
   giftEvents: AdminGiftEventPackage[];
+  deletedGiftEventIds: string[];
+  giftEventsInitialized: boolean;
   activeGiftModal: { eventId: string; isReplay: boolean } | null;
   giftDateTestOverride: { month: number; day: number } | null;
   isGiftEventOpenableNow: (ev: AdminGiftEventPackage, accountId?: string) => boolean;
@@ -1213,60 +1252,40 @@ const DEFAULT_JOB_COIN_BONUS_CONFIG: JobCoinBonusConfig = {
   extraBonusCoins: 0,
 };
 
-interface SpinVaultEntry {
-  spinCoins: number;
-  totalSpinsPlayed?: number;
-  totalSpinWinnings?: number;
-  updatedAtMs: number;
+const writeSpinVaultFromAccounts = (_accs: BankAccount[], _nowMs: number = Date.now()) => {
+  // Penyimpanan lokal dinonaktifkan — seluruh data koin & akun tersimpan 100% di Cloud Firestore.
+};
+
+const mergeAccountsWithSpinVault = (accs: BankAccount[]): BankAccount[] => accs;
+
+function sanitizeForFirestore(value: unknown, depth = 0): unknown {
+  if (depth > 8 || value === undefined) return null;
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  if (typeof value === 'string') {
+    if (value.startsWith('data:image/') && value.length > 4096) {
+      return '';
+    }
+    return value.length > 8000 ? value.slice(0, 8000) : value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 260)
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item, depth + 1));
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v === undefined || !k) continue;
+      out[k] = sanitizeForFirestore(v, depth + 1);
+    }
+    return out;
+  }
+  return String(value);
 }
-
-const readSpinVaultMap = (): Record<string, SpinVaultEntry> => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.SPIN_VAULT);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, SpinVaultEntry>) : {};
-  } catch {
-    return {};
-  }
-};
-
-const writeSpinVaultFromAccounts = (accs: BankAccount[], nowMs: number = Date.now()) => {
-  try {
-    const nextVault: Record<string, SpinVaultEntry> = {};
-    for (const acc of accs) {
-      nextVault[acc.id] = {
-        spinCoins: typeof acc.spinCoins === 'number' && Number.isFinite(acc.spinCoins) ? Math.max(0, acc.spinCoins) : 0,
-        totalSpinsPlayed: acc.totalSpinsPlayed || 0,
-        totalSpinWinnings: acc.totalSpinWinnings || 0,
-        updatedAtMs: nowMs,
-      };
-    }
-    localStorage.setItem(STORAGE_KEYS.SPIN_VAULT, JSON.stringify(nextVault));
-  } catch {
-    // ignore
-  }
-};
-
-const mergeAccountsWithSpinVault = (accs: BankAccount[]): BankAccount[] => {
-  const vault = readSpinVaultMap();
-  if (Object.keys(vault).length === 0) return accs;
-  return accs.map((acc) => {
-    const entry = vault[acc.id];
-    if (!entry) return acc;
-    const accCoins = typeof acc.spinCoins === 'number' ? acc.spinCoins : 0;
-    // Restore non-zero spinCoins if localStorage accounts dropped them
-    if (accCoins === 0 && entry.spinCoins > 0) {
-      return {
-        ...acc,
-        spinCoins: entry.spinCoins,
-        totalSpinsPlayed: Math.max(acc.totalSpinsPlayed || 0, entry.totalSpinsPlayed || 0),
-        totalSpinWinnings: Math.max(acc.totalSpinWinnings || 0, entry.totalSpinWinnings || 0),
-      };
-    }
-    return acc;
-  });
-};
 
 const getLocalDateKey = (d: Date = new Date()): string => {
   const y = d.getFullYear();
@@ -1374,218 +1393,62 @@ export const DEFAULT_USER_APP_SETTINGS: UserAppSettings = {
 };
 
 export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [deletedAccountIds, setDeletedAccountIds] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.DELETED_ACCOUNTS);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return Array.isArray(parsed) ? parsed : [];
-      }
-    } catch { /* empty */ }
-    return [];
+  const clientSessionId = useRef<string>(
+    `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  ).current;
+
+  const [isCloudBootReady, setIsCloudBootReady] = useState<boolean>(false);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('syncing');
+  const [lastCloudSyncAt, setLastCloudSyncAt] = useState<string | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [cloudUserStatus, setCloudUserStatus] = useState<CloudUserRecord | null>(null);
+  const [banSupportConfig, setBanSupportConfig] = useState<BanSupportConfig>({
+    whatsappNumber: '6281234567890',
+    emailAddress: 'support@banknusantara.id',
   });
 
-  const [accountDeletionRequests, setAccountDeletionRequests] = useState<AccountDeletionRequest[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.ACCOUNT_DELETION_REQUESTS);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return Array.isArray(parsed) ? parsed : [];
-      }
-    } catch { /* empty */ }
-    return [];
-  });
+  const [deletedAccountIds, setDeletedAccountIds] = useState<string[]>([]);
+  const deletedAccountIdsRef = useRef<string[]>([]);
+  deletedAccountIdsRef.current = deletedAccountIds;
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNT_DELETION_REQUESTS, JSON.stringify(accountDeletionRequests));
-    } catch { /* empty */ }
-  }, [accountDeletionRequests]);
+  const [accountDeletionRequests, setAccountDeletionRequests] = useState<AccountDeletionRequest[]>([]);
 
-  const [accounts, setAccounts] = useState<BankAccount[]>(() => {
-    let deletedIds: string[] = [];
-    try {
-      const rawDel = localStorage.getItem(STORAGE_KEYS.DELETED_ACCOUNTS);
-      if (rawDel) {
-        const parsedDel = JSON.parse(rawDel);
-        if (Array.isArray(parsedDel)) deletedIds = parsedDel;
-      }
-    } catch { /* empty */ }
+  const [accounts, setAccounts] = useState<BankAccount[]>(() =>
+    INITIAL_ACCOUNTS.map((a) => ({
+      ...a,
+      status: a.cardStatus === 'banned' || a.banInfo?.isBanned ? 'banned' : 'active',
+      banReason: a.banInfo?.reason || a.banReason || '',
+    }))
+  );
 
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.ACCOUNTS);
-      if (saved !== null) {
-        const parsed: BankAccount[] = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return mergeAccountsWithSpinVault(
-            parsed.filter((p) => !deletedIds.includes(p.id))
-          );
-        }
-      }
-      return mergeAccountsWithSpinVault(
-        INITIAL_ACCOUNTS.filter((initAcc) => !deletedIds.includes(initAcc.id))
-      );
-    } catch {
-      return mergeAccountsWithSpinVault(
-        INITIAL_ACCOUNTS.filter((initAcc) => !deletedIds.includes(initAcc.id))
-      );
-    }
-  });
+  const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(null);
+  const [websitePopups, setWebsitePopups] = useState<WebsiteSystemPopupNotification[]>([]);
+  const [dismissedPopupIds, setDismissedPopupIds] = useState<string[]>([]);
+  const [globalChats, setGlobalChats] = useState<GlobalChatMessage[]>([
+    {
+      id: 'gchat-welcome-1',
+      senderName: 'Admin Utama Bank Nusantara',
+      senderRole: 'admin',
+      senderAccount: '9999999999',
+      isVerified: true,
+      title: 'Pesan dari Admin',
+      text: 'Selamat datang di Bank Nusantara! Pesan Chat Global hanya dapat dikirim resmi oleh Admin melalui Panel Admin.',
+      timestamp: new Date().toISOString(),
+      isPinned: true,
+    },
+  ]);
 
-  const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.GOOGLE_USER);
-      if (!saved) return null;
-      const parsed = JSON.parse(saved) as GoogleUserSession;
-      if (!parsed || typeof parsed !== 'object') return null;
-      return parsed;
-    } catch {
-      return null;
-    }
-  });
-
-  const [websitePopups, setWebsitePopups] = useState<WebsiteSystemPopupNotification[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.WEBSITE_POPUPS);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [dismissedPopupIds, setDismissedPopupIds] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.DISMISSED_POPUPS);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [globalChats, setGlobalChats] = useState<GlobalChatMessage[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.GLOBAL_CHATS);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return [
-      {
-        id: 'gchat-welcome-1',
-        senderName: 'Admin Utama Bank Nusantara',
-        senderRole: 'admin',
-        senderAccount: '9999999999',
-        isVerified: true,
-        title: 'Pesan dari Admin',
-        text: 'Selamat datang di Bank Nusantara! Pesan Chat Global hanya dapat dikirim resmi oleh Admin melalui Panel Admin.',
-        timestamp: new Date().toISOString(),
-        isPinned: true,
-      },
-    ];
-  });
-
-  const [bugReports, setBugReports] = useState<BugReportRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.BUG_REPORTS);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return [
-      {
-        id: 'bug-sample-1',
-        reporterName: 'Raden Satrio (Saya)',
-        reporterAccountNumber: '1029384756',
-        reporterEmail: 'satrio@nusantara.id',
-        category: 'Tampilan & Fitur',
-        explanation:
-          'Contoh laporan bug: Saat mencoba cek mutasi di layar potret HP, tampilan sudah lancar namun mohon dicek kembali oleh Admin.',
-        status: 'baru',
-        createdAt: new Date(Date.now() - 1800 * 1000).toISOString(),
-      },
-    ];
-  });
-
-  const [appUpdates, setAppUpdates] = useState<AppUpdateRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.APP_UPDATES);
-      if (saved) {
-        const parsed: AppUpdateRecord[] = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Otomatis gabungkan update terbaru dari INITIAL_APP_UPDATES setiap kali aplikasi diupdate!
-          const missingNewUpdates = INITIAL_APP_UPDATES.filter(
-            (initUpd) => !parsed.some((p) => p.id === initUpd.id)
-          );
-          if (missingNewUpdates.length > 0) {
-            const demotedExisting = parsed.map((p) => ({ ...p, isCurrent: false }));
-            const merged = [...missingNewUpdates, ...demotedExisting];
-            return merged.map((u, idx) => ({ ...u, isCurrent: idx === 0 }));
-          }
-          return parsed;
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_APP_UPDATES;
-  });
-
-  const [spinWheelConfig, setSpinWheelConfig] = useState<SpinWheelAdminConfig>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.SPIN_CONFIG);
-      if (saved) {
-        return { ...INITIAL_SPIN_WHEEL_CONFIG, ...JSON.parse(saved) };
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_SPIN_WHEEL_CONFIG;
-  });
-
-  const [spinHistory, setSpinHistory] = useState<SpinHistoryRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.SPIN_HISTORY);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return [];
-  });
-
-  const [sultanEmpireConfig, setSultanEmpireConfig] = useState<SultanEmpireAdminConfig>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.EMPIRE_CONFIG);
-      if (saved) {
-        return { ...INITIAL_SULTAN_EMPIRE_CONFIG, ...JSON.parse(saved) };
-      }
-    } catch {
-      // ignore
-    }
-    return INITIAL_SULTAN_EMPIRE_CONFIG;
-  });
-
-  const [goldMarketConfig, setGoldMarketConfig] = useState<GoldAndTransferMarketConfig>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.GOLD_TRANSFER_MARKET);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return { ...createInitialGoldMarketConfig(), ...parsed };
-      }
-    } catch {
-      // ignore
-    }
-    return createInitialGoldMarketConfig();
-  });
-
-  const [adminHelpRequests, setAdminHelpRequests] = useState<AdminHelpRequestRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.MINTOL_REQUESTS);
-      if (saved) return JSON.parse(saved);
-    } catch {
-      // ignore
-    }
-    return [];
-  });
+  const [bugReports, setBugReports] = useState<BugReportRecord[]>([]);
+  const [appUpdates, setAppUpdates] = useState<AppUpdateRecord[]>(INITIAL_APP_UPDATES);
+  const [spinWheelConfig, setSpinWheelConfig] = useState<SpinWheelAdminConfig>(INITIAL_SPIN_WHEEL_CONFIG);
+  const [spinHistory, setSpinHistory] = useState<SpinHistoryRecord[]>([]);
+  const [sultanEmpireConfig, setSultanEmpireConfig] = useState<SultanEmpireAdminConfig>(
+    INITIAL_SULTAN_EMPIRE_CONFIG
+  );
+  const [goldMarketConfig, setGoldMarketConfig] = useState<GoldAndTransferMarketConfig>(() =>
+    createInitialGoldMarketConfig()
+  );
+  const [adminHelpRequests, setAdminHelpRequests] = useState<AdminHelpRequestRecord[]>([]);
 
   const [isBugReportModalOpen, setIsBugReportModalOpen] = useState<boolean>(false);
   const [isMintolModalOpen, setIsMintolModalOpen] = useState<boolean>(false);
@@ -1593,24 +1456,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [connectedDevicesCount, setConnectedDevicesCount] = useState<number>(1);
   const [activePushBanners, setActivePushBanners] = useState<MobilePushBannerToast[]>([]);
 
-  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('bank_nusantara_notif_enabled_v2');
-      if (saved === 'false') return false;
-    } catch { /* empty */ }
-    return true;
-  });
-
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(true);
   const notificationsEnabledRef = useRef<boolean>(notificationsEnabled);
   notificationsEnabledRef.current = notificationsEnabled;
 
-  const [backgroundAutoNotifEnabled, setBackgroundAutoNotifEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('bank_nusantara_bg_auto_notif_v2');
-      if (saved === 'false') return false;
-    } catch { /* empty */ }
-    return true;
-  });
+  const [backgroundAutoNotifEnabled, setBackgroundAutoNotifEnabled] = useState<boolean>(true);
 
   const [notificationPermissionStatus, setNotificationPermissionStatus] = useState<
     'default' | 'granted' | 'denied'
@@ -1625,321 +1475,215 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return 'default';
   });
 
-  const [currentAccountId, setCurrentAccountIdState] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_ACC);
-      return saved || 'acc-1';
-    } catch {
-      return 'acc-1';
-    }
-  });
-
+  const [currentAccountId, setCurrentAccountIdState] = useState<string>('acc-1');
   const [userRole, setUserRoleState] = useState<'customer' | 'admin'>('customer');
-  const [adminUnlocked, setAdminUnlockedState] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEYS.ADMIN_UNLOCKED) === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const [adminUnlocked, setAdminUnlockedState] = useState<boolean>(false);
 
-  const [rawFeatureConfigs, setFeatureConfigs] = useState<FeatureSecurityConfig[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.FEATURE_CONFIGS);
-      if (saved) {
-        const parsed: FeatureSecurityConfig[] = JSON.parse(saved);
-        // Merge with INITIAL_FEATURE_CONFIGS and keep any custom features added by Admin, strictly deduplicated by id
-        const mergedDefaults = INITIAL_FEATURE_CONFIGS.map((initFeat) => {
-          const found = parsed.find((p) => p.id === initFeat.id);
-          return found
-            ? {
-                ...initFeat,
-                requireAdminPin: found.requireAdminPin,
-                requireAdminApproval: found.requireAdminApproval,
-              }
-            : initFeat;
-        });
-        const customFeatures = parsed.filter(
-          (p) => !INITIAL_FEATURE_CONFIGS.some((initFeat) => initFeat.id === p.id)
-        );
-        const combined = [...customFeatures, ...mergedDefaults];
-        const seenIds = new Set<string>();
-        return combined.filter((item) => {
-          if (seenIds.has(item.id)) return false;
-          seenIds.add(item.id);
-          return true;
-        });
-      }
-      return INITIAL_FEATURE_CONFIGS;
-    } catch {
-      return INITIAL_FEATURE_CONFIGS;
-    }
-  });
-
-  const [deletedFeatureIds, setDeletedFeatureIds] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.DELETED_FEATURES);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [userSettings, setUserSettings] = useState<UserAppSettings>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.USER_SETTINGS);
-      if (saved) {
-        return { ...DEFAULT_USER_APP_SETTINGS, ...JSON.parse(saved) };
-      }
-    } catch {
-      // ignore
-    }
-    return DEFAULT_USER_APP_SETTINGS;
-  });
-
+  const [rawFeatureConfigs, setFeatureConfigs] = useState<FeatureSecurityConfig[]>(INITIAL_FEATURE_CONFIGS);
+  const [deletedFeatureIds, setDeletedFeatureIds] = useState<string[]>([]);
+  const [userSettings, setUserSettings] = useState<UserAppSettings>(DEFAULT_USER_APP_SETTINGS);
   const userSettingsRef = useRef<UserAppSettings>(userSettings);
   userSettingsRef.current = userSettings;
 
-  // Active features exclude any feature ID in deletedFeatureIds
   const featureConfigs = rawFeatureConfigs.filter((f) => !deletedFeatureIds.includes(f.id));
   const deletedFeaturesList = rawFeatureConfigs.filter((f) => deletedFeatureIds.includes(f.id));
 
-  const [redeemCodes, setRedeemCodes] = useState<RedeemCode[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.REDEEM_CODES);
-      return saved ? JSON.parse(saved) : INITIAL_REDEEM_CODES;
-    } catch {
-      return INITIAL_REDEEM_CODES;
-    }
-  });
+  const [redeemCodes, setRedeemCodes] = useState<RedeemCode[]>(INITIAL_REDEEM_CODES);
+  const [purchasedCodes, setPurchasedCodes] = useState<PurchasedVoucherCode[]>(INITIAL_PURCHASED_CODES);
+  const [resiList, setResiList] = useState<ResiTrackingRecord[]>(INITIAL_RESI_LIST);
+  const [cardUpgrades, setCardUpgrades] = useState<CardUpgradeApplication[]>(INITIAL_UPGRADES);
+  const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
+  const [loans, setLoans] = useState<LoanApplication[]>(INITIAL_LOANS);
+  const [chats, setChats] = useState<ChatMessage[]>(INITIAL_CHATS);
+  const [pockets, setPockets] = useState<PocketSaving[]>(INITIAL_POCKETS);
+  const [depositos, setDepositos] = useState<DepositoRecord[]>(INITIAL_DEPOSITOS);
+  const [cardlessTokens, setCardlessTokens] = useState<CardlessToken[]>(INITIAL_CARDLESS);
+  const [scheduledPayments, setScheduledPayments] = useState<ScheduledPayment[]>(INITIAL_SCHEDULED_PAYMENTS);
+  const [favorites, setFavorites] = useState<FavoriteAccount[]>(INITIAL_FAVORITES);
+  const [notifications, setNotifications] = useState<AppNotification[]>(INITIAL_NOTIFICATIONS);
+  const [pinResetRequests, setPinResetRequests] = useState<PinResetRequest[]>([]);
 
-  const [purchasedCodes, setPurchasedCodes] = useState<PurchasedVoucherCode[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.PURCHASED_CODES);
-      return saved ? JSON.parse(saved) : INITIAL_PURCHASED_CODES;
-    } catch {
-      return INITIAL_PURCHASED_CODES;
-    }
-  });
+  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>(DEFAULT_BUDGET_CATEGORIES);
+  const [manualExpenses, setManualExpenses] = useState<ManualExpenseRecord[]>([]);
+  const [budgetTxCategoryMap, setBudgetTxCategoryMap] = useState<Record<string, string>>({});
+  const [budgetAlertHistory, setBudgetAlertHistory] = useState<string[]>([]);
 
-  const [resiList, setResiList] = useState<ResiTrackingRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.RESI_LIST);
-      return saved ? JSON.parse(saved) : INITIAL_RESI_LIST;
-    } catch {
-      return INITIAL_RESI_LIST;
-    }
-  });
+  const [deletedGiftEventIds, setDeletedGiftEventIds] = useState<string[]>([]);
+  const deletedGiftEventIdsRef = useRef<string[]>([]);
+  deletedGiftEventIdsRef.current = deletedGiftEventIds;
 
-  const [cardUpgrades, setCardUpgrades] = useState<CardUpgradeApplication[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.UPGRADES);
-      return saved ? JSON.parse(saved) : INITIAL_UPGRADES;
-    } catch {
-      return INITIAL_UPGRADES;
-    }
-  });
+  const [giftEventsInitialized, setGiftEventsInitialized] = useState<boolean>(false);
+  const giftEventsInitializedRef = useRef<boolean>(giftEventsInitialized);
+  giftEventsInitializedRef.current = giftEventsInitialized;
 
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
-      if (saved) {
-        const parsed: any[] = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.map((tx) => ({
-            ...tx,
-            title: tx.title || tx.description || 'Transaksi Bank Nusantara',
-            referenceNo: tx.referenceNo || tx.referenceCode || `BNUS-${String(tx.id || '').slice(-6)}`,
-            timestamp: tx.timestamp || tx.date || new Date().toISOString(),
-          }));
-        }
-      }
-      return INITIAL_TRANSACTIONS;
-    } catch {
-      return INITIAL_TRANSACTIONS;
-    }
-  });
-
-  const [loans, setLoans] = useState<LoanApplication[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.LOANS);
-      return saved ? JSON.parse(saved) : INITIAL_LOANS;
-    } catch {
-      return INITIAL_LOANS;
-    }
-  });
-
-  const [chats, setChats] = useState<ChatMessage[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CHATS);
-      return saved ? JSON.parse(saved) : INITIAL_CHATS;
-    } catch {
-      return INITIAL_CHATS;
-    }
-  });
-
-  const [pockets, setPockets] = useState<PocketSaving[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.POCKETS);
-      return saved ? JSON.parse(saved) : INITIAL_POCKETS;
-    } catch {
-      return INITIAL_POCKETS;
-    }
-  });
-
-  const [depositos, setDepositos] = useState<DepositoRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.DEPOSITOS);
-      return saved ? JSON.parse(saved) : INITIAL_DEPOSITOS;
-    } catch {
-      return INITIAL_DEPOSITOS;
-    }
-  });
-
-  const [cardlessTokens, setCardlessTokens] = useState<CardlessToken[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.CARDLESS);
-      return saved ? JSON.parse(saved) : INITIAL_CARDLESS;
-    } catch {
-      return INITIAL_CARDLESS;
-    }
-  });
-
-  const [scheduledPayments, setScheduledPayments] = useState<ScheduledPayment[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.SCHEDULED);
-      return saved ? JSON.parse(saved) : INITIAL_SCHEDULED_PAYMENTS;
-    } catch {
-      return INITIAL_SCHEDULED_PAYMENTS;
-    }
-  });
-
-  const [favorites, setFavorites] = useState<FavoriteAccount[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.FAVORITES);
-      return saved ? JSON.parse(saved) : INITIAL_FAVORITES;
-    } catch {
-      return INITIAL_FAVORITES;
-    }
-  });
-
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-      return saved ? JSON.parse(saved) : INITIAL_NOTIFICATIONS;
-    } catch {
-      return INITIAL_NOTIFICATIONS;
-    }
-  });
-
-  const [pinResetRequests, setPinResetRequests] = useState<PinResetRequest[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.PIN_RESETS);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [firebaseUser] = useState<FirebaseUser | null>(null);
-
-  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.BUDGET_CATEGORIES);
-      if (saved) {
-        const parsed: BudgetCategory[] = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const missingDefaults = DEFAULT_BUDGET_CATEGORIES.filter(
-            (def) => !parsed.some((p) => p.id === def.id)
-          );
-          return [...parsed, ...missingDefaults];
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return DEFAULT_BUDGET_CATEGORIES;
-  });
-
-  const [manualExpenses, setManualExpenses] = useState<ManualExpenseRecord[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.MANUAL_EXPENSES);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [budgetTxCategoryMap, setBudgetTxCategoryMap] = useState<Record<string, string>>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.BUDGET_TX_MAP);
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  const [budgetAlertHistory, setBudgetAlertHistory] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.BUDGET_ALERTS);
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [giftEvents, setGiftEvents] = useState<AdminGiftEventPackage[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.GIFT_EVENTS);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch { /* empty */ }
-    return DEFAULT_ADMIN_GIFT_EVENTS;
-  });
+  const [giftEvents, setGiftEvents] = useState<AdminGiftEventPackage[]>(DEFAULT_ADMIN_GIFT_EVENTS);
   const [activeGiftModal, setActiveGiftModal] = useState<{ eventId: string; isReplay: boolean } | null>(null);
   const [openingGiftBoxKeys, setOpeningGiftBoxKeys] = useState<string[]>([]);
   const openingGiftBoxKeysRef = useRef<Set<string>>(new Set());
   const [giftDateTestOverride, setGiftDateTestOverride] = useState<{ month: number; day: number } | null>(null);
-  const [jobCoinBonusConfig, setJobCoinBonusConfig] = useState<JobCoinBonusConfig>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.JOB_COIN_BONUS);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') {
-          return {
-            enabled: parsed.enabled !== false,
-            coinMultiplier: Math.max(0.1, Number(parsed.coinMultiplier) || 1),
-            extraBonusCoins: Math.max(0, Math.round(Number(parsed.extraBonusCoins) || 0)),
-          };
-        }
-      }
-    } catch { /* empty */ }
-    return DEFAULT_JOB_COIN_BONUS_CONFIG;
-  });
+  const [jobCoinBonusConfig, setJobCoinBonusConfig] = useState<JobCoinBonusConfig>(DEFAULT_JOB_COIN_BONUS_CONFIG);
+  const [devRoles, setDevRoles] = useState<DevRoleConfig[]>(DEFAULT_DEV_ROLES_10);
 
-  const [devRoles, setDevRoles] = useState<DevRoleConfig[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.DEV_ROLES);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length === 10) return parsed;
-      }
-    } catch { /* empty */ }
-    return DEFAULT_DEV_ROLES_10;
-  });
-
+  // Bersihkan sisa localStorage & sessionStorage lama sekali saat startup agar zero local cache tertinggal
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.DEV_ROLES, JSON.stringify(devRoles));
-    } catch { /* empty */ }
-  }, [devRoles]);
+    wipeLegacyBrowserStorage();
+    void clearDeviceSnapshotStorage();
+  }, []);
 
   // Real-time Firestore Sync across devices & mobile (Laptop/Admin as Master Data to HP)
   const hasFirestoreHydratedRef = useRef<boolean>(false);
   const isApplyingFirestoreRef = useRef<boolean>(false);
   const lastFirestoreWriteMsRef = useRef<number>(0);
+
+  const applyMasterCloudData = (
+    data: Record<string, any>,
+    options?: { forceInitial?: boolean }
+  ) => {
+    if (!data || typeof data !== 'object') return;
+    if (!options?.forceInitial && data.writerSessionId === clientSessionId) {
+      return;
+    }
+
+    const incomingMs = typeof data.updatedAtMs === 'number' ? data.updatedAtMs : 0;
+    if (
+      !options?.forceInitial &&
+      hasFirestoreHydratedRef.current &&
+      incomingMs > 0 &&
+      incomingMs <= lastFirestoreWriteMsRef.current
+    ) {
+      return;
+    }
+    if (incomingMs > lastFirestoreWriteMsRef.current) {
+      lastFirestoreWriteMsRef.current = incomingMs;
+    }
+
+    isApplyingFirestoreRef.current = true;
+
+    const mergedDelAccountIds: string[] = Array.isArray(data.deletedAccountIds)
+      ? Array.from(new Set([...deletedAccountIdsRef.current, ...data.deletedAccountIds]))
+      : deletedAccountIdsRef.current;
+    if (Array.isArray(data.deletedAccountIds)) {
+      setDeletedAccountIds(mergedDelAccountIds);
+    }
+
+    const mergedDelGiftIds: string[] = Array.isArray(data.deletedGiftEventIds)
+      ? Array.from(new Set([...deletedGiftEventIdsRef.current, ...data.deletedGiftEventIds]))
+      : deletedGiftEventIdsRef.current;
+    if (Array.isArray(data.deletedGiftEventIds)) {
+      setDeletedGiftEventIds(mergedDelGiftIds);
+    }
+
+    if (Array.isArray(data.accounts)) {
+      const cleanAccounts = (data.accounts as BankAccount[])
+        .filter((a) => !mergedDelAccountIds.includes(a.id))
+        .map((a) => ({
+          ...a,
+          status:
+            a.status === 'banned' || a.cardStatus === 'banned' || a.banInfo?.isBanned
+              ? ('banned' as const)
+              : ('active' as const),
+          banReason: a.banReason || a.banInfo?.reason || '',
+        }));
+      setAccounts(cleanAccounts);
+    }
+
+    if (Array.isArray(data.transactions)) setTransactions(data.transactions as Transaction[]);
+    if (Array.isArray(data.loans)) setLoans(data.loans as LoanApplication[]);
+    if (Array.isArray(data.scheduledPayments)) setScheduledPayments(data.scheduledPayments as ScheduledPayment[]);
+    if (Array.isArray(data.favorites)) setFavorites(data.favorites as FavoriteAccount[]);
+    if (Array.isArray(data.notifications)) setNotifications(data.notifications as AppNotification[]);
+    if (Array.isArray(data.chats)) setChats(data.chats as ChatMessage[]);
+    if (Array.isArray(data.cardUpgrades)) setCardUpgrades(data.cardUpgrades as CardUpgradeApplication[]);
+    if (Array.isArray(data.pinResetRequests)) setPinResetRequests(data.pinResetRequests as PinResetRequest[]);
+    if (Array.isArray(data.redeemCodes)) setRedeemCodes(data.redeemCodes as RedeemCode[]);
+    if (Array.isArray(data.purchasedCodes)) setPurchasedCodes(data.purchasedCodes as PurchasedVoucherCode[]);
+    if (Array.isArray(data.resiList)) setResiList(data.resiList as ResiTrackingRecord[]);
+    if (Array.isArray(data.cardlessTokens)) setCardlessTokens(data.cardlessTokens as CardlessToken[]);
+    if (Array.isArray(data.pockets)) setPockets(data.pockets as PocketSaving[]);
+    if (Array.isArray(data.depositos)) setDepositos(data.depositos as DepositoRecord[]);
+    if (Array.isArray(data.accountDeletionRequests)) {
+      setAccountDeletionRequests(data.accountDeletionRequests as AccountDeletionRequest[]);
+    }
+
+    if (Boolean(data.giftEventsInitialized) || Array.isArray(data.giftEvents)) {
+      setGiftEventsInitialized(true);
+      if (Array.isArray(data.giftEvents)) {
+        const filteredGifts = (data.giftEvents as AdminGiftEventPackage[]).filter(
+          (ev) => !mergedDelGiftIds.includes(ev.id)
+        );
+        setGiftEvents(filteredGifts);
+      }
+    }
+
+    if (data.banSupportConfig && typeof data.banSupportConfig === 'object') {
+      setBanSupportConfig((prev) => ({
+        ...prev,
+        ...(data.banSupportConfig as BanSupportConfig),
+      }));
+    }
+    if (data.defaultLetterSealConfig && typeof data.defaultLetterSealConfig === 'object') {
+      setDefaultLetterSealConfig((prev) => ({
+        ...prev,
+        ...(data.defaultLetterSealConfig as LetterSignatureStampConfig),
+      }));
+    }
+    if (data.jobCoinBonusConfig && typeof data.jobCoinBonusConfig === 'object') {
+      setJobCoinBonusConfig((prev) => ({
+        ...prev,
+        ...(data.jobCoinBonusConfig as JobCoinBonusConfig),
+      }));
+    }
+    if (data.spinWheelConfig && typeof data.spinWheelConfig === 'object') {
+      setSpinWheelConfig((prev) => ({
+        ...prev,
+        ...(data.spinWheelConfig as SpinWheelAdminConfig),
+      }));
+    }
+    if (Array.isArray(data.spinHistory)) setSpinHistory(data.spinHistory as SpinHistoryRecord[]);
+    if (data.sultanEmpireConfig && typeof data.sultanEmpireConfig === 'object') {
+      setSultanEmpireConfig((prev) => ({
+        ...prev,
+        ...(data.sultanEmpireConfig as SultanEmpireAdminConfig),
+      }));
+    }
+    if (Array.isArray(data.featureConfigs)) setFeatureConfigs(data.featureConfigs as FeatureSecurityConfig[]);
+    if (Array.isArray(data.deletedFeatureIds)) setDeletedFeatureIds(data.deletedFeatureIds as string[]);
+    if (data.userSettings && typeof data.userSettings === 'object') {
+      setUserSettings((prev) => ({ ...prev, ...(data.userSettings as UserAppSettings) }));
+    }
+    if (data.goldMarketConfig && typeof data.goldMarketConfig === 'object') {
+      setGoldMarketConfig((prev) => ({
+        ...prev,
+        ...(data.goldMarketConfig as GoldAndTransferMarketConfig),
+      }));
+    }
+    if (Array.isArray(data.budgetCategories) && data.budgetCategories.length > 0) {
+      const incomingCats = data.budgetCategories as BudgetCategory[];
+      const missingDefaults = DEFAULT_BUDGET_CATEGORIES.filter(
+        (def) => !incomingCats.some((c) => c.id === def.id)
+      );
+      setBudgetCategories([...incomingCats, ...missingDefaults]);
+    }
+    if (Array.isArray(data.manualExpenses)) setManualExpenses(data.manualExpenses as ManualExpenseRecord[]);
+    if (data.budgetTxCategoryMap && typeof data.budgetTxCategoryMap === 'object') {
+      setBudgetTxCategoryMap(data.budgetTxCategoryMap as Record<string, string>);
+    }
+    if (Array.isArray(data.budgetAlertHistory)) setBudgetAlertHistory(data.budgetAlertHistory as string[]);
+    if (Array.isArray(data.appUpdates) && data.appUpdates.length > 0) {
+      setAppUpdates(data.appUpdates as AppUpdateRecord[]);
+    }
+    if (Array.isArray(data.devRoles) && data.devRoles.length > 0) {
+      setDevRoles(data.devRoles as DevRoleConfig[]);
+    }
+    if (Array.isArray(data.adminHelpRequests)) setAdminHelpRequests(data.adminHelpRequests as AdminHelpRequestRecord[]);
+    if (Array.isArray(data.websitePopups)) setWebsitePopups(data.websitePopups as WebsiteSystemPopupNotification[]);
+    if (Array.isArray(data.globalChats)) setGlobalChats(data.globalChats as GlobalChatMessage[]);
+    if (Array.isArray(data.bugReports)) setBugReports(data.bugReports as BugReportRecord[]);
+
+    window.setTimeout(() => {
+      isApplyingFirestoreRef.current = false;
+    }, 100);
+  };
 
   const flushMasterStateToCloud = (overrides?: {
     accounts?: BankAccount[];
@@ -1947,129 +1691,338 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     accountDeletionRequests?: AccountDeletionRequest[];
     transactions?: Transaction[];
     giftEvents?: AdminGiftEventPackage[];
+    deletedGiftEventIds?: string[];
+    giftEventsInitialized?: boolean;
     pockets?: PocketSaving[];
     depositos?: DepositoRecord[];
+    banSupportConfig?: BanSupportConfig;
+    loans?: LoanApplication[];
+    scheduledPayments?: ScheduledPayment[];
+    favorites?: FavoriteAccount[];
+    notifications?: AppNotification[];
+    chats?: ChatMessage[];
+    cardUpgrades?: CardUpgradeApplication[];
+    pinResetRequests?: PinResetRequest[];
+    redeemCodes?: RedeemCode[];
+    purchasedCodes?: PurchasedVoucherCode[];
+    resiList?: ResiTrackingRecord[];
+    cardlessTokens?: CardlessToken[];
+    spinWheelConfig?: SpinWheelAdminConfig;
+    spinHistory?: SpinHistoryRecord[];
+    sultanEmpireConfig?: SultanEmpireAdminConfig;
+    featureConfigs?: FeatureSecurityConfig[];
+    deletedFeatureIds?: string[];
+    userSettings?: UserAppSettings;
+    goldMarketConfig?: GoldAndTransferMarketConfig;
+    budgetCategories?: BudgetCategory[];
+    manualExpenses?: ManualExpenseRecord[];
+    budgetTxCategoryMap?: Record<string, string>;
+    budgetAlertHistory?: string[];
+    appUpdates?: AppUpdateRecord[];
+    devRoles?: DevRoleConfig[];
+    defaultLetterSealConfig?: LetterSignatureStampConfig;
+    jobCoinBonusConfig?: JobCoinBonusConfig;
+    adminHelpRequests?: AdminHelpRequestRecord[];
+    websitePopups?: WebsiteSystemPopupNotification[];
+    globalChats?: GlobalChatMessage[];
+    bugReports?: BugReportRecord[];
   }) => {
     const nowMs = Date.now();
     lastFirestoreWriteMsRef.current = nowMs;
     lastSyncEpochRef.current = nowMs;
-    const nextAccs = overrides?.accounts ?? accounts;
-    const nextDels = overrides?.deletedAccountIds ?? deletedAccountIds;
-    const nextDelRequests = overrides?.accountDeletionRequests ?? accountDeletionRequests;
-    const nextTxs = overrides?.transactions ?? transactions;
-    const nextGifts = overrides?.giftEvents ?? giftEvents;
-    const nextPockets = overrides?.pockets ?? pockets;
-    const nextDepositos = overrides?.depositos ?? depositos;
+    setCloudSyncStatus('syncing');
 
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(nextAccs));
-      localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(nextDels));
-      localStorage.setItem(STORAGE_KEYS.ACCOUNT_DELETION_REQUESTS, JSON.stringify(nextDelRequests));
-    } catch { /* empty */ }
+    const payload = sanitizeForFirestore({
+      accounts: overrides?.accounts ?? accounts,
+      deletedAccountIds: overrides?.deletedAccountIds ?? deletedAccountIds,
+      accountDeletionRequests: overrides?.accountDeletionRequests ?? accountDeletionRequests,
+      transactions: (overrides?.transactions ?? transactions).slice(0, 220),
+      giftEvents: overrides?.giftEvents ?? giftEvents,
+      deletedGiftEventIds: overrides?.deletedGiftEventIds ?? deletedGiftEventIds,
+      giftEventsInitialized: overrides?.giftEventsInitialized ?? true,
+      banSupportConfig: overrides?.banSupportConfig ?? banSupportConfig,
+      pockets: overrides?.pockets ?? pockets,
+      depositos: overrides?.depositos ?? depositos,
+      loans: overrides?.loans ?? loans,
+      scheduledPayments: overrides?.scheduledPayments ?? scheduledPayments,
+      favorites: overrides?.favorites ?? favorites,
+      notifications: (overrides?.notifications ?? notifications).slice(0, 120),
+      chats: (overrides?.chats ?? chats).slice(0, 120),
+      cardUpgrades: overrides?.cardUpgrades ?? cardUpgrades,
+      pinResetRequests: overrides?.pinResetRequests ?? pinResetRequests,
+      redeemCodes: overrides?.redeemCodes ?? redeemCodes,
+      purchasedCodes: overrides?.purchasedCodes ?? purchasedCodes,
+      resiList: overrides?.resiList ?? resiList,
+      cardlessTokens: overrides?.cardlessTokens ?? cardlessTokens,
+      spinWheelConfig: overrides?.spinWheelConfig ?? spinWheelConfig,
+      spinHistory: (overrides?.spinHistory ?? spinHistory).slice(0, 80),
+      sultanEmpireConfig: overrides?.sultanEmpireConfig ?? sultanEmpireConfig,
+      featureConfigs: overrides?.featureConfigs ?? rawFeatureConfigs,
+      deletedFeatureIds: overrides?.deletedFeatureIds ?? deletedFeatureIds,
+      userSettings: overrides?.userSettings ?? userSettings,
+      goldMarketConfig: overrides?.goldMarketConfig ?? goldMarketConfig,
+      budgetCategories: overrides?.budgetCategories ?? budgetCategories,
+      manualExpenses: overrides?.manualExpenses ?? manualExpenses,
+      budgetTxCategoryMap: overrides?.budgetTxCategoryMap ?? budgetTxCategoryMap,
+      budgetAlertHistory: overrides?.budgetAlertHistory ?? budgetAlertHistory,
+      appUpdates: overrides?.appUpdates ?? appUpdates,
+      devRoles: overrides?.devRoles ?? devRoles,
+      defaultLetterSealConfig: overrides?.defaultLetterSealConfig ?? defaultLetterSealConfig,
+      jobCoinBonusConfig: overrides?.jobCoinBonusConfig ?? jobCoinBonusConfig,
+      adminHelpRequests: overrides?.adminHelpRequests ?? adminHelpRequests,
+      websitePopups: (overrides?.websitePopups ?? websitePopups).slice(0, 40),
+      globalChats: (overrides?.globalChats ?? globalChats).slice(0, 100),
+      bugReports: (overrides?.bugReports ?? bugReports).slice(0, 60),
+      writerSessionId: clientSessionId,
+      updatedAtMs: nowMs,
+      updatedAt: new Date(nowMs).toISOString(),
+    }) as Record<string, unknown>;
 
-    try {
-      setDoc(
-        doc(db, 'bank_state_v1', 'master_state'),
-        {
-          accounts: nextAccs,
-          deletedAccountIds: nextDels,
-          accountDeletionRequests: nextDelRequests,
-          transactions: nextTxs,
-          giftEvents: nextGifts,
-          pockets: nextPockets,
-          depositos: nextDepositos,
-          updatedAtMs: nowMs,
-          updatedAt: new Date(nowMs).toISOString(),
-        },
-        { merge: true }
-      ).catch(() => { /* offline silent catch */ });
-    } catch { /* empty */ }
-
-    try {
-      const snap = {
-        ...buildPersistableSnapshot(nowMs),
-        accounts: nextAccs,
-        deletedAccountIds: nextDels,
-        accountDeletionRequests: nextDelRequests,
-        transactions: nextTxs,
-        pockets: nextPockets,
-        depositos: nextDepositos,
-      };
-      latestSnapshotRef.current = snap;
-      void saveSnapshotToDeviceStorage(snap, 'default');
-      fetch('/api/db/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scopeKey: 'default', snapshot: snap }),
-      }).catch(() => {});
-    } catch { /* empty */ }
+    setDoc(doc(db, 'bank_state_v1', 'master_state'), payload, { merge: true })
+      .then(() => {
+        setCloudSyncStatus('synced');
+        setLastCloudSyncAt(new Date().toISOString());
+      })
+      .catch((err) => {
+        setCloudSyncStatus('offline');
+        handleFirestoreError(err, OperationType.WRITE, 'bank_state_v1/master_state', {
+          suppressThrow: true,
+        });
+      });
   };
 
+  // Pre-Boot Cloud Auth Check + Dedicated Real-Time Listener on users/{uid} (Ban & Multi-Device Session)
+  useEffect(() => {
+    let active = true;
+    let userDocUnsub: (() => void) | null = null;
+
+    void testConnection();
+
+    const authUnsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (!active) return;
+
+      if (userDocUnsub) {
+        userDocUnsub();
+        userDocUnsub = null;
+      }
+
+      setFirebaseUser(fbUser);
+
+      // Wajib cek master_state dari server cloud sebelum membuka halaman utama
+      let cloudAccountsLoaded: BankAccount[] = [];
+      try {
+        let masterSnap;
+        try {
+          masterSnap = await getDocFromServer(doc(db, 'bank_state_v1', 'master_state'));
+        } catch {
+          masterSnap = await getDoc(doc(db, 'bank_state_v1', 'master_state'));
+        }
+        if (masterSnap && masterSnap.exists() && active) {
+          const masterData = masterSnap.data();
+          applyMasterCloudData(masterData, { forceInitial: true });
+          if (Array.isArray(masterData.accounts)) {
+            cloudAccountsLoaded = masterData.accounts as BankAccount[];
+          }
+          setCloudSyncStatus('synced');
+          setLastCloudSyncAt(new Date().toISOString());
+        }
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, 'bank_state_v1/master_state', {
+          suppressThrow: true,
+        });
+      }
+
+      if (fbUser && active) {
+        const cleanEmail = (fbUser.email || '').trim().toLowerCase() || 'nasabah@banknusantara.id';
+        const cleanName = fbUser.displayName?.trim() || cleanEmail.split('@')[0] || 'Nasabah Bank Nusantara';
+        const userRef = doc(db, 'users', fbUser.uid);
+
+        let initialUserData: CloudUserRecord | null = null;
+        try {
+          let userSnap;
+          try {
+            userSnap = await getDocFromServer(userRef);
+          } catch {
+            userSnap = await getDoc(userRef);
+          }
+          if (userSnap && userSnap.exists()) {
+            initialUserData = userSnap.data() as CloudUserRecord;
+          } else {
+            const nowIso = new Date().toISOString();
+            const newCloudUser: CloudUserRecord = {
+              uid: fbUser.uid,
+              email: cleanEmail,
+              displayName: cleanName,
+              photoURL: fbUser.photoURL || undefined,
+              status: 'active',
+              banReason: '',
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              updatedAtMs: Date.now(),
+            };
+            await setDoc(userRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
+              merge: true,
+            });
+            initialUserData = newCloudUser;
+          }
+        } catch (err) {
+          handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`, {
+            suppressThrow: true,
+          });
+        }
+
+        if (!active) return;
+
+        if (initialUserData) {
+          setCloudUserStatus(initialUserData);
+        }
+
+        // Cocokkan rekening milik Google User ini di Cloud (untuk multi-device & refresh tanpa localStorage)
+        const matchedAccountId = initialUserData?.lastAccountId;
+        const matchedAccount =
+          cloudAccountsLoaded.find((a) => a.id === matchedAccountId) ||
+          cloudAccountsLoaded.find(
+            (a) =>
+              a.firebaseUid === fbUser.uid ||
+              (a.googleEmail && a.googleEmail.toLowerCase() === cleanEmail) ||
+              (a.email && a.email.toLowerCase() === cleanEmail)
+          ) ||
+          null;
+
+        if (matchedAccount) {
+          setCurrentAccountIdState(matchedAccount.id);
+        }
+
+        setGoogleUser({
+          email: cleanEmail,
+          name: cleanName,
+          picture: fbUser.photoURL || undefined,
+          firebaseUid: fbUser.uid,
+          loggedInAt: new Date().toISOString(),
+          hasCompletedOnboarding: Boolean(
+            initialUserData?.hasCompletedOnboarding || matchedAccount
+          ),
+        });
+
+        // Listener Real-Time KHUSUS memantau status ban & akun pada users/{uid}
+        userDocUnsub = onSnapshot(
+          userRef,
+          { includeMetadataChanges: true },
+          (uSnap) => {
+            if (!uSnap.exists()) return;
+            const uData = uSnap.data() as CloudUserRecord;
+            setCloudUserStatus(uData);
+
+            if (uData.lastAccountId) {
+              setCurrentAccountIdState((prev) =>
+                prev === uData.lastAccountId ? prev : uData.lastAccountId!
+              );
+            }
+
+            if (uData.status === 'banned') {
+              setActiveGiftModal(null);
+              setIsMintolModalOpen(false);
+              setIsBugReportModalOpen(false);
+              setIsGlobalChatModalOpen(false);
+            }
+
+            setAccounts((prev) =>
+              prev.map((acc) => {
+                const isLinked =
+                  acc.firebaseUid === fbUser.uid ||
+                  acc.id === uData.lastAccountId ||
+                  (acc.googleEmail && acc.googleEmail.toLowerCase() === cleanEmail);
+                if (!isLinked) return acc;
+                if (uData.status === 'banned') {
+                  return {
+                    ...acc,
+                    firebaseUid: acc.firebaseUid || fbUser.uid,
+                    status: 'banned',
+                    banReason: uData.banReason || acc.banReason || 'Akun diblokir oleh Admin atau Sistem Cloud.',
+                    cardStatus: 'banned',
+                    banInfo: {
+                      ...(acc.banInfo || {
+                        durationType: 'permanent',
+                        durationLabel: 'PERMANEN',
+                        bannedAt: new Date().toISOString(),
+                      }),
+                      isBanned: true,
+                      reason: uData.banReason || acc.banInfo?.reason || 'Akun diblokir secara real-time.',
+                      appealStatus: uData.appealStatus || acc.banInfo?.appealStatus || 'none',
+                      appealNote: uData.appealNote ?? acc.banInfo?.appealNote,
+                      appealAdminNote: uData.appealAdminNote ?? acc.banInfo?.appealAdminNote,
+                      appealRequestedAt: uData.appealRequestedAt ?? acc.banInfo?.appealRequestedAt,
+                    },
+                  };
+                }
+                if (acc.status === 'banned' || acc.cardStatus === 'banned') {
+                  return {
+                    ...acc,
+                    firebaseUid: acc.firebaseUid || fbUser.uid,
+                    status: 'active',
+                    banReason: '',
+                    cardStatus: 'active',
+                    banInfo: undefined,
+                  };
+                }
+                return acc;
+              })
+            );
+          },
+          (err) => {
+            handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`, {
+              suppressThrow: true,
+            });
+          }
+        );
+      } else if (active) {
+        setGoogleUser(null);
+        setCloudUserStatus(null);
+      }
+
+      if (active) {
+        hasFirestoreHydratedRef.current = true;
+        hasBootHydratedRef.current = true;
+        setIsCloudBootReady(true);
+      }
+    });
+
+    return () => {
+      active = false;
+      authUnsub();
+      if (userDocUnsub) userDocUnsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Real-time Multi-Device Firestore Listener (HP <-> Laptop tanpa refresh)
   useEffect(() => {
     const unsub = onSnapshot(
       doc(db, 'bank_state_v1', 'master_state'),
+      { includeMetadataChanges: true },
       (docSnap) => {
         if (docSnap.metadata.hasPendingWrites) {
+          setCloudSyncStatus('syncing');
           return;
         }
+        if (docSnap.metadata.fromCache && typeof navigator !== 'undefined' && !navigator.onLine) {
+          setCloudSyncStatus('offline');
+        } else {
+          setCloudSyncStatus('synced');
+          setLastCloudSyncAt(new Date().toISOString());
+        }
+
         if (docSnap.exists()) {
           const data = docSnap.data();
-          if (data) {
-            const incomingMs = typeof data.updatedAtMs === 'number' ? data.updatedAtMs : 0;
-            if (
-              hasFirestoreHydratedRef.current &&
-              incomingMs > 0 &&
-              incomingMs <= lastFirestoreWriteMsRef.current
-            ) {
-              return;
-            }
-            if (incomingMs > lastFirestoreWriteMsRef.current) {
-              lastFirestoreWriteMsRef.current = incomingMs;
-            }
-            isApplyingFirestoreRef.current = true;
-
-            const delIds: string[] = Array.isArray(data.deletedAccountIds)
-              ? Array.from(new Set([...deletedAccountIds, ...data.deletedAccountIds]))
-              : deletedAccountIds;
-
-            if (Array.isArray(data.deletedAccountIds)) {
-              setDeletedAccountIds(delIds);
-              try {
-                localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(delIds));
-              } catch { /* empty */ }
-            }
-            if (data.accounts && Array.isArray(data.accounts) && data.accounts.length > 0) {
-              const cleanAccounts = data.accounts.filter((a: BankAccount) => !delIds.includes(a.id));
-              setAccounts(cleanAccounts);
-              try {
-                localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(cleanAccounts));
-              } catch { /* empty */ }
-            }
-            if (data.transactions && Array.isArray(data.transactions)) {
-              setTransactions(data.transactions);
-            }
-            if (data.giftEvents && Array.isArray(data.giftEvents) && data.giftEvents.length > 0) {
-              setGiftEvents(data.giftEvents);
-            }
-            if (data.pockets && Array.isArray(data.pockets)) setPockets(data.pockets);
-            if (data.depositos && Array.isArray(data.depositos)) setDepositos(data.depositos);
-            if (Array.isArray(data.accountDeletionRequests)) {
-              const incomingReqs = data.accountDeletionRequests as AccountDeletionRequest[];
-              setAccountDeletionRequests(incomingReqs);
-              try {
-                localStorage.setItem(STORAGE_KEYS.ACCOUNT_DELETION_REQUESTS, JSON.stringify(incomingReqs));
-              } catch { /* empty */ }
-            }
-
-            window.setTimeout(() => {
-              isApplyingFirestoreRef.current = false;
-            }, 120);
-          }
+          applyMasterCloudData(data);
         }
         hasFirestoreHydratedRef.current = true;
       },
       (err) => {
-        console.error('Firestore sync error:', err);
+        setCloudSyncStatus('offline');
+        handleFirestoreError(err, OperationType.GET, 'bank_state_v1/master_state', {
+          suppressThrow: true,
+        });
         hasFirestoreHydratedRef.current = true;
       }
     );
@@ -2077,6 +2030,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [defaultLetterSealConfig, setDefaultLetterSealConfig] = useState<LetterSignatureStampConfig>({
+    signatureMode: 'template',
+    signatureDrawingDataUrl: '',
+    signatureTemplateId: 'kaligrafi_royal',
+    signatureName: 'Admin Utama Bank Nusantara',
+    signatureColor: 'amber',
+    stampTemplateId: 'royal_wax',
+    stampPrimaryName: 'BANK NUSANTARA',
+    stampSecondaryName: 'RESMI • TERVERIFIKASI',
+    stampColor: 'amber',
+  });
+
+  // Automatic Real-Time Cloud Sync Coordinator (Debounced Firestore Write - Zero localStorage)
   useEffect(() => {
     if (
       !hasFirestoreHydratedRef.current ||
@@ -2087,72 +2053,67 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
     const t = window.setTimeout(() => {
-      const nowMs = Date.now();
-      lastFirestoreWriteMsRef.current = nowMs;
-      try {
-        setDoc(
-          doc(db, 'bank_state_v1', 'master_state'),
-          {
-            accounts,
-            deletedAccountIds,
-            accountDeletionRequests,
-            transactions,
-            giftEvents,
-            pockets,
-            depositos,
-            updatedAtMs: nowMs,
-            updatedAt: new Date(nowMs).toISOString(),
-          },
-          { merge: true }
-        ).catch(() => { /* offline silent catch */ });
-      } catch { /* empty */ }
-    }, 600);
+      flushMasterStateToCloud();
+    }, 350);
     return () => window.clearTimeout(t);
-  }, [accounts, deletedAccountIds, accountDeletionRequests, transactions, giftEvents, pockets, depositos]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    accounts,
+    deletedAccountIds,
+    accountDeletionRequests,
+    transactions,
+    giftEvents,
+    deletedGiftEventIds,
+    giftEventsInitialized,
+    banSupportConfig,
+    pockets,
+    depositos,
+    loans,
+    scheduledPayments,
+    favorites,
+    notifications,
+    chats,
+    cardUpgrades,
+    pinResetRequests,
+    redeemCodes,
+    purchasedCodes,
+    resiList,
+    cardlessTokens,
+    spinWheelConfig,
+    spinHistory,
+    sultanEmpireConfig,
+    rawFeatureConfigs,
+    deletedFeatureIds,
+    userSettings,
+    goldMarketConfig,
+    budgetCategories,
+    manualExpenses,
+    budgetTxCategoryMap,
+    budgetAlertHistory,
+    appUpdates,
+    devRoles,
+    defaultLetterSealConfig,
+    jobCoinBonusConfig,
+    adminHelpRequests,
+    websitePopups,
+    globalChats,
+    bugReports,
+  ]);
 
-  const [defaultLetterSealConfig, setDefaultLetterSealConfig] = useState<LetterSignatureStampConfig>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEYS.LETTER_SEAL);
-      if (saved) return JSON.parse(saved);
-    } catch { /* empty */ }
-    return {
-      signatureMode: 'template',
-      signatureDrawingDataUrl: '',
-      signatureTemplateId: 'kaligrafi_royal',
-      signatureName: 'Admin Utama Bank Nusantara',
-      signatureColor: 'amber',
-      stampTemplateId: 'royal_wax',
-      stampPrimaryName: 'BANK NUSANTARA',
-      stampSecondaryName: 'RESMI • TERVERIFIKASI',
-      stampColor: 'amber',
-    };
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.LETTER_SEAL, JSON.stringify(defaultLetterSealConfig));
-    } catch { /* empty */ }
-  }, [defaultLetterSealConfig]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.JOB_COIN_BONUS, JSON.stringify(jobCoinBonusConfig));
-    } catch { /* empty */ }
-  }, [jobCoinBonusConfig]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.GIFT_EVENTS, JSON.stringify(giftEvents));
-    } catch { /* empty */ }
-  }, [giftEvents]);
-
-  const syncGiftEventsToServer = (eventsToSync: AdminGiftEventPackage[]) => {
+  const syncGiftEventsToServer = (
+    eventsToSync: AdminGiftEventPackage[],
+    deletedIdsToSync: string[] = deletedGiftEventIdsRef.current
+  ) => {
     try {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(
           JSON.stringify({
             type: 'gift_events:sync',
-            payload: { giftEvents: eventsToSync },
+            payload: {
+              giftEvents: eventsToSync,
+              deletedGiftEventIds: deletedIdsToSync,
+              giftEventsInitialized: true,
+            },
           })
         );
       }
@@ -2160,196 +2121,119 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     fetch('/api/gift-events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ giftEvents: eventsToSync }),
+      body: JSON.stringify({
+        giftEvents: eventsToSync,
+        deletedGiftEventIds: deletedIdsToSync,
+        giftEventsInitialized: true,
+      }),
+      keepalive: true,
     }).catch(() => { /* ignore offline */ });
   };
 
-  // Sync to local storage + Spin Vault (debounced to prevent main-thread lag on rapid interactions)
   const accountsRef = useRef<BankAccount[]>(accounts);
   accountsRef.current = accounts;
 
-  useEffect(() => {
-    const t = window.setTimeout(() => {
-      try {
-        localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
-        writeSpinVaultFromAccounts(accounts);
-      } catch { /* empty */ }
-    }, 220);
-    return () => window.clearTimeout(t);
-  }, [accounts]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_ACC, currentAccountId);
-    } catch { /* empty */ }
-  }, [currentAccountId]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.FEATURE_CONFIGS, JSON.stringify(rawFeatureConfigs));
-    } catch { /* empty */ }
-  }, [rawFeatureConfigs]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.DELETED_FEATURES, JSON.stringify(deletedFeatureIds));
-    } catch { /* empty */ }
-  }, [deletedFeatureIds]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(deletedAccountIds));
-    } catch { /* empty */ }
-  }, [deletedAccountIds]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.USER_SETTINGS, JSON.stringify(userSettings));
-    } catch { /* empty */ }
-  }, [userSettings]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.REDEEM_CODES, JSON.stringify(redeemCodes));
-    } catch { /* empty */ }
-  }, [redeemCodes]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.PURCHASED_CODES, JSON.stringify(purchasedCodes));
-    } catch { /* empty */ }
-  }, [purchasedCodes]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.RESI_LIST, JSON.stringify(resiList));
-    } catch { /* empty */ }
-  }, [resiList]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.PIN_RESETS, JSON.stringify(pinResetRequests));
-    } catch { /* empty */ }
-  }, [pinResetRequests]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.UPGRADES, JSON.stringify(cardUpgrades));
-    } catch { /* empty */ }
-  }, [cardUpgrades]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.POCKETS, JSON.stringify(pockets));
-    } catch { /* empty */ }
-  }, [pockets]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.DEPOSITOS, JSON.stringify(depositos));
-    } catch { /* empty */ }
-  }, [depositos]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.CARDLESS, JSON.stringify(cardlessTokens));
-    } catch { /* empty */ }
-  }, [cardlessTokens]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.CHATS, JSON.stringify(chats));
-    } catch { /* empty */ }
-  }, [chats]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.SPIN_CONFIG, JSON.stringify(spinWheelConfig));
-    } catch { /* empty */ }
-  }, [spinWheelConfig]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.SPIN_HISTORY, JSON.stringify(spinHistory));
-    } catch { /* empty */ }
-  }, [spinHistory]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.EMPIRE_CONFIG, JSON.stringify(sultanEmpireConfig));
-    } catch { /* empty */ }
-  }, [sultanEmpireConfig]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.MINTOL_REQUESTS, JSON.stringify(adminHelpRequests));
-    } catch { /* empty */ }
-  }, [adminHelpRequests]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.ADMIN_UNLOCKED, String(adminUnlocked));
-    } catch { /* empty */ }
-  }, [adminUnlocked]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(transactions));
-    } catch { /* empty */ }
-  }, [transactions]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.LOANS, JSON.stringify(loans));
-    } catch { /* empty */ }
-  }, [loans]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.SCHEDULED, JSON.stringify(scheduledPayments));
-    } catch { /* empty */ }
-  }, [scheduledPayments]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.FAVORITES, JSON.stringify(favorites));
-    } catch { /* empty */ }
-  }, [favorites]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(notifications));
-    } catch { /* empty */ }
-  }, [notifications]);
-
-  useEffect(() => {
-    try {
-      if (googleUser) {
-        localStorage.setItem(STORAGE_KEYS.GOOGLE_USER, JSON.stringify(googleUser));
-      } else {
-        localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
-      }
-    } catch { /* empty */ }
-  }, [googleUser]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.WEBSITE_POPUPS, JSON.stringify(websitePopups));
-    } catch { /* empty */ }
-  }, [websitePopups]);
-
   const currentAccount = accounts.find((a) => a.id === currentAccountId) || accounts[0] || null;
 
-  // ================= PORTAL MASUK & ONBOARDING HANDLERS (TANPA GOOGLE SIGN-IN) =================
-  const enterBankPortal = () => {
-    const session: GoogleUserSession = {
-      email: 'nasabah@banknusantara.id',
-      name: currentAccount?.fullName || 'Nasabah Bank Nusantara',
-      loggedInAt: new Date().toISOString(),
-      hasCompletedOnboarding: false, // Langsung diarahkan ke Buat Kartu Baru atau Login ke Kartu Lain
-    };
-    setGoogleUser(session);
+  // ================= GOOGLE SIGN-IN WAJIB (FIREBASE AUTH) & ONBOARDING HANDLERS =================
+  const loginWithGooglePopup = async (): Promise<{
+    success: boolean;
+    errorCode?: string;
+    message: string;
+  }> => {
+    const res = await signInWithGooglePopup();
+    if (!res.success || !res.user) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        errorCode: res.errorCode,
+        message: res.message || 'Login Google gagal. Silakan coba lagi.',
+      };
+    }
+
+    const fbUser = res.user;
+    setFirebaseUser(fbUser);
+    const cleanEmail = (fbUser.email || '').trim().toLowerCase() || 'nasabah@banknusantara.id';
+    const cleanName = fbUser.displayName?.trim() || cleanEmail.split('@')[0] || 'Nasabah Bank Nusantara';
+
+    // Pastikan dokumen users/{uid} tersedia & baca status real-time
+    const userRef = doc(db, 'users', fbUser.uid);
+    const nowIso = new Date().toISOString();
+    let hasExistingCard = false;
+    let preferredAccId: string | undefined;
+
+    try {
+      const userSnap = await getDocFromServer(userRef).catch(() => getDoc(userRef));
+      if (userSnap && userSnap.exists()) {
+        const uData = userSnap.data() as CloudUserRecord;
+        setCloudUserStatus(uData);
+        preferredAccId = uData.lastAccountId;
+        hasExistingCard = Boolean(uData.hasCompletedOnboarding);
+        await setDoc(
+          userRef,
+          sanitizeForFirestore({
+            email: cleanEmail,
+            displayName: cleanName,
+            photoURL: fbUser.photoURL || '',
+            updatedAt: nowIso,
+            updatedAtMs: Date.now(),
+          }) as Record<string, unknown>,
+          { merge: true }
+        );
+      } else {
+        const newCloudUser: CloudUserRecord = {
+          uid: fbUser.uid,
+          email: cleanEmail,
+          displayName: cleanName,
+          photoURL: fbUser.photoURL || undefined,
+          status: 'active',
+          banReason: '',
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          updatedAtMs: Date.now(),
+        };
+        await setDoc(userRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
+          merge: true,
+        });
+        setCloudUserStatus(newCloudUser);
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${fbUser.uid}`, {
+        suppressThrow: true,
+      });
+    }
+
+    const linkedCard =
+      accounts.find((a) => a.id === preferredAccId) ||
+      accounts.find(
+        (a) =>
+          a.firebaseUid === fbUser.uid ||
+          (a.googleEmail && a.googleEmail.toLowerCase() === cleanEmail)
+      ) ||
+      null;
+
+    if (linkedCard) {
+      setCurrentAccountIdState(linkedCard.id);
+    }
+
+    setGoogleUser({
+      email: cleanEmail,
+      name: cleanName,
+      picture: fbUser.photoURL || undefined,
+      firebaseUid: fbUser.uid,
+      loggedInAt: nowIso,
+      hasCompletedOnboarding: Boolean(hasExistingCard || linkedCard),
+    });
+
     playAtmSound('success');
+    return {
+      success: true,
+      message: `Berhasil login dengan Google sebagai ${cleanName} (${cleanEmail})!`,
+    };
+  };
+
+  const enterBankPortal = () => {
+    void loginWithGooglePopup();
   };
 
   const loginWithGoogle = (email: string, name: string, picture?: string, firebaseUid?: string) => {
@@ -2359,7 +2243,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       email: cleanEmail,
       name: cleanName,
       picture,
-      firebaseUid,
+      firebaseUid: firebaseUid || firebaseUser?.uid,
       loggedInAt: new Date().toISOString(),
       hasCompletedOnboarding: false,
     };
@@ -2369,6 +2253,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const completeGoogleOnboarding = () => {
     setGoogleUser((prev) => (prev ? { ...prev, hasCompletedOnboarding: true } : prev));
+    if (firebaseUser) {
+      setDoc(
+        doc(db, 'users', firebaseUser.uid),
+        {
+          hasCompletedOnboarding: true,
+          lastAccountId: currentAccountId || '',
+          updatedAt: new Date().toISOString(),
+          updatedAtMs: Date.now(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
   };
 
   const reopenGoogleOnboarding = () => {
@@ -2377,70 +2273,265 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const logoutGoogle = () => {
     setGoogleUser(null);
+    setCloudUserStatus(null);
+    setFirebaseUser(null);
+    void signOut(auth).catch(() => {});
     playAtmSound('beep');
   };
 
-  // ================= WEBSITE SYSTEM POPUP NOTIFICATIONS (CLOSABLE) & REAL-TIME SYNC =================
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.DISMISSED_POPUPS, JSON.stringify(dismissedPopupIds));
-    } catch { /* empty */ }
-  }, [dismissedPopupIds]);
+  // ================= REAL-TIME BAN LOCK STATE & UNIFIED APPEALS (WA / EMAIL / IN-APP) =================
+  const computeActiveBanLockState = () => {
+    const cloudBanned = cloudUserStatus?.status === 'banned';
+    const accountBanned =
+      Boolean(currentAccount) &&
+      (currentAccount?.status === 'banned' ||
+        currentAccount?.cardStatus === 'banned' ||
+        Boolean(currentAccount?.banInfo?.isBanned));
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.GLOBAL_CHATS, JSON.stringify(globalChats));
-    } catch { /* empty */ }
-  }, [globalChats]);
+    const isBanned = Boolean(cloudBanned || accountBanned);
+    if (!isBanned) {
+      return {
+        isBanned: false,
+        reason: '',
+        appealStatus: 'none' as const,
+      };
+    }
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.BUG_REPORTS, JSON.stringify(bugReports));
-    } catch { /* empty */ }
-  }, [bugReports]);
+    const reason =
+      cloudUserStatus?.banReason?.trim() ||
+      currentAccount?.banReason?.trim() ||
+      currentAccount?.banInfo?.reason?.trim() ||
+      'Akun Anda melanggar ketentuan layanan atau dibekukan oleh Admin Bank Nusantara.';
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.APP_UPDATES, JSON.stringify(appUpdates));
-    } catch { /* empty */ }
-  }, [appUpdates]);
+    const appealStatus =
+      currentAccount?.banInfo?.appealStatus ||
+      cloudUserStatus?.appealStatus ||
+      ('none' as const);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.GOLD_TRANSFER_MARKET, JSON.stringify(goldMarketConfig));
-    } catch { /* empty */ }
-  }, [goldMarketConfig]);
+    return {
+      isBanned: true,
+      reason,
+      bannedAt: currentAccount?.banInfo?.bannedAt || cloudUserStatus?.updatedAt,
+      durationLabel: currentAccount?.banInfo?.durationLabel || 'Diblokir Real-Time',
+      expiresAt: currentAccount?.banInfo?.expiresAt,
+      appealStatus,
+      appealNote: currentAccount?.banInfo?.appealNote || cloudUserStatus?.appealNote,
+      appealAdminNote:
+        currentAccount?.banInfo?.appealAdminNote || cloudUserStatus?.appealAdminNote,
+    };
+  };
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.BUDGET_CATEGORIES, JSON.stringify(budgetCategories));
-    } catch { /* empty */ }
-  }, [budgetCategories]);
+  const activeBanLockState = computeActiveBanLockState();
 
+  // Pastikan jika tiba-tiba dibanned secara real-time, seluruh modal terbuka langsung ditutup
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.MANUAL_EXPENSES, JSON.stringify(manualExpenses));
-    } catch { /* empty */ }
-  }, [manualExpenses]);
+    if (activeBanLockState.isBanned) {
+      setActiveGiftModal(null);
+      setIsMintolModalOpen(false);
+      setIsBugReportModalOpen(false);
+      setIsGlobalChatModalOpen(false);
+    }
+  }, [activeBanLockState.isBanned]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.BUDGET_TX_MAP, JSON.stringify(budgetTxCategoryMap));
-    } catch { /* empty */ }
-  }, [budgetTxCategoryMap]);
+  const adminUpdateBanSupportConfig = async (
+    config: BanSupportConfig
+  ): Promise<{ success: boolean; message: string }> => {
+    const cleanWa = config.whatsappNumber.replace(/[^\d+]/g, '').trim();
+    const cleanEmail = config.emailAddress.trim();
+    const nextConfig: BanSupportConfig = {
+      whatsappNumber: cleanWa,
+      emailAddress: cleanEmail,
+    };
+    setBanSupportConfig(nextConfig);
+    flushMasterStateToCloud({ banSupportConfig: nextConfig });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Nomor WhatsApp & Alamat Email Tinjauan Ban berhasil disimpan ke Cloud Firestore!',
+    };
+  };
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.BUDGET_ALERTS, JSON.stringify(budgetAlertHistory));
-    } catch { /* empty */ }
-  }, [budgetAlertHistory]);
+  const submitUnifiedBanAppeal = async (
+    message: string,
+    source: 'in_app' | 'whatsapp' | 'email' = 'in_app'
+  ): Promise<{ success: boolean; message: string }> => {
+    const cleanNote = message.trim();
+    if (source === 'in_app' && cleanNote.length < 5) {
+      return {
+        success: false,
+        message: 'Mohon tulis alasan atau penjelasan tinjauan Anda minimal 5 karakter.',
+      };
+    }
 
-  // ================= 3-LAYER UNIFIED PERSISTENCE (FIREBASE + SERVER DB + PENYIMPANAN HP) =================
+    const nowIso = new Date().toISOString();
+    const finalNote =
+      cleanNote ||
+      (source === 'whatsapp'
+        ? 'Pengguna membuka tombol Tinjau dengan WhatsApp.'
+        : 'Pengguna membuka tombol Tinjau dengan Email.');
+
+    const updatedAccounts = currentAccount
+      ? accounts.map((acc) =>
+          acc.id === currentAccount.id
+            ? {
+                ...acc,
+                status: 'banned' as const,
+                cardStatus: 'banned' as const,
+                banInfo: {
+                  ...(acc.banInfo || {
+                    isBanned: true,
+                    durationType: 'permanent' as const,
+                    durationLabel: 'PERMANEN',
+                    bannedAt: nowIso,
+                    reason: activeBanLockState.reason,
+                  }),
+                  appealStatus: 'pending' as const,
+                  appealNote: finalNote,
+                  appealSource: source,
+                  appealRequestedAt: nowIso,
+                },
+              }
+            : acc
+        )
+      : accounts;
+
+    if (currentAccount) {
+      setAccounts(updatedAccounts);
+      flushMasterStateToCloud({ accounts: updatedAccounts });
+    }
+
+    const targetUid = firebaseUser?.uid || currentAccount?.firebaseUid;
+    if (targetUid) {
+      try {
+        await setDoc(
+          doc(db, 'users', targetUid),
+          sanitizeForFirestore({
+            appealStatus: 'pending',
+            appealNote: finalNote,
+            appealSource: source,
+            appealRequestedAt: nowIso,
+            updatedAt: nowIso,
+            updatedAtMs: Date.now(),
+          }) as Record<string, unknown>,
+          { merge: true }
+        );
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${targetUid}`, {
+          suppressThrow: true,
+        });
+      }
+    }
+
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Permohonan tinjauan Anda telah terkirim ke Panel Admin secara real-time!',
+    };
+  };
+
+  const adminReviewUnifiedBanAppeal = async (
+    accountId: string,
+    action: 'approve' | 'reject',
+    adminNote?: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const target = accounts.find((a) => a.id === accountId);
+    if (!target) {
+      return { success: false, message: 'Rekening nasabah tidak ditemukan.' };
+    }
+    const nowIso = new Date().toISOString();
+    const cleanAdminNote = adminNote?.trim() || '';
+
+    if (action === 'approve') {
+      const nextAccounts: BankAccount[] = accounts.map((acc) =>
+        acc.id === accountId
+          ? {
+              ...acc,
+              status: 'active' as const,
+              banReason: '',
+              cardStatus: 'active' as const,
+              banInfo: undefined,
+            }
+          : acc
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+
+      const targetUid =
+        target.firebaseUid ||
+        (firebaseUser && target.googleEmail === googleUser?.email ? firebaseUser.uid : undefined);
+      if (targetUid) {
+        await setDoc(
+          doc(db, 'users', targetUid),
+          {
+            status: 'active',
+            banReason: '',
+            appealStatus: 'approved',
+            appealAdminNote: cleanAdminNote || 'Banding disetujui Admin, akun dibuka kembali.',
+            updatedAt: nowIso,
+            updatedAtMs: Date.now(),
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
+
+      addNotification(
+        '🔓 Banding Diterima — Akun Dibuka Kembali!',
+        `Tinjauan akun ${target.fullName} (${target.accountNumber}) disetujui Admin. Akun kini aktif normal.`,
+        'success',
+        { category: 'security', targetView: 'dashboard', accountId: target.id }
+      );
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `Tinjauan disetujui! Akun ${target.fullName} telah dibuka dari status Banned.`,
+      };
+    } else {
+      const nextAccounts: BankAccount[] = accounts.map((acc) =>
+        acc.id === accountId
+          ? {
+              ...acc,
+              banInfo: acc.banInfo
+                ? {
+                    ...acc.banInfo,
+                    appealStatus: 'rejected' as const,
+                    appealAdminNote:
+                      cleanAdminNote || 'Permohonan tinjauan ditolak oleh Admin.',
+                  }
+                : undefined,
+            }
+          : acc
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+
+      const targetUid =
+        target.firebaseUid ||
+        (firebaseUser && target.googleEmail === googleUser?.email ? firebaseUser.uid : undefined);
+      if (targetUid) {
+        await setDoc(
+          doc(db, 'users', targetUid),
+          {
+            appealStatus: 'rejected',
+            appealAdminNote: cleanAdminNote || 'Permohonan tinjauan ditolak oleh Admin.',
+            updatedAt: nowIso,
+            updatedAtMs: Date.now(),
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
+
+      playAtmSound('beep');
+      return {
+        success: true,
+        message: `Permohonan tinjauan ${target.fullName} ditolak.`,
+      };
+    }
+  };
+
+  // ================= WEBSITE SYSTEM POPUP NOTIFICATIONS =================
   const lastSyncEpochRef = useRef<number>(0);
   const isApplyingExternalSnapshotRef = useRef<boolean>(false);
   const hasBootHydratedRef = useRef<boolean>(false);
-  const didMountSaveEffectRef = useRef<boolean>(false);
-  const bootHydrationPromiseRef = useRef<Promise<void> | null>(null);
 
   const buildPersistableSnapshot = (epochMs: number): BankPersistableSnapshot => ({
     version: 1,
@@ -2482,256 +2573,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dismissedPopupIds,
     globalChats,
     bugReports,
+    giftEvents,
+    deletedGiftEventIds,
+    giftEventsInitialized,
+    banSupportConfig,
     adminUnlocked,
   });
-
-  const applyExternalSnapshot = (snapshot: Partial<BankPersistableSnapshot>) => {
-    const incomingTs = typeof snapshot.updatedAtMs === 'number' ? snapshot.updatedAtMs : 0;
-    if (incomingTs <= lastSyncEpochRef.current) return;
-
-    isApplyingExternalSnapshotRef.current = true;
-    lastSyncEpochRef.current = incomingTs;
-
-    const incomingDeletedAccountIds = Array.isArray(snapshot.deletedAccountIds)
-      ? snapshot.deletedAccountIds
-      : [];
-    const mergedDeletedAccountIds = Array.from(
-      new Set([...deletedAccountIds, ...incomingDeletedAccountIds])
-    );
-    if (mergedDeletedAccountIds.length > 0) {
-      setDeletedAccountIds(mergedDeletedAccountIds);
-      try {
-        localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(mergedDeletedAccountIds));
-      } catch { /* empty */ }
-    }
-
-    if (Array.isArray(snapshot.accounts)) {
-      const parsed = (snapshot.accounts as BankAccount[]).filter(
-        (acc) => !mergedDeletedAccountIds.includes(acc.id)
-      );
-      const mergedAccounts = mergeAccountsWithSpinVault(parsed);
-      setAccounts(mergedAccounts);
-      writeSpinVaultFromAccounts(mergedAccounts, incomingTs);
-    }
-    if (snapshot.defaultLetterSealConfig && typeof snapshot.defaultLetterSealConfig === 'object') {
-      setDefaultLetterSealConfig((prev) => ({
-        ...prev,
-        ...(snapshot.defaultLetterSealConfig as LetterSignatureStampConfig),
-      }));
-    }
-    if (typeof snapshot.currentAccountId === 'string') {
-      setCurrentAccountIdState(snapshot.currentAccountId);
-    }
-    if (Array.isArray(snapshot.transactions)) {
-      setTransactions(snapshot.transactions as Transaction[]);
-    }
-    if (snapshot.goldMarketConfig && typeof snapshot.goldMarketConfig === 'object') {
-      setGoldMarketConfig((prev) => ({ ...prev, ...(snapshot.goldMarketConfig as GoldAndTransferMarketConfig) }));
-    }
-    if (snapshot.userSettings && typeof snapshot.userSettings === 'object') {
-      setUserSettings((prev) => ({ ...prev, ...(snapshot.userSettings as UserAppSettings) }));
-    }
-    if (Array.isArray(snapshot.pockets)) setPockets(snapshot.pockets as PocketSaving[]);
-    if (Array.isArray(snapshot.depositos)) setDepositos(snapshot.depositos as DepositoRecord[]);
-    if (Array.isArray(snapshot.loans)) setLoans(snapshot.loans as LoanApplication[]);
-    if (Array.isArray(snapshot.scheduledPayments)) setScheduledPayments(snapshot.scheduledPayments as ScheduledPayment[]);
-    if (Array.isArray(snapshot.favorites)) setFavorites(snapshot.favorites as FavoriteAccount[]);
-    if (Array.isArray(snapshot.notifications)) setNotifications(snapshot.notifications as AppNotification[]);
-    if (Array.isArray(snapshot.cardlessTokens)) setCardlessTokens(snapshot.cardlessTokens as CardlessToken[]);
-    if (Array.isArray(snapshot.cardUpgrades)) setCardUpgrades(snapshot.cardUpgrades as CardUpgradeApplication[]);
-    if (Array.isArray(snapshot.pinResetRequests)) setPinResetRequests(snapshot.pinResetRequests as PinResetRequest[]);
-    if (Array.isArray(snapshot.redeemCodes)) setRedeemCodes(snapshot.redeemCodes as RedeemCode[]);
-    if (Array.isArray(snapshot.purchasedCodes)) setPurchasedCodes(snapshot.purchasedCodes as PurchasedVoucherCode[]);
-    if (Array.isArray(snapshot.resiList)) setResiList(snapshot.resiList as ResiTrackingRecord[]);
-    if (Array.isArray(snapshot.chats)) setChats(snapshot.chats as ChatMessage[]);
-    if (snapshot.spinWheelConfig && typeof snapshot.spinWheelConfig === 'object') {
-      setSpinWheelConfig((prev) => ({ ...prev, ...(snapshot.spinWheelConfig as SpinWheelAdminConfig) }));
-    }
-    if (Array.isArray(snapshot.spinHistory)) setSpinHistory(snapshot.spinHistory as SpinHistoryRecord[]);
-    if (snapshot.sultanEmpireConfig && typeof snapshot.sultanEmpireConfig === 'object') {
-      setSultanEmpireConfig((prev) => ({ ...prev, ...(snapshot.sultanEmpireConfig as SultanEmpireAdminConfig) }));
-    }
-    if (Array.isArray(snapshot.featureConfigs)) setFeatureConfigs(snapshot.featureConfigs as FeatureSecurityConfig[]);
-    if (Array.isArray(snapshot.deletedFeatureIds)) setDeletedFeatureIds(snapshot.deletedFeatureIds);
-    if (Array.isArray(snapshot.accountDeletionRequests)) {
-      setAccountDeletionRequests(snapshot.accountDeletionRequests as AccountDeletionRequest[]);
-    }
-    if (Array.isArray(snapshot.adminHelpRequests)) setAdminHelpRequests(snapshot.adminHelpRequests as AdminHelpRequestRecord[]);
-    if (Array.isArray(snapshot.appUpdates) && snapshot.appUpdates.length > 0) {
-      setAppUpdates(snapshot.appUpdates as AppUpdateRecord[]);
-    }
-    if (Array.isArray(snapshot.budgetCategories) && snapshot.budgetCategories.length > 0) {
-      const incomingCats = snapshot.budgetCategories as BudgetCategory[];
-      const missingDefaults = DEFAULT_BUDGET_CATEGORIES.filter(
-        (def) => !incomingCats.some((c) => c.id === def.id)
-      );
-      setBudgetCategories([...incomingCats, ...missingDefaults]);
-    }
-    if (Array.isArray(snapshot.manualExpenses)) {
-      setManualExpenses(snapshot.manualExpenses as ManualExpenseRecord[]);
-    }
-    if (snapshot.budgetTxCategoryMap && typeof snapshot.budgetTxCategoryMap === 'object') {
-      setBudgetTxCategoryMap(snapshot.budgetTxCategoryMap);
-    }
-    if (Array.isArray(snapshot.budgetAlertHistory)) {
-      setBudgetAlertHistory(snapshot.budgetAlertHistory);
-    }
-    if (snapshot.googleUser && typeof snapshot.googleUser === 'object') {
-      const incomingGoogle = snapshot.googleUser as GoogleUserSession;
-      setGoogleUser((prev) => prev || incomingGoogle);
-    }
-
-    window.setTimeout(() => {
-      isApplyingExternalSnapshotRef.current = false;
-    }, 60);
-  };
-
-  // Boot Hydration from Device Storage (IndexedDB) & Server Database (/api/db/state)
-  useEffect(() => {
-    let active = true;
-
-    const hydrate = async () => {
-      try {
-        const [deviceSnap, dbRes] = await Promise.all([
-          loadSnapshotFromDeviceStorage('default'),
-          fetch('/api/db/state?scopeKey=default')
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null),
-        ]);
-        if (!active) return;
-
-        const serverSnap =
-          dbRes && dbRes.snapshot && typeof dbRes.snapshot === 'object'
-            ? (dbRes.snapshot as Partial<BankPersistableSnapshot>)
-            : null;
-
-        const deviceTs = typeof deviceSnap?.updatedAtMs === 'number' ? deviceSnap.updatedAtMs : 0;
-        const serverTs = typeof serverSnap?.updatedAtMs === 'number' ? serverSnap.updatedAtMs : 0;
-
-        if (deviceSnap && deviceTs >= serverTs && deviceTs > 0) {
-          applyExternalSnapshot(deviceSnap);
-        } else if (serverSnap && serverTs > 0) {
-          applyExternalSnapshot(serverSnap);
-        }
-      } finally {
-        hasBootHydratedRef.current = true;
-      }
-    };
-
-    const p = hydrate();
-    bootHydrationPromiseRef.current = p;
-    return () => {
-      active = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Automatic 2-Layer Save Coordinator (HP IndexedDB + Server Database)
-  const latestSnapshotRef = useRef<BankPersistableSnapshot | null>(null);
-  useEffect(() => {
-    const nowEpoch = Date.now();
-    const snap = buildPersistableSnapshot(nowEpoch);
-    latestSnapshotRef.current = snap;
-
-    // Never advance lastSyncEpochRef on initial render or before boot hydration finishes!
-    if (!didMountSaveEffectRef.current) {
-      didMountSaveEffectRef.current = true;
-      return;
-    }
-    if (!hasBootHydratedRef.current || isApplyingExternalSnapshotRef.current) {
-      return;
-    }
-
-    lastSyncEpochRef.current = nowEpoch;
-
-    // Layer 1: Device IndexedDB (fast write)
-    const deviceTimer = window.setTimeout(() => {
-      void saveSnapshotToDeviceStorage(snap, 'default');
-    }, 80);
-
-    // Layer 2: Server Database (/api/db/state)
-    const remoteTimer = window.setTimeout(() => {
-      fetch('/api/db/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scopeKey: 'default', snapshot: snap }),
-      }).catch(() => {});
-    }, 350);
-
-    return () => {
-      window.clearTimeout(deviceTimer);
-      window.clearTimeout(remoteTimer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    accounts,
-    currentAccountId,
-    googleUser,
-    transactions,
-    goldMarketConfig,
-    userSettings,
-    pockets,
-    depositos,
-    loans,
-    scheduledPayments,
-    favorites,
-    notifications,
-    cardlessTokens,
-    cardUpgrades,
-    pinResetRequests,
-    redeemCodes,
-    purchasedCodes,
-    resiList,
-    chats,
-    spinWheelConfig,
-    spinHistory,
-    sultanEmpireConfig,
-    rawFeatureConfigs,
-    deletedFeatureIds,
-    deletedAccountIds,
-    accountDeletionRequests,
-    defaultLetterSealConfig,
-    adminHelpRequests,
-    appUpdates,
-    budgetCategories,
-    manualExpenses,
-    budgetTxCategoryMap,
-    budgetAlertHistory,
-    adminUnlocked,
-  ]);
-
-  // Immediate flush when user closes/backgrounds browser
-  useEffect(() => {
-    const flushImmediately = () => {
-      const snap = latestSnapshotRef.current;
-      if (!snap) return;
-      void saveSnapshotToDeviceStorage(snap, 'default');
-      try {
-        fetch('/api/db/state', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            scopeKey: 'default',
-            snapshot: snap,
-          }),
-          keepalive: true,
-        }).catch(() => {});
-      } catch {
-        // ignore
-      }
-    };
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') flushImmediately();
-    };
-
-    window.addEventListener('pagehide', flushImmediately);
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => {
-      window.removeEventListener('pagehide', flushImmediately);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, []);
 
   // Real-time Calendar Watcher: Checks every 1 second whether system month rolled over onto Tanggal 1
   // and compounds +5% per month automatically (even across multiple missed months).
@@ -2817,17 +2664,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('bank_nusantara_notif_enabled_v2', String(notificationsEnabled));
-    } catch { /* empty */ }
-  }, [notificationsEnabled]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('bank_nusantara_bg_auto_notif_v2', String(backgroundAutoNotifEnabled));
-    } catch { /* empty */ }
-  }, [backgroundAutoNotifEnabled]);
+  // Notification toggles remain purely in memory & cloud userSettings (zero localStorage)
 
   const inferNotificationMeta = (
     title: string,
@@ -3268,8 +3105,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setBugReports(data.bugReports);
         }
 
-        if (Array.isArray(data.giftEvents) && data.giftEvents.length > 0) {
-          setGiftEvents(data.giftEvents as AdminGiftEventPackage[]);
+        if (Array.isArray(data.deletedGiftEventIds)) {
+          const mergedDeleted = Array.from(
+            new Set([...deletedGiftEventIdsRef.current, ...data.deletedGiftEventIds])
+          );
+          setDeletedGiftEventIds(mergedDeleted);
+        }
+
+        if (Boolean(data.giftEventsInitialized) && Array.isArray(data.giftEvents)) {
+          const deletedSet = new Set([
+            ...deletedGiftEventIdsRef.current,
+            ...(Array.isArray(data.deletedGiftEventIds) ? data.deletedGiftEventIds : []),
+          ]);
+          const filtered = (data.giftEvents as AdminGiftEventPackage[]).filter(
+            (ev) => !deletedSet.has(ev.id)
+          );
+          setGiftEventsInitialized(true);
+          setGiftEvents(filtered);
         }
 
         if (Array.isArray(data.pushAlerts)) {
@@ -3352,8 +3204,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               if (Array.isArray(msg.payload.bugReports)) {
                 setBugReports(msg.payload.bugReports);
               }
-              if (Array.isArray(msg.payload.giftEvents) && msg.payload.giftEvents.length > 0) {
-                setGiftEvents(msg.payload.giftEvents as AdminGiftEventPackage[]);
+              if (Array.isArray(msg.payload.deletedGiftEventIds)) {
+                setDeletedGiftEventIds((prev) =>
+                  Array.from(new Set([...prev, ...msg.payload.deletedGiftEventIds]))
+                );
+              }
+              if (
+                Boolean(msg.payload.giftEventsInitialized) &&
+                Array.isArray(msg.payload.giftEvents)
+              ) {
+                const deletedSet = new Set([
+                  ...deletedGiftEventIdsRef.current,
+                  ...(Array.isArray(msg.payload.deletedGiftEventIds)
+                    ? msg.payload.deletedGiftEventIds
+                    : []),
+                ]);
+                setGiftEventsInitialized(true);
+                setGiftEvents(
+                  (msg.payload.giftEvents as AdminGiftEventPackage[]).filter(
+                    (ev) => !deletedSet.has(ev.id)
+                  )
+                );
               }
               if (Array.isArray(msg.payload.pushAlerts)) {
                 msg.payload.pushAlerts.forEach((pa: AppNotification) => seenPushIdsRef.current.add(pa.id));
@@ -3361,8 +3232,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               if (typeof msg.payload.connectedDevices === 'number') {
                 setConnectedDevicesCount(Math.max(1, msg.payload.connectedDevices));
               }
-            } else if (msg.type === 'gift_events:updated' && Array.isArray(msg.payload?.giftEvents)) {
-              setGiftEvents(msg.payload.giftEvents as AdminGiftEventPackage[]);
+            } else if (
+              msg.type === 'gift_events:updated' &&
+              Array.isArray(msg.payload?.giftEvents)
+            ) {
+              const incomingDel: string[] = Array.isArray(msg.payload?.deletedGiftEventIds)
+                ? msg.payload.deletedGiftEventIds
+                : [];
+              if (incomingDel.length > 0) {
+                setDeletedGiftEventIds((prev) => Array.from(new Set([...prev, ...incomingDel])));
+              }
+              const deletedSet = new Set([...deletedGiftEventIdsRef.current, ...incomingDel]);
+              setGiftEventsInitialized(true);
+              setGiftEvents(
+                (msg.payload.giftEvents as AdminGiftEventPackage[]).filter(
+                  (ev) => !deletedSet.has(ev.id)
+                )
+              );
             } else if (msg.type === 'presence' && msg.payload) {
               if (typeof msg.payload.connectedDevices === 'number') {
                 setConnectedDevicesCount(Math.max(1, msg.payload.connectedDevices));
@@ -3669,6 +3555,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setCurrentAccountId = (id: string) => {
     setCurrentAccountIdState(id);
+    if (firebaseUser) {
+      setDoc(
+        doc(db, 'users', firebaseUser.uid),
+        { lastAccountId: id, updatedAt: new Date().toISOString(), updatedAtMs: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+    }
   };
 
   const setUserRole = (role: 'customer' | 'admin') => {
@@ -3678,21 +3571,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const setAdminUnlocked = (unlocked: boolean) => {
     setAdminUnlockedState(unlocked);
     if (unlocked && currentAccount) {
-      setAccounts((prev) =>
-        prev.map((a) =>
-          a.id === currentAccount.id
-            ? {
-                ...a,
-                hasAccessedAdminPanel: true,
-                adminAccessTimestamp: new Date().toISOString(),
-              }
-            : a
-        )
+      const nextAccounts = accounts.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              hasAccessedAdminPanel: true,
+              adminAccessTimestamp: new Date().toISOString(),
+            }
+          : a
       );
-      try {
-        localStorage.setItem(`bank_nusantara_admin_accessed_${currentAccount.id}`, 'true');
-        localStorage.setItem('bank_nusantara_global_admin_accessed', 'true');
-      } catch { /* empty */ }
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
     }
   };
 
@@ -5035,22 +4924,39 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       cvv: newCVV,
       expiryDate: expiry,
       cardStatus: 'pending',
+      status: 'active',
+      banReason: '',
       dailyWithdrawnToday: 0,
       lastWithdrawalDate: '',
       initialDeposit: data.initialDeposit,
       createdAt: new Date().toISOString(),
       rewardPoints: 100,
       allowInternational: false,
+      firebaseUid: firebaseUser?.uid,
       googleEmail: googleUser?.email || data.email.trim(),
       hasCompletedTutorial: false,
       tutorialApprovedByAdmin: false,
     };
 
-    setAccounts((prev) => [newAccount, ...prev]);
+    const nextAccounts = [newAccount, ...accounts];
+    setAccounts(nextAccounts);
     setCurrentAccountIdState(newAccount.id);
     if (googleUser && !googleUser.hasCompletedOnboarding) {
       setGoogleUser({ ...googleUser, hasCompletedOnboarding: true });
     }
+    if (firebaseUser) {
+      setDoc(
+        doc(db, 'users', firebaseUser.uid),
+        {
+          lastAccountId: newAccount.id,
+          hasCompletedOnboarding: true,
+          updatedAt: new Date().toISOString(),
+          updatedAtMs: Date.now(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
+    flushMasterStateToCloud({ accounts: nextAccounts });
 
     addNotification(
       'Permohonan Kartu Baru Menunggu Persetujuan Admin ⏳',
@@ -5313,6 +5219,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setCurrentAccountIdState(targetAcc.id);
+    if (firebaseUser) {
+      const nextAccounts = accounts.map((a) =>
+        a.id === targetAcc.id
+          ? {
+              ...a,
+              firebaseUid: a.firebaseUid || firebaseUser.uid,
+              googleEmail: a.googleEmail || googleUser?.email || firebaseUser.email || a.email,
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+      setDoc(
+        doc(db, 'users', firebaseUser.uid),
+        {
+          lastAccountId: targetAcc.id,
+          hasCompletedOnboarding: true,
+          updatedAt: new Date().toISOString(),
+          updatedAtMs: Date.now(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
     if (googleUser && !googleUser.hasCompletedOnboarding) {
       setGoogleUser({ ...googleUser, hasCompletedOnboarding: true });
     } else if (!googleUser) {
@@ -5458,13 +5387,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
 
       if (expiredList.length > 0) {
-        setAccounts((prev) =>
-          prev.map((acc) =>
-            expiredList.some((exp) => exp.id === acc.id)
-              ? { ...acc, cardStatus: 'active', banInfo: undefined }
-              : acc
-          )
+        const nextAccounts: BankAccount[] = currentAccounts.map((acc) =>
+          expiredList.some((exp) => exp.id === acc.id)
+            ? { ...acc, status: 'active' as const, banReason: '', cardStatus: 'active' as const, banInfo: undefined }
+            : acc
         );
+        setAccounts(nextAccounts);
+        expiredList.forEach((exp) => {
+          if (exp.firebaseUid) {
+            setDoc(
+              doc(db, 'users', exp.firebaseUid),
+              {
+                status: 'active',
+                banReason: '',
+                updatedAt: new Date().toISOString(),
+                updatedAtMs: Date.now(),
+              },
+              { merge: true }
+            ).catch(() => {});
+          }
+        });
+        flushMasterStateToCloud({ accounts: nextAccounts });
 
         const newPopups: WebsiteSystemPopupNotification[] = expiredList.map((unbannedAcc) => {
           const prevDurationLabel = unbannedAcc.banInfo?.durationLabel || '1 Menit';
@@ -5525,32 +5468,55 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? 'PERMANEN (Tidak Dapat Ditinjau Lagi)'
         : input.durationLabel || `${mins} Menit`;
 
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === input.accountId
-          ? {
-              ...acc,
-              cardStatus: 'banned',
-              banInfo: {
-                isBanned: true,
-                reason: cleanReason,
-                durationType: input.durationType,
-                durationMinutes: mins,
-                durationLabel: label,
-                bannedAt: new Date(now).toISOString(),
-                expiresAt,
-                appealStatus: 'none',
-              },
-            }
-          : acc
-      )
+    const nextAccounts: BankAccount[] = accounts.map((acc) =>
+      acc.id === input.accountId
+        ? {
+            ...acc,
+            status: 'banned' as const,
+            banReason: cleanReason || 'Akun diblokir oleh Admin Bank Nusantara.',
+            cardStatus: 'banned' as const,
+            banInfo: {
+              isBanned: true,
+              reason: cleanReason,
+              durationType: input.durationType,
+              durationMinutes: mins,
+              durationLabel: label,
+              bannedAt: new Date(now).toISOString(),
+              expiresAt,
+              appealStatus: 'none' as const,
+            },
+          }
+        : acc
     );
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
+
+    const targetUid =
+      target.firebaseUid ||
+      (firebaseUser &&
+      ((target.googleEmail && target.googleEmail.toLowerCase() === (firebaseUser.email || '').toLowerCase()) ||
+        target.id === currentAccountId)
+        ? firebaseUser.uid
+        : undefined);
+    if (targetUid) {
+      setDoc(
+        doc(db, 'users', targetUid),
+        sanitizeForFirestore({
+          status: 'banned',
+          banReason: cleanReason || 'Akun diblokir oleh Admin Bank Nusantara.',
+          appealStatus: 'none',
+          updatedAt: new Date(now).toISOString(),
+          updatedAtMs: now,
+        }) as Record<string, unknown>,
+        { merge: true }
+      ).catch(() => {});
+    }
 
     addNotification(
       `🚫 Kartu Di-BANNED (${input.durationType === 'permanent' ? 'PERMANEN' : label})`,
       `Kartu ${target.fullName} (${target.accountNumber}) telah di-BANNED oleh Admin.${cleanReason ? ` Alasan: "${cleanReason}".` : ' (Tanpa alasan spesifik).'}${
         input.durationType === 'permanent'
-          ? ' Status Banned Permanen tidak dapat diajukan tinjauan ulang oleh nasabah, namun tetap bisa dibuka di Panel Admin.'
+          ? ' Kartu ini telah dikunci di seluruh perangkat hingga dibuka Admin atau melalui peninjauan resmi.'
           : ' Kartu akan otomatis terbuka begitu hitung mundur waktu selesai.'
       }`,
       'alert',
@@ -5565,7 +5531,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('alert');
     return {
       success: true,
-      message: `Kartu milik ${target.fullName} (${target.accountNumber}) berhasil di-BANNED (${label})!`,
+      message: `Kartu milik ${target.fullName} (${target.accountNumber}) berhasil di-BANNED (${label}) dan disinkronkan real-time!`,
     };
   };
 
@@ -5575,17 +5541,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const prevDurationLabel = target.banInfo?.durationLabel || 'Banned';
 
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === accountId
-          ? {
-              ...acc,
-              cardStatus: 'active',
-              banInfo: undefined,
-            }
-          : acc
-      )
+    const nextAccounts: BankAccount[] = accounts.map((acc) =>
+      acc.id === accountId
+        ? {
+            ...acc,
+            status: 'active' as const,
+            banReason: '',
+            cardStatus: 'active' as const,
+            banInfo: undefined,
+          }
+        : acc
     );
+    setAccounts(nextAccounts);
 
     const unbanPopup: WebsiteSystemPopupNotification = {
       id: `sys-unban-manual-${Date.now()}-${target.id}`,
@@ -5600,7 +5567,30 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       timestamp: new Date().toISOString(),
       dismissed: false,
     };
-    setWebsitePopups((prev) => [unbanPopup, ...prev]);
+    const nextPopups = [unbanPopup, ...websitePopups];
+    setWebsitePopups(nextPopups);
+    flushMasterStateToCloud({ accounts: nextAccounts, websitePopups: nextPopups });
+
+    const targetUid =
+      target.firebaseUid ||
+      (firebaseUser &&
+      ((target.googleEmail && target.googleEmail.toLowerCase() === (firebaseUser.email || '').toLowerCase()) ||
+        target.id === currentAccountId)
+        ? firebaseUser.uid
+        : undefined);
+    if (targetUid) {
+      setDoc(
+        doc(db, 'users', targetUid),
+        {
+          status: 'active',
+          banReason: '',
+          appealStatus: 'approved',
+          updatedAt: new Date().toISOString(),
+          updatedAtMs: Date.now(),
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
 
     addNotification(
       '🔓 Sistem Website: Banned Kartu Telah Dibuka!',
@@ -5619,16 +5609,33 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     return {
       success: true,
-      message: `Status Banned pada kartu ${target.fullName} (${target.accountNumber}) berhasil dibuka & notifikasi sistem website telah dikirim!`,
+      message: `Status Banned pada kartu ${target.fullName} (${target.accountNumber}) berhasil dibuka & disinkronkan real-time!`,
     };
   };
 
   const adminUnbanAllCards = () => {
-    const bannedList = accounts.filter((a) => a.cardStatus === 'banned');
+    const bannedList = accounts.filter((a) => a.cardStatus === 'banned' || a.status === 'banned');
     if (bannedList.length === 0) {
       return { success: false, message: 'Tidak ada kartu yang sedang di-banned saat ini.', count: 0 };
     }
-    bannedList.forEach((acc) => adminUnbanCard(acc.id));
+    const nowIso = new Date().toISOString();
+    const nextAccounts: BankAccount[] = accounts.map((acc) =>
+      acc.cardStatus === 'banned' || acc.status === 'banned'
+        ? { ...acc, status: 'active' as const, banReason: '', cardStatus: 'active' as const, banInfo: undefined }
+        : acc
+    );
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
+    bannedList.forEach((acc) => {
+      if (acc.firebaseUid) {
+        setDoc(
+          doc(db, 'users', acc.firebaseUid),
+          { status: 'active', banReason: '', appealStatus: 'approved', updatedAt: nowIso, updatedAtMs: Date.now() },
+          { merge: true }
+        ).catch(() => {});
+      }
+    });
+    playAtmSound('success');
     return {
       success: true,
       message: `Seluruh ${bannedList.length} kartu yang di-banned berhasil dibuka kembali!`,
@@ -5638,33 +5645,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const submitCardBanAppeal = (accountId: string, appealNote?: string) => {
     const target = accounts.find((a) => a.id === accountId);
-    if (!target || target.cardStatus !== 'banned' || !target.banInfo) {
+    if (!target || (target.cardStatus !== 'banned' && target.status !== 'banned')) {
       return { success: false, message: 'Kartu ini tidak dalam status Banned.' };
     }
 
-    if (target.banInfo.durationType === 'permanent') {
-      playAtmSound('alert');
-      return {
-        success: false,
-        message: 'Kartu ini di-BANNED PERMANEN oleh Admin dan TIDAK DAPAT ditinjau lagi! Hanya Admin yang dapat membuka banned secara langsung di Panel Admin.',
-      };
-    }
-
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === accountId && acc.banInfo
-          ? {
-              ...acc,
-              banInfo: {
-                ...acc.banInfo,
-                appealStatus: 'pending',
-                appealNote: appealNote?.trim() || 'Nasabah mengajukan permohonan tinjauan pembukaan Banned Kartu.',
-                appealRequestedAt: new Date().toISOString(),
-              },
-            }
-          : acc
-      )
+    const nowIso = new Date().toISOString();
+    const cleanNote =
+      appealNote?.trim() || 'Nasabah mengajukan permohonan tinjauan pembukaan Banned Akun.';
+    const nextAccounts: BankAccount[] = accounts.map((acc) =>
+      acc.id === accountId
+        ? {
+            ...acc,
+            banInfo: {
+              ...(acc.banInfo || {
+                isBanned: true,
+                durationType: 'permanent' as const,
+                durationLabel: 'PERMANEN',
+                bannedAt: nowIso,
+                reason: acc.banReason,
+              }),
+              appealStatus: 'pending' as const,
+              appealNote: cleanNote,
+              appealSource: 'in_app' as const,
+              appealRequestedAt: nowIso,
+            },
+          }
+        : acc
     );
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
+    if (target.firebaseUid) {
+      setDoc(
+        doc(db, 'users', target.firebaseUid),
+        { appealStatus: 'pending', appealNote: cleanNote, appealSource: 'in_app', appealRequestedAt: nowIso, updatedAt: nowIso, updatedAtMs: Date.now() },
+        { merge: true }
+      ).catch(() => {});
+    }
 
     addNotification(
       'Permohonan Tinjauan Banned Terkirim ke Admin 📩',
@@ -6678,59 +6694,38 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nowEpoch = Date.now();
     lastSyncEpochRef.current = nowEpoch;
 
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(remaining));
-      localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(nextDeletedAccountIds));
-      localStorage.setItem(STORAGE_KEYS.CURRENT_ACC, nextCurrentAccountId);
-      if (shouldLogout) {
-        localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
-      }
-      writeSpinVaultFromAccounts(remaining, nowEpoch);
+    flushMasterStateToCloud({
+      accounts: remaining,
+      deletedAccountIds: nextDeletedAccountIds,
+      transactions: nextTransactions,
+      loans: nextLoans,
+      scheduledPayments: nextScheduledPayments,
+      pockets: nextPockets,
+      depositos: nextDepositos,
+      cardUpgrades: nextCardUpgrades,
+      pinResetRequests: nextPinResets,
+      cardlessTokens: nextCardless,
+      favorites: nextFavorites,
+      purchasedCodes: nextPurchasedCodes,
+      resiList: nextResiList,
+      chats: nextChats,
+      spinHistory: nextSpinHistory,
+      adminHelpRequests: nextAdminHelpRequests,
+      manualExpenses: nextManualExpenses,
+    });
 
-      // Immediate Firestore sync to prevent deleted accounts from reappearing
-      setDoc(doc(db, 'bank_state_v1', 'master_state'), {
-        accounts: remaining,
-        deletedAccountIds: nextDeletedAccountIds,
-        transactions: nextTransactions,
-        pockets: nextPockets,
-        depositos: nextDepositos,
-        updatedAt: new Date().toISOString(),
-      }, { merge: true }).catch(() => {});
-    } catch { /* empty */ }
-
-    try {
-      const snap: BankPersistableSnapshot = {
-        ...buildPersistableSnapshot(nowEpoch),
-        updatedAtMs: nowEpoch,
-        currentAccountId: nextCurrentAccountId,
-        googleUser: nextGoogleUser,
-        accounts: remaining,
-        deletedAccountIds: nextDeletedAccountIds,
-        transactions: nextTransactions,
-        loans: nextLoans,
-        scheduledPayments: nextScheduledPayments,
-        pockets: nextPockets,
-        depositos: nextDepositos,
-        cardUpgrades: nextCardUpgrades,
-        pinResetRequests: nextPinResets,
-        cardlessTokens: nextCardless,
-        favorites: nextFavorites,
-        purchasedCodes: nextPurchasedCodes,
-        resiList: nextResiList,
-        chats: nextChats,
-        spinHistory: nextSpinHistory,
-        adminHelpRequests: nextAdminHelpRequests,
-        manualExpenses: nextManualExpenses,
-      };
-      latestSnapshotRef.current = snap;
-      void saveSnapshotToDeviceStorage(snap, 'default');
-      fetch('/api/db/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scopeKey: 'default', snapshot: snap }),
-        keepalive: true,
-      }).catch(() => {});
-    } catch { /* empty */ }
+    if (firebaseUser && isDeletingCurrent) {
+      setDoc(
+        doc(db, 'users', firebaseUser.uid),
+        {
+          lastAccountId: nextCurrentAccountId || '',
+          hasCompletedOnboarding: Boolean(nextCurrentAccountId),
+          updatedAt: new Date().toISOString(),
+          updatedAtMs: nowEpoch,
+        },
+        { merge: true }
+      ).catch(() => {});
+    }
 
     playAtmSound('beep');
     return {
@@ -6852,9 +6847,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         : r
     );
     setAccountDeletionRequests(nextList);
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNT_DELETION_REQUESTS, JSON.stringify(nextList));
-    } catch { /* empty */ }
 
     const delRes = adminDeleteAccount(targetReq.accountId, { logoutIfCurrent: false });
     flushMasterStateToCloud({ accountDeletionRequests: nextList });
@@ -8053,7 +8045,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [currentAccountId, budgetCategories, transactions, manualExpenses, budgetTxCategoryMap, budgetAlertHistory]);
 
   const resetAllData = () => {
-    setAccounts(INITIAL_ACCOUNTS);
+    const cleanInitialAccounts = INITIAL_ACCOUNTS.map((a) => ({
+      ...a,
+      status: 'active' as const,
+      banReason: '',
+    }));
+    setAccounts(cleanInitialAccounts);
     setCurrentAccountIdState('acc-1');
     setUserRoleState('customer');
     setTransactions(INITIAL_TRANSACTIONS);
@@ -8077,11 +8074,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setBudgetTxCategoryMap({});
     setDeletedAccountIds([]);
     setBudgetAlertHistory([]);
-    setGoogleUser(null);
+    setGiftEvents(DEFAULT_ADMIN_GIFT_EVENTS);
+    setDeletedGiftEventIds([]);
+    setGiftEventsInitialized(true);
+    wipeLegacyBrowserStorage();
     void clearDeviceSnapshotStorage();
-    try {
-      localStorage.clear();
-    } catch { /* empty */ }
+    flushMasterStateToCloud({
+      accounts: cleanInitialAccounts,
+      deletedAccountIds: [],
+      transactions: INITIAL_TRANSACTIONS,
+      pockets: INITIAL_POCKETS,
+      depositos: INITIAL_DEPOSITOS,
+      giftEvents: DEFAULT_ADMIN_GIFT_EVENTS,
+      deletedGiftEventIds: [],
+      giftEventsInitialized: true,
+    });
   };
 
   const startFromZero = () => {
@@ -9564,10 +9571,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         : a
     );
     setAccounts(updatedAccounts);
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(updatedAccounts));
-      writeSpinVaultFromAccounts(updatedAccounts, Date.now());
-    } catch { /* empty */ }
+    flushMasterStateToCloud({ accounts: updatedAccounts });
 
     const newTx: Transaction = {
       id: `tx-buycoin-${Date.now()}`,
@@ -9741,10 +9745,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         : a
     );
     setAccounts(updatedAccountsAfterSpin);
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(updatedAccountsAfterSpin));
-      writeSpinVaultFromAccounts(updatedAccountsAfterSpin, Date.now());
-    } catch { /* empty */ }
+    flushMasterStateToCloud({ accounts: updatedAccountsAfterSpin });
 
     const historyItem: SpinHistoryRecord = {
       id: `spinhist-${Date.now()}`,
@@ -9860,10 +9861,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       a.id === accountId ? { ...a, spinCoins: nextCoins } : a
     );
     setAccounts(updatedAdjustedAccounts);
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(updatedAdjustedAccounts));
-      writeSpinVaultFromAccounts(updatedAdjustedAccounts, Date.now());
-    } catch { /* empty */ }
+    flushMasterStateToCloud({ accounts: updatedAdjustedAccounts });
     playAtmSound('success');
     return {
       success: true,
@@ -9880,10 +9878,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       spinCoins: (a.spinCoins || 0) + cleanCoins,
     }));
     setAccounts(updatedRainAccounts);
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(updatedRainAccounts));
-      writeSpinVaultFromAccounts(updatedRainAccounts, Date.now());
-    } catch { /* empty */ }
+    flushMasterStateToCloud({ accounts: updatedRainAccounts });
     playAtmSound('cash');
     return {
       success: true,
@@ -13405,11 +13400,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const adminDeleteGiftEvent = (eventId: string) => {
     const nextList = giftEvents.filter((e) => e.id !== eventId);
+    const nextDeletedGiftEventIds = Array.from(new Set([...deletedGiftEventIds, eventId]));
+    setDeletedGiftEventIds(nextDeletedGiftEventIds);
+    setGiftEventsInitialized(true);
     setGiftEvents(nextList);
-    syncGiftEventsToServer(nextList);
-    flushMasterStateToCloud({ giftEvents: nextList });
+    syncGiftEventsToServer(nextList, nextDeletedGiftEventIds);
+    flushMasterStateToCloud({
+      giftEvents: nextList,
+      deletedGiftEventIds: nextDeletedGiftEventIds,
+      giftEventsInitialized: true,
+    });
     playAtmSound('beep');
-    return { success: true, message: 'Paket Hadiah & Surat berhasil dihapus.' };
+    return { success: true, message: 'Paket Hadiah & Surat berhasil dihapus permanen di semua perangkat & Cloud!' };
   };
 
   const adminToggleGiftEventActive = (eventId: string) => {
@@ -14415,6 +14417,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUserRole,
         googleUser,
         firebaseUser,
+        isCloudBootReady,
+        cloudSyncStatus,
+        lastCloudSyncAt,
+        cloudUserStatus,
+        loginWithGooglePopup,
         enterBankPortal,
         loginWithGoogle,
         completeGoogleOnboarding,
@@ -14533,6 +14540,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminUnbanCard,
         adminUnbanAllCards,
         submitCardBanAppeal,
+        activeBanLockState,
+        banSupportConfig,
+        adminUpdateBanSupportConfig,
+        submitUnifiedBanAppeal,
+        adminReviewUnifiedBanAppeal,
         adminToggleVerifyAccount,
         adminVerifyAllAccounts,
         adminAdjustAccountBalance,
@@ -14681,6 +14693,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         resetAllData,
         startFromZero,
         giftEvents,
+        deletedGiftEventIds,
+        giftEventsInitialized,
         activeGiftModal,
         giftDateTestOverride,
         isGiftEventOpenableNow,

@@ -39,6 +39,10 @@ export interface BankPersistableSnapshot {
   deletedFeatureIds: string[];
   deletedAccountIds?: string[];
   accountDeletionRequests?: unknown[];
+  giftEvents?: unknown[];
+  deletedGiftEventIds?: string[];
+  giftEventsInitialized?: boolean;
+  banSupportConfig?: unknown;
   defaultLetterSealConfig?: unknown;
   adminHelpRequests: unknown[];
   appUpdates: unknown[];
@@ -51,6 +55,34 @@ export interface BankPersistableSnapshot {
   globalChats: unknown[];
   bugReports: unknown[];
   adminUnlocked: boolean;
+}
+
+/**
+ * Membersihkan seluruh sisa key localStorage & sessionStorage lama agar tidak ada
+ * cache lokal tertinggal yang mengakali status banned atau memunculkan data lama.
+ */
+export function wipeLegacyBrowserStorage(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith('bank_nusantara_')) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach((k) => window.localStorage.removeItem(k));
+  } catch { /* empty */ }
+  try {
+    const sKeysToRemove: string[] = [];
+    for (let i = 0; i < window.sessionStorage.length; i++) {
+      const k = window.sessionStorage.key(i);
+      if (k && k.startsWith('bank_nusantara_')) {
+        sKeysToRemove.push(k);
+      }
+    }
+    sKeysToRemove.forEach((k) => window.sessionStorage.removeItem(k));
+  } catch { /* empty */ }
 }
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;

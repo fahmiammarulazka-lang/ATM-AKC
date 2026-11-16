@@ -1,5 +1,27 @@
 {
   "entities": {
+    "CloudUser": {
+      "title": "CloudUser",
+      "description": "Authenticated Google user profile, real-time ban enforcement status, and in-app ban appeal state",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "banned"] },
+        "banReason": { "type": "string" },
+        "bannedAt": { "type": "string" },
+        "banAppealStatus": { "type": "string", "enum": ["none", "pending", "rejected", "approved"] },
+        "banAppealMessage": { "type": "string" },
+        "banAppealSubmittedAt": { "type": "string" },
+        "banAppealAdminNote": { "type": "string" },
+        "currentAccountId": { "type": "string" },
+        "hasCompletedOnboarding": { "type": "boolean" },
+        "updatedAtMs": { "type": "number" }
+      },
+      "required": ["uid", "email", "status"]
+    },
     "Account": {
       "title": "Account",
       "description": "Bank Nusantara customer and admin accounts",
@@ -8,8 +30,12 @@
         "id": { "type": "string" },
         "accountNumber": { "type": "string" },
         "fullName": { "type": "string" },
+        "email": { "type": "string" },
+        "firebaseUid": { "type": "string" },
         "balance": { "type": "number" },
         "pin": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "banned"] },
+        "banReason": { "type": "string" },
         "isVerified": { "type": "boolean" },
         "tier": { "type": "string" },
         "hasAccessedAdminPanel": { "type": "boolean" }
@@ -28,9 +54,38 @@
         "isActive": { "type": "boolean" }
       },
       "required": ["id", "title"]
+    },
+    "BanSupportConfig": {
+      "title": "BanSupportConfig",
+      "description": "Admin-configured WhatsApp phone number and email address shown on the banned screen",
+      "type": "object",
+      "properties": {
+        "whatsappNumber": { "type": "string" },
+        "emailAddress": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["whatsappNumber", "emailAddress"]
+    },
+    "MasterCloudState": {
+      "title": "MasterCloudState",
+      "description": "Real-time shared state document syncing accounts, transactions, giftEvents, deletedGiftEventIds, and banSupportConfig",
+      "type": "object",
+      "properties": {
+        "updatedAtMs": { "type": "number" },
+        "giftEventsInitialized": { "type": "boolean" }
+      },
+      "required": ["updatedAtMs"]
     }
   },
   "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/CloudUser" },
+      "description": "Per-Google-user status and real-time ban listener document"
+    },
+    "/bank_state_v1/{docId}": {
+      "schema": { "$ref": "#/entities/MasterCloudState" },
+      "description": "Unified real-time cloud state for accounts, ledgers, gift events, deleted tombstones, and ban support settings"
+    },
     "/accounts/{accountId}": {
       "schema": { "$ref": "#/entities/Account" },
       "description": "Customer accounts collection"

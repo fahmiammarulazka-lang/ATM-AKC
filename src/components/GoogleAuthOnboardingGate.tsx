@@ -1,10 +1,10 @@
 /**
  * Bank Nusantara — Gerbang Masuk Portal Nasabah & Pendaftaran / Login Kartu
- * Alur 2 Tahap Tanpa Sign in with Google:
- * 1. Layar Awal: Tombol utama "Masuk".
- * 2. Setelah "Masuk" ditekan: Langsung tampil pilihan "Buat Kartu Baru" atau "Login ke Kartu Lain".
+ * Alur 2 Tahap Wajib Google Sign-In:
+ * 1. Layar Awal: Tombol "Sign in with Google" (Firebase Auth Popup) dengan domain resmi atm-akc.vercel.app.
+ * 2. Setelah Login Google berhasil: Tampil pilihan "Buat Kartu Baru" atau "Login ke Kartu Lain".
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   CreditCard,
   ShieldCheck,
@@ -14,7 +14,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Lock,
-  ArrowLeft,
+  LogOut,
+  Cloud,
+  Globe,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CardTier, BankAccount } from '../types/bank';
@@ -23,16 +25,21 @@ import { PinPromptModal } from './PinPromptModal';
 import { VerifiedBadge } from './VerifiedBadge';
 import { AllowNotificationFooterButton } from './GlobalChatAndNotificationLayer';
 import { GoogleMapsAddressPicker } from './GoogleMapsAddressPicker';
+import { FIREBASE_CLOUD_CONFIG } from '../config/firebaseCloudConfig';
 
 export const GoogleAuthOnboardingGate: React.FC = () => {
   const {
     googleUser,
-    enterBankPortal,
+    loginWithGooglePopup,
     logoutGoogle,
     accounts,
     registerCard,
     loginToCardWithPin,
+    cloudSyncStatus,
   } = useBank();
+
+  const [authLoading, setAuthLoading] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<{ message: string; code?: string } | null>(null);
 
   // Stage 2 Mode ('register' = Buat Kartu Baru, 'login_old' = Login ke Kartu Lain pakai PIN Kartu / PIN Admin)
   const [onboardingTab, setOnboardingTab] = useState<'register' | 'login_old'>('register');
@@ -49,9 +56,31 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   const [confirmPin, setConfirmPin] = useState<string>('');
   const [regError, setRegError] = useState<string>('');
 
+  // Prefill nama & email dari akun Google yang login
+  useEffect(() => {
+    if (googleUser) {
+      if (!fullName && googleUser.name) setFullName(googleUser.name);
+      if (googleUser.email) setEmail(googleUser.email);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [googleUser?.email, googleUser?.name]);
+
   // Login to Another Card State
   const [selectedOldCard, setSelectedOldCard] = useState<BankAccount | null>(null);
   const [oldCardSearch, setOldCardSearch] = useState<string>('');
+
+  const handleGoogleSignInClick = async () => {
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      const res = await loginWithGooglePopup();
+      if (!res.success) {
+        setAuthError({ message: res.message, code: res.errorCode });
+      }
+    } finally {
+      setAuthLoading(false);
+    }
+  };
 
   // Handle New Card Registration
   const handleRegisterSubmit = (e: React.FormEvent) => {
@@ -84,7 +113,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
       fullName: finalName,
       nik: nik.trim(),
       phone: phone.trim(),
-      email: email.trim() || 'nasabah@banknusantara.id',
+      email: email.trim() || googleUser?.email || 'nasabah@banknusantara.id',
       address: address.trim() || 'Jakarta, Indonesia',
       pin: newPin,
       cardTier: selectedTier,
@@ -97,7 +126,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   };
 
   // ============================================================================
-  // STAGE 1: LAYAR AWAL — HANYA TOMBOL "MASUK"
+  // STAGE 1: LAYAR AWAL — WAJIB SIGN IN WITH GOOGLE (FIREBASE AUTH)
   // ============================================================================
   if (!googleUser) {
     return (
@@ -118,38 +147,88 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               Bank Nusantara
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
-              Selamat datang di layanan perbankan &amp; brankas digital <strong className="text-white">Bank Nusantara</strong>. Tekan tombol di bawah ini untuk langsung membuat kartu baru atau login ke kartu Anda.
+              Wajib masuk menggunakan akun <strong className="text-white">Google</strong> Anda agar seluruh saldo, riwayat, status akun, dan Hadiah &amp; Surat tersinkron real-time antara HP dan laptop.
             </p>
           </div>
 
-          {/* Primary Entry Card with Single "Masuk" Button */}
+          {/* Primary Sign in with Google Card */}
           <div className="bg-[#11151E] border border-slate-800 rounded-2xl p-5 space-y-4">
             <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800 pb-3">
-              <span className="font-semibold text-slate-200">Portal Nasabah &amp; Kartu ATM</span>
-              <span className="font-mono text-[11px] text-emerald-400">Penyimpanan Otomatis</span>
+              <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Autentikasi Cloud Real-Time</span>
+              </span>
+              <span
+                className={`font-mono text-[10px] px-2 py-0.5 rounded border ${
+                  cloudSyncStatus === 'synced'
+                    ? 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10'
+                    : 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+                }`}
+              >
+                {cloudSyncStatus === 'synced' ? 'Cloud Online' : 'Menghubungkan...'}
+              </span>
             </div>
+
+            {authError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs space-y-1.5">
+                <div className="flex items-start gap-2 font-bold">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>{authError.message}</span>
+                </div>
+                {authError.code === 'auth/unauthorized-domain' && (
+                  <p className="text-[11px] text-amber-200 pl-6 leading-relaxed">
+                    Pastikan domain <code className="bg-slate-950 px-1.5 py-0.5 rounded text-amber-300">atm-akc.vercel.app</code> sudah ditambahkan pada <strong>Firebase Console → Authentication → Settings → Authorized domains</strong>.
+                  </p>
+                )}
+              </div>
+            )}
 
             <button
               type="button"
-              onClick={enterBankPortal}
-              className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 active:scale-[0.99] text-slate-950 font-black text-base flex items-center justify-center gap-2.5 shadow-xl shadow-amber-500/20 transition-all cursor-pointer"
+              disabled={authLoading}
+              onClick={handleGoogleSignInClick}
+              className="w-full py-3.5 px-5 rounded-xl bg-white hover:bg-slate-100 active:scale-[0.99] disabled:opacity-60 text-slate-900 font-black text-sm flex items-center justify-center gap-3 shadow-xl transition-all cursor-pointer"
             >
-              <LogIn className="w-5 h-5 shrink-0" />
-              <span>Masuk</span>
+              {/* Official Google G Emblem SVG */}
+              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  fill="#4285F4"
+                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
+                />
+              </svg>
+              <span>{authLoading ? 'Menghubungkan ke Google...' : 'Sign in with Google'}</span>
             </button>
 
-            <p className="text-[11px] text-slate-400 text-center leading-relaxed">
-              Seluruh saldo rekening, 300 paket koin Spin the Wheel, emas 24K, dan transaksi tersimpan otomatis di Server Database dan Penyimpanan Perangkat Anda.
-            </p>
+            <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-[10px] font-mono text-slate-400 flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>Authorized Domain:</span>
+              </span>
+              <span className="text-amber-300 font-bold truncate">
+                {FIREBASE_CLOUD_CONFIG.authorizedDomains[0]}
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-col gap-2.5 text-[11px] text-slate-500 pt-3 border-t border-slate-800">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Terdaftar &amp; Diawasi OJK</span>
+                <span>100% Cloud Firestore Real-Time</span>
               </span>
-              <span>Akses PIN 6 Digit</span>
+              <span>Tanpa Cache Lokal</span>
             </div>
 
             <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800/60">
@@ -162,7 +241,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   }
 
   // ============================================================================
-  // STAGE 2: SETELAH KLIK "MASUK" -> BUAT KARTU BARU ATAU LOGIN KE KARTU LAIN (PIN KARTU / PIN ADMIN)
+  // STAGE 2: SETELAH LOGIN GOOGLE -> BUAT KARTU BARU ATAU LOGIN KE KARTU LAIN (PIN KARTU / PIN ADMIN)
   // ============================================================================
   const filteredOldCards = accounts.filter(
     (a) =>
@@ -174,20 +253,31 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#070c18] text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
       <div className="max-w-3xl w-full bg-slate-900/95 border border-slate-800 rounded-3xl p-5 sm:p-8 shadow-2xl space-y-6 relative z-10 my-6">
-        {/* Top Portal Bar */}
+        {/* Top Portal Bar showing Signed-In Google User */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-600 text-slate-950 font-black text-sm flex items-center justify-center shrink-0">
-              <CreditCard className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-bold text-white">Portal Kartu Bank Nusantara</span>
+            {googleUser.picture ? (
+              <img
+                src={googleUser.picture}
+                alt={googleUser.name}
+                referrerPolicy="no-referrer"
+                className="w-10 h-10 rounded-xl border border-amber-400/50 object-cover shrink-0"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-600 text-slate-950 font-black text-sm flex items-center justify-center shrink-0">
+                {googleUser.name.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs flex-wrap">
+                <span className="font-bold text-white truncate">{googleUser.name}</span>
                 <span aria-hidden="true" className="text-slate-600">·</span>
-                <span className="text-[11px] font-mono text-emerald-400">Server DB &amp; Perangkat Aktif</span>
+                <span className="text-[11px] font-mono text-emerald-400 truncate">
+                  {googleUser.email}
+                </span>
               </div>
               <span className="text-[11px] text-slate-400 block">
-                Silakan buat kartu baru atau login ke kartu lain dengan PIN Kartu Anda.
+                Akun Google terhubung ke Cloud Firestore Real-Time. Pilih buat kartu baru atau login ke kartu Anda.
               </span>
             </div>
           </div>
@@ -195,10 +285,10 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
           <button
             type="button"
             onClick={logoutGoogle}
-            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto whitespace-nowrap shrink-0"
+            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-rose-950/70 text-slate-300 hover:text-rose-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto whitespace-nowrap shrink-0"
           >
-            <ArrowLeft className="w-3.5 h-3.5 text-amber-400" />
-            <span>Kembali</span>
+            <LogOut className="w-3.5 h-3.5 text-rose-400" />
+            <span>Ganti Akun Google</span>
           </button>
         </div>
 
