@@ -16,6 +16,8 @@ import {
   onAuthStateChanged,
   signOut,
   signInWithGooglePopup,
+  normalizeEmailKey,
+  emailToFirestoreDocId,
   testConnection,
   handleFirestoreError,
   OperationType,
@@ -82,7 +84,14 @@ import {
   BanSupportConfig,
   CloudUserRecord,
   CloudSyncStatus,
+  NotificationCategory10Key,
 } from '../types/bank';
+import {
+  DEFAULT_NOTIFICATION_CATEGORY_PERMISSIONS,
+  sanitizeNotificationCategoryPermissions,
+  normalizeNotificationCategory,
+  getNotificationCategoryMeta,
+} from '../data/notificationCategories';
 import {
   DEFAULT_ADMIN_GIFT_EVENTS,
   GIFT_REWARD_CATALOG,
@@ -223,6 +232,10 @@ interface BankContextType {
   cloudSyncStatus: CloudSyncStatus;
   lastCloudSyncAt: string | null;
   cloudUserStatus: CloudUserRecord | null;
+  loginOrRegisterWithEmail: (input: {
+    email: string;
+    displayName?: string;
+  }) => Promise<{ success: boolean; isNewUser?: boolean; message: string }>;
   loginWithGooglePopup: () => Promise<{ success: boolean; errorCode?: string; message: string }>;
   enterBankPortal: () => void;
   loginWithGoogle: (email: string, name: string, picture?: string, firebaseUid?: string) => void;
@@ -426,9 +439,13 @@ interface BankContextType {
   currentAccountScheduled: ScheduledPayment[];
   favorites: FavoriteAccount[];
 
-  // Notifications
+  // Notifications (10 Jenis + Izin Real-Time Cloud)
   notifications: AppNotification[];
   unreadNotificationCount: number;
+  notificationCategoryPermissions: Record<NotificationCategory10Key, boolean>;
+  toggleNotificationCategoryPermission: (categoryKey: NotificationCategory10Key) => void;
+  setAllNotificationCategoryPermissions: (allowed: boolean) => void;
+  markCategoryNotificationsAsRead: (categoryKey: NotificationCategory10Key) => void;
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead: () => void;
   addNotification: (
@@ -1390,6 +1407,7 @@ export const DEFAULT_USER_APP_SETTINGS: UserAppSettings = {
   pushLoanAlerts: true,
   pushSecurityAlerts: true,
   pushPromoAlerts: true,
+  notificationCategoryPermissions: { ...DEFAULT_NOTIFICATION_CATEGORY_PERMISSIONS },
 };
 
 export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -1401,6 +1419,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('syncing');
   const [lastCloudSyncAt, setLastCloudSyncAt] = useState<string | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
+  const [activeCloudEmail, setActiveCloudEmail] = useState<string | null>(null);
+  const activeCloudEmailRef = useRef<string | null>(null);
+  activeCloudEmailRef.current = activeCloudEmail;
   const [cloudUserStatus, setCloudUserStatus] = useState<CloudUserRecord | null>(null);
   const [banSupportConfig, setBanSupportConfig] = useState<BanSupportConfig>({
     whatsappNumber: '6281234567890',
@@ -1649,7 +1670,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (Array.isArray(data.featureConfigs)) setFeatureConfigs(data.featureConfigs as FeatureSecurityConfig[]);
     if (Array.isArray(data.deletedFeatureIds)) setDeletedFeatureIds(data.deletedFeatureIds as string[]);
     if (data.userSettings && typeof data.userSettings === 'object') {
-      setUserSettings((prev) => ({ ...prev, ...(data.userSettings as UserAppSettings) }));
+      const incomingSettings = data.userSettings as UserAppSettings;
+      setUserSettings((prev) => ({
+        ...prev,
+        ...incomingSettings,
+        notificationCategoryPermissions: sanitizeNotificationCategoryPermissions(
+          incomingSettings.notificationCategoryPermissions || prev.notificationCategoryPermissions
+        ),
+      }));
     }
     if (data.goldMarketConfig && typeof data.goldMarketConfig === 'object') {
       setGoldMarketConfig((prev) => ({
@@ -1791,7 +1819,119 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
   };
 
-  // Pre-Boot Cloud Auth Check + Dedicated Real-Time Listener on users/{uid} (Ban & Multi-Device Session)
+  const applyCloudUserDocSnapshot = (
+    uData: CloudUserRecord,
+    contextUid?: string,
+    contextEmail?: string
+  ) => {
+    setCloudUserStatus(uData);
+
+    if (uData.notificationCategoryPermissions && typeof uData.notificationCategoryPermissions === 'object') {
+      const normalizedPerms = sanitizeNotificationCategoryPermissions(
+        uData.notificationCategoryPermissions
+      );
+      setUserSettings((prev) => ({
+        ...prev,
+        notificationCategoryPermissions: normalizedPerms,
+      }));
+    }
+
+    if (uData.lastAccountId) {
+      setCurrentAccountIdState((prev) =>
+        prev === uData.lastAccountId ? prev : uData.lastAccountId!
+      );
+    }
+
+    if (uData.status === 'banned') {
+      setActiveGiftModal(null);
+      setIsMintolModalOpen(false);
+      setIsBugReportModalOpen(false);
+      setIsGlobalChatModalOpen(false);
+    }
+
+    const cleanTargetEmail = normalizeEmailKey(contextEmail || uData.email || '');
+    setAccounts((prev) =>
+      prev.map((acc) => {
+        const accGoogle = acc.googleEmail ? normalizeEmailKey(acc.googleEmail) : '';
+        const accEmail = acc.email ? normalizeEmailKey(acc.email) : '';
+        const isLinked =
+          (contextUid && acc.firebaseUid === contextUid) ||
+          (uData.lastAccountId && acc.id === uData.lastAccountId) ||
+          (cleanTargetEmail && (accGoogle === cleanTargetEmail || accEmail === cleanTargetEmail));
+        if (!isLinked) return acc;
+        if (uData.status === 'banned') {
+          return {
+            ...acc,
+            firebaseUid: acc.firebaseUid || contextUid,
+            status: 'banned',
+            banReason: uData.banReason || acc.banReason || 'Akun diblokir oleh Admin atau Sistem Cloud.',
+            cardStatus: 'banned',
+            banInfo: {
+              ...(acc.banInfo || {
+                durationType: 'permanent',
+                durationLabel: 'PERMANEN',
+                bannedAt: new Date().toISOString(),
+              }),
+              isBanned: true,
+              reason: uData.banReason || acc.banInfo?.reason || 'Akun diblokir secara real-time.',
+              appealStatus: uData.appealStatus || acc.banInfo?.appealStatus || 'none',
+              appealNote: uData.appealNote ?? acc.banInfo?.appealNote,
+              appealAdminNote: uData.appealAdminNote ?? acc.banInfo?.appealAdminNote,
+              appealRequestedAt: uData.appealRequestedAt ?? acc.banInfo?.appealRequestedAt,
+            },
+          };
+        }
+        if (acc.status === 'banned' || acc.cardStatus === 'banned') {
+          return {
+            ...acc,
+            firebaseUid: acc.firebaseUid || contextUid,
+            status: 'active',
+            banReason: '',
+            cardStatus: 'active',
+            banInfo: undefined,
+          };
+        }
+        return acc;
+      })
+    );
+  };
+
+  const syncCloudUserProfile = async (
+    target: { uid?: string; email?: string; fallbackEmail?: string },
+    fields: Record<string, unknown>
+  ) => {
+    const payload = sanitizeForFirestore({
+      ...fields,
+      updatedAt: new Date().toISOString(),
+      updatedAtMs: Date.now(),
+    }) as Record<string, unknown>;
+    const tasks: Promise<void>[] = [];
+    if (target.uid) {
+      tasks.push(
+        setDoc(doc(db, 'users', target.uid), payload, { merge: true }).catch(() => {})
+      );
+    }
+    const emailSet = new Set<string>();
+    if (target.email && target.email.includes('@')) {
+      emailSet.add(normalizeEmailKey(target.email));
+    }
+    if (target.fallbackEmail && target.fallbackEmail.includes('@')) {
+      emailSet.add(normalizeEmailKey(target.fallbackEmail));
+    }
+    emailSet.forEach((em) => {
+      const eKey = emailToFirestoreDocId(em);
+      tasks.push(
+        setDoc(
+          doc(db, 'users_by_email', eKey),
+          { ...payload, email: em, emailKey: eKey },
+          { merge: true }
+        ).catch(() => {})
+      );
+    });
+    await Promise.all(tasks);
+  };
+
+  // Pre-Boot Cloud Auth Check + Dedicated Real-Time Listener on users/{uid} (Google) & users_by_email/{emailKey}
   useEffect(() => {
     let active = true;
     let userDocUnsub: (() => void) | null = null;
@@ -1833,36 +1973,66 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       if (fbUser && active) {
-        const cleanEmail = (fbUser.email || '').trim().toLowerCase() || 'nasabah@banknusantara.id';
+        const cleanEmail = normalizeEmailKey(fbUser.email || '') || 'nasabah@banknusantara.id';
         const cleanName = fbUser.displayName?.trim() || cleanEmail.split('@')[0] || 'Nasabah Bank Nusantara';
+        const emailDocId = emailToFirestoreDocId(cleanEmail);
         const userRef = doc(db, 'users', fbUser.uid);
+        const emailRef = doc(db, 'users_by_email', emailDocId);
 
         let initialUserData: CloudUserRecord | null = null;
         try {
-          let userSnap;
-          try {
-            userSnap = await getDocFromServer(userRef);
-          } catch {
-            userSnap = await getDoc(userRef);
-          }
-          if (userSnap && userSnap.exists()) {
-            initialUserData = userSnap.data() as CloudUserRecord;
+          const [userSnap, emailSnap] = await Promise.all([
+            getDocFromServer(userRef).catch(() => getDoc(userRef)),
+            getDocFromServer(emailRef).catch(() => getDoc(emailRef)),
+          ]);
+          const uidData = userSnap && userSnap.exists() ? (userSnap.data() as CloudUserRecord) : null;
+          const emailData = emailSnap && emailSnap.exists() ? (emailSnap.data() as CloudUserRecord) : null;
+
+          if (uidData || emailData) {
+            const mergedBanned = uidData?.status === 'banned' || emailData?.status === 'banned';
+            const mergedReason =
+              emailData?.banReason || uidData?.banReason || '';
+            const mergedLastAccountId =
+              emailData?.lastAccountId || uidData?.lastAccountId || '';
+            const mergedOnboarded = Boolean(
+              emailData?.hasCompletedOnboarding || uidData?.hasCompletedOnboarding
+            );
+            initialUserData = {
+              ...(uidData || emailData)!,
+              uid: fbUser.uid,
+              email: cleanEmail,
+              emailKey: emailDocId,
+              displayName: cleanName || uidData?.displayName || emailData?.displayName || 'Nasabah',
+              status: mergedBanned ? 'banned' : 'active',
+              banReason: mergedReason,
+              lastAccountId: mergedLastAccountId,
+              hasCompletedOnboarding: mergedOnboarded,
+              authMode: 'google',
+            };
           } else {
             const nowIso = new Date().toISOString();
             const newCloudUser: CloudUserRecord = {
               uid: fbUser.uid,
               email: cleanEmail,
+              emailKey: emailDocId,
               displayName: cleanName,
               photoURL: fbUser.photoURL || undefined,
               status: 'active',
               banReason: '',
+              authMode: 'google',
+              emailVerified: true,
               createdAt: nowIso,
               updatedAt: nowIso,
               updatedAtMs: Date.now(),
             };
-            await setDoc(userRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
-              merge: true,
-            });
+            await Promise.all([
+              setDoc(userRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
+                merge: true,
+              }),
+              setDoc(emailRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
+                merge: true,
+              }),
+            ]);
             initialUserData = newCloudUser;
           }
         } catch (err) {
@@ -1877,15 +2047,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setCloudUserStatus(initialUserData);
         }
 
-        // Cocokkan rekening milik Google User ini di Cloud (untuk multi-device & refresh tanpa localStorage)
+        setActiveCloudEmail(cleanEmail);
+
+        // Cocokkan rekening milik User ini di Cloud (untuk multi-device & refresh tanpa localStorage)
         const matchedAccountId = initialUserData?.lastAccountId;
         const matchedAccount =
           cloudAccountsLoaded.find((a) => a.id === matchedAccountId) ||
           cloudAccountsLoaded.find(
             (a) =>
               a.firebaseUid === fbUser.uid ||
-              (a.googleEmail && a.googleEmail.toLowerCase() === cleanEmail) ||
-              (a.email && a.email.toLowerCase() === cleanEmail)
+              (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+              (a.email && normalizeEmailKey(a.email) === cleanEmail)
           ) ||
           null;
 
@@ -1898,6 +2070,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           name: cleanName,
           picture: fbUser.photoURL || undefined,
           firebaseUid: fbUser.uid,
+          authMode: 'google',
+          emailKey: emailDocId,
           loggedInAt: new Date().toISOString(),
           hasCompletedOnboarding: Boolean(
             initialUserData?.hasCompletedOnboarding || matchedAccount
@@ -1910,63 +2084,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           { includeMetadataChanges: true },
           (uSnap) => {
             if (!uSnap.exists()) return;
-            const uData = uSnap.data() as CloudUserRecord;
-            setCloudUserStatus(uData);
-
-            if (uData.lastAccountId) {
-              setCurrentAccountIdState((prev) =>
-                prev === uData.lastAccountId ? prev : uData.lastAccountId!
-              );
-            }
-
-            if (uData.status === 'banned') {
-              setActiveGiftModal(null);
-              setIsMintolModalOpen(false);
-              setIsBugReportModalOpen(false);
-              setIsGlobalChatModalOpen(false);
-            }
-
-            setAccounts((prev) =>
-              prev.map((acc) => {
-                const isLinked =
-                  acc.firebaseUid === fbUser.uid ||
-                  acc.id === uData.lastAccountId ||
-                  (acc.googleEmail && acc.googleEmail.toLowerCase() === cleanEmail);
-                if (!isLinked) return acc;
-                if (uData.status === 'banned') {
-                  return {
-                    ...acc,
-                    firebaseUid: acc.firebaseUid || fbUser.uid,
-                    status: 'banned',
-                    banReason: uData.banReason || acc.banReason || 'Akun diblokir oleh Admin atau Sistem Cloud.',
-                    cardStatus: 'banned',
-                    banInfo: {
-                      ...(acc.banInfo || {
-                        durationType: 'permanent',
-                        durationLabel: 'PERMANEN',
-                        bannedAt: new Date().toISOString(),
-                      }),
-                      isBanned: true,
-                      reason: uData.banReason || acc.banInfo?.reason || 'Akun diblokir secara real-time.',
-                      appealStatus: uData.appealStatus || acc.banInfo?.appealStatus || 'none',
-                      appealNote: uData.appealNote ?? acc.banInfo?.appealNote,
-                      appealAdminNote: uData.appealAdminNote ?? acc.banInfo?.appealAdminNote,
-                      appealRequestedAt: uData.appealRequestedAt ?? acc.banInfo?.appealRequestedAt,
-                    },
-                  };
-                }
-                if (acc.status === 'banned' || acc.cardStatus === 'banned') {
-                  return {
-                    ...acc,
-                    firebaseUid: acc.firebaseUid || fbUser.uid,
-                    status: 'active',
-                    banReason: '',
-                    cardStatus: 'active',
-                    banInfo: undefined,
-                  };
-                }
-                return acc;
-              })
+            applyCloudUserDocSnapshot(
+              uSnap.data() as CloudUserRecord,
+              fbUser.uid,
+              cleanEmail
             );
           },
           (err) => {
@@ -1975,7 +2096,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             });
           }
         );
-      } else if (active) {
+      } else if (active && !activeCloudEmailRef.current) {
         setGoogleUser(null);
         setCloudUserStatus(null);
       }
@@ -1994,6 +2115,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Listener Real-Time KHUSUS Berbasis Email (users_by_email/{emailKey}) untuk semua email (Email Bebas & Google)
+  useEffect(() => {
+    if (!activeCloudEmail) return;
+    const cleanEmail = normalizeEmailKey(activeCloudEmail);
+    const emailDocId = emailToFirestoreDocId(cleanEmail);
+    const emailRef = doc(db, 'users_by_email', emailDocId);
+
+    const unsub = onSnapshot(
+      emailRef,
+      { includeMetadataChanges: true },
+      (eSnap) => {
+        if (!eSnap.exists()) return;
+        applyCloudUserDocSnapshot(
+          eSnap.data() as CloudUserRecord,
+          firebaseUser?.uid,
+          cleanEmail
+        );
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, `users_by_email/${emailDocId}`, {
+          suppressThrow: true,
+        });
+      }
+    );
+
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCloudEmail]);
 
   // Real-time Multi-Device Firestore Listener (HP <-> Laptop tanpa refresh)
   useEffect(() => {
@@ -2135,7 +2285,159 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const currentAccount = accounts.find((a) => a.id === currentAccountId) || accounts[0] || null;
 
-  // ================= GOOGLE SIGN-IN WAJIB (FIREBASE AUTH) & ONBOARDING HANDLERS =================
+  // ================= DAFTAR / MASUK BEBAS SEMUA EMAIL + GOOGLE OPSIONAL (REAL-TIME CLOUD) =================
+  const loginOrRegisterWithEmail = async (input: {
+    email: string;
+    displayName?: string;
+  }): Promise<{ success: boolean; isNewUser?: boolean; message: string }> => {
+    const cleanEmail = normalizeEmailKey(input.email || '');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail)) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'Format alamat email tidak valid. Masukkan alamat email yang benar (contoh: nama@gmail.com).',
+      };
+    }
+
+    const emailDocId = emailToFirestoreDocId(cleanEmail);
+    const emailRef = doc(db, 'users_by_email', emailDocId);
+    const nowIso = new Date().toISOString();
+    const defaultNameFromEmail =
+      cleanEmail
+        .split('@')[0]
+        .replace(/[._-]+/g, ' ')
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim() || 'Nasabah Bank Nusantara';
+    const providedName = input.displayName?.trim() || '';
+
+    setCloudSyncStatus('syncing');
+
+    // Segarkan master_state terbaru dari Cloud Server agar sinkron penuh di perangkat baru
+    let latestAccounts: BankAccount[] = accountsRef.current;
+    try {
+      const masterSnap = await getDocFromServer(doc(db, 'bank_state_v1', 'master_state')).catch(
+        () => getDoc(doc(db, 'bank_state_v1', 'master_state'))
+      );
+      if (masterSnap && masterSnap.exists()) {
+        const masterData = masterSnap.data();
+        applyMasterCloudData(masterData, { forceInitial: true });
+        if (Array.isArray(masterData.accounts)) {
+          latestAccounts = masterData.accounts as BankAccount[];
+        }
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, 'bank_state_v1/master_state', {
+        suppressThrow: true,
+      });
+    }
+
+    let isNewUser = false;
+    let userRecord: CloudUserRecord | null = null;
+    try {
+      const emailSnap = await getDocFromServer(emailRef).catch(() => getDoc(emailRef));
+      if (emailSnap && emailSnap.exists()) {
+        const existing = emailSnap.data() as CloudUserRecord;
+        const resolvedName =
+          providedName && (!existing.displayName || existing.displayName === 'Nasabah Bank Nusantara')
+            ? providedName
+            : existing.displayName || providedName || defaultNameFromEmail;
+        userRecord = {
+          ...existing,
+          email: cleanEmail,
+          emailKey: emailDocId,
+          displayName: resolvedName,
+          emailVerified: true,
+          updatedAt: nowIso,
+          updatedAtMs: Date.now(),
+        };
+        await setDoc(
+          emailRef,
+          sanitizeForFirestore({
+            displayName: resolvedName,
+            emailVerified: true,
+            updatedAt: nowIso,
+            updatedAtMs: Date.now(),
+          }) as Record<string, unknown>,
+          { merge: true }
+        );
+      } else {
+        isNewUser = true;
+        const matchedExistingCard = latestAccounts.find(
+          (a) =>
+            (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+            (a.email && normalizeEmailKey(a.email) === cleanEmail)
+        );
+        const newRecord: CloudUserRecord = {
+          uid: `email:${emailDocId}`,
+          email: cleanEmail,
+          emailKey: emailDocId,
+          displayName: providedName || defaultNameFromEmail,
+          status:
+            matchedExistingCard?.status === 'banned' || matchedExistingCard?.cardStatus === 'banned'
+              ? 'banned'
+              : 'active',
+          banReason: matchedExistingCard?.banReason || '',
+          authMode: 'email_direct',
+          emailVerified: true,
+          lastAccountId: matchedExistingCard?.id || '',
+          hasCompletedOnboarding: Boolean(matchedExistingCard),
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          updatedAtMs: Date.now(),
+        };
+        await setDoc(emailRef, sanitizeForFirestore(newRecord) as Record<string, unknown>, {
+          merge: true,
+        });
+        userRecord = newRecord;
+      }
+    } catch (err) {
+      setCloudSyncStatus('offline');
+      handleFirestoreError(err, OperationType.WRITE, `users_by_email/${emailDocId}`, {
+        suppressThrow: true,
+      });
+      return {
+        success: false,
+        message: 'Gagal terhubung ke Cloud Firestore. Periksa koneksi internet Anda lalu coba lagi.',
+      };
+    }
+
+    const finalRecord = userRecord!;
+    const linkedCard =
+      latestAccounts.find((a) => a.id === finalRecord.lastAccountId) ||
+      latestAccounts.find(
+        (a) =>
+          (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+          (a.email && normalizeEmailKey(a.email) === cleanEmail)
+      ) ||
+      null;
+
+    if (linkedCard) {
+      setCurrentAccountIdState(linkedCard.id);
+    }
+
+    setActiveCloudEmail(cleanEmail);
+    applyCloudUserDocSnapshot(finalRecord, undefined, cleanEmail);
+    setGoogleUser({
+      email: cleanEmail,
+      name: finalRecord.displayName || providedName || defaultNameFromEmail,
+      authMode: 'email_direct',
+      emailKey: emailDocId,
+      loggedInAt: nowIso,
+      hasCompletedOnboarding: Boolean(finalRecord.hasCompletedOnboarding || linkedCard),
+    });
+    setCloudSyncStatus('synced');
+    setLastCloudSyncAt(nowIso);
+
+    playAtmSound(finalRecord.status === 'banned' ? 'alert' : 'success');
+    return {
+      success: true,
+      isNewUser,
+      message: isNewUser
+        ? `Email ${cleanEmail} langsung aktif tanpa verifikasi! Silakan buat kartu baru atau masuk ke kartu yang sudah ada.`
+        : `Selamat datang kembali, ${finalRecord.displayName || cleanEmail}! Data tersinkron real-time dari Cloud.`,
+    };
+  };
+
   const loginWithGooglePopup = async (): Promise<{
     success: boolean;
     errorCode?: string;
@@ -2153,48 +2455,78 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const fbUser = res.user;
     setFirebaseUser(fbUser);
-    const cleanEmail = (fbUser.email || '').trim().toLowerCase() || 'nasabah@banknusantara.id';
+    const cleanEmail = normalizeEmailKey(fbUser.email || '') || 'nasabah@banknusantara.id';
     const cleanName = fbUser.displayName?.trim() || cleanEmail.split('@')[0] || 'Nasabah Bank Nusantara';
+    const emailDocId = emailToFirestoreDocId(cleanEmail);
 
-    // Pastikan dokumen users/{uid} tersedia & baca status real-time
     const userRef = doc(db, 'users', fbUser.uid);
+    const emailRef = doc(db, 'users_by_email', emailDocId);
     const nowIso = new Date().toISOString();
     let hasExistingCard = false;
     let preferredAccId: string | undefined;
 
     try {
-      const userSnap = await getDocFromServer(userRef).catch(() => getDoc(userRef));
-      if (userSnap && userSnap.exists()) {
-        const uData = userSnap.data() as CloudUserRecord;
-        setCloudUserStatus(uData);
-        preferredAccId = uData.lastAccountId;
-        hasExistingCard = Boolean(uData.hasCompletedOnboarding);
-        await setDoc(
-          userRef,
-          sanitizeForFirestore({
-            email: cleanEmail,
-            displayName: cleanName,
-            photoURL: fbUser.photoURL || '',
-            updatedAt: nowIso,
-            updatedAtMs: Date.now(),
-          }) as Record<string, unknown>,
-          { merge: true }
+      const [userSnap, emailSnap] = await Promise.all([
+        getDocFromServer(userRef).catch(() => getDoc(userRef)),
+        getDocFromServer(emailRef).catch(() => getDoc(emailRef)),
+      ]);
+      const uidData = userSnap && userSnap.exists() ? (userSnap.data() as CloudUserRecord) : null;
+      const emailData = emailSnap && emailSnap.exists() ? (emailSnap.data() as CloudUserRecord) : null;
+
+      if (uidData || emailData) {
+        const mergedBanned = uidData?.status === 'banned' || emailData?.status === 'banned';
+        preferredAccId = emailData?.lastAccountId || uidData?.lastAccountId;
+        hasExistingCard = Boolean(
+          emailData?.hasCompletedOnboarding || uidData?.hasCompletedOnboarding
         );
+        const mergedUser: CloudUserRecord = {
+          ...(uidData || emailData)!,
+          uid: fbUser.uid,
+          email: cleanEmail,
+          emailKey: emailDocId,
+          displayName: cleanName,
+          photoURL: fbUser.photoURL || uidData?.photoURL || '',
+          status: mergedBanned ? 'banned' : 'active',
+          banReason: emailData?.banReason || uidData?.banReason || '',
+          lastAccountId: preferredAccId || '',
+          hasCompletedOnboarding: hasExistingCard,
+          authMode: 'google',
+          emailVerified: true,
+          updatedAt: nowIso,
+          updatedAtMs: Date.now(),
+        };
+        setCloudUserStatus(mergedUser);
+        await Promise.all([
+          setDoc(userRef, sanitizeForFirestore(mergedUser) as Record<string, unknown>, {
+            merge: true,
+          }),
+          setDoc(emailRef, sanitizeForFirestore(mergedUser) as Record<string, unknown>, {
+            merge: true,
+          }),
+        ]);
       } else {
         const newCloudUser: CloudUserRecord = {
           uid: fbUser.uid,
           email: cleanEmail,
+          emailKey: emailDocId,
           displayName: cleanName,
           photoURL: fbUser.photoURL || undefined,
           status: 'active',
           banReason: '',
+          authMode: 'google',
+          emailVerified: true,
           createdAt: nowIso,
           updatedAt: nowIso,
           updatedAtMs: Date.now(),
         };
-        await setDoc(userRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
-          merge: true,
-        });
+        await Promise.all([
+          setDoc(userRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
+            merge: true,
+          }),
+          setDoc(emailRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
+            merge: true,
+          }),
+        ]);
         setCloudUserStatus(newCloudUser);
       }
     } catch (err) {
@@ -2203,12 +2535,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     }
 
+    setActiveCloudEmail(cleanEmail);
+
     const linkedCard =
       accounts.find((a) => a.id === preferredAccId) ||
       accounts.find(
         (a) =>
           a.firebaseUid === fbUser.uid ||
-          (a.googleEmail && a.googleEmail.toLowerCase() === cleanEmail)
+          (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+          (a.email && normalizeEmailKey(a.email) === cleanEmail)
       ) ||
       null;
 
@@ -2221,6 +2556,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       name: cleanName,
       picture: fbUser.photoURL || undefined,
       firebaseUid: fbUser.uid,
+      authMode: 'google',
+      emailKey: emailDocId,
       loggedInAt: nowIso,
       hasCompletedOnboarding: Boolean(hasExistingCard || linkedCard),
     });
@@ -2237,34 +2574,33 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const loginWithGoogle = (email: string, name: string, picture?: string, firebaseUid?: string) => {
-    const cleanEmail = email.trim().toLowerCase() || 'nasabah@banknusantara.id';
+    const cleanEmail = normalizeEmailKey(email) || 'nasabah@banknusantara.id';
     const cleanName = name.trim() || 'Nasabah Bank Nusantara';
     const session: GoogleUserSession = {
       email: cleanEmail,
       name: cleanName,
       picture,
       firebaseUid: firebaseUid || firebaseUser?.uid,
+      authMode: firebaseUid ? 'google' : 'email_direct',
+      emailKey: emailToFirestoreDocId(cleanEmail),
       loggedInAt: new Date().toISOString(),
       hasCompletedOnboarding: false,
     };
+    setActiveCloudEmail(cleanEmail);
     setGoogleUser(session);
     playAtmSound('success');
   };
 
   const completeGoogleOnboarding = () => {
     setGoogleUser((prev) => (prev ? { ...prev, hasCompletedOnboarding: true } : prev));
-    if (firebaseUser) {
-      setDoc(
-        doc(db, 'users', firebaseUser.uid),
-        {
-          hasCompletedOnboarding: true,
-          lastAccountId: currentAccountId || '',
-          updatedAt: new Date().toISOString(),
-          updatedAtMs: Date.now(),
-        },
-        { merge: true }
-      ).catch(() => {});
-    }
+    const targetEmail = googleUser?.email || activeCloudEmail || currentAccount?.googleEmail || currentAccount?.email;
+    void syncCloudUserProfile(
+      { uid: firebaseUser?.uid, email: targetEmail || undefined },
+      {
+        hasCompletedOnboarding: true,
+        lastAccountId: currentAccountId || '',
+      }
+    );
   };
 
   const reopenGoogleOnboarding = () => {
@@ -2272,6 +2608,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logoutGoogle = () => {
+    setActiveCloudEmail(null);
     setGoogleUser(null);
     setCloudUserStatus(null);
     setFirebaseUser(null);
@@ -2401,26 +2738,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const targetUid = firebaseUser?.uid || currentAccount?.firebaseUid;
-    if (targetUid) {
-      try {
-        await setDoc(
-          doc(db, 'users', targetUid),
-          sanitizeForFirestore({
-            appealStatus: 'pending',
-            appealNote: finalNote,
-            appealSource: source,
-            appealRequestedAt: nowIso,
-            updatedAt: nowIso,
-            updatedAtMs: Date.now(),
-          }) as Record<string, unknown>,
-          { merge: true }
-        );
-      } catch (err) {
-        handleFirestoreError(err, OperationType.WRITE, `users/${targetUid}`, {
-          suppressThrow: true,
-        });
+    const targetEmail =
+      googleUser?.email || activeCloudEmail || currentAccount?.googleEmail || currentAccount?.email;
+    await syncCloudUserProfile(
+      { uid: targetUid, email: targetEmail || undefined },
+      {
+        appealStatus: 'pending',
+        appealNote: finalNote,
+        appealSource: source,
+        appealRequestedAt: nowIso,
       }
-    }
+    );
 
     playAtmSound('success');
     return {
@@ -2438,8 +2766,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) {
       return { success: false, message: 'Rekening nasabah tidak ditemukan.' };
     }
-    const nowIso = new Date().toISOString();
     const cleanAdminNote = adminNote?.trim() || '';
+
+    const targetUid =
+      target.firebaseUid ||
+      (firebaseUser &&
+      ((target.googleEmail && normalizeEmailKey(target.googleEmail) === normalizeEmailKey(googleUser?.email || '')) ||
+        target.id === currentAccountId)
+        ? firebaseUser.uid
+        : undefined);
 
     if (action === 'approve') {
       const nextAccounts: BankAccount[] = accounts.map((acc) =>
@@ -2456,29 +2791,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setAccounts(nextAccounts);
       flushMasterStateToCloud({ accounts: nextAccounts });
 
-      const targetUid =
-        target.firebaseUid ||
-        (firebaseUser && target.googleEmail === googleUser?.email ? firebaseUser.uid : undefined);
-      if (targetUid) {
-        await setDoc(
-          doc(db, 'users', targetUid),
-          {
-            status: 'active',
-            banReason: '',
-            appealStatus: 'approved',
-            appealAdminNote: cleanAdminNote || 'Banding disetujui Admin, akun dibuka kembali.',
-            updatedAt: nowIso,
-            updatedAtMs: Date.now(),
-          },
-          { merge: true }
-        ).catch(() => {});
-      }
+      await syncCloudUserProfile(
+        {
+          uid: targetUid,
+          email: target.googleEmail || target.email,
+          fallbackEmail: target.email,
+        },
+        {
+          status: 'active',
+          banReason: '',
+          appealStatus: 'approved',
+          appealAdminNote: cleanAdminNote || 'Banding disetujui Admin, akun dibuka kembali.',
+        }
+      );
 
       addNotification(
         '🔓 Banding Diterima — Akun Dibuka Kembali!',
         `Tinjauan akun ${target.fullName} (${target.accountNumber}) disetujui Admin. Akun kini aktif normal.`,
         'success',
-        { category: 'security', targetView: 'dashboard', accountId: target.id }
+        { category: 'keamanan', targetView: 'dashboard', accountId: target.id }
       );
       playAtmSound('success');
       return {
@@ -2504,21 +2835,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setAccounts(nextAccounts);
       flushMasterStateToCloud({ accounts: nextAccounts });
 
-      const targetUid =
-        target.firebaseUid ||
-        (firebaseUser && target.googleEmail === googleUser?.email ? firebaseUser.uid : undefined);
-      if (targetUid) {
-        await setDoc(
-          doc(db, 'users', targetUid),
-          {
-            appealStatus: 'rejected',
-            appealAdminNote: cleanAdminNote || 'Permohonan tinjauan ditolak oleh Admin.',
-            updatedAt: nowIso,
-            updatedAtMs: Date.now(),
-          },
-          { merge: true }
-        ).catch(() => {});
-      }
+      await syncCloudUserProfile(
+        {
+          uid: targetUid,
+          email: target.googleEmail || target.email,
+          fallbackEmail: target.email,
+        },
+        {
+          appealStatus: 'rejected',
+          appealAdminNote: cleanAdminNote || 'Permohonan tinjauan ditolak oleh Admin.',
+        }
+      );
 
       playAtmSound('beep');
       return {
@@ -2678,77 +3005,115 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       skipServerBroadcast?: boolean;
     }
   ): {
-    category: NotificationCategory;
+    category: NotificationCategory10Key;
     targetView: string;
     targetDashboardTab: string;
     accountId?: string;
     referenceId?: string;
     skipServerBroadcast?: boolean;
   } => {
-    const text = `${title} ${message}`.toLowerCase();
-    let category: NotificationCategory = explicit?.category || 'promo';
-    if (!explicit?.category) {
-      if (text.includes('pinjam') || text.includes('angsuran') || text.includes('kredit')) {
-        category = 'loan';
-      } else if (
-        text.includes('kunci') ||
-        text.includes('blokir') ||
-        text.includes('freeze') ||
-        text.includes('banned') ||
-        text.includes('unban') ||
-        text.includes('pin') ||
-        text.includes('ringkasan') ||
-        text.includes('nomor rekening') ||
-        text.includes('kartu')
-      ) {
-        category = 'security';
-      } else if (
-        text.includes('transfer') ||
-        text.includes('tarik') ||
-        text.includes('setor') ||
-        text.includes('transaksi') ||
-        text.includes('pesanan') ||
-        text.includes('pembeli') ||
-        text.includes('mutasi') ||
-        text.includes('emas') ||
-        text.includes('deposito') ||
-        text.includes('tagihan') ||
-        text.includes('pulsa') ||
-        text.includes('token')
-      ) {
-        category = 'transaction';
-      } else {
-        category = 'promo';
-      }
-    }
-
-    const defaultView =
-      category === 'promo' ? 'dashboard' : 'dashboard';
-    const defaultTab =
-      category === 'loan'
-        ? 'pinjaman'
-        : category === 'security'
-        ? 'ringkasan'
-        : category === 'transaction'
-        ? 'mutasi'
-        : 'ringkasan';
+    const resolvedCategory = normalizeNotificationCategory(
+      explicit?.category,
+      title,
+      message,
+      explicit?.targetView
+    );
+    const metaCfg = getNotificationCategoryMeta(resolvedCategory);
 
     return {
-      category,
-      targetView: explicit?.targetView || defaultView,
-      targetDashboardTab: explicit?.targetDashboardTab || defaultTab,
+      category: resolvedCategory,
+      targetView: explicit?.targetView || metaCfg.defaultTargetView,
+      targetDashboardTab: explicit?.targetDashboardTab || metaCfg.defaultDashboardTab,
       accountId: explicit?.accountId,
       referenceId: explicit?.referenceId,
       skipServerBroadcast: explicit?.skipServerBroadcast,
     };
   };
 
+  const notificationCategoryPermissions = sanitizeNotificationCategoryPermissions(
+    userSettings.notificationCategoryPermissions
+  );
+
   const isCategoryAlertEnabled = (category: NotificationCategory): boolean => {
     const currentSettings = userSettingsRef.current;
-    if (category === 'transaction') return currentSettings.pushTransactionAlerts !== false;
-    if (category === 'loan') return currentSettings.pushLoanAlerts !== false;
-    if (category === 'security') return currentSettings.pushSecurityAlerts !== false;
-    return currentSettings.pushPromoAlerts !== false;
+    const key = normalizeNotificationCategory(category);
+    const perms = sanitizeNotificationCategoryPermissions(
+      currentSettings.notificationCategoryPermissions
+    );
+    if (perms[key] === false) return false;
+    if (key === 'transaksi' && currentSettings.pushTransactionAlerts === false) return false;
+    if (key === 'pinjaman' && currentSettings.pushLoanAlerts === false) return false;
+    if (key === 'keamanan' && currentSettings.pushSecurityAlerts === false) return false;
+    return true;
+  };
+
+  const persistNotificationCategoryPermissions = (
+    nextPerms: Record<NotificationCategory10Key, boolean>
+  ) => {
+    const nextSettings: UserAppSettings = {
+      ...userSettingsRef.current,
+      notificationCategoryPermissions: nextPerms,
+      pushTransactionAlerts: nextPerms.transaksi,
+      pushLoanAlerts: nextPerms.pinjaman,
+      pushSecurityAlerts: nextPerms.keamanan,
+      pushPromoAlerts: nextPerms.sistem,
+    };
+    setUserSettings(nextSettings);
+    flushMasterStateToCloud({ userSettings: nextSettings });
+    const targetEmail =
+      googleUser?.email || activeCloudEmail || currentAccount?.googleEmail || currentAccount?.email;
+    void syncCloudUserProfile(
+      { uid: firebaseUser?.uid, email: targetEmail || undefined },
+      { notificationCategoryPermissions: nextPerms }
+    );
+  };
+
+  const toggleNotificationCategoryPermission = (categoryKey: NotificationCategory10Key) => {
+    const currentPerms = sanitizeNotificationCategoryPermissions(
+      userSettingsRef.current.notificationCategoryPermissions
+    );
+    const nextAllowed = !currentPerms[categoryKey];
+    const nextPerms: Record<NotificationCategory10Key, boolean> = {
+      ...currentPerms,
+      [categoryKey]: nextAllowed,
+    };
+    if (!nextAllowed) {
+      setActivePushBanners((prev) =>
+        prev.filter((b) => normalizeNotificationCategory(b.category, b.title, b.message, b.targetView) !== categoryKey)
+      );
+    }
+    persistNotificationCategoryPermissions(nextPerms);
+    playAtmSound('beep');
+  };
+
+  const setAllNotificationCategoryPermissions = (allowed: boolean) => {
+    const nextPerms: Record<NotificationCategory10Key, boolean> = {
+      transaksi: allowed,
+      transfer: allowed,
+      keamanan: allowed,
+      pinjaman: allowed,
+      kartu: allowed,
+      emas: allowed,
+      kerja: allowed,
+      spin: allowed,
+      hadiah: allowed,
+      sistem: allowed,
+    };
+    if (!allowed) {
+      setActivePushBanners([]);
+    }
+    persistNotificationCategoryPermissions(nextPerms);
+    playAtmSound('beep');
+  };
+
+  const markCategoryNotificationsAsRead = (categoryKey: NotificationCategory10Key) => {
+    setNotifications((prev) =>
+      prev.map((n) =>
+        normalizeNotificationCategory(n.category, n.title, n.message, n.targetView) === categoryKey
+          ? { ...n, read: true }
+          : n
+      )
+    );
   };
 
   const triggerMobileAndNativeNotification = (
@@ -2766,6 +3131,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!notificationsEnabledRef.current) return;
 
     const resolvedMeta = inferNotificationMeta(title, message, meta);
+    if (!isCategoryAlertEnabled(resolvedMeta.category)) return;
     const bannerId = `push-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const newBanner: MobilePushBannerToast = {
       id: bannerId,
@@ -3555,13 +3921,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setCurrentAccountId = (id: string) => {
     setCurrentAccountIdState(id);
-    if (firebaseUser) {
-      setDoc(
-        doc(db, 'users', firebaseUser.uid),
-        { lastAccountId: id, updatedAt: new Date().toISOString(), updatedAtMs: Date.now() },
-        { merge: true }
-      ).catch(() => {});
-    }
+    const targetEmail = googleUser?.email || activeCloudEmail;
+    void syncCloudUserProfile(
+      { uid: firebaseUser?.uid, email: targetEmail || undefined },
+      { lastAccountId: id }
+    );
   };
 
   const setUserRole = (role: 'customer' | 'admin') => {
@@ -3691,7 +4055,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         getBody: () =>
           `Beli 100 Koin hanya sekitar Rp 994.xxx–995.xxx (lebih murah 0,50% dari Spin Uang Langsung).`,
         type: 'success',
-        category: 'promo',
+        category: 'spin',
         targetDashboardTab: 'ringkasan',
       },
       {
@@ -3701,7 +4065,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             currentAccount?.spinCoins || 0
           ).toLocaleString('id-ID')} Koin.`,
         type: 'info',
-        category: 'transaction',
+        category: 'transaksi',
         targetDashboardTab: 'mutasi',
       },
       {
@@ -3709,7 +4073,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         getBody: () =>
           'Coba keberuntungan Anda sekarang pakai Koin Spin atau langsung pakai Saldo Uang Rekening.',
         type: 'info',
-        category: 'promo',
+        category: 'spin',
         targetDashboardTab: 'ringkasan',
       },
       {
@@ -3717,7 +4081,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         getBody: () =>
           'Notifikasi latar belakang terus memantau penguncian kartu, PIN, dan aktivitas rekening Anda.',
         type: 'warning',
-        category: 'security',
+        category: 'keamanan',
         targetDashboardTab: 'ringkasan',
       },
       {
@@ -3725,7 +4089,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         getBody: () =>
           'Cek status pengajuan pinjaman online atau klaim Kode Redeem yang dibagikan Admin sebelum kuota penuh!',
         type: 'success',
-        category: 'loan',
+        category: 'pinjaman',
         targetDashboardTab: 'pinjaman',
       },
     ];
@@ -4909,6 +5273,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const finalTier: CardTier = data.cardTier || 'regular';
     const expiry = generateExpiryDate(CARD_TIER_CONFIGS[finalTier].validityYears);
 
+    const linkedEmail = googleUser?.email || activeCloudEmail || data.email.trim();
     const newAccount: BankAccount = {
       id: `acc-${Date.now()}`,
       accountNumber: tempAccountNum,
@@ -4933,7 +5298,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       rewardPoints: 100,
       allowInternational: false,
       firebaseUid: firebaseUser?.uid,
-      googleEmail: googleUser?.email || data.email.trim(),
+      googleEmail: linkedEmail,
       hasCompletedTutorial: false,
       tutorialApprovedByAdmin: false,
     };
@@ -4944,18 +5309,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (googleUser && !googleUser.hasCompletedOnboarding) {
       setGoogleUser({ ...googleUser, hasCompletedOnboarding: true });
     }
-    if (firebaseUser) {
-      setDoc(
-        doc(db, 'users', firebaseUser.uid),
-        {
-          lastAccountId: newAccount.id,
-          hasCompletedOnboarding: true,
-          updatedAt: new Date().toISOString(),
-          updatedAtMs: Date.now(),
-        },
-        { merge: true }
-      ).catch(() => {});
-    }
+    void syncCloudUserProfile(
+      { uid: firebaseUser?.uid, email: linkedEmail },
+      {
+        lastAccountId: newAccount.id,
+        hasCompletedOnboarding: true,
+      }
+    );
     flushMasterStateToCloud({ accounts: nextAccounts });
 
     addNotification(
@@ -5219,35 +5579,40 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setCurrentAccountIdState(targetAcc.id);
-    if (firebaseUser) {
+    const activeEmailSession = googleUser?.email || activeCloudEmail || firebaseUser?.email || '';
+    if (firebaseUser || activeEmailSession) {
       const nextAccounts = accounts.map((a) =>
         a.id === targetAcc.id
           ? {
               ...a,
-              firebaseUid: a.firebaseUid || firebaseUser.uid,
-              googleEmail: a.googleEmail || googleUser?.email || firebaseUser.email || a.email,
+              firebaseUid: a.firebaseUid || firebaseUser?.uid,
+              googleEmail: a.googleEmail || activeEmailSession || a.email,
             }
           : a
       );
       setAccounts(nextAccounts);
       flushMasterStateToCloud({ accounts: nextAccounts });
-      setDoc(
-        doc(db, 'users', firebaseUser.uid),
+      void syncCloudUserProfile(
+        {
+          uid: firebaseUser?.uid,
+          email: activeEmailSession || targetAcc.googleEmail || targetAcc.email,
+        },
         {
           lastAccountId: targetAcc.id,
           hasCompletedOnboarding: true,
-          updatedAt: new Date().toISOString(),
-          updatedAtMs: Date.now(),
-        },
-        { merge: true }
-      ).catch(() => {});
+        }
+      );
     }
     if (googleUser && !googleUser.hasCompletedOnboarding) {
       setGoogleUser({ ...googleUser, hasCompletedOnboarding: true });
     } else if (!googleUser) {
+      const loginEmail = normalizeEmailKey(targetAcc.googleEmail || targetAcc.email || 'nasabah@banknusantara.id');
+      setActiveCloudEmail(loginEmail);
       setGoogleUser({
-        email: targetAcc.email || 'nasabah@banknusantara.id',
+        email: loginEmail,
         name: targetAcc.fullName,
+        authMode: 'email_direct',
+        emailKey: emailToFirestoreDocId(loginEmail),
         loggedInAt: new Date().toISOString(),
         hasCompletedOnboarding: true,
       });
@@ -5394,18 +5759,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         );
         setAccounts(nextAccounts);
         expiredList.forEach((exp) => {
-          if (exp.firebaseUid) {
-            setDoc(
-              doc(db, 'users', exp.firebaseUid),
-              {
-                status: 'active',
-                banReason: '',
-                updatedAt: new Date().toISOString(),
-                updatedAtMs: Date.now(),
-              },
-              { merge: true }
-            ).catch(() => {});
-          }
+          void syncCloudUserProfile(
+            {
+              uid: exp.firebaseUid,
+              email: exp.googleEmail || exp.email,
+              fallbackEmail: exp.email,
+            },
+            { status: 'active', banReason: '' }
+          );
         });
         flushMasterStateToCloud({ accounts: nextAccounts });
 
@@ -5494,23 +5855,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const targetUid =
       target.firebaseUid ||
       (firebaseUser &&
-      ((target.googleEmail && target.googleEmail.toLowerCase() === (firebaseUser.email || '').toLowerCase()) ||
+      ((target.googleEmail && normalizeEmailKey(target.googleEmail) === normalizeEmailKey(firebaseUser.email || '')) ||
         target.id === currentAccountId)
         ? firebaseUser.uid
         : undefined);
-    if (targetUid) {
-      setDoc(
-        doc(db, 'users', targetUid),
-        sanitizeForFirestore({
-          status: 'banned',
-          banReason: cleanReason || 'Akun diblokir oleh Admin Bank Nusantara.',
-          appealStatus: 'none',
-          updatedAt: new Date(now).toISOString(),
-          updatedAtMs: now,
-        }) as Record<string, unknown>,
-        { merge: true }
-      ).catch(() => {});
-    }
+    void syncCloudUserProfile(
+      {
+        uid: targetUid,
+        email: target.googleEmail || target.email,
+        fallbackEmail: target.email,
+      },
+      {
+        status: 'banned',
+        banReason: cleanReason || 'Akun diblokir oleh Admin Bank Nusantara.',
+        appealStatus: 'none',
+      }
+    );
 
     addNotification(
       `🚫 Kartu Di-BANNED (${input.durationType === 'permanent' ? 'PERMANEN' : label})`,
@@ -5521,7 +5881,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }`,
       'alert',
       {
-        category: 'security',
+        category: 'keamanan',
         targetView: 'dashboard',
         targetDashboardTab: 'ringkasan',
         accountId: target.id,
@@ -5574,30 +5934,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const targetUid =
       target.firebaseUid ||
       (firebaseUser &&
-      ((target.googleEmail && target.googleEmail.toLowerCase() === (firebaseUser.email || '').toLowerCase()) ||
+      ((target.googleEmail && normalizeEmailKey(target.googleEmail) === normalizeEmailKey(firebaseUser.email || '')) ||
         target.id === currentAccountId)
         ? firebaseUser.uid
         : undefined);
-    if (targetUid) {
-      setDoc(
-        doc(db, 'users', targetUid),
-        {
-          status: 'active',
-          banReason: '',
-          appealStatus: 'approved',
-          updatedAt: new Date().toISOString(),
-          updatedAtMs: Date.now(),
-        },
-        { merge: true }
-      ).catch(() => {});
-    }
+    void syncCloudUserProfile(
+      {
+        uid: targetUid,
+        email: target.googleEmail || target.email,
+        fallbackEmail: target.email,
+      },
+      {
+        status: 'active',
+        banReason: '',
+        appealStatus: 'approved',
+      }
+    );
 
     addNotification(
       '🔓 Sistem Website: Banned Kartu Telah Dibuka!',
       `Status BANNED pada kartu ${target.fullName} (${target.accountNumber}) telah dibuka. Kartu kini kembali AKTIF.`,
       'success',
       {
-        category: 'security',
+        category: 'keamanan',
         targetView: 'dashboard',
         targetDashboardTab: 'ringkasan',
         accountId: target.id,
@@ -5618,7 +5977,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (bannedList.length === 0) {
       return { success: false, message: 'Tidak ada kartu yang sedang di-banned saat ini.', count: 0 };
     }
-    const nowIso = new Date().toISOString();
     const nextAccounts: BankAccount[] = accounts.map((acc) =>
       acc.cardStatus === 'banned' || acc.status === 'banned'
         ? { ...acc, status: 'active' as const, banReason: '', cardStatus: 'active' as const, banInfo: undefined }
@@ -5627,13 +5985,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setAccounts(nextAccounts);
     flushMasterStateToCloud({ accounts: nextAccounts });
     bannedList.forEach((acc) => {
-      if (acc.firebaseUid) {
-        setDoc(
-          doc(db, 'users', acc.firebaseUid),
-          { status: 'active', banReason: '', appealStatus: 'approved', updatedAt: nowIso, updatedAtMs: Date.now() },
-          { merge: true }
-        ).catch(() => {});
-      }
+      void syncCloudUserProfile(
+        {
+          uid: acc.firebaseUid,
+          email: acc.googleEmail || acc.email,
+          fallbackEmail: acc.email,
+        },
+        { status: 'active', banReason: '', appealStatus: 'approved' }
+      );
     });
     playAtmSound('success');
     return {
@@ -5674,13 +6033,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
     setAccounts(nextAccounts);
     flushMasterStateToCloud({ accounts: nextAccounts });
-    if (target.firebaseUid) {
-      setDoc(
-        doc(db, 'users', target.firebaseUid),
-        { appealStatus: 'pending', appealNote: cleanNote, appealSource: 'in_app', appealRequestedAt: nowIso, updatedAt: nowIso, updatedAtMs: Date.now() },
-        { merge: true }
-      ).catch(() => {});
-    }
+    void syncCloudUserProfile(
+      {
+        uid: target.firebaseUid,
+        email: target.googleEmail || target.email,
+        fallbackEmail: target.email,
+      },
+      {
+        appealStatus: 'pending',
+        appealNote: cleanNote,
+        appealSource: 'in_app',
+        appealRequestedAt: nowIso,
+      }
+    );
 
     addNotification(
       'Permohonan Tinjauan Banned Terkirim ke Admin 📩',
@@ -6714,17 +7079,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       manualExpenses: nextManualExpenses,
     });
 
-    if (firebaseUser && isDeletingCurrent) {
-      setDoc(
-        doc(db, 'users', firebaseUser.uid),
+    if (isDeletingCurrent) {
+      void syncCloudUserProfile(
+        {
+          uid: firebaseUser?.uid,
+          email: googleUser?.email || activeCloudEmail || undefined,
+        },
         {
           lastAccountId: nextCurrentAccountId || '',
           hasCompletedOnboarding: Boolean(nextCurrentAccountId),
-          updatedAt: new Date().toISOString(),
-          updatedAtMs: nowEpoch,
-        },
-        { merge: true }
-      ).catch(() => {});
+        }
+      );
     }
 
     playAtmSound('beep');
@@ -14421,6 +14786,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         cloudSyncStatus,
         lastCloudSyncAt,
         cloudUserStatus,
+        loginOrRegisterWithEmail,
         loginWithGooglePopup,
         enterBankPortal,
         loginWithGoogle,
@@ -14525,6 +14891,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         favorites,
         notifications,
         unreadNotificationCount,
+        notificationCategoryPermissions,
+        toggleNotificationCategoryPermission,
+        setAllNotificationCategoryPermissions,
+        markCategoryNotificationsAsRead,
         markNotificationAsRead,
         markAllNotificationsAsRead,
         addNotification,

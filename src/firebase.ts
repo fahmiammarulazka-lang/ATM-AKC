@@ -34,6 +34,28 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 export { signInWithPopup, signOut, onAuthStateChanged };
 export type { FirebaseUser };
 
+export function normalizeEmailKey(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function emailToFirestoreDocId(email: string): string {
+  const normalized = normalizeEmailKey(email);
+  let hash = 2166136261;
+  for (let i = 0; i < normalized.length; i++) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  const hex = (hash >>> 0).toString(16).padStart(8, '0');
+  const slug =
+    normalized
+      .replace(/@/g, '_at_')
+      .replace(/[^a-z0-9_-]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 48) || 'user';
+  return `${slug}__${hex}`;
+}
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

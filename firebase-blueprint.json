@@ -17,7 +17,10 @@
         "banAppealSubmittedAt": { "type": "string" },
         "banAppealAdminNote": { "type": "string" },
         "currentAccountId": { "type": "string" },
+        "lastAccountId": { "type": "string" },
         "hasCompletedOnboarding": { "type": "boolean" },
+        "authMode": { "type": "string", "enum": ["email_direct", "google"] },
+        "emailKey": { "type": "string" },
         "updatedAtMs": { "type": "number" }
       },
       "required": ["uid", "email", "status"]
@@ -81,6 +84,10 @@
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/CloudUser" },
       "description": "Per-Google-user status and real-time ban listener document"
+    },
+    "/users_by_email/{emailKey}": {
+      "schema": { "$ref": "#/entities/CloudUser" },
+      "description": "Per-email cloud user document enabling instant registration and real-time multi-device sync for any email address without Firebase verification"
     },
     "/bank_state_v1/{docId}": {
       "schema": { "$ref": "#/entities/MasterCloudState" },

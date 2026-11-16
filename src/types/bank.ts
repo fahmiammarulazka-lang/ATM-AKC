@@ -74,6 +74,10 @@ export interface CloudUserRecord {
   currentAccountId?: string;
   lastAccountId?: string;
   hasCompletedOnboarding?: boolean;
+  authMode?: 'email_direct' | 'google';
+  emailKey?: string;
+  emailVerified?: boolean;
+  notificationCategoryPermissions?: Record<NotificationCategory10Key, boolean>;
   createdAt?: string;
   updatedAtMs?: number;
   updatedAt?: string;
@@ -229,6 +233,8 @@ export interface GoogleUserSession {
   name: string;
   picture?: string;
   firebaseUid?: string;
+  authMode?: 'email_direct' | 'google';
+  emailKey?: string;
   loggedInAt: string;
   hasCompletedOnboarding: boolean;
 }
@@ -260,7 +266,24 @@ export interface GlobalChatMessage {
   isPinned?: boolean;
 }
 
-export type NotificationCategory = 'transaction' | 'loan' | 'security' | 'promo';
+export type NotificationCategory10Key =
+  | 'transaksi'
+  | 'transfer'
+  | 'keamanan'
+  | 'pinjaman'
+  | 'kartu'
+  | 'emas'
+  | 'kerja'
+  | 'spin'
+  | 'hadiah'
+  | 'sistem';
+
+export type NotificationCategory =
+  | NotificationCategory10Key
+  | 'transaction'
+  | 'loan'
+  | 'security'
+  | 'promo';
 
 export interface MobilePushBannerToast {
   id: string;
@@ -806,11 +829,12 @@ export interface UserAppSettings {
   confirmBeforeCoinPurchase: boolean;
   autoRedeemPulsaTokenNotif: boolean;
 
-  // 6. Preferensi Kategori Notifikasi Push
+  // 6. Preferensi Kategori Notifikasi Push (10 Jenis Lengkap + Kompatibilitas Lama)
   pushTransactionAlerts: boolean;
   pushLoanAlerts: boolean;
   pushSecurityAlerts: boolean;
   pushPromoAlerts: boolean;
+  notificationCategoryPermissions?: Record<NotificationCategory10Key, boolean>;
 }
 
 export type BudgetCategoryIcon =

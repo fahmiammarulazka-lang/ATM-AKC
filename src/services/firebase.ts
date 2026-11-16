@@ -7,6 +7,8 @@ export {
   signOut,
   onAuthStateChanged,
   signInWithGooglePopup,
+  normalizeEmailKey,
+  emailToFirestoreDocId,
   testConnection,
   handleFirestoreError,
   OperationType,
