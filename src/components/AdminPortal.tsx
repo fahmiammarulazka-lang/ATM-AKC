@@ -166,6 +166,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     adminMultiplyAccountBalance,
     adminSetAllAccountsTier,
     adminDeleteAccount,
+    accountDeletionRequests,
+    approveAccountDeletionRequest,
+    rejectAccountDeletionRequest,
     appUpdates,
     adminAddAppUpdate,
     adminEditAppUpdate,
@@ -6226,16 +6229,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           </div>
           </div>
 
-          {/* 10-Step Secure Account Deletion Section */}
+          {/* 5-Confirmation Approval Queue & Admin Quick Account Deletion Section */}
           <div className="bg-rose-950/40 border-2 border-rose-500/50 rounded-3xl p-6 shadow-xl space-y-4 text-xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-rose-900/50 pb-4">
               <div>
                 <h3 className="font-black text-rose-300 text-base flex items-center gap-2">
                   <ShieldAlert className="w-5 h-5 text-rose-400" />
-                  <span>Pusat Otoritas: Penghapusan Akun Aman (10 Konfirmasi &amp; Timer 30 Detik)</span>
+                  <span>Antrean Persetujuan Hapus Akun (5 Konfirmasi) &amp; Hapus Cepat Admin</span>
+                  {accountDeletionRequests.filter((r) => r.status === 'pending').length > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black tabular-nums">
+                      {accountDeletionRequests.filter((r) => r.status === 'pending').length} Menunggu
+                    </span>
+                  )}
                 </h3>
                 <p className="text-slate-300 text-[11px] mt-0.5">
-                  Menghapus akun secara permanen beserta seluruh data terkait (rekening, transaksi, pinjaman, brankas, pocket, penyimpanan lokal &amp; server) dengan 10 langkah konfirmasi wajib baca 30 detik.
+                  Tinjau permohonan hapus akun dari nasabah (Setujui Hapus Permanen atau Tolak) maupun lakukan Hapus Cepat Admin.
                 </p>
               </div>
               <button
@@ -6244,9 +6252,62 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 className="px-5 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black shadow-lg cursor-pointer flex items-center gap-2 shrink-0"
               >
                 <Trash2 className="w-4 h-4" />
-                <span>Hapus Akun (10 Konfirmasi)</span>
+                <span>Kelola Persetujuan &amp; Hapus Cepat</span>
               </button>
             </div>
+
+            {accountDeletionRequests.filter((r) => r.status === 'pending').length > 0 && (
+              <div className="space-y-2.5">
+                {accountDeletionRequests
+                  .filter((r) => r.status === 'pending')
+                  .map((req) => (
+                    <div
+                      key={req.id}
+                      className="p-3.5 rounded-2xl bg-slate-950/90 border border-amber-400/50 flex flex-col md:flex-row md:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-black text-white">{req.accountName}</span>
+                          <span className="font-mono text-amber-300 text-[11px] tabular-nums">
+                            {req.accountNumber}
+                          </span>
+                          <span className="text-[11px] text-emerald-300 font-bold tabular-nums">
+                            {formatRupiah(req.balanceSnapshot)}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300">
+                          <strong className="text-amber-200">{req.reasonCategory}:</strong> {req.reasonDetail}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const res = rejectAccountDeletionRequest(req.id);
+                            setDeleteFeedback(res.message);
+                          }}
+                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold cursor-pointer flex items-center gap-1"
+                        >
+                          <XCircle className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Tolak</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const res = approveAccountDeletionRequest(req.id);
+                            setDeleteFeedback(res.message);
+                          }}
+                          className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black cursor-pointer flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Setujui Hapus</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+
             {deleteFeedback && (
               <div className="p-3 rounded-xl bg-slate-950 border border-rose-500 text-rose-300 font-bold">
                 {deleteFeedback}
@@ -6950,15 +7011,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         );
       })()}
 
-      {/* Persistent Bottom Feature in Admin Portal: Hapus Akun 10 Konfirmasi + Timer 30 Detik */}
+      {/* Persistent Bottom Feature in Admin Portal: Antrean Persetujuan & Hapus Cepat Admin */}
       <div className="bg-rose-950/35 border-2 border-rose-500/45 rounded-3xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
         <div>
           <h3 className="font-black text-rose-300 text-sm flex items-center gap-2">
             <ShieldAlert className="w-4 h-4 text-rose-400" />
-            <span>Fitur Hapus Akun Permanen (10 Konfirmasi &amp; Wajib Baca 30 Detik)</span>
+            <span>
+              Persetujuan Hapus Akun Nasabah ({accountDeletionRequests.filter((r) => r.status === 'pending').length} Menunggu) &amp; Hapus Cepat Admin
+            </span>
           </h3>
           <p className="text-slate-300 text-[11px] mt-0.5">
-            Menghapus akun hingga bersih total dari Panel Admin, Daftar Kartu, dan Penyimpanan.
+            Setujui atau tolak permohonan 5 konfirmasi hapus akun dari nasabah, atau lakukan penghapusan cepat Admin.
           </p>
         </div>
         <button
@@ -6967,7 +7030,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black shadow-lg cursor-pointer flex items-center gap-2 shrink-0"
         >
           <Trash2 className="w-4 h-4" />
-          <span>Hapus Akun</span>
+          <span>
+            Kelola Hapus Akun ({accountDeletionRequests.filter((r) => r.status === 'pending').length})
+          </span>
         </button>
       </div>
 

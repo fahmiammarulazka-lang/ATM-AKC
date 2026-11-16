@@ -865,10 +865,17 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                             {activeEvent.rewards.map((rew) => {
                               const gachaRoll = savedGachaResults.find((g) => g.rewardId === rew.id);
                               const meta = GIFT_REWARD_CATALOG.find((c) => c.type === rew.type);
+                              const activeSub = meta?.subOptions?.find(
+                                (s) => s.id === rew.selectedSubOptionId
+                              );
+                              const isTrialItem = Boolean(meta?.isTrial || activeSub?.isTrialVariant);
                               const targetRole = rew.targetDevRoleId
                                 ? devRoles.find((r) => r.id === rew.targetDevRoleId)
                                 : null;
                               const displayAmount = gachaRoll ? gachaRoll.rolledAmount : rew.amount;
+                              const isTierChoiceOnly =
+                                rew.type === 'upgrade_card_tier' ||
+                                rew.type === 'trial_card_tier_selector';
 
                               return (
                                 <div
@@ -885,17 +892,24 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                                       <span className="text-xs font-bold text-white block truncate">
                                         {rew.label}
                                       </span>
+                                      {rew.selectedSubOptionLabel && (
+                                        <span className="text-[10px] text-amber-300 font-semibold block truncate">
+                                          Pilihan: {rew.selectedSubOptionLabel}
+                                        </span>
+                                      )}
                                       {gachaRoll ? (
                                         <span className="text-[10px] text-fuchsia-300 font-bold block truncate">
                                           🎲 {gachaRoll.tierLabel} ({gachaRoll.probabilityPercent}%)
                                         </span>
-                                      ) : meta?.isTrial ? (
+                                      ) : isTrialItem ? (
                                         <span className="text-[10px] text-cyan-300 flex items-center gap-1">
                                           <Clock className="w-3 h-3" />
                                           <span>
                                             Trial{' '}
                                             {formatTrialDurationLabel(
-                                              rew.trialDurationMinutes || meta.defaultTrialMinutes
+                                              rew.trialDurationMinutes ||
+                                                activeSub?.defaultTrialMinutesOverride ||
+                                                meta?.defaultTrialMinutes
                                             )}
                                           </span>
                                         </span>
@@ -913,6 +927,8 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                                       ? targetRole
                                         ? targetRole.name
                                         : 'Role Aktif!'
+                                      : isTierChoiceOnly && rew.selectedSubOptionLabel
+                                      ? rew.selectedSubOptionLabel
                                       : `+${formatNumericByReward(rew, displayAmount)}`}
                                   </span>
                                 </div>

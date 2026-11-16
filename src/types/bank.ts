@@ -876,7 +876,60 @@ export type GiftRewardType =
   | 'trial_diamond_combo'
   | 'trial_all_assets_boost'
   | 'upgrade_card_admin_infinity_perm'
-  | 'royal_crown_100g_50m_pack';
+  | 'royal_crown_100g_50m_pack'
+  // 40 Hadiah Tambahan (Melengkapi Tepat 100 Macam Hadiah + Banyak Fitur Trial & Sub-Pilihan)
+  | 'job_career_custom_selector'
+  | 'business_custom_selector'
+  | 'trading_custom_selector'
+  | 'vip_protection_selector'
+  | 'trial_card_tier_selector'
+  | 'trial_regular_card'
+  | 'trial_premium_card'
+  | 'trial_admin_infinity_card'
+  | 'trial_job_career_selector'
+  | 'trial_job_salary_2x'
+  | 'trial_job_salary_5x'
+  | 'trial_job_click_power'
+  | 'trial_job_coin_rain'
+  | 'trial_cashback_15'
+  | 'trial_cashback_50'
+  | 'trial_free_transfer_vip'
+  | 'trial_priority_badge_verified'
+  | 'trial_trading_selector'
+  | 'trial_trading_btc_whale'
+  | 'trial_trading_gold_bullion'
+  | 'trial_business_selector'
+  | 'trial_business_mining_farm'
+  | 'trial_business_hypercar_garage'
+  | 'trial_royal_emperor_all_access'
+  | 'trial_gacha_mystery_duration'
+  | 'trial_double_reward_points'
+  | 'cash_thr_lebaran_pack'
+  | 'cash_startup_modal'
+  | 'cash_billionaire_vault'
+  | 'spin_mega_ticket_bundle'
+  | 'job_level_mega_jump'
+  | 'voucher_sultan_50'
+  | 'gold_bar_50g_royal'
+  | 'gold_coin_nusantara_pack'
+  | 'deposito_platinum_50m'
+  | 'dream_pocket_education_fund'
+  | 'dream_pocket_house_fund'
+  | 'pln_industrial_pack'
+  | 'pulsa_roaming_vip'
+  | 'diamond_all_permanent_pack';
+
+export interface GiftRewardSubOption {
+  id: string;
+  label: string;
+  emoji?: string;
+  description?: string;
+  unitLabelOverride?: string;
+  defaultAmountOverride?: number;
+  stepOverride?: number;
+  isTrialVariant?: boolean;
+  defaultTrialMinutesOverride?: number;
+}
 
 export interface ActiveAccountTrial {
   id: string;
@@ -886,14 +939,18 @@ export interface ActiveAccountTrial {
   startedAt: string;
   expiresAt: string;
   durationMinutes: number;
+  grantedTrialCardTier?: CardTier;
   revertSnapshot: {
     previousVerified?: boolean;
     previousVerifiedLabel?: string;
     previousVipShield?: boolean;
     previousCardTier?: CardTier;
     previousDevRoleId?: string | null;
+    previousCashbackPercent?: number;
     deltaClickPower?: number;
     deltaSalaryMultiplier?: number;
+    temporaryBusinessDeltas?: Record<string, number>;
+    temporaryTradingDeltas?: Record<string, number>;
   };
 }
 
@@ -916,6 +973,8 @@ export interface GiftRewardCatalogMeta {
   isTrial?: boolean;
   defaultTrialMinutes?: number;
   isRoleGrant?: boolean;
+  subOptionsPrompt?: string;
+  subOptions?: GiftRewardSubOption[];
 }
 
 export interface GachaTierRange {
@@ -955,6 +1014,8 @@ export interface AdminGiftRewardItem {
   customNote?: string;
   trialDurationMinutes?: number;
   targetDevRoleId?: string;
+  selectedSubOptionId?: string;
+  selectedSubOptionLabel?: string;
   rewardMode?: 'fixed' | 'gacha';
   gachaTiers?: GachaTierRange[];
 }
@@ -1077,6 +1138,27 @@ export interface DevRoleConfig {
   bypassAdminPin: boolean;
   autoApproveAccount?: boolean;
   description: string;
+}
+
+export interface AccountDeletionRequest {
+  id: string;
+  accountId: string;
+  accountNumber: string;
+  accountName: string;
+  cardTier: CardTier;
+  balanceSnapshot: number;
+  reasonCategory: string;
+  reasonDetail: string;
+  confirmationAnswers: {
+    understandPermanentLoss: boolean;
+    noPendingObligations: boolean;
+    agreeAdminReview: boolean;
+  };
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  requestedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  adminNote?: string;
 }
 
 

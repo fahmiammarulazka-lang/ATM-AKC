@@ -38,6 +38,7 @@ export interface BankPersistableSnapshot {
   featureConfigs: unknown[];
   deletedFeatureIds: string[];
   deletedAccountIds?: string[];
+  accountDeletionRequests?: unknown[];
   defaultLetterSealConfig?: unknown;
   adminHelpRequests: unknown[];
   appUpdates: unknown[];

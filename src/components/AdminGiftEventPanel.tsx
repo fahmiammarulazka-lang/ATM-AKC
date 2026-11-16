@@ -1,6 +1,6 @@
 /**
  * AdminGiftEventPanel
- * Pusat Kendali Hadiah & Surat (58 Macam Hadiah, Hadiah Role Permanen/Trial, Gacha Min–Max %,
+ * Pusat Kendali Hadiah & Surat (100 Macam Hadiah + Sub-Pilihan Varian, Trial Lengkap, Role Permanen/Trial, Gacha Min–Max %,
  * Date Lock Ketat, & Studio Tanda Tangan Gambar/Template + 5 Template Stempel)
  */
 import React, { useState } from 'react';
@@ -163,7 +163,8 @@ export const AdminGiftEventPanel: React.FC = () => {
       return (
         r.label.toLowerCase().includes(q) ||
         r.description.toLowerCase().includes(q) ||
-        r.category.toLowerCase().includes(q)
+        r.category.toLowerCase().includes(q) ||
+        Boolean(r.subOptions?.some((s) => s.label.toLowerCase().includes(q)))
       );
     }
     return true;
@@ -177,18 +178,21 @@ export const AdminGiftEventPanel: React.FC = () => {
     }
     const meta = GIFT_REWARD_CATALOG.find((m) => m.type === type);
     if (!meta) return;
+    const defaultSub = meta.subOptions?.[0];
     setSelectedRewards((prev) => [
       ...prev,
       {
         id: `rew-${type}-${Date.now()}-${Math.floor(Math.random() * 999)}`,
         type: meta.type,
         label: meta.label,
-        amount: meta.defaultAmount,
-        unitLabel: meta.unitLabel,
+        amount: defaultSub?.defaultAmountOverride ?? meta.defaultAmount,
+        unitLabel: defaultSub?.unitLabelOverride ?? meta.unitLabel,
         emoji: meta.emoji,
         rewardMode: 'fixed',
-        trialDurationMinutes: meta.defaultTrialMinutes,
+        trialDurationMinutes: defaultSub?.defaultTrialMinutesOverride ?? meta.defaultTrialMinutes,
         targetDevRoleId: meta.isRoleGrant ? devRoles[0]?.id : undefined,
+        selectedSubOptionId: defaultSub?.id,
+        selectedSubOptionLabel: defaultSub?.label,
       },
     ]);
   };
@@ -204,16 +208,19 @@ export const AdminGiftEventPanel: React.FC = () => {
       GIFT_REWARD_CATALOG.map((meta, idx) => {
         const existing = selectedRewards.find((s) => s.type === meta.type);
         if (existing) return existing;
+        const defaultSub = meta.subOptions?.[0];
         return {
           id: `rew-all-${idx}-${Date.now()}`,
           type: meta.type,
           label: meta.label,
-          amount: meta.defaultAmount,
-          unitLabel: meta.unitLabel,
+          amount: defaultSub?.defaultAmountOverride ?? meta.defaultAmount,
+          unitLabel: defaultSub?.unitLabelOverride ?? meta.unitLabel,
           emoji: meta.emoji,
           rewardMode: 'fixed',
-          trialDurationMinutes: meta.defaultTrialMinutes,
+          trialDurationMinutes: defaultSub?.defaultTrialMinutesOverride ?? meta.defaultTrialMinutes,
           targetDevRoleId: meta.isRoleGrant ? devRoles[0]?.id : undefined,
+          selectedSubOptionId: defaultSub?.id,
+          selectedSubOptionLabel: defaultSub?.label,
         };
       })
     );
@@ -442,13 +449,13 @@ export const AdminGiftEventPanel: React.FC = () => {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
           <div className="space-y-1.5">
             <span className="px-3 py-1 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase tracking-wider inline-block">
-              🎁 HADIAH &amp; SURAT ROYAL ({GIFT_REWARD_CATALOG.length} MACAM HADIAH + ROLE + GACHA + STEMPEL &amp; TTD)
+              🎁 HADIAH &amp; SURAT ROYAL ({GIFT_REWARD_CATALOG.length} MACAM HADIAH + SUB-PILIHAN + TRIAL LENGKAP + GACHA)
             </span>
             <h2 className="text-xl sm:text-2xl font-black text-white">
-              Atur Kotak Hadiah, 50+ Hadiah &amp; Role, Gacha Min–Max %, Tanda Tangan &amp; Stempel
+              Atur Kotak Hadiah, {GIFT_REWARD_CATALOG.length} Hadiah + Sub-Pilihan &amp; Trial Lengkap, Gacha, TTD &amp; Stempel
             </h2>
             <p className="text-slate-300 max-w-3xl leading-relaxed">
-              Pilih dari <strong>{GIFT_REWARD_CATALOG.length} jenis hadiah</strong> (termasuk <strong>Hadiah Role Dev Permanen/Trial</strong> &amp; Mode <strong>🎲 Gacha Min–Max %</strong>), aktifkan <strong>Kunci Ketat Tanggal</strong>, serta atur desain <strong>Tanda Tangan Gambar / 5 Template Huruf</strong> &amp; <strong>5 Template Stempel</strong>!
+              Pilih dari <strong>{GIFT_REWARD_CATALOG.length} jenis hadiah jelas</strong> dengan <strong>sub-pilihan varian di dalam kartu</strong> (Upgrade Kartu 5 Tier, Pekerjaan &amp; Lowongan, Bisnis, Bursa, VIP), puluhan <strong>Fitur Trial Berdurasi Lengkap</strong>, <strong>Hadiah Role Dev</strong> &amp; Mode <strong>🎲 Gacha Min–Max %</strong>!
             </p>
           </div>
 
@@ -1321,7 +1328,8 @@ export const AdminGiftEventPanel: React.FC = () => {
                 </span>
               </h3>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                Tersedia <strong>{GIFT_REWARD_CATALOG.length} macam hadiah</strong> (50+ variasi termasuk <strong>Hadiah Role Permanen/Trial</strong> &amp; Mode <strong>Gacha Min–Max %</strong>).
+                Tersedia tepat <strong>{GIFT_REWARD_CATALOG.length} macam hadiah</strong> dengan{' '}
+                <strong>Sub-Pilihan Varian</strong> di dalam hadiah &amp; banyak <strong>Fitur Trial</strong>.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -1380,8 +1388,19 @@ export const AdminGiftEventPanel: React.FC = () => {
             {visibleCatalog.map((meta) => {
               const selectedItem = selectedRewards.find((r) => r.type === meta.type);
               const isSelected = Boolean(selectedItem);
+              const activeSub =
+                meta.subOptions?.find((s) => s.id === selectedItem?.selectedSubOptionId) ||
+                meta.subOptions?.[0];
+              const effectiveIsTrial = Boolean(meta.isTrial || activeSub?.isTrialVariant);
+              const effectiveUnitLabel =
+                selectedItem?.unitLabel || activeSub?.unitLabelOverride || meta.unitLabel;
+              const effectiveStep = activeSub?.stepOverride || meta.step;
+              const isSingleChoiceTierCard =
+                meta.type === 'upgrade_card_tier' || meta.type === 'trial_card_tier_selector';
               const trialDecoded = minutesToAmountAndUnit(
-                selectedItem?.trialDurationMinutes || meta.defaultTrialMinutes
+                selectedItem?.trialDurationMinutes ||
+                  activeSub?.defaultTrialMinutesOverride ||
+                  meta.defaultTrialMinutes
               );
 
               return (
@@ -1391,7 +1410,7 @@ export const AdminGiftEventPanel: React.FC = () => {
                     isSelected
                       ? meta.isRoleGrant
                         ? 'bg-amber-950/45 border-amber-400/80'
-                        : meta.isTrial
+                        : effectiveIsTrial
                         ? 'bg-cyan-950/40 border-cyan-400/70'
                         : 'bg-amber-950/40 border-amber-400/70'
                       : 'bg-slate-950/90 border-slate-800 hover:border-slate-700'
@@ -1409,6 +1428,11 @@ export const AdminGiftEventPanel: React.FC = () => {
                           <span className="font-bold text-white text-xs truncate">
                             {meta.label}
                           </span>
+                          {meta.subOptions && meta.subOptions.length > 0 && (
+                            <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[9px] font-black">
+                              {meta.subOptions.length} PILIHAN
+                            </span>
+                          )}
                           {meta.isRoleGrant && (
                             <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[9px] font-black">
                               ROLE
@@ -1434,12 +1458,67 @@ export const AdminGiftEventPanel: React.FC = () => {
                           : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                       }`}
                     >
-                      {isSelected ? '✓ Dipilih' : '+ Tambah'}
+                      {isSelected ? '✓ Dipilih' : '+ Pilih'}
                     </button>
                   </div>
 
                   {selectedItem && (
                     <div className="space-y-2.5 pt-2 border-t border-white/10">
+                      {/* Interactive Sub-Options Picker inside the clicked Reward */}
+                      {meta.subOptions && meta.subOptions.length > 0 && (
+                        <div className="p-2.5 rounded-xl bg-slate-950/90 border border-emerald-400/40 space-y-2">
+                          <span className="text-[10px] font-black text-emerald-300 block">
+                            {meta.subOptionsPrompt || 'Pilih Varian Hadiah di Dalamnya:'}
+                          </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            {meta.subOptions.map((sub) => {
+                              const isSubActive =
+                                (selectedItem.selectedSubOptionId || meta.subOptions?.[0]?.id) ===
+                                sub.id;
+                              return (
+                                <button
+                                  key={sub.id}
+                                  type="button"
+                                  onClick={() => {
+                                    updateRewardItem(meta.type, {
+                                      selectedSubOptionId: sub.id,
+                                      selectedSubOptionLabel: sub.label,
+                                      unitLabel: sub.unitLabelOverride ?? meta.unitLabel,
+                                      amount: sub.defaultAmountOverride ?? selectedItem.amount,
+                                      trialDurationMinutes:
+                                        sub.defaultTrialMinutesOverride ??
+                                        selectedItem.trialDurationMinutes ??
+                                        meta.defaultTrialMinutes,
+                                    });
+                                  }}
+                                  className={`p-2 rounded-lg border text-left transition cursor-pointer flex items-center gap-2 ${
+                                    isSubActive
+                                      ? 'bg-emerald-400 text-slate-950 border-emerald-300 font-black shadow'
+                                      : 'bg-slate-900 text-slate-200 border-slate-800 hover:border-slate-600'
+                                  }`}
+                                >
+                                  {sub.emoji && <span className="text-sm shrink-0">{sub.emoji}</span>}
+                                  <div className="min-w-0">
+                                    <span className="text-[10px] font-bold block truncate">
+                                      {sub.label}
+                                    </span>
+                                    {sub.description && (
+                                      <span
+                                        className={`text-[9px] block truncate ${
+                                          isSubActive ? 'text-slate-800' : 'text-slate-400'
+                                        }`}
+                                      >
+                                        {sub.description}
+                                      </span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Role Selector when meta.isRoleGrant (for specific permanent/trial Role) */}
                       {(meta.type === 'role_grant_permanent' || meta.type === 'role_grant_trial') && (
                         <div className="flex flex-wrap items-center gap-2">
@@ -1469,8 +1548,8 @@ export const AdminGiftEventPanel: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Fixed vs Gacha Switch (hidden for direct Role picks, enabled for numeric/everything else) */}
-                      {!meta.isRoleGrant && (
+                      {/* Fixed vs Gacha Switch (hidden for direct Role/Card-Tier picks) */}
+                      {!meta.isRoleGrant && !isSingleChoiceTierCard && (
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5">
                             <button
@@ -1512,7 +1591,7 @@ export const AdminGiftEventPanel: React.FC = () => {
                               <input
                                 type="number"
                                 min={1}
-                                step={meta.step}
+                                step={effectiveStep}
                                 value={selectedItem.amount}
                                 onChange={(e) =>
                                   updateRewardItem(meta.type, {
@@ -1522,7 +1601,7 @@ export const AdminGiftEventPanel: React.FC = () => {
                                 className="w-28 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-emerald-300 font-mono font-bold text-xs tabular-nums"
                               />
                               <span className="text-[10px] text-slate-400 font-mono">
-                                {meta.unitLabel}
+                                {effectiveUnitLabel}
                               </span>
                             </div>
                           )}
@@ -1530,7 +1609,7 @@ export const AdminGiftEventPanel: React.FC = () => {
                       )}
 
                       {/* Custom Trial Duration Control */}
-                      {meta.isTrial && (
+                      {effectiveIsTrial && (
                         <div className="flex flex-wrap items-center gap-2 p-2 rounded-xl bg-slate-950/90 border border-cyan-500/30">
                           <span className="text-[10px] text-cyan-300 font-bold flex items-center gap-1">
                             <Clock className="w-3 h-3" />
@@ -1571,7 +1650,9 @@ export const AdminGiftEventPanel: React.FC = () => {
                           <span className="text-[10px] font-mono text-slate-400">
                             (Otomatis berakhir dalam{' '}
                             {formatTrialDurationLabel(
-                              selectedItem.trialDurationMinutes || meta.defaultTrialMinutes
+                              selectedItem.trialDurationMinutes ||
+                                activeSub?.defaultTrialMinutesOverride ||
+                                meta.defaultTrialMinutes
                             )}
                             )
                           </span>
@@ -1580,6 +1661,7 @@ export const AdminGiftEventPanel: React.FC = () => {
 
                       {/* Inline Multi-Tier Gacha Builder */}
                       {!meta.isRoleGrant &&
+                        !isSingleChoiceTierCard &&
                         selectedItem.rewardMode === 'gacha' &&
                         selectedItem.gachaTiers && (
                           <GachaTierBuilder
@@ -1588,9 +1670,9 @@ export const AdminGiftEventPanel: React.FC = () => {
                             onChange={(nextTiers) =>
                               updateRewardItem(meta.type, { gachaTiers: nextTiers })
                             }
-                            unitLabel={meta.unitLabel}
+                            unitLabel={effectiveUnitLabel}
                             isCurrency={isCurrencyRewardType(meta.type)}
-                            step={meta.step}
+                            step={effectiveStep}
                             metaForPreset={meta}
                           />
                         )}

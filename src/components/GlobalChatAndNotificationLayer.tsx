@@ -18,6 +18,7 @@ import {
   Bell,
   BellRing,
   Check,
+  RotateCcw,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { MINTOL_ADMIN_FEATURES_CATALOG } from '../data/empireAndMintolCatalog';
@@ -871,6 +872,8 @@ export const AllowNotificationFooterButton: React.FC = () => {
     notificationsEnabled,
     requestAndEnableNotifications,
     sendTestNotificationNow,
+    accountDeletionRequests,
+    cancelAccountDeletionRequest,
   } = useBank();
 
   const [notifFeedback, setNotifFeedback] = useState<string>('');
@@ -878,6 +881,9 @@ export const AllowNotificationFooterButton: React.FC = () => {
   const openBugCount = bugReports.filter((b) => b.status === 'baru').length;
   const pendingMintolCount = adminHelpRequests.filter((r) => r.status === 'menunggu').length;
   const isBgActive = notificationsEnabled && notificationPermissionStatus === 'granted';
+  const pendingDeletionReq = currentAccount
+    ? accountDeletionRequests.find((r) => r.accountId === currentAccount.id && r.status === 'pending') || null
+    : null;
 
   const handleEnableBgNotif = async () => {
     const res = await requestAndEnableNotifications();
@@ -948,16 +954,39 @@ export const AllowNotificationFooterButton: React.FC = () => {
         <span>Tes Notif</span>
       </button>
 
-      {currentAccount && (
-        <button
-          type="button"
-          onClick={() => setIsDeleteAccountModalOpen(true)}
-          className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer bg-rose-600/25 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-500/60 shadow-sm whitespace-nowrap shrink-0"
-          title="Hapus akun permanen dengan 10 konfirmasi & timer baca 30 detik"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          <span>Hapus Akun</span>
-        </button>
+      {currentAccount && pendingDeletionReq ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setIsDeleteAccountModalOpen(true)}
+            className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/60 shadow-sm whitespace-nowrap shrink-0"
+            title="Pengajuan hapus akun Anda sedang menunggu persetujuan Admin"
+          >
+            <Clock className="w-3.5 h-3.5 text-amber-300" />
+            <span>Menunggu Hapus Admin</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => cancelAccountDeletionRequest(pendingDeletionReq.id)}
+            className="px-3 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1 cursor-pointer bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/60 shadow-sm whitespace-nowrap shrink-0"
+            title="Batalkan pengajuan hapus akun sebelum disetujui Admin"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Batalkan Hapus</span>
+          </button>
+        </div>
+      ) : (
+        currentAccount && (
+          <button
+            type="button"
+            onClick={() => setIsDeleteAccountModalOpen(true)}
+            className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer bg-rose-600/25 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-500/60 shadow-sm whitespace-nowrap shrink-0"
+            title="Ajukan hapus akun (5 konfirmasi & menunggu persetujuan Admin)"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Hapus Akun</span>
+          </button>
+        )
       )}
 
       <AccountDeletion10StepModal
