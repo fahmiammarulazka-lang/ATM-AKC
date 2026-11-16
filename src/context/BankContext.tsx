@@ -10,6 +10,8 @@
  */
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import confetti from 'canvas-confetti';
+import { db } from '../services/firebase';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import {
   BankAccount,
   Transaction,
@@ -1807,6 +1809,55 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem(STORAGE_KEYS.DEV_ROLES, JSON.stringify(devRoles));
     } catch { /* empty */ }
   }, [devRoles]);
+
+  // Real-time Firestore Sync across devices & mobile (including deletedAccountIds)
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'bank_state_v1', 'master_state'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data) {
+          if (data.deletedAccountIds && Array.isArray(data.deletedAccountIds)) {
+            setDeletedAccountIds(data.deletedAccountIds);
+            try {
+              localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(data.deletedAccountIds));
+            } catch { /* empty */ }
+          }
+          if (data.accounts && Array.isArray(data.accounts)) {
+            const delIds = data.deletedAccountIds || [];
+            const cleanAccounts = data.accounts.filter((a: BankAccount) => !delIds.includes(a.id));
+            setAccounts(cleanAccounts);
+            try {
+              localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(cleanAccounts));
+            } catch { /* empty */ }
+          }
+          if (data.transactions && Array.isArray(data.transactions)) setTransactions(data.transactions);
+          if (data.giftEvents && Array.isArray(data.giftEvents)) setGiftEvents(data.giftEvents);
+          if (data.pockets && Array.isArray(data.pockets)) setPockets(data.pockets);
+          if (data.depositos && Array.isArray(data.depositos)) setDepositos(data.depositos);
+        }
+      }
+    }, (err) => {
+      console.error('Firestore sync error:', err);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      try {
+        setDoc(doc(db, 'bank_state_v1', 'master_state'), {
+          accounts,
+          deletedAccountIds,
+          transactions,
+          giftEvents,
+          pockets,
+          depositos,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true }).catch(() => { /* offline silent catch */ });
+      } catch { /* empty */ }
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [accounts, deletedAccountIds, transactions, giftEvents, pockets, depositos]);
 
   const [defaultLetterSealConfig, setDefaultLetterSealConfig] = useState<LetterSignatureStampConfig>(() => {
     try {
@@ -10758,7 +10809,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             executedLogs.push('Diskon Biaya Spin 80%');
             break;
           case 'mintol_diskon_beli_koin':
-            adminUpdateSpinWheelConfig({ coinPackageDiscountPercent: 80 });
+            adminUpdateSpinWheelConfig({ coinPurchaseDiscountPercent: 80 });
             executedLogs.push('Diskon Pembelian 100 Paket Koin 80%');
             break;
           case 'mintol_murahin_harga_koin':
