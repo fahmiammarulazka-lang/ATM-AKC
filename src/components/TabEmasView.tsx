@@ -89,6 +89,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
   const [goldMotif, setGoldMotif] = useState<GoldMotifType>(
     currentAccount?.goldPreferredMotif || 'klasik'
   );
+  const [selectedKarat, setSelectedKarat] = useState<number>(24);
   const [isFlippedBack, setIsFlippedBack] = useState<boolean>(false);
   const [barImgError, setBarImgError] = useState<boolean>(false);
   const [certiImgError, setCertiImgError] = useState<boolean>(false);
@@ -130,6 +131,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
     currentAccount.customUserGoldPricePerGram && currentAccount.customUserGoldPricePerGram >= 1000
       ? currentAccount.customUserGoldPricePerGram
       : goldMarketConfig.currentPricePerGram || 1_400_000;
+  const effectivePricePerGram = Math.round(activePricePerGram * (selectedKarat / 24));
   const isUsingCustomUserPrice = Boolean(
     currentAccount.customUserGoldPricePerGram && currentAccount.customUserGoldPricePerGram >= 1000
   );
@@ -139,7 +141,14 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
     batches.length > 0
       ? batches.reduce((sum, b) => sum + b.grams, 0)
       : currentAccount.goldGrams || 0;
-  const currentMarketValueRp = Math.round(totalGrams * activePricePerGram);
+  const currentMarketValueRp = Math.round(
+    batches.length > 0
+      ? batches.reduce((sum, b) => {
+          const bk = b.karat || 24;
+          return sum + b.grams * activePricePerGram * (bk / 24);
+        }, 0)
+      : totalGrams * activePricePerGram
+  );
   const totalCostModalRp =
     batches.length > 0
       ? batches.reduce((sum, b) => sum + b.costRupiah, 0)
@@ -156,7 +165,8 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
     if (batches.length === 0) return currentMarketValueRp;
     return Math.round(
       batches.reduce((sum, b) => {
-        const gross = b.grams * activePricePerGram;
+        const bk = b.karat || 24;
+        const gross = b.grams * activePricePerGram * (bk / 24);
         const isSameDay = b.purchaseDateKey === todayKey;
         return sum + (isSameDay ? gross * (1 - sameDayPenaltyPct / 100) : gross);
       }, 0)
@@ -303,6 +313,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
         rupiahAmount: parsedNominal,
         goldForm,
         motif: goldMotif,
+        karat: selectedKarat,
       });
       if (res.success) {
         fireGoldParticles();
@@ -1211,6 +1222,52 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
           )}
 
           <form onSubmit={handleExecuteTrade} className="space-y-4 text-xs">
+            {tradeMode === 'buy' && (
+              <div className="rounded-2xl bg-[#11151E] border border-amber-500/30 p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-amber-300 text-xs flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Pilih Karat Emas (1K s/d 24K): {selectedKarat} Karat</span>
+                  </div>
+                  <span className="font-mono text-emerald-300 text-xs font-bold">
+                    {formatRupiah(effectivePricePerGram)} / gram
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[24, 22, 18, 14, 10, 8, 4, 1].map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setSelectedKarat(k)}
+                      className={`px-3 py-1.5 rounded-lg font-mono font-bold text-xs cursor-pointer ${
+                        selectedKarat === k
+                          ? 'bg-amber-400 text-slate-950'
+                          : 'bg-[#090B10] hover:bg-slate-800 border border-slate-700 text-slate-200'
+                      }`}
+                    >
+                      {k}K
+                    </button>
+                  ))}
+                </div>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] text-slate-400">
+                    <span>1K (Paling Murah)</span>
+                    <span>12K</span>
+                    <span>24K (Murni 999.9)</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={24}
+                    step={1}
+                    value={selectedKarat}
+                    onChange={(e) => setSelectedKarat(Number(e.target.value))}
+                    className="w-full accent-amber-400 cursor-pointer"
+                  />
+                </div>
+              </div>
+            )}
+
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-slate-300 font-semibold">
@@ -1477,7 +1534,8 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
               <tbody className="divide-y divide-slate-800/70">
                 {batches.map((b) => {
                   const isSameDay = b.purchaseDateKey === todayKey;
-                  const marketVal = b.grams * activePricePerGram;
+                  const bk = b.karat || 24;
+                  const marketVal = b.grams * activePricePerGram * (bk / 24);
                   const netSell = Math.round(
                     isSameDay ? marketVal * (1 - sameDayPenaltyPct / 100) : marketVal
                   );
@@ -1504,7 +1562,7 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
                         </div>
                       </td>
                       <td className="py-3 px-3 text-slate-200">
-                        {b.goldForm === 'batangan' ? 'Batangan' : 'Perhiasan'} · {b.motif}
+                        {b.goldForm === 'batangan' ? 'Batangan' : 'Perhiasan'} · {b.karat || 24}K · {b.motif}
                       </td>
                       <td className="py-3 px-3 text-right font-mono tabular-nums text-amber-200">
                         {b.grams.toFixed(4)} g

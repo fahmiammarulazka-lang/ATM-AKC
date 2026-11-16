@@ -37,6 +37,8 @@ export interface BankPersistableSnapshot {
   sultanEmpireConfig: unknown;
   featureConfigs: unknown[];
   deletedFeatureIds: string[];
+  deletedAccountIds?: string[];
+  defaultLetterSealConfig?: unknown;
   adminHelpRequests: unknown[];
   appUpdates: unknown[];
   budgetCategories: unknown[];

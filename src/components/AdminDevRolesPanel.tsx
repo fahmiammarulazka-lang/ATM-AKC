@@ -159,8 +159,8 @@ export const AdminDevRolesPanel: React.FC = () => {
                 </div>
               </div>
 
-              {/* Quick Access & PIN Mode Switches */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              {/* Quick Access & PIN Mode & Auto-Approve Switches */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => {
@@ -179,11 +179,11 @@ export const AdminDevRolesPanel: React.FC = () => {
                       : 'bg-slate-950 border-slate-800 text-slate-400'
                   }`}
                 >
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-1.5 truncate">
                     <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>Tombol Cepat Admin</span>
+                    <span className="truncate">Tombol Cepat</span>
                   </span>
-                  <span className="px-2 py-0.5 rounded bg-black/40 font-mono text-[10px]">
+                  <span className="px-1.5 py-0.5 rounded bg-black/40 font-mono text-[9px] shrink-0">
                     {role.canQuickOpenAdmin ? 'AKTIF' : 'OFF'}
                   </span>
                 </button>
@@ -206,16 +206,43 @@ export const AdminDevRolesPanel: React.FC = () => {
                       : 'bg-amber-950/40 border-amber-500/40 text-amber-200'
                   }`}
                 >
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-1.5 truncate">
                     {role.bypassAdminPin ? (
                       <Unlock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                     ) : (
                       <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                     )}
-                    <span>Otorisasi</span>
+                    <span className="truncate">Otorisasi PIN</span>
                   </span>
-                  <span className="px-2 py-0.5 rounded bg-black/40 font-mono text-[10px]">
-                    {role.bypassAdminPin ? 'BEBAS PIN' : 'WAJIB PIN'}
+                  <span className="px-1.5 py-0.5 rounded bg-black/40 font-mono text-[9px] shrink-0">
+                    {role.bypassAdminPin ? 'BEBAS' : 'WAJIB'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    adminUpdateDevRole(role.id, {
+                      autoApproveAccount: !role.autoApproveAccount,
+                    });
+                    setFeedback(
+                      `Aturan persetujuan role "${role.name}": ${
+                        !role.autoApproveAccount ? 'Tanpa Persetujuan (Langsung Aktif)' : 'Wajib Persetujuan Admin'
+                      }.`
+                    );
+                  }}
+                  className={`p-2.5 rounded-xl border font-bold text-[11px] cursor-pointer flex items-center justify-between gap-2 transition-all ${
+                    role.autoApproveAccount
+                      ? 'bg-emerald-950/60 border-emerald-400/60 text-emerald-200'
+                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 truncate">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="truncate">Tanpa ACC</span>
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-black/40 font-mono text-[9px] shrink-0">
+                    {role.autoApproveAccount ? 'OTOMATIS' : 'OFF'}
                   </span>
                 </button>
               </div>

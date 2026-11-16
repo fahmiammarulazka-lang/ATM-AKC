@@ -60,7 +60,7 @@ import {
   ActiveAccountTrial,
   GachaTierRange,
   GachaClaimedItemResult,
-  JobGachaBonusConfig,
+  JobCoinBonusConfig,
   GiftRewardType,
   DevRoleConfig,
   LetterSignatureStampConfig,
@@ -72,10 +72,7 @@ import {
   formatTrialDurationLabel,
 } from '../data/giftRewardsCatalog';
 import { DEFAULT_DEV_ROLES_10 } from '../data/devRolesCatalog';
-import {
-  DEFAULT_JOB_GACHA_BONUS_CONFIG,
-  rollGachaOutcome,
-} from '../utils/gachaUtils';
+import { rollGachaOutcome } from '../utils/gachaUtils';
 import { type FirebaseUser } from '../firebase';
 import {
   saveSnapshotToDeviceStorage,
@@ -578,7 +575,10 @@ interface BankContextType {
   ) => { success: boolean; message: string };
   adminMultiplyAccountBalance: (accountId: string, multiplier: number) => { success: boolean; message: string };
   adminSetAllAccountsTier: (tier: CardTier) => { success: boolean; message: string };
-  adminDeleteAccount: (accountId: string) => { success: boolean; message: string };
+  adminDeleteAccount: (
+    accountId: string,
+    options?: { logoutIfCurrent?: boolean }
+  ) => { success: boolean; message: string };
   adminQuickLoginToAccount: (accountId: string) => { success: boolean; message: string };
   adminQuickToggleFreezeAccount: (accountId: string) => { success: boolean; message: string };
   adminQuickFullEditAccount: (
@@ -623,7 +623,8 @@ interface BankContextType {
     targetClicks: number,
     requiredLevel: number,
     jobTitle: string,
-    coinReward?: number
+    coinReward?: number,
+    clickCount?: number
   ) => {
     success: boolean;
     completed: boolean;
@@ -631,12 +632,8 @@ interface BankContextType {
     targetClicks: number;
     paidAmount?: number;
     coinsEarned?: number;
-    gachaBonusResult?: {
-      tierLabel: string;
-      probabilityPercent: number;
-      amount: number;
-      rewardType: JobGachaBonusConfig['rewardType'];
-    };
+    baseCoinsEarned?: number;
+    bonusCoinsEarned?: number;
     message: string;
   };
   upgradeJobLevelWithCash: () => { success: boolean; newLevel?: number; message: string };
@@ -847,6 +844,7 @@ interface BankContextType {
     rupiahAmount: number;
     goldForm: GoldFormType;
     motif: GoldMotifType;
+    karat?: number;
     note?: string;
   }) => {
     success: boolean;
@@ -1014,9 +1012,9 @@ interface BankContextType {
   adminTriggerGiftEventNow: (eventId: string) => { success: boolean; message: string };
   adminSetGiftDateTestOverride: (override: { month: number; day: number } | null) => void;
 
-  // Sistem Gacha Universal Admin & Bonus Gacha Pekerjaan
-  jobGachaBonusConfig: JobGachaBonusConfig;
-  adminUpdateJobGachaBonusConfig: (config: JobGachaBonusConfig) => { success: boolean; message: string };
+  // Sistem Bonus Coin Lowongan Pekerjaan (Pengali & Bonus Ekstra) & Gacha Universal Admin
+  jobCoinBonusConfig: JobCoinBonusConfig;
+  adminUpdateJobCoinBonusConfig: (config: JobCoinBonusConfig) => { success: boolean; message: string };
   adminExecuteUniversalGachaDrop: (input: {
     targetAccountId: string | '__ALL__';
     rewardType: GiftRewardType;
@@ -1094,9 +1092,16 @@ const STORAGE_KEYS = {
   BUDGET_ALERTS: 'bank_nusantara_budget_alerts_v1',
   SPIN_VAULT: 'bank_nusantara_spin_vault_v1',
   GIFT_EVENTS: 'bank_nusantara_gift_events_v1',
-  JOB_GACHA_BONUS: 'bank_nusantara_job_gacha_v1',
+  JOB_COIN_BONUS: 'bank_nusantara_job_coin_bonus_v1',
   DEV_ROLES: 'bank_nusantara_dev_roles_v1',
   LETTER_SEAL: 'bank_nusantara_letter_seal_v1',
+  DELETED_ACCOUNTS: 'bank_nusantara_deleted_accounts_v1',
+};
+
+const DEFAULT_JOB_COIN_BONUS_CONFIG: JobCoinBonusConfig = {
+  enabled: true,
+  coinMultiplier: 1,
+  extraBonusCoins: 0,
 };
 
 interface SpinVaultEntry {
@@ -1260,17 +1265,44 @@ export const DEFAULT_USER_APP_SETTINGS: UserAppSettings = {
 };
 
 export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [deletedAccountIds, setDeletedAccountIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.DELETED_ACCOUNTS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch { /* empty */ }
+    return [];
+  });
+
   const [accounts, setAccounts] = useState<BankAccount[]>(() => {
+    let deletedIds: string[] = [];
+    try {
+      const rawDel = localStorage.getItem(STORAGE_KEYS.DELETED_ACCOUNTS);
+      if (rawDel) {
+        const parsedDel = JSON.parse(rawDel);
+        if (Array.isArray(parsedDel)) deletedIds = parsedDel;
+      }
+    } catch { /* empty */ }
+
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.ACCOUNTS);
-      if (saved) {
+      if (saved !== null) {
         const parsed: BankAccount[] = JSON.parse(saved);
-        const missing = INITIAL_ACCOUNTS.filter((initAcc) => !parsed.some((p) => p.id === initAcc.id));
-        return mergeAccountsWithSpinVault([...parsed, ...missing]);
+        if (Array.isArray(parsed)) {
+          return mergeAccountsWithSpinVault(
+            parsed.filter((p) => !deletedIds.includes(p.id))
+          );
+        }
       }
-      return mergeAccountsWithSpinVault(INITIAL_ACCOUNTS);
+      return mergeAccountsWithSpinVault(
+        INITIAL_ACCOUNTS.filter((initAcc) => !deletedIds.includes(initAcc.id))
+      );
     } catch {
-      return mergeAccountsWithSpinVault(INITIAL_ACCOUNTS);
+      return mergeAccountsWithSpinVault(
+        INITIAL_ACCOUNTS.filter((initAcc) => !deletedIds.includes(initAcc.id))
+      );
     }
   });
 
@@ -1742,12 +1774,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
   const [activeGiftModal, setActiveGiftModal] = useState<{ eventId: string; isReplay: boolean } | null>(null);
   const [giftDateTestOverride, setGiftDateTestOverride] = useState<{ month: number; day: number } | null>(null);
-  const [jobGachaBonusConfig, setJobGachaBonusConfig] = useState<JobGachaBonusConfig>(() => {
+  const [jobCoinBonusConfig, setJobCoinBonusConfig] = useState<JobCoinBonusConfig>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.JOB_GACHA_BONUS);
-      if (saved) return JSON.parse(saved);
+      const saved = localStorage.getItem(STORAGE_KEYS.JOB_COIN_BONUS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            enabled: parsed.enabled !== false,
+            coinMultiplier: Math.max(0.1, Number(parsed.coinMultiplier) || 1),
+            extraBonusCoins: Math.max(0, Math.round(Number(parsed.extraBonusCoins) || 0)),
+          };
+        }
+      }
     } catch { /* empty */ }
-    return DEFAULT_JOB_GACHA_BONUS_CONFIG;
+    return DEFAULT_JOB_COIN_BONUS_CONFIG;
   });
 
   const [devRoles, setDevRoles] = useState<DevRoleConfig[]>(() => {
@@ -1793,9 +1834,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEYS.JOB_GACHA_BONUS, JSON.stringify(jobGachaBonusConfig));
+      localStorage.setItem(STORAGE_KEYS.JOB_COIN_BONUS, JSON.stringify(jobCoinBonusConfig));
     } catch { /* empty */ }
-  }, [jobGachaBonusConfig]);
+  }, [jobCoinBonusConfig]);
 
   useEffect(() => {
     try {
@@ -1821,12 +1862,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }).catch(() => { /* ignore offline */ });
   };
 
-  // Sync to local storage + Spin Vault
+  // Sync to local storage + Spin Vault (debounced to prevent main-thread lag on rapid interactions)
+  const accountsRef = useRef<BankAccount[]>(accounts);
+  accountsRef.current = accounts;
+
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
-      writeSpinVaultFromAccounts(accounts);
-    } catch { /* empty */ }
+    const t = window.setTimeout(() => {
+      try {
+        localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(accounts));
+        writeSpinVaultFromAccounts(accounts);
+      } catch { /* empty */ }
+    }, 220);
+    return () => window.clearTimeout(t);
   }, [accounts]);
 
   useEffect(() => {
@@ -1846,6 +1893,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem(STORAGE_KEYS.DELETED_FEATURES, JSON.stringify(deletedFeatureIds));
     } catch { /* empty */ }
   }, [deletedFeatureIds]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(deletedAccountIds));
+    } catch { /* empty */ }
+  }, [deletedAccountIds]);
 
   useEffect(() => {
     try {
@@ -2114,6 +2167,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     sultanEmpireConfig,
     featureConfigs: rawFeatureConfigs,
     deletedFeatureIds,
+    deletedAccountIds,
+    defaultLetterSealConfig,
     adminHelpRequests,
     appUpdates,
     budgetCategories,
@@ -2134,14 +2189,34 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isApplyingExternalSnapshotRef.current = true;
     lastSyncEpochRef.current = incomingTs;
 
-    if (Array.isArray(snapshot.accounts) && snapshot.accounts.length > 0) {
-      const parsed = snapshot.accounts as BankAccount[];
-      const missing = INITIAL_ACCOUNTS.filter((initAcc) => !parsed.some((p) => p.id === initAcc.id));
-      const mergedAccounts = mergeAccountsWithSpinVault([...parsed, ...missing]);
+    const incomingDeletedAccountIds = Array.isArray(snapshot.deletedAccountIds)
+      ? snapshot.deletedAccountIds
+      : [];
+    const mergedDeletedAccountIds = Array.from(
+      new Set([...deletedAccountIds, ...incomingDeletedAccountIds])
+    );
+    if (mergedDeletedAccountIds.length > 0) {
+      setDeletedAccountIds(mergedDeletedAccountIds);
+      try {
+        localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(mergedDeletedAccountIds));
+      } catch { /* empty */ }
+    }
+
+    if (Array.isArray(snapshot.accounts)) {
+      const parsed = (snapshot.accounts as BankAccount[]).filter(
+        (acc) => !mergedDeletedAccountIds.includes(acc.id)
+      );
+      const mergedAccounts = mergeAccountsWithSpinVault(parsed);
       setAccounts(mergedAccounts);
       writeSpinVaultFromAccounts(mergedAccounts, incomingTs);
     }
-    if (typeof snapshot.currentAccountId === 'string' && snapshot.currentAccountId) {
+    if (snapshot.defaultLetterSealConfig && typeof snapshot.defaultLetterSealConfig === 'object') {
+      setDefaultLetterSealConfig((prev) => ({
+        ...prev,
+        ...(snapshot.defaultLetterSealConfig as LetterSignatureStampConfig),
+      }));
+    }
+    if (typeof snapshot.currentAccountId === 'string') {
       setCurrentAccountIdState(snapshot.currentAccountId);
     }
     if (Array.isArray(snapshot.transactions)) {
@@ -2307,6 +2382,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     sultanEmpireConfig,
     rawFeatureConfigs,
     deletedFeatureIds,
+    deletedAccountIds,
+    defaultLetterSealConfig,
     adminHelpRequests,
     appUpdates,
     budgetCategories,
@@ -2476,7 +2553,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         text.includes('banned') ||
         text.includes('unban') ||
         text.includes('pin') ||
-        text.includes('keamanan') ||
+        text.includes('ringkasan') ||
         text.includes('nomor rekening') ||
         text.includes('kartu')
       ) {
@@ -2507,7 +2584,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       category === 'loan'
         ? 'pinjaman'
         : category === 'security'
-        ? 'keamanan'
+        ? 'ringkasan'
         : category === 'transaction'
         ? 'mutasi'
         : 'ringkasan';
@@ -3293,6 +3370,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setAdminUnlocked = (unlocked: boolean) => {
     setAdminUnlockedState(unlocked);
+    if (unlocked && currentAccount) {
+      setAccounts((prev) =>
+        prev.map((a) =>
+          a.id === currentAccount.id
+            ? {
+                ...a,
+                hasAccessedAdminPanel: true,
+                adminAccessTimestamp: new Date().toISOString(),
+              }
+            : a
+        )
+      );
+      try {
+        localStorage.setItem(`bank_nusantara_admin_accessed_${currentAccount.id}`, 'true');
+        localStorage.setItem('bank_nusantara_global_admin_accessed', 'true');
+      } catch { /* empty */ }
+    }
   };
 
   const currentAccountTransactions = transactions.filter(
@@ -3376,7 +3470,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
         skipServerBroadcast: true,
       }
     );
@@ -3428,7 +3522,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'Notifikasi latar belakang terus memantau penguncian kartu, PIN, dan aktivitas rekening Anda.',
         type: 'warning',
         category: 'security',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
       },
       {
         title: 'Pantau Pinjaman & Kode Redeem 🎁',
@@ -4658,7 +4752,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
         accountId: newAccount.id,
       }
     );
@@ -4718,7 +4812,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
         accountId,
       }
     );
@@ -4758,7 +4852,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
         accountId,
       }
     );
@@ -4795,7 +4889,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         {
           category: 'security',
           targetView: 'dashboard',
-          targetDashboardTab: 'keamanan',
+          targetDashboardTab: 'ringkasan',
           accountId,
         }
       );
@@ -4809,7 +4903,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         {
           category: 'security',
           targetView: 'dashboard',
-          targetDashboardTab: 'keamanan',
+          targetDashboardTab: 'ringkasan',
           accountId,
         }
       );
@@ -4842,7 +4936,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
         accountId,
       }
     );
@@ -4895,7 +4989,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
         accountId: targetAcc.id,
       }
     );
@@ -5009,8 +5103,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
    */
   useEffect(() => {
     const checkExpiredBans = () => {
+      const currentAccounts = accountsRef.current;
       const now = Date.now();
-      const expiredList = accounts.filter(
+      const expiredList = currentAccounts.filter(
         (acc) =>
           acc.cardStatus === 'banned' &&
           acc.banInfo?.durationType === 'custom' &&
@@ -5065,7 +5160,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     checkExpiredBans();
     const intervalId = setInterval(checkExpiredBans, 1000);
     return () => clearInterval(intervalId);
-  }, [accounts]);
+  }, []);
 
   const adminBanCard = (input: {
     accountId: string;
@@ -5118,7 +5213,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
         accountId: target.id,
       }
     );
@@ -5170,7 +5265,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
         accountId: target.id,
       }
     );
@@ -5847,7 +5942,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
       }
     );
     playAtmSound('success');
@@ -6137,21 +6232,121 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  const adminDeleteAccount = (accountId: string) => {
-    if (accounts.length <= 1) {
-      return { success: false, message: 'Tidak dapat menghapus satu-satunya rekening yang tersisa!' };
-    }
+  const adminDeleteAccount = (
+    accountId: string,
+    options?: { logoutIfCurrent?: boolean }
+  ) => {
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan!' };
+
     const remaining = accounts.filter((a) => a.id !== accountId);
+    const nextDeletedAccountIds = Array.from(new Set([...deletedAccountIds, accountId]));
+    const nextTransactions = transactions.filter((tx) => tx.accountId !== accountId);
+    const nextLoans = loans.filter((l) => l.accountId !== accountId);
+    const nextScheduledPayments = scheduledPayments.filter((s) => s.accountId !== accountId);
+    const nextPockets = pockets.filter((p) => p.accountId !== accountId);
+    const nextDepositos = depositos.filter((d) => d.accountId !== accountId);
+    const nextCardUpgrades = cardUpgrades.filter((u) => u.accountId !== accountId);
+    const nextPinResets = pinResetRequests.filter(
+      (p) => p.accountId !== accountId && p.accountNumber !== target.accountNumber
+    );
+    const nextCardless = cardlessTokens.filter((c) => c.accountId !== accountId);
+    const nextFavorites = favorites.filter((f) => f.accountNumber !== target.accountNumber);
+    const nextPurchasedCodes = purchasedCodes.filter((c) => c.accountId !== accountId);
+    const nextResiList = resiList.filter((r) => r.accountId !== accountId);
+    const nextChats = chats.filter(
+      (c) => c.senderAccount !== target.accountNumber && c.receiverAccount !== target.accountNumber
+    );
+    const nextSpinHistory = spinHistory.filter((s) => s.accountId !== accountId);
+    const nextAdminHelpRequests = adminHelpRequests.filter(
+      (r) => r.requesterAccountId !== accountId
+    );
+    const nextManualExpenses = manualExpenses.filter((m) => m.accountId !== accountId);
+
+    const isDeletingCurrent = currentAccountId === accountId;
+    const nextCurrentAccountId = isDeletingCurrent
+      ? remaining[0]?.id || ''
+      : currentAccountId;
+    const shouldLogout =
+      remaining.length === 0 || (Boolean(options?.logoutIfCurrent) && isDeletingCurrent);
+    const nextGoogleUser = shouldLogout ? null : googleUser;
+
+    setDeletedAccountIds(nextDeletedAccountIds);
     setAccounts(remaining);
-    if (currentAccountId === accountId && remaining[0]) {
-      setCurrentAccountIdState(remaining[0].id);
+    setTransactions(nextTransactions);
+    setLoans(nextLoans);
+    setScheduledPayments(nextScheduledPayments);
+    setPockets(nextPockets);
+    setDepositos(nextDepositos);
+    setCardUpgrades(nextCardUpgrades);
+    setPinResetRequests(nextPinResets);
+    setCardlessTokens(nextCardless);
+    setFavorites(nextFavorites);
+    setPurchasedCodes(nextPurchasedCodes);
+    setResiList(nextResiList);
+    setChats(nextChats);
+    setSpinHistory(nextSpinHistory);
+    setAdminHelpRequests(nextAdminHelpRequests);
+    setManualExpenses(nextManualExpenses);
+
+    if (isDeletingCurrent) {
+      setCurrentAccountIdState(nextCurrentAccountId);
     }
+    if (shouldLogout) {
+      setGoogleUser(null);
+    }
+
+    const nowEpoch = Date.now();
+    lastSyncEpochRef.current = nowEpoch;
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(remaining));
+      localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(nextDeletedAccountIds));
+      localStorage.setItem(STORAGE_KEYS.CURRENT_ACC, nextCurrentAccountId);
+      if (shouldLogout) {
+        localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
+      }
+      writeSpinVaultFromAccounts(remaining, nowEpoch);
+    } catch { /* empty */ }
+
+    try {
+      const snap: BankPersistableSnapshot = {
+        ...buildPersistableSnapshot(nowEpoch),
+        updatedAtMs: nowEpoch,
+        currentAccountId: nextCurrentAccountId,
+        googleUser: nextGoogleUser,
+        accounts: remaining,
+        deletedAccountIds: nextDeletedAccountIds,
+        transactions: nextTransactions,
+        loans: nextLoans,
+        scheduledPayments: nextScheduledPayments,
+        pockets: nextPockets,
+        depositos: nextDepositos,
+        cardUpgrades: nextCardUpgrades,
+        pinResetRequests: nextPinResets,
+        cardlessTokens: nextCardless,
+        favorites: nextFavorites,
+        purchasedCodes: nextPurchasedCodes,
+        resiList: nextResiList,
+        chats: nextChats,
+        spinHistory: nextSpinHistory,
+        adminHelpRequests: nextAdminHelpRequests,
+        manualExpenses: nextManualExpenses,
+      };
+      latestSnapshotRef.current = snap;
+      void saveSnapshotToDeviceStorage(snap, 'default');
+      fetch('/api/db/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scopeKey: 'default', snapshot: snap }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch { /* empty */ }
+
     playAtmSound('beep');
     return {
       success: true,
-      message: `Rekening & kartu atas nama ${target.fullName} (${target.accountNumber}) berhasil dihapus!`,
+      message: `Rekening & kartu atas nama ${target.fullName} (${target.accountNumber}) berhasil dihapus permanen dari seluruh sistem!`,
     };
   };
 
@@ -6177,7 +6372,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         category: 'security',
         targetView: 'dashboard',
-        targetDashboardTab: 'keamanan',
+        targetDashboardTab: 'ringkasan',
         accountId,
       }
     );
@@ -7323,6 +7518,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setBudgetCategories(DEFAULT_BUDGET_CATEGORIES);
     setManualExpenses([]);
     setBudgetTxCategoryMap({});
+    setDeletedAccountIds([]);
     setBudgetAlertHistory([]);
     setGoogleUser(null);
     void clearDeviceSnapshotStorage();
@@ -7566,7 +7762,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     targetClicks: number,
     requiredLevel: number,
     jobTitle: string,
-    coinReward = 0
+    coinReward = 0,
+    clickCount = 1
   ): {
     success: boolean;
     completed: boolean;
@@ -7574,12 +7771,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     targetClicks: number;
     paidAmount?: number;
     coinsEarned?: number;
-    gachaBonusResult?: {
-      tierLabel: string;
-      probabilityPercent: number;
-      amount: number;
-      rewardType: JobGachaBonusConfig['rewardType'];
-    };
+    baseCoinsEarned?: number;
+    bonusCoinsEarned?: number;
     message: string;
   } => {
     if (!currentAccount) {
@@ -7606,47 +7799,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const power = Math.max(1, currentAccount.clickPower || 1);
     const mult = Math.max(1, currentAccount.salaryMultiplier || 1);
+    const safeClickCount = Math.max(1, Math.round(clickCount || 1));
     const prevClicks = currentAccount.jobClickProgress?.[jobId] || 0;
-    const nextClicks = prevClicks + power;
+    const nextClicks = prevClicks + power * safeClickCount;
 
     if (nextClicks >= targetClicks) {
       const finalSalary = Math.round(salary * mult);
       const baseCoins = coinReward > 0 ? coinReward : Math.max(2, Math.round(salary / 50_000));
-      const finalCoins = Math.max(1, Math.round(baseCoins * mult));
+      const baseWithSalaryMult = Math.max(1, Math.round(baseCoins * mult));
+      const adminCoinMult = jobCoinBonusConfig.enabled
+        ? Math.max(0.1, jobCoinBonusConfig.coinMultiplier || 1)
+        : 1;
+      const adminExtraCoins = jobCoinBonusConfig.enabled
+        ? Math.max(0, Math.round(jobCoinBonusConfig.extraBonusCoins || 0))
+        : 0;
+      const multipliedCoins = Math.max(1, Math.round(baseWithSalaryMult * adminCoinMult));
+      const totalCoinsCredited = multipliedCoins + adminExtraCoins;
+      const bonusCoinsEarned = Math.max(0, totalCoinsCredited - baseWithSalaryMult);
 
-      let extraGachaCash = 0;
-      let extraGachaCoins = 0;
-      let extraGachaVouchers = 0;
-      let extraGachaPoints = 0;
-      let gachaBonusResult:
-        | {
-            tierLabel: string;
-            probabilityPercent: number;
-            amount: number;
-            rewardType: JobGachaBonusConfig['rewardType'];
-          }
-        | undefined;
-
-      if (jobGachaBonusConfig.enabled && jobGachaBonusConfig.tiers.length > 0) {
-        const gStep = jobGachaBonusConfig.rewardType === 'cash_balance' ? 5000 : 1;
-        const roll = rollGachaOutcome(jobGachaBonusConfig.tiers, gStep);
-        gachaBonusResult = {
-          tierLabel: roll.tierLabel,
-          probabilityPercent: roll.probabilityPercent,
-          amount: roll.rolledAmount,
-          rewardType: jobGachaBonusConfig.rewardType,
-        };
-        if (jobGachaBonusConfig.rewardType === 'cash_balance') extraGachaCash = roll.rolledAmount;
-        if (jobGachaBonusConfig.rewardType === 'spin_coins') extraGachaCoins = roll.rolledAmount;
-        if (jobGachaBonusConfig.rewardType === 'level_voucher') extraGachaVouchers = roll.rolledAmount;
-        if (jobGachaBonusConfig.rewardType === 'reward_points') extraGachaPoints = roll.rolledAmount;
-      }
-
-      const totalCashCredited = finalSalary + extraGachaCash;
-      const totalCoinsCredited = finalCoins + extraGachaCoins;
       const isUnlim =
         currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
-      const newBalance = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance + totalCashCredited;
+      const newBalance = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance + finalSalary;
 
       setAccounts((prev) =>
         prev.map((a) => {
@@ -7656,40 +7829,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ...a,
             balance: newBalance,
             spinCoins: (a.spinCoins || 0) + totalCoinsCredited,
-            levelVouchers: (a.levelVouchers || 0) + extraGachaVouchers,
             jobClickProgress: nextMap,
             totalJobsCompleted: (a.totalJobsCompleted || 0) + 1,
-            totalJobEarnings: (a.totalJobEarnings || 0) + totalCashCredited,
-            rewardPoints:
-              (a.rewardPoints || 0) + Math.max(10, Math.round(finalSalary / 10_000)) + extraGachaPoints,
+            totalJobEarnings: (a.totalJobEarnings || 0) + finalSalary,
+            rewardPoints: (a.rewardPoints || 0) + Math.max(10, Math.round(finalSalary / 10_000)),
           };
         })
       );
 
-      const gachaDesc = gachaBonusResult
-        ? ` + Gacha Bonus [${gachaBonusResult.tierLabel} • ${gachaBonusResult.probabilityPercent}%]: +${
-            gachaBonusResult.rewardType === 'cash_balance'
-              ? formatRupiah(gachaBonusResult.amount)
-              : `${gachaBonusResult.amount.toLocaleString('id-ID')} ${
-                  gachaBonusResult.rewardType === 'spin_coins'
-                    ? 'Coin'
-                    : gachaBonusResult.rewardType === 'level_voucher'
-                    ? 'Voucher Level'
-                    : 'Poin'
-                }`
-          }`
-        : '';
+      const coinBonusDesc =
+        bonusCoinsEarned > 0
+          ? ` (termasuk Bonus Coin Admin +${bonusCoinsEarned.toLocaleString('id-ID')} Coin)`
+          : '';
 
       const salaryTx: Transaction = {
         id: `tx-job-${Date.now()}-${Math.floor(Math.random() * 999)}`,
         accountId: currentAccount.id,
         type: 'setor',
         title: `💼 Gaji & Coin Cair: ${jobTitle} (${targetClicks}/${targetClicks} Klik)`,
-        amount: totalCashCredited,
+        amount: finalSalary,
         coinAmount: totalCoinsCredited,
         recipientAccount: currentAccount.accountNumber,
         recipientName: currentAccount.fullName,
-        description: `Gaji ${formatRupiah(finalSalary)} + ${finalCoins.toLocaleString('id-ID')} Coin${gachaDesc}`,
+        description: `Gaji ${formatRupiah(finalSalary)} + ${totalCoinsCredited.toLocaleString('id-ID')} Coin${coinBonusDesc}`,
         referenceNo: `JOB-${Date.now().toString().slice(-6)}`,
         timestamp: new Date().toISOString(),
         status: 'success',
@@ -7703,12 +7865,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         completed: true,
         currentClicks: 0,
         targetClicks,
-        paidAmount: totalCashCredited,
+        paidAmount: finalSalary,
         coinsEarned: totalCoinsCredited,
-        gachaBonusResult,
+        baseCoinsEarned: baseWithSalaryMult,
+        bonusCoinsEarned,
         message: `🎉 TARGET ${targetClicks.toLocaleString('id-ID')} KLIK TERCAPAI! Anda langsung digaji ${formatRupiah(
           finalSalary
-        )} + ${finalCoins.toLocaleString('id-ID')} Coin${gachaDesc}!`,
+        )} + ${totalCoinsCredited.toLocaleString('id-ID')} Coin${coinBonusDesc}!`,
       };
     } else {
       setAccounts((prev) =>
@@ -8949,7 +9112,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const cashCost = calculateCashSpinCost(spinCount, spinWheelConfig);
       rupiahToSpend = cashCost.finalRupiah;
       if (!isAdminCard && currentAccount.balance < rupiahToSpend) {
-        playAtmSound('error');
+        playAtmSound('alert');
         return {
           success: false,
           message: `Saldo rekening Anda tidak mencukupi untuk ${spinCount}x Spin Pakai Uang Langsung! Dibutuhkan ${formatRupiahWithDecimals(
@@ -8963,7 +9126,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const { finalCoins } = calculateSpinCost(spinCount, spinWheelConfig);
       coinsToSpend = finalCoins;
       if (currentCoins < coinsToSpend) {
-        playAtmSound('error');
+        playAtmSound('alert');
         return {
           success: false,
           message: `Koin Spin Anda belum mencukupi untuk ${spinCount}x Spin! Dibutuhkan ${coinsToSpend.toLocaleString(
@@ -9178,7 +9341,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const isInf = isUnlimitedNumber(currentAccount.balance);
     if (!isInf && currentAccount.balance < totalCost) {
-      playAtmSound('error');
+      playAtmSound('alert');
       return {
         success: false,
         message: `Saldo tidak mencukupi untuk membeli ${cleanQty}x ${biz.name}. Dibutuhkan ${formatRupiah(
@@ -9241,7 +9404,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const currentOwned = currentAccount.empireBusinesses?.[businessId] || 0;
     const cleanQty = Math.max(1, Math.min(currentOwned, Math.floor(quantity)));
     if (currentOwned <= 0 || cleanQty <= 0) {
-      playAtmSound('error');
+      playAtmSound('alert');
       return {
         success: false,
         message: `Anda belum memiliki unit ${biz.name} untuk dilelang.`,
@@ -9323,7 +9486,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     if (totalUnits === 0) {
-      playAtmSound('error');
+      playAtmSound('alert');
       return {
         success: false,
         message: 'Anda belum memiliki Rig Mining atau Aset Lelang. Beli minimal 1 unit terlebih dahulu!',
@@ -9404,7 +9567,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (action === 'buy') {
       if (!isInf && currentAccount.balance < totalValue) {
-        playAtmSound('error');
+        playAtmSound('alert');
         return {
           success: false,
           message: `Saldo tidak cukup untuk membeli ${cleanUnits} ${asset.unitLabel} ${asset.name} (${formatRupiah(
@@ -9436,7 +9599,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     } else {
       if (currentHolding < cleanUnits) {
-        playAtmSound('error');
+        playAtmSound('alert');
         return {
           success: false,
           message: `Portofolio ${asset.name} kamu hanya ${currentHolding} ${asset.unitLabel}.`,
@@ -9485,7 +9648,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isInf = isUnlimitedNumber(currentAccount.balance);
 
     if (!isInf && currentAccount.balance < finalPrice) {
-      playAtmSound('error');
+      playAtmSound('alert');
       return {
         success: false,
         message: `Saldo kurang untuk membuka ${vault.name}. Dibutuhkan ${formatRupiah(finalPrice)}.`,
@@ -9618,6 +9781,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     rupiahAmount: number;
     goldForm: GoldFormType;
     motif: GoldMotifType;
+    karat?: number;
     note?: string;
   }) => {
     if (!currentAccount) {
@@ -9646,8 +9810,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    const activePrice = getEffectiveGoldPrice(currentAccount);
-    const gramsAdded = cleanAmount / activePrice;
+    const karat = input.karat && input.karat >= 1 && input.karat <= 24 ? input.karat : 24;
+    const basePrice = getEffectiveGoldPrice(currentAccount);
+    const activePricePerGram = Math.round(basePrice * (karat / 24));
+    const gramsAdded = cleanAmount / activePricePerGram;
     const now = new Date();
     const newBatch: GoldBatchRecord = {
       id: `gold-batch-${Date.now()}-${Math.floor(Math.random() * 999)}`,
@@ -9655,9 +9821,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       purchaseDateKey: getLocalDateKey(now),
       grams: gramsAdded,
       costRupiah: cleanAmount,
-      pricePerGramAtBuy: activePrice,
+      pricePerGramAtBuy: activePricePerGram,
       goldForm: input.goldForm,
       motif: input.motif,
+      karat,
       note: input.note,
     };
 
@@ -9684,12 +9851,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       id: `tx-gold-buy-${Date.now()}`,
       accountId: currentAccount.id,
       type: 'beli_emas',
-      title: `Beli Emas 24K (${input.goldForm === 'batangan' ? 'Batangan' : 'Perhiasan'}) — ${gramsAdded.toFixed(4)} g`,
+      title: `Beli Emas ${karat}K (${input.goldForm === 'batangan' ? 'Batangan' : 'Perhiasan'}) — ${gramsAdded.toFixed(4)} g`,
       amount: cleanAmount,
       goldGrams: gramsAdded,
       timestamp: now.toISOString(),
-      description: `Pembelian Emas 24K 999.9 senilai ${formatRupiah(cleanAmount)} @ ${formatRupiah(activePrice)}/gr`,
-      recipientName: 'Brankas Emas 24K Bank Nusantara',
+      description: `Pembelian Emas ${karat}K senilai ${formatRupiah(cleanAmount)} @ ${formatRupiah(activePricePerGram)}/gr`,
+      recipientName: `Brankas Emas ${karat}K Bank Nusantara`,
       status: 'success',
       referenceNo: `GLD-${Date.now().toString().slice(-6)}`,
       category: 'emas',
@@ -9699,7 +9866,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return {
       success: true,
-      message: `Pembelian Emas 24K sebesar ${formatRupiah(cleanAmount)} (${gramsAdded.toFixed(4)} gram) berhasil!`,
+      message: `Pembelian Emas ${karat}K sebesar ${formatRupiah(cleanAmount)} (${gramsAdded.toFixed(4)} gram) berhasil!`,
       gramsAdded,
       batch: newBatch,
       newBalance: nextBalance,
@@ -9755,6 +9922,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ];
 
     let gramsRemainingToSell = 0;
+    const totalMarketVal = workingBatches.reduce((sum, b) => {
+      const bk = b.karat || 24;
+      return sum + b.grams * activePrice * (bk / 24);
+    }, 0);
+
     if (input.mode === 'all') {
       gramsRemainingToSell = totalOwnedGrams;
     } else if (input.mode === 'batch' && input.batchId) {
@@ -9771,15 +9943,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           message: `Nominal penjualan minimal adalah ${formatRupiah(minNom)}.`,
         };
       }
-      gramsRemainingToSell = cleanNominal / activePrice;
-      if (gramsRemainingToSell > totalOwnedGrams + 0.00001) {
+      if (cleanNominal > totalMarketVal + 100) {
         return {
           success: false,
           message: `Saldo emas tidak mencukupi. Maksimal nilai pasar emas Anda saat ini adalah ${formatRupiah(
-            Math.round(totalOwnedGrams * activePrice)
+            Math.round(totalMarketVal)
           )}.`,
         };
       }
+      let rem = cleanNominal;
+      let totalGramsToSell = 0;
+      for (const b of workingBatches) {
+        if (rem <= 0) break;
+        const bk = b.karat || 24;
+        const bPrice = activePrice * (bk / 24);
+        const bMax = b.grams * bPrice;
+        const takeVal = Math.min(bMax, rem);
+        totalGramsToSell += takeVal / bPrice;
+        rem -= takeVal;
+      }
+      gramsRemainingToSell = totalGramsToSell;
     }
 
     let grossMarketValue = 0;
@@ -9800,7 +9983,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       const takeGrams = Math.min(batch.grams, gramsRemainingToSell);
       const portionRatio = batch.grams > 0 ? takeGrams / batch.grams : 0;
-      const portionMarketValue = takeGrams * activePrice;
+      const bk = batch.karat || 24;
+      const batchActivePrice = activePrice * (bk / 24);
+      const portionMarketValue = takeGrams * batchActivePrice;
       const isSameDay = batch.purchaseDateKey === todayKey;
       if (isSameDay) sameDayApplied = true;
       const netProceeds = isSameDay
@@ -10486,7 +10671,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }) => {
     const cleanMsg = (input.message || '').trim();
     if (!cleanMsg) {
-      playAtmSound('error');
+      playAtmSound('alert');
       return {
         success: false,
         message: 'Pesan penjelasan minta tolong ke Admin WAJIB diisi dan tidak boleh kosong!',
@@ -10577,15 +10762,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             executedLogs.push('Diskon Pembelian 100 Paket Koin 80%');
             break;
           case 'mintol_murahin_harga_koin':
-            adminUpdateSpinWheelConfig({ basePricePerCoin: 1000 });
+            adminUpdateSpinWheelConfig({ baseCoinPriceRupiah: 1000 });
             executedLogs.push('Harga dasar 1 Koin diturunkan jadi Rp 1.000');
             break;
           case 'mintol_boost_probabilitas_spin':
-            adminUpdateSpinWheelConfig({ highPrizeProbabilityBoost: 500 });
-            executedLogs.push('Boost Probabilitas Hadiah Besar Spin 500x');
+            adminUpdateSpinWheelConfig({ luckMultiplier: 10 });
+            executedLogs.push('Boost Probabilitas Hadiah Besar Spin 10x');
             break;
           case 'mintol_force_jackpot_20m':
-            adminUpdateSpinWheelConfig({ guaranteedMinPrizeId: 'spin-20m' });
+            adminUpdateSpinWheelConfig({ forceJackpotMode: 'only_15m_20m' });
             executedLogs.push('Mode Pasti Jackpot Rp 20 Juta Diaktifkan');
             break;
           case 'mintol_naik_level_kerja':
@@ -10672,10 +10857,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           case 'mintol_kode_redeem_spesial':
             createRedeemCode({
               code: `MINTOL-${targetAcc.accountNumber.slice(-4)}`,
+              title: `Voucher Mintol ${targetAcc.fullName}`,
               rewardAmount: reqAmount,
-              maxQuota: 5,
-              expiresAt: new Date(Date.now() + 7 * 86400000).toISOString(),
-              description: `Kode Redeem Khusus Mintol ${targetAcc.fullName}`,
+              maxClaims: 5,
+              durationMinutes: 10080,
             });
             executedLogs.push(`Kode Redeem MINTOL-${targetAcc.accountNumber.slice(-4)} dibuat`);
             break;
@@ -10684,11 +10869,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             executedLogs.push('+Pulsa Rp 1 Juta & +Token PLN Rp 1 Juta');
             break;
           case 'mintol_lunasi_cod_resi':
-            adminFreeClearAllCodResi(targetId);
+            adminFreeClearAllCodResi();
             executedLogs.push('Semua paket COD lunas & terkirim');
             break;
           case 'mintol_bunga_deposito_celengan':
-            adminBoostDepositosAndPockets(targetId, 25);
+            adminBoostDepositosAndPockets(25);
             executedLogs.push('Deposito & Celengan ditambah bonus +25%');
             break;
           case 'mintol_poin_reward_sultan':
@@ -11734,6 +11919,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     themeColor?: 'amber' | 'emerald' | 'rose' | 'indigo';
     rewards: AdminGiftRewardItem[];
     customSealConfig?: LetterSignatureStampConfig | null;
+    frequencyType?: 'once' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom_recurring';
+    recurringIntervalHours?: number;
+    autoRotateRecurring?: boolean;
+    maxRedeemsPerUser?: number;
+    targetCardTier?: CardTier | 'all';
+    targetDevRoleOnly?: string;
+    celebrationEffect?: 'confetti' | 'gold_rain' | 'fireworks' | 'none';
+    soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
+    requireAdminVerifiedAccessForNotif?: boolean;
+    adminAuditLogTag?: string;
+    customStampText?: string;
+    watermarkText?: string;
+    securityHashToken?: string;
+    allowAnonymousClaim?: boolean;
+    notifyOnlyAdminVerifiedUsers?: boolean;
+    priorityLevel?: 'normal' | 'high' | 'vip_exclusive';
+    customCssTheme?: string;
+    attachmentFileUrl?: string;
+    attachmentFileName?: string;
+    autoExpireHours?: number;
+    allowTransferableGift?: boolean;
   }): { success: boolean; message: string; event: AdminGiftEventPackage } => {
     const monthLabel = MONTHS_INDO.find((m) => m.value === input.scheduleMonth)?.label || `Bulan ${input.scheduleMonth}`;
     const scheduleLabel = `${input.scheduleDay} ${monthLabel}`;
@@ -11763,6 +11969,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       createdAt: existing ? existing.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       lastTriggeredAt: existing?.lastTriggeredAt,
+
+      frequencyType: input.frequencyType || 'monthly',
+      recurringIntervalHours: input.recurringIntervalHours || 24,
+      autoRotateRecurring: input.autoRotateRecurring ?? false,
+      maxRedeemsPerUser: input.maxRedeemsPerUser || 1,
+      targetCardTier: input.targetCardTier || 'all',
+      targetDevRoleOnly: input.targetDevRoleOnly || '',
+      celebrationEffect: input.celebrationEffect || 'confetti',
+      soundEffect: input.soundEffect || 'chime',
+      requireAdminVerifiedAccessForNotif: input.requireAdminVerifiedAccessForNotif ?? true,
+      adminAuditLogTag: input.adminAuditLogTag || 'GIFT-AUDIT-LOG',
+      customStampText: input.customStampText || 'BANK NUSANTARA RESMI',
+      watermarkText: input.watermarkText || 'CONFIDENTIAL SULTAN',
+      securityHashToken: input.securityHashToken || `BN-HASH-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+      allowAnonymousClaim: input.allowAnonymousClaim ?? false,
+      notifyOnlyAdminVerifiedUsers: input.notifyOnlyAdminVerifiedUsers ?? true,
+      priorityLevel: input.priorityLevel || 'normal',
+      customCssTheme: input.customCssTheme || 'default',
+      attachmentFileUrl: input.attachmentFileUrl || '',
+      attachmentFileName: input.attachmentFileName || '',
+      autoExpireHours: input.autoExpireHours || 72,
+      allowTransferableGift: input.allowTransferableGift ?? false,
     };
 
     const nextList = existing
@@ -11838,14 +12066,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const adminUpdateJobGachaBonusConfig = (config: JobGachaBonusConfig) => {
-    setJobGachaBonusConfig(config);
+  const adminUpdateJobCoinBonusConfig = (config: JobCoinBonusConfig) => {
+    const cleanConfig: JobCoinBonusConfig = {
+      enabled: Boolean(config.enabled),
+      coinMultiplier: Math.max(0.1, Number(config.coinMultiplier) || 1),
+      extraBonusCoins: Math.max(0, Math.round(Number(config.extraBonusCoins) || 0)),
+    };
+    setJobCoinBonusConfig(cleanConfig);
     playAtmSound('success');
     return {
       success: true,
-      message: config.enabled
-        ? `✅ Gacha Bonus Lowongan Pekerjaan AKTIF (${config.tiers.length} Tier Min–Max • % Peluang)!`
-        : '⏸️ Gacha Bonus Lowongan Pekerjaan dinonaktifkan.',
+      message: cleanConfig.enabled
+        ? `✅ Bonus Coin Pekerjaan AKTIF: Pengali ${cleanConfig.coinMultiplier}x Coin + Ekstra +${cleanConfig.extraBonusCoins.toLocaleString('id-ID')} Coin per selesai kerja!`
+        : '⏸️ Pengali & Bonus Coin Ekstra Pekerjaan dinonaktifkan (kembali ke 1x Coin dasar).',
     };
   };
 
@@ -12300,14 +12533,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!targetAcc) return { success: false, message: 'Rekening tidak ditemukan.' };
     const roleObj = roleId ? devRoles.find((r) => r.id === roleId) : null;
     setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === accountId ? { ...acc, devRoleId: roleObj ? roleObj.id : null } : acc
-      )
+      prev.map((acc) => {
+        if (acc.id === accountId) {
+          const autoActive = roleObj && roleObj.autoApproveAccount;
+          return {
+            ...acc,
+            devRoleId: roleObj ? roleObj.id : null,
+            ...(autoActive
+              ? {
+                  cardStatus: 'active' as const,
+                  hasCompletedTutorial: true,
+                  tutorialApprovedByAdmin: true,
+                }
+              : {}),
+          };
+        }
+        return acc;
+      })
     );
     return {
       success: true,
       message: roleObj
-        ? `Akun ${targetAcc.fullName} resmi ditugaskan menjadi ${roleObj.name}!`
+        ? `Akun ${targetAcc.fullName} resmi ditugaskan menjadi ${roleObj.name}!${roleObj.autoApproveAccount ? ' (Tanpa Persetujuan / Langsung Aktif)' : ''}`
         : `Role Dev pada akun ${targetAcc.fullName} dilepas kembali ke Nasabah Biasa.`,
     };
   };
@@ -12610,8 +12857,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminToggleGiftEventActive,
         adminTriggerGiftEventNow,
         adminSetGiftDateTestOverride,
-        jobGachaBonusConfig,
-        adminUpdateJobGachaBonusConfig,
+        jobCoinBonusConfig,
+        adminUpdateJobCoinBonusConfig,
         adminExecuteUniversalGachaDrop,
         devRoles,
         adminUpdateDevRole,

@@ -81,6 +81,8 @@ import { AdminGoldTransferPanel } from './AdminGoldTransferPanel';
 import { AdminGiftEventPanel } from './AdminGiftEventPanel';
 import { AdminDevRolesPanel } from './AdminDevRolesPanel';
 import { AdminUniversalGachaPanel } from './AdminUniversalGachaPanel';
+import { AdminJobCoinBonusCard } from './AdminJobCoinBonusCard';
+import { AccountDeletion10StepModal } from './AccountDeletion10StepModal';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -256,6 +258,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   const [mintolReplyMap, setMintolReplyMap] = useState<Record<string, string>>({});
   const [mintolFeedback, setMintolFeedback] = useState<string>('');
 
+  // 10-Step Secure Account Deletion States
+  const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
+  const [deleteFeedback, setDeleteFeedback] = useState<string>('');
+
+
   // States for Super Tools #27 to #56 (56+ Super Tools Ga Kaleng-Kaleng)
   const [stJobLevelInput, setStJobLevelInput] = useState<number>(25);
   const [stJobLevelMode, setStJobLevelMode] = useState<'set' | 'add' | 'max'>('set');
@@ -407,6 +414,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
 
   // Super Admin Tools state
   const [superToolAccountId, setSuperToolAccountId] = useState<string>(accounts[0]?.id || '');
+
+  useEffect(() => {
+    if (accounts.length === 0) {
+      if (selectedBanAccountId) setSelectedBanAccountId('');
+      if (superToolAccountId) setSuperToolAccountId('');
+      return;
+    }
+    if (!accounts.some((a) => a.id === selectedBanAccountId)) {
+      setSelectedBanAccountId(accounts[0].id);
+    }
+    if (!accounts.some((a) => a.id === superToolAccountId)) {
+      setSuperToolAccountId(accounts[0].id);
+    }
+  }, [accounts, selectedBanAccountId, superToolAccountId]);
   const [balanceActionMode, setBalanceActionMode] = useState<'add' | 'subtract' | 'set' | 'unlimited'>('add');
   const [balanceAdjustAmount, setBalanceAdjustAmount] = useState<number>(1_000_000);
   const [balanceAdjustNote, setBalanceAdjustNote] = useState<string>('Penambahan Saldo Resmi oleh Admin');
@@ -4046,6 +4067,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               </button>
             </div>
 
+            <div className="md:col-span-2 lg:col-span-3">
+              <AdminJobCoinBonusCard compact />
+            </div>
+
             {/* SUPER TOOL #32: Hujan Voucher Level ke Semua Nasabah */}
             <div className="bg-slate-900/90 border border-cyan-500/40 rounded-2xl p-4 space-y-3 flex flex-col justify-between">
               <div className="space-y-2">
@@ -6200,6 +6225,34 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             </table>
           </div>
           </div>
+
+          {/* 10-Step Secure Account Deletion Section */}
+          <div className="bg-rose-950/40 border-2 border-rose-500/50 rounded-3xl p-6 shadow-xl space-y-4 text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-rose-900/50 pb-4">
+              <div>
+                <h3 className="font-black text-rose-300 text-base flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-rose-400" />
+                  <span>Pusat Otoritas: Penghapusan Akun Aman (10 Konfirmasi &amp; Timer 30 Detik)</span>
+                </h3>
+                <p className="text-slate-300 text-[11px] mt-0.5">
+                  Menghapus akun secara permanen beserta seluruh data terkait (rekening, transaksi, pinjaman, brankas, pocket, penyimpanan lokal &amp; server) dengan 10 langkah konfirmasi wajib baca 30 detik.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(true)}
+                className="px-5 py-3 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black shadow-lg cursor-pointer flex items-center gap-2 shrink-0"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Hapus Akun (10 Konfirmasi)</span>
+              </button>
+            </div>
+            {deleteFeedback && (
+              <div className="p-3 rounded-xl bg-slate-950 border border-rose-500 text-rose-300 font-bold">
+                {deleteFeedback}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -6896,6 +6949,35 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           </div>
         );
       })()}
+
+      {/* Persistent Bottom Feature in Admin Portal: Hapus Akun 10 Konfirmasi + Timer 30 Detik */}
+      <div className="bg-rose-950/35 border-2 border-rose-500/45 rounded-3xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
+        <div>
+          <h3 className="font-black text-rose-300 text-sm flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-rose-400" />
+            <span>Fitur Hapus Akun Permanen (10 Konfirmasi &amp; Wajib Baca 30 Detik)</span>
+          </h3>
+          <p className="text-slate-300 text-[11px] mt-0.5">
+            Menghapus akun hingga bersih total dari Panel Admin, Daftar Kartu, dan Penyimpanan.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowDeleteModal(true)}
+          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black shadow-lg cursor-pointer flex items-center gap-2 shrink-0"
+        >
+          <Trash2 className="w-4 h-4" />
+          <span>Hapus Akun</span>
+        </button>
+      </div>
+
+      <AccountDeletion10StepModal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        mode="admin"
+        initialTargetAccountId={accounts[0]?.id}
+        onDeleted={(msg) => setDeleteFeedback(msg)}
+      />
     </div>
   );
 };

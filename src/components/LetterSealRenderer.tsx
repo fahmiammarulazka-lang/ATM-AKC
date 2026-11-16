@@ -9,6 +9,8 @@ import {
   Type,
   Stamp,
   Star,
+  Image as ImageIcon,
+  Upload,
 } from 'lucide-react';
 import {
   LetterSignatureStampConfig,
@@ -285,12 +287,16 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [brushSize, setBrushSize] = useState<number>(3.5);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<string>('');
+  const [uploadError, setUploadError] = useState<string>('');
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const isDrawingRef = useRef<boolean>(false);
 
   const inkColor = getSealColorMeta(value.signatureColor);
 
-  // Restore existing drawing if user switches back to 'draw' mode
+  // Restore existing drawing or uploaded photo onto the canvas whenever mode or dataUrl updates
   useEffect(() => {
+    if (isDrawingRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas || value.signatureMode !== 'draw') return;
     const ctx = canvas.getContext('2d');
@@ -299,12 +305,46 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
     if (value.signatureDrawingDataUrl) {
       const img = new Image();
       img.onload = () => {
+        if (isDrawingRef.current) return;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const scale = Math.min(canvas.width / Math.max(1, img.width), canvas.height / Math.max(1, img.height));
+        const drawW = img.width * scale;
+        const drawH = img.height * scale;
+        const offsetX = (canvas.width - drawW) / 2;
+        const offsetY = (canvas.height - drawH) / 2;
+        ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
       };
       img.src = value.signatureDrawingDataUrl;
     }
-  }, [value.signatureMode]);
+  }, [value.signatureMode, value.signatureDrawingDataUrl]);
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setUploadError('File harus berupa gambar/foto (JPG, PNG, WEBP, GIF).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('Ukuran foto tanda tangan maksimal 5 MB.');
+      return;
+    }
+    setUploadError('');
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result;
+      if (typeof result === 'string' && result) {
+        onChange({
+          ...value,
+          signatureMode: 'draw',
+          signatureDrawingDataUrl: result,
+        });
+        setAutoSaveStatus('✓ Foto tanda tangan otomatis tersimpan');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   const getCanvasPoint = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -324,6 +364,7 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
     canvas.setPointerCapture(e.pointerId);
     const pt = getCanvasPoint(e);
     lastPointRef.current = pt;
+    isDrawingRef.current = true;
     setIsDrawing(true);
 
     const ctx = canvas.getContext('2d');
@@ -355,7 +396,8 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
   };
 
   const finalizeStroke = () => {
-    if (!isDrawing) return;
+    if (!isDrawingRef.current) return;
+    isDrawingRef.current = false;
     setIsDrawing(false);
     lastPointRef.current = null;
     const canvas = canvasRef.current;
@@ -365,10 +407,12 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
         signatureMode: 'draw',
         signatureDrawingDataUrl: canvas.toDataURL('image/png'),
       });
+      setAutoSaveStatus('✓ Goresan tanda tangan otomatis tersimpan');
     }
   };
 
   const clearCanvas = () => {
+    isDrawingRef.current = false;
     const canvas = canvasRef.current;
     if (canvas) {
       const ctx = canvas.getContext('2d');
@@ -378,6 +422,8 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
       ...value,
       signatureDrawingDataUrl: '',
     });
+    setAutoSaveStatus('');
+    setUploadError('');
   };
 
   return (
@@ -391,7 +437,7 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
               <span>1. Tanda Tangan Pengirim</span>
             </span>
 
-            <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+            <div className="flex flex-wrap items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
               <button
                 type="button"
                 onClick={() => onChange({ ...value, signatureMode: 'draw' })}
@@ -404,6 +450,16 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
                 <PenTool className="w-3 h-3" />
                 <span>Gambar Bebas</span>
               </button>
+              <label className="px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer flex items-center gap-1 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-400/40">
+                <ImageIcon className="w-3 h-3" />
+                <span>Pilih Foto</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                />
+              </label>
               <button
                 type="button"
                 onClick={() => onChange({ ...value, signatureMode: 'template' })}
@@ -418,6 +474,19 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
               </button>
             </div>
           </div>
+
+          {(autoSaveStatus || (value.signatureMode === 'draw' && value.signatureDrawingDataUrl)) && (
+            <div className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 text-[10px] font-bold flex items-center justify-between gap-2">
+              <span>{autoSaveStatus || '✓ Tanda tangan aktif & tersimpan otomatis'}</span>
+              <span className="font-mono text-[9px] text-emerald-400/90 uppercase">Auto-Save Aktif</span>
+            </div>
+          )}
+
+          {uploadError && (
+            <div className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 border border-rose-400/40 text-rose-300 text-[10px] font-bold">
+              {uploadError}
+            </div>
+          )}
 
           {/* Nama di bawah tanda tangan */}
           <div>
@@ -457,8 +526,8 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
           </div>
 
           {value.signatureMode === 'draw' ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] text-slate-400">Tebal Pena:</span>
                   {[
@@ -481,14 +550,27 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
                   ))}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={clearCanvas}
-                  className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-bold text-[10px] flex items-center gap-1 cursor-pointer"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  <span>Hapus Kanvas</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <label className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-cyan-200 font-bold text-[10px] flex items-center gap-1 cursor-pointer whitespace-nowrap">
+                    <Upload className="w-3 h-3" />
+                    <span>Pilih Foto</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handlePhotoUpload}
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={clearCanvas}
+                    className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-bold text-[10px] flex items-center gap-1 cursor-pointer"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Hapus</span>
+                  </button>
+                </div>
               </div>
 
               <div className="rounded-2xl border-2 border-dashed border-amber-400/50 bg-[#0b101d] overflow-hidden relative">
@@ -499,12 +581,13 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
                   onPointerDown={handlePointerDown}
                   onPointerMove={handlePointerMove}
                   onPointerUp={finalizeStroke}
+                  onPointerCancel={finalizeStroke}
                   onPointerLeave={finalizeStroke}
                   className="w-full h-36 cursor-crosshair touch-none block"
                 />
                 {!value.signatureDrawingDataUrl && (
                   <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] text-slate-500 font-mono">
-                    Gambar tanda tangan Anda di area ini...
+                    Gambar tanda tangan di sini atau pilih foto...
                   </span>
                 )}
               </div>

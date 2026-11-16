@@ -4,7 +4,6 @@ import {
   Send,
   Sparkles,
   CheckCircle2,
-  Briefcase,
   Users,
   Clock,
   Layers,
@@ -15,16 +14,14 @@ import { buildDefaultGachaTiersForReward } from '../utils/gachaUtils';
 import {
   GachaTierRange,
   GiftRewardType,
-  JobGachaBonusConfig,
 } from '../types/bank';
 import { GachaTierBuilder } from './GachaTierBuilder';
+import { AdminJobCoinBonusCard } from './AdminJobCoinBonusCard';
 import { formatRupiah } from '../utils/bankUtils';
 
 export const AdminUniversalGachaPanel: React.FC = () => {
   const {
     accounts,
-    jobGachaBonusConfig,
-    adminUpdateJobGachaBonusConfig,
     adminExecuteUniversalGachaDrop,
   } = useBank();
 
@@ -52,10 +49,6 @@ export const AdminUniversalGachaPanel: React.FC = () => {
   const [dropLogs, setDropLogs] = useState<
     { accountName: string; accountNumber: string; tierLabel: string; amount: number; unitLabel: string }[]
   >([]);
-
-  // Local editable state for Job Gacha Bonus Config
-  const [jobGachaDraft, setJobGachaDraft] = useState<JobGachaBonusConfig>(() => jobGachaBonusConfig);
-  const [jobGachaFeedback, setJobGachaFeedback] = useState<string>('');
 
   const handleRewardTypeChange = (nextType: GiftRewardType) => {
     setSelectedType(nextType);
@@ -103,11 +96,6 @@ export const AdminUniversalGachaPanel: React.FC = () => {
     });
     setFeedback(res.message);
     setDropLogs(res.logs || []);
-  };
-
-  const handleSaveJobGacha = () => {
-    const res = adminUpdateJobGachaBonusConfig(jobGachaDraft);
-    setJobGachaFeedback(res.message);
   };
 
   return (
@@ -158,7 +146,7 @@ export const AdminUniversalGachaPanel: React.FC = () => {
           <div className="space-y-3">
             <div>
               <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                Jenis Hadiah (30 Pilihan Tersedia Termasuk Trial)
+                Jenis Hadiah ({GIFT_REWARD_CATALOG.length} Pilihan Tersedia Termasuk Role &amp; Trial)
               </label>
               <select
                 value={selectedType}
@@ -370,94 +358,8 @@ export const AdminUniversalGachaPanel: React.FC = () => {
         </div>
       </div>
 
-      {/* Section 2: Job Vacancy Gacha Bonus Configurator */}
-      <div className="bg-slate-900/95 border-2 border-emerald-500/40 rounded-3xl p-6 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-          <div className="space-y-1">
-            <span className="px-2.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-black text-[10px] uppercase inline-flex items-center gap-1">
-              <Briefcase className="w-3 h-3" />
-              <span>GACHA BONUS LOWONGAN PEKERJAAN</span>
-            </span>
-            <h3 className="font-black text-white text-base">
-              Bonus Gacha Acak Otomatis Saat Nasabah Menyelesaikan Target Klik Kerja
-            </h3>
-            <p className="text-[11px] text-slate-400">
-              Jika diaktifkan, setiap gajian pekerjaan akan otomatis melakukan roll Gacha sesuai rentang Min–Max dan persentase peluang di bawah ini.
-            </p>
-          </div>
-
-          <label className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 border border-emerald-400/50 cursor-pointer shrink-0">
-            <input
-              type="checkbox"
-              checked={jobGachaDraft.enabled}
-              onChange={(e) =>
-                setJobGachaDraft((prev) => ({ ...prev, enabled: e.target.checked }))
-              }
-            />
-            <span className="font-black text-emerald-300">
-              {jobGachaDraft.enabled ? 'Aktif di Semua Pekerjaan' : 'Nonaktif'}
-            </span>
-          </label>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-          <div className="lg:col-span-4 space-y-3">
-            <label className="text-[11px] font-bold text-slate-300 block">
-              Jenis Hadiah Bonus Gacha Kerja
-            </label>
-            <select
-              value={jobGachaDraft.rewardType}
-              onChange={(e) =>
-                setJobGachaDraft((prev) => ({
-                  ...prev,
-                  rewardType: e.target.value as JobGachaBonusConfig['rewardType'],
-                }))
-              }
-              className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-bold"
-            >
-              <option value="cash_balance">💵 Bonus Uang Tunai (Rp)</option>
-              <option value="spin_coins">🪙 Bonus Coin Spin</option>
-              <option value="level_voucher">🎫 Bonus Voucher Level</option>
-              <option value="reward_points">⭐ Bonus Poin Reward</option>
-            </select>
-
-            <button
-              type="button"
-              onClick={handleSaveJobGacha}
-              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 font-black cursor-pointer flex items-center justify-center gap-2"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Simpan Pengaturan Gacha Pekerjaan</span>
-            </button>
-
-            {jobGachaFeedback && (
-              <div className="p-2.5 rounded-xl bg-emerald-950/70 border border-emerald-400/50 text-emerald-200 font-bold text-[11px]">
-                {jobGachaFeedback}
-              </div>
-            )}
-          </div>
-
-          <div className="lg:col-span-8">
-            <GachaTierBuilder
-              tiers={jobGachaDraft.tiers}
-              onChange={(nextTiers) =>
-                setJobGachaDraft((prev) => ({ ...prev, tiers: nextTiers }))
-              }
-              unitLabel={
-                jobGachaDraft.rewardType === 'cash_balance'
-                  ? 'Rp'
-                  : jobGachaDraft.rewardType === 'spin_coins'
-                  ? 'Coin'
-                  : jobGachaDraft.rewardType === 'level_voucher'
-                  ? 'Voucher'
-                  : 'Poin'
-              }
-              isCurrency={jobGachaDraft.rewardType === 'cash_balance'}
-              step={jobGachaDraft.rewardType === 'cash_balance' ? 5000 : 1}
-            />
-          </div>
-        </div>
-      </div>
+      {/* Section 2: Pengaturan Pengali & Bonus Coin Pekerjaan */}
+      <AdminJobCoinBonusCard />
     </div>
   );
 };

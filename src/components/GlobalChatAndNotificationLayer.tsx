@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { MINTOL_ADMIN_FEATURES_CATALOG } from '../data/empireAndMintolCatalog';
+import { AccountDeletion10StepModal } from './AccountDeletion10StepModal';
 
 export const GlobalChatAndNotificationLayer: React.FC = () => {
   const {
@@ -97,7 +98,7 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
     }
   };
 
-  const handleSubmitBug = (e: React.FormEvent) => {
+  const handleSubmitBug = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
@@ -107,8 +108,8 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
       return;
     }
 
-    const res = submitBugReport({
-      description: description.trim(),
+    const res = await submitBugReport({
+      explanation: description.trim(),
       photoDataUrl,
       photoFileName,
     });
@@ -429,7 +430,7 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
                   </h4>
                   <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                     {myReports.map((rep) => (
-                      <div
+                       <div
                         key={rep.id}
                         className="p-3 rounded-2xl bg-slate-800/70 border border-slate-700/70 flex items-start justify-between gap-3 text-xs"
                       >
@@ -437,16 +438,16 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
                           <div className="flex items-center gap-2">
                             <span
                               className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                                rep.status === 'resolved'
+                                rep.status === 'selesai'
                                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30'
-                                  : rep.status === 'reviewed'
+                                  : rep.status === 'diproses'
                                   ? 'bg-amber-500/20 text-amber-300 border border-amber-400/30'
                                   : 'bg-rose-500/20 text-rose-300 border border-rose-400/30'
                               }`}
                             >
-                              {rep.status === 'resolved'
+                              {rep.status === 'selesai'
                                 ? 'Selesai Diperbaiki'
-                                : rep.status === 'reviewed'
+                                : rep.status === 'diproses'
                                 ? 'Sedang Ditinjau Admin'
                                 : 'Menunggu Admin'}
                             </span>
@@ -454,10 +455,10 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
                               {new Date(rep.createdAt).toLocaleString('id-ID')}
                             </span>
                           </div>
-                          <p className="text-slate-200 whitespace-pre-wrap">{rep.description}</p>
-                          {rep.adminNote && (
+                          <p className="text-slate-200 whitespace-pre-wrap">{rep.explanation}</p>
+                          {rep.adminReply && (
                             <p className="text-emerald-300 font-semibold mt-1">
-                              Balasan Admin: {rep.adminNote}
+                              Balasan Admin: {rep.adminReply}
                             </p>
                           )}
                         </div>
@@ -861,6 +862,7 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
  */
 export const AllowNotificationFooterButton: React.FC = () => {
   const {
+    currentAccount,
     setIsBugReportModalOpen,
     bugReports,
     setIsMintolModalOpen,
@@ -872,6 +874,7 @@ export const AllowNotificationFooterButton: React.FC = () => {
   } = useBank();
 
   const [notifFeedback, setNotifFeedback] = useState<string>('');
+  const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState<boolean>(false);
   const openBugCount = bugReports.filter((b) => b.status === 'baru').length;
   const pendingMintolCount = adminHelpRequests.filter((r) => r.status === 'menunggu').length;
   const isBgActive = notificationsEnabled && notificationPermissionStatus === 'granted';
@@ -944,6 +947,24 @@ export const AllowNotificationFooterButton: React.FC = () => {
         <BellRing className="w-3.5 h-3.5" />
         <span>Tes Notif</span>
       </button>
+
+      {currentAccount && (
+        <button
+          type="button"
+          onClick={() => setIsDeleteAccountModalOpen(true)}
+          className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer bg-rose-600/25 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-500/60 shadow-sm whitespace-nowrap shrink-0"
+          title="Hapus akun permanen dengan 10 konfirmasi & timer baca 30 detik"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          <span>Hapus Akun</span>
+        </button>
+      )}
+
+      <AccountDeletion10StepModal
+        isOpen={isDeleteAccountModalOpen}
+        onClose={() => setIsDeleteAccountModalOpen(false)}
+        mode="customer"
+      />
     </div>
   );
 };

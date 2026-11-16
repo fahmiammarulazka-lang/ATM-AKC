@@ -43,7 +43,6 @@ import { AdminPinModal } from './AdminPinModal';
 import { DigitalBankingFeatures } from './DigitalBankingFeatures';
 import { JobVacancyView } from './JobVacancyView';
 import { VerifiedBadge } from './VerifiedBadge';
-import { CompleteSettingsView } from './CompleteSettingsView';
 import { TabEmasView } from './TabEmasView';
 import { TransferWorkspace } from './TransferWorkspace';
 import {
@@ -64,7 +63,6 @@ export type DashboardTab =
   | 'emas'
   | 'pinjaman'
   | 'mutasi'
-  | 'keamanan'
   | 'jadwal';
 
 interface CustomerDashboardProps {
@@ -108,10 +106,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   }, [activeTrialCount]);
 
   // Active sub-tab in dashboard
-  const [activeTab, setActiveTab] = useState<DashboardTab>(requestedSubTab?.tab || 'ringkasan');
+  const [activeTab, setActiveTab] = useState<DashboardTab>(
+    requestedSubTab?.tab && (requestedSubTab.tab as string) !== 'keamanan'
+      ? requestedSubTab.tab
+      : 'ringkasan'
+  );
   useEffect(() => {
     if (requestedSubTab?.tab) {
-      setActiveTab(requestedSubTab.tab);
+      setActiveTab(
+        (requestedSubTab.tab as string) === 'keamanan' ? 'ringkasan' : requestedSubTab.tab
+      );
     }
   }, [requestedSubTab]);
 
@@ -544,18 +548,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         >
           <CalendarClock className="w-4 h-4 text-purple-400" />
           <span>Jadwal Pembayaran</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('keamanan')}
-          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
-            activeTab === 'keamanan'
-              ? 'bg-indigo-600 text-white font-bold shadow-lg shadow-indigo-600/30'
-              : 'text-cyan-400 hover:text-white hover:bg-slate-800/60'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4 text-cyan-400" />
-          <span>⚙️ Pengaturan Lengkap & Fitur Dihapus</span>
         </button>
       </div>
 
@@ -1370,11 +1362,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           </div>
         </div>
       )}
-
-      {/* =========================================================================
-          TAB 6: PUSAT PENGATURAN LENGKAP & FITUR DIHAPUS
-         ========================================================================= */}
-      {activeTab === 'keamanan' && <CompleteSettingsView />}
 
       {/* MODAL GANTI NOMOR HP (Section 8 with OTP simulation) */}
       {showPhoneModal && (

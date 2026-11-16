@@ -1,4 +1,4 @@
-import { GachaTierRange, GiftRewardCatalogMeta, JobGachaBonusConfig } from '../types/bank';
+import { GachaTierRange, GiftRewardCatalogMeta } from '../types/bank';
 
 export const normalizeGachaTiers = (tiers: GachaTierRange[]): GachaTierRange[] => {
   if (!tiers || tiers.length === 0) return [];
@@ -164,32 +164,4 @@ export const buildDefaultGachaTiersForReward = (
       probabilityPercent: 10,
     },
   ];
-};
-
-export const DEFAULT_JOB_GACHA_BONUS_CONFIG: JobGachaBonusConfig = {
-  enabled: true,
-  rewardType: 'cash_balance',
-  tiers: [
-    {
-      id: 'job-gacha-1',
-      label: 'Bonus Harian',
-      minAmount: 25_000,
-      maxAmount: 100_000,
-      probabilityPercent: 65,
-    },
-    {
-      id: 'job-gacha-2',
-      label: 'Bonus Rajin',
-      minAmount: 150_000,
-      maxAmount: 450_000,
-      probabilityPercent: 25,
-    },
-    {
-      id: 'job-gacha-3',
-      label: 'Jackpot Karyawan',
-      minAmount: 500_000,
-      maxAmount: 1_500_000,
-      probabilityPercent: 10,
-    },
-  ],
 };

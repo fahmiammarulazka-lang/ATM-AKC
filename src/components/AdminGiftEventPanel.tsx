@@ -86,10 +86,39 @@ export const AdminGiftEventPanel: React.FC = () => {
 
   // Custom Signature & Stamp settings for this event (or use Default Global)
   const [sealScope, setSealScope] = useState<'global' | 'custom'>('global');
-  const [customSealDraft, setCustomSealDraft] = useState<LetterSignatureStampConfig>(
-    () => defaultLetterSealConfig
-  );
+  const [customSealDraft, setCustomSealDraft] = useState<LetterSignatureStampConfig>(() => {
+    try {
+      const savedDraft = localStorage.getItem('bank_nusantara_custom_seal_draft_v1');
+      if (savedDraft) {
+        return { ...defaultLetterSealConfig, ...JSON.parse(savedDraft) };
+      }
+    } catch { /* empty */ }
+    return defaultLetterSealConfig;
+  });
   const [showSealStudio, setShowSealStudio] = useState<boolean>(true);
+
+  // 20+ Advanced Admin Features State
+  const [frequencyType, setFrequencyType] = useState<'once' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom_recurring'>('monthly');
+  const [recurringIntervalHours, setRecurringIntervalHours] = useState<number>(24);
+  const [autoRotateRecurring, setAutoRotateRecurring] = useState<boolean>(false);
+  const [maxRedeemsPerUser, setMaxRedeemsPerUser] = useState<number>(1);
+  const [targetCardTier, setTargetCardTier] = useState<string>('all');
+  const [targetDevRoleOnly, setTargetDevRoleOnly] = useState<string>('');
+  const [celebrationEffect, setCelebrationEffect] = useState<'confetti' | 'gold_rain' | 'fireworks' | 'none'>('confetti');
+  const [soundEffect, setSoundEffect] = useState<'chime' | 'harp' | 'fanfare' | 'silent'>('chime');
+  const [requireAdminVerifiedAccessForNotif, setRequireAdminVerifiedAccessForNotif] = useState<boolean>(true);
+  const [adminAuditLogTag, setAdminAuditLogTag] = useState<string>('GIFT-AUDIT-LOG');
+  const [customStampText, setCustomStampText] = useState<string>('BANK NUSANTARA RESMI');
+  const [watermarkText, setWatermarkText] = useState<string>('CONFIDENTIAL SULTAN');
+  const [securityHashToken, setSecurityHashToken] = useState<string>('BN-HASH-999');
+  const [allowAnonymousClaim, setAllowAnonymousClaim] = useState<boolean>(false);
+  const [notifyOnlyAdminVerifiedUsers, setNotifyOnlyAdminVerifiedUsers] = useState<boolean>(true);
+  const [priorityLevel, setPriorityLevel] = useState<'normal' | 'high' | 'vip_exclusive'>('normal');
+  const [customCssTheme, setCustomCssTheme] = useState<string>('default');
+  const [attachmentFileUrl, setAttachmentFileUrl] = useState<string>('');
+  const [attachmentFileName, setAttachmentFileName] = useState<string>('');
+  const [autoExpireHours, setAutoExpireHours] = useState<number>(72);
+  const [allowTransferableGift, setAllowTransferableGift] = useState<boolean>(false);
 
   const [selectedRewards, setSelectedRewards] = useState<AdminGiftRewardItem[]>(() =>
     GIFT_REWARD_CATALOG.slice(0, 4).map((meta, idx) => ({
@@ -189,6 +218,27 @@ export const AdminGiftEventPanel: React.FC = () => {
     setThemeColor('amber');
     setSealScope('global');
     setCustomSealDraft(defaultLetterSealConfig);
+    setFrequencyType('monthly');
+    setRecurringIntervalHours(24);
+    setAutoRotateRecurring(false);
+    setMaxRedeemsPerUser(1);
+    setTargetCardTier('all');
+    setTargetDevRoleOnly('');
+    setCelebrationEffect('confetti');
+    setSoundEffect('chime');
+    setRequireAdminVerifiedAccessForNotif(true);
+    setAdminAuditLogTag('GIFT-AUDIT-LOG');
+    setCustomStampText('BANK NUSANTARA RESMI');
+    setWatermarkText('CONFIDENTIAL SULTAN');
+    setSecurityHashToken('BN-HASH-999');
+    setAllowAnonymousClaim(false);
+    setNotifyOnlyAdminVerifiedUsers(true);
+    setPriorityLevel('normal');
+    setCustomCssTheme('default');
+    setAttachmentFileUrl('');
+    setAttachmentFileName('');
+    setAutoExpireHours(72);
+    setAllowTransferableGift(false);
   };
 
   const loadEventIntoEditor = (ev: AdminGiftEventPackage) => {
@@ -212,6 +262,28 @@ export const AdminGiftEventPanel: React.FC = () => {
       setSealScope('global');
       setCustomSealDraft(defaultLetterSealConfig);
     }
+    setFrequencyType(ev.frequencyType || 'monthly');
+    setRecurringIntervalHours(ev.recurringIntervalHours || 24);
+    setAutoRotateRecurring(ev.autoRotateRecurring ?? false);
+    setMaxRedeemsPerUser(ev.maxRedeemsPerUser || 1);
+    setTargetCardTier(ev.targetCardTier || 'all');
+    setTargetDevRoleOnly(ev.targetDevRoleOnly || '');
+    setCelebrationEffect(ev.celebrationEffect || 'confetti');
+    setSoundEffect(ev.soundEffect || 'chime');
+    setRequireAdminVerifiedAccessForNotif(ev.requireAdminVerifiedAccessForNotif ?? true);
+    setAdminAuditLogTag(ev.adminAuditLogTag || 'GIFT-AUDIT-LOG');
+    setCustomStampText(ev.customStampText || 'BANK NUSANTARA RESMI');
+    setWatermarkText(ev.watermarkText || 'CONFIDENTIAL SULTAN');
+    setSecurityHashToken(ev.securityHashToken || 'BN-HASH-999');
+    setAllowAnonymousClaim(ev.allowAnonymousClaim ?? false);
+    setNotifyOnlyAdminVerifiedUsers(ev.notifyOnlyAdminVerifiedUsers ?? true);
+    setPriorityLevel(ev.priorityLevel || 'normal');
+    setCustomCssTheme(ev.customCssTheme || 'default');
+    setAttachmentFileUrl(ev.attachmentFileUrl || '');
+    setAttachmentFileName(ev.attachmentFileName || '');
+    setAutoExpireHours(ev.autoExpireHours || 72);
+    setAllowTransferableGift(ev.allowTransferableGift ?? false);
+
     setFeedback(`Mengedit paket "${ev.title}" (Pengirim: ${ev.senderName}).`);
   };
 
@@ -236,6 +308,27 @@ export const AdminGiftEventPanel: React.FC = () => {
       themeColor,
       rewards: selectedRewards,
       customSealConfig: sealScope === 'custom' ? customSealDraft : null,
+      frequencyType,
+      recurringIntervalHours,
+      autoRotateRecurring,
+      maxRedeemsPerUser,
+      targetCardTier: targetCardTier as any,
+      targetDevRoleOnly,
+      celebrationEffect,
+      soundEffect,
+      requireAdminVerifiedAccessForNotif,
+      adminAuditLogTag,
+      customStampText,
+      watermarkText,
+      securityHashToken,
+      allowAnonymousClaim,
+      notifyOnlyAdminVerifiedUsers,
+      priorityLevel,
+      customCssTheme,
+      attachmentFileUrl,
+      attachmentFileName,
+      autoExpireHours,
+      allowTransferableGift,
     });
     if (alsoSendNow && res.success) {
       const sendRes = adminTriggerGiftEventNow(res.event.id);
@@ -384,6 +477,9 @@ export const AdminGiftEventPanel: React.FC = () => {
                 adminUpdateDefaultLetterSealConfig(nextCfg);
               } else {
                 setCustomSealDraft(nextCfg);
+                try {
+                  localStorage.setItem('bank_nusantara_custom_seal_draft_v1', JSON.stringify(nextCfg));
+                } catch { /* empty */ }
               }
             }}
           />
@@ -556,6 +652,182 @@ export const AdminGiftEventPanel: React.FC = () => {
                 />
                 <span className="font-bold text-emerald-300">Status Event Aktif</span>
               </label>
+            </div>
+
+            {/* 20+ ADVANCED ADMIN FEATURES SECTION */}
+            <div className="p-4 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-3">
+              <h4 className="font-black text-amber-300 text-xs flex items-center gap-1.5 border-b border-slate-800 pb-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>Pengaturan 20+ Fitur Lanjutan Hadiah &amp; Surat (Frekuensi, Stempel, &amp; Keamanan)</span>
+              </h4>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                    Frekuensi Pengiriman Hadiah
+                  </label>
+                  <select
+                    value={frequencyType}
+                    onChange={(e) => setFrequencyType(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-amber-200 font-bold text-xs"
+                  >
+                    <option value="once">Sekali Saja</option>
+                    <option value="hourly">Setiap Jam (Hourly)</option>
+                    <option value="daily">Setiap Hari (Daily)</option>
+                    <option value="weekly">Setiap Minggu (Weekly)</option>
+                    <option value="monthly">Setiap Bulan (Monthly)</option>
+                    <option value="yearly">Setiap Tahun (Yearly)</option>
+                    <option value="custom_recurring">Kustom Berulang</option>
+                  </select>
+                </div>
+
+                {frequencyType === 'custom_recurring' && (
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                      Interval Jam Kustom
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={recurringIntervalHours}
+                      onChange={(e) => setRecurringIntervalHours(Math.max(1, Number(e.target.value) || 24))}
+                      className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold text-xs"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                    Maks Klaim Per Nasabah
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={maxRedeemsPerUser}
+                    onChange={(e) => setMaxRedeemsPerUser(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                    Efek Perayaan Visual
+                  </label>
+                  <select
+                    value={celebrationEffect}
+                    onChange={(e) => setCelebrationEffect(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-semibold text-xs"
+                  >
+                    <option value="confetti">Konfeti Warna-Warni</option>
+                    <option value="gold_rain">Hujan Emas Sulta</option>
+                    <option value="fireworks">Kembang Api Megah</option>
+                    <option value="none">Tanpa Efek</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                    Efek Suara Perayaan
+                  </label>
+                  <select
+                    value={soundEffect}
+                    onChange={(e) => setSoundEffect(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-semibold text-xs"
+                  >
+                    <option value="chime">Chime Emas Khas</option>
+                    <option value="harp">Petikan Harpa Royal</option>
+                    <option value="fanfare">Fanfare Raja</option>
+                    <option value="silent">Senyap / Silent</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                    Teks Stempel Khusus Surat
+                  </label>
+                  <input
+                    type="text"
+                    value={customStampText}
+                    onChange={(e) => setCustomStampText(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-amber-200 font-bold text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                    Teks Watermark Surat
+                  </label>
+                  <input
+                    type="text"
+                    value={watermarkText}
+                    onChange={(e) => setWatermarkText(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-cyan-200 font-bold text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                    Token Keamanan Hash
+                  </label>
+                  <input
+                    type="text"
+                    value={securityHashToken}
+                    onChange={(e) => setSecurityHashToken(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 font-mono text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                    Tag Audit Log Admin
+                  </label>
+                  <input
+                    type="text"
+                    value={adminAuditLogTag}
+                    onChange={(e) => setAdminAuditLogTag(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-200 font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-1 border-t border-slate-800">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={notifyOnlyAdminVerifiedUsers}
+                    onChange={(e) => setNotifyOnlyAdminVerifiedUsers(e.target.checked)}
+                  />
+                  <span className="font-bold text-amber-300 text-[11px]">
+                    Notifikasi Hanya untuk Pengguna yang Pernah Akses Panel Admin dengan Benar
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoRotateRecurring}
+                    onChange={(e) => setAutoRotateRecurring(e.target.checked)}
+                  />
+                  <span className="font-bold text-slate-200 text-[11px]">
+                    Rotasi Otomatis Hadiah Saat Jadwal Berulang Tiba
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={allowTransferableGift}
+                    onChange={(e) => setAllowTransferableGift(e.target.checked)}
+                  />
+                  <span className="font-bold text-slate-200 text-[11px]">
+                    Izinkan Hadiah Ditransfer ke Nasabah Lain
+                  </span>
+                </label>
+              </div>
             </div>
 
             <div>

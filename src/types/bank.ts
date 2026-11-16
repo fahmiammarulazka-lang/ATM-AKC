@@ -107,6 +107,8 @@ export interface BankAccount {
   activeTrials?: ActiveAccountTrial[];
   // Custom Dev / Own / Admin Role Slot (10 Role yang dapat dikustomisasi di Panel Admin)
   devRoleId?: string | null;
+  hasAccessedAdminPanel?: boolean;
+  adminAccessTimestamp?: string;
 }
 
 export type GoldFormType = 'batangan' | 'perhiasan';
@@ -123,6 +125,7 @@ export interface GoldBatchRecord {
   goldForm: GoldFormType;
   motif: GoldMotifType;
   note?: string;
+  karat?: number; // 1 to 24 karat purity
 }
 
 export interface GoldPriceHistoryPoint {
@@ -320,14 +323,25 @@ export interface SpinHistoryRecord {
 
 export interface AdminHelpRequestRecord {
   id: string;
-  requesterAccountId: string;
-  requesterName: string;
-  requesterAccountNumber: string;
-  selectedFeatureIds: string[]; // Bisa pilih 1 atau banyak fitur dari 32 fitur Mintol Admin
-  selectedFeatureLabels: string[];
-  requestedAmountOrValue?: number; // Nominal saldo / koin / level yang diminta
-  message: string; // WAJIB DIISI (Sesuai permintaan user: "Dan pesannya itu wajib")
-  status: 'menunggu' | 'dikabulkan' | 'ditolak';
+  requesterAccountId?: string;
+  accountId?: string;
+  requesterName?: string;
+  senderName?: string;
+  requesterAccountNumber?: string;
+  senderAccountNumber?: string;
+  selectedFeatureIds?: string[];
+  selectedFeatures?: string[];
+  selectedFeatureLabels?: string[];
+  featureLabels?: string[];
+  requestedAmountOrValue?: number;
+  requestedAmount?: number;
+  requestedCoins?: number;
+  requestedLevel?: number;
+  urgency?: 'normal' | 'penting' | 'darurat_sultan';
+  message: string;
+  status: 'pending' | 'granted' | 'rejected' | 'menunggu' | 'dikabulkan' | 'ditolak';
+  attachmentDataUrl?: string;
+  attachmentName?: string;
   adminReply?: string;
   createdAt: string;
   resolvedAt?: string;
@@ -891,10 +905,10 @@ export interface GachaClaimedItemResult {
   maxAmount: number;
 }
 
-export interface JobGachaBonusConfig {
+export interface JobCoinBonusConfig {
   enabled: boolean;
-  rewardType: 'cash_balance' | 'spin_coins' | 'level_voucher' | 'reward_points';
-  tiers: GachaTierRange[];
+  coinMultiplier: number; // Pengali Coin Kerja (1x, 2x, 3x, 5x, dst.)
+  extraBonusCoins: number; // Bonus Coin Ekstra tetap tiap selesai target klik
 }
 
 export interface AdminGiftRewardItem {
@@ -935,6 +949,29 @@ export interface AdminGiftEventPackage {
   createdAt: string;
   updatedAt?: string;
   lastTriggeredAt?: string;
+
+  // 20+ Advanced Admin Features for Gift & Letter
+  frequencyType?: 'once' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom_recurring';
+  recurringIntervalHours?: number;
+  autoRotateRecurring?: boolean;
+  maxRedeemsPerUser?: number;
+  targetCardTier?: CardTier | 'all';
+  targetDevRoleOnly?: string;
+  celebrationEffect?: 'confetti' | 'gold_rain' | 'fireworks' | 'none';
+  soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
+  requireAdminVerifiedAccessForNotif?: boolean;
+  adminAuditLogTag?: string;
+  customStampText?: string;
+  watermarkText?: string;
+  securityHashToken?: string;
+  allowAnonymousClaim?: boolean;
+  notifyOnlyAdminVerifiedUsers?: boolean;
+  priorityLevel?: 'normal' | 'high' | 'vip_exclusive';
+  customCssTheme?: string;
+  attachmentFileUrl?: string;
+  attachmentFileName?: string;
+  autoExpireHours?: number;
+  allowTransferableGift?: boolean;
 }
 
 export type SignatureTemplateId =
@@ -984,6 +1021,7 @@ export interface DevRoleConfig {
   badgeColor: DevRoleBadgeColor;
   canQuickOpenAdmin: boolean;
   bypassAdminPin: boolean;
+  autoApproveAccount?: boolean;
   description: string;
 }
 
