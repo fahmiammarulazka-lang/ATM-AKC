@@ -328,14 +328,15 @@ export function playAtmSound(type: 'beep' | 'cash' | 'card' | 'success' | 'alert
 export function formatBanRemainingTime(expiresAt?: string): {
   expired: boolean;
   formatted: string;
+  text: string;
   remainingSeconds: number;
 } {
   if (!expiresAt) {
-    return { expired: false, formatted: 'Permanen', remainingSeconds: Infinity };
+    return { expired: false, formatted: 'Permanen', text: 'Permanen', remainingSeconds: Infinity };
   }
   const diffMs = new Date(expiresAt).getTime() - Date.now();
   if (diffMs <= 0) {
-    return { expired: true, formatted: '00m 00d (Selesai)', remainingSeconds: 0 };
+    return { expired: true, formatted: '00m 00d (Selesai)', text: '00m 00d (Selesai)', remainingSeconds: 0 };
   }
   const totalSec = Math.ceil(diffMs / 1000);
   const hours = Math.floor(totalSec / 3600);
@@ -343,15 +344,19 @@ export function formatBanRemainingTime(expiresAt?: string): {
   const secs = totalSec % 60;
 
   if (hours > 0) {
+    const str = `${String(hours).padStart(2, '0')}j ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}d`;
     return {
       expired: false,
-      formatted: `${String(hours).padStart(2, '0')}j ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}d`,
+      formatted: str,
+      text: str,
       remainingSeconds: totalSec,
     };
   }
+  const str = `${String(mins).padStart(2, '0')} Menit ${String(secs).padStart(2, '0')} Detik`;
   return {
     expired: false,
-    formatted: `${String(mins).padStart(2, '0')} Menit ${String(secs).padStart(2, '0')} Detik`,
+    formatted: str,
+    text: str,
     remainingSeconds: totalSec,
   };
 }
@@ -378,8 +383,37 @@ export function getFeatureUltraDetailedExplanation(feat: {
     feat.id === 'tukar_token' ||
     feat.id === 'redeem_code';
 
+  const summary = `${feat.title} merupakan layanan perbankan digital resmi PT Bank Nusantara (Persero) Tbk dalam kategori "${feat.category}". ${feat.description} Layanan ini terintegrasi langsung dengan Core Banking Real-Time, sistem proteksi EMV Chip 256-bit, verifikasi PIN Kartu 6 digit, serta sistem manajemen otoritas terpusat.`;
+
   return {
-    summary: `${feat.title} merupakan layanan perbankan digital resmi PT Bank Nusantara (Persero) Tbk dalam kategori "${feat.category}". ${feat.description} Layanan ini terintegrasi langsung dengan Core Banking Real-Time, sistem proteksi EMV Chip 256-bit, verifikasi PIN Kartu 6 digit, serta sistem manajemen otoritas terpusat.`,
+    summary,
+    executiveSummary: summary,
+    stepByStepSop: [
+      `Pastikan Kartu ATM Anda berstatus AKTIF (tidak sedang dibekukan atau di-Banned).`,
+      `Buka tab "Layanan Digital, Redeem & Pulsa" lalu pilih "${feat.title}".`,
+      `Masukkan ID/Tujuan beserta detail layanan dan pilih atau ketik nominal pembayaran.`,
+      `Periksa rincian saldo sebelum & sesudah transaksi.`,
+      `Klik tombol Bayar & Cetak Struk untuk menyimpan bukti struk digital referensi transaksi.`,
+    ],
+    technicalArchitecture: feat.requireAdminApproval
+      ? `Ketika Anda mengeksekusi transaksi pada fitur "${feat.title}", sistem akan langsung mencatat instruksi Anda dengan status "SEDANG DIPROSES" dan menyinkronkan ke Core Banking.`
+      : `Fitur "${feat.title}" saat ini dikonfigurasi dalam mode EKSEKUSI INSTAN (Tanpa Antrean Pemrosesan) yang langsung tuntas detik itu juga.`,
+    securityAndCompliance: feat.requireAdminPin
+      ? `Dilengkapi proteksi Otorisasi PIN Admin serta enkripsi TLS 1.3 dan jaminan Auto-Refund 100% apabila transaksi dibatalkan.`
+      : `Dapat diakses langsung oleh nasabah dengan enkripsi TLS 1.3 serta jaminan Auto-Refund 100% apabila transaksi dibatalkan.`,
+    financialSimulation: feat.isPaidWithMoney
+      ? `Estimasi nominal standar ${formatRupiah(feat.defaultAmount || 100000)} langsung memotong saldo rekening aktif (atau tetap ∞ Tidak Terbatas bagi pemegang Kartu Admin).`
+      : `Layanan non-debit atau klaim manfaat sehingga tidak memotong saldo utama rekening Anda (Rp 0 biaya eksekusi).`,
+    faqList: [
+      {
+        q: `Bagaimana jika transaksi pada "${feat.title}" ditolak oleh Admin?`,
+        a: `Core Banking Bank Nusantara menjamin pengembalian dana (Refund) 100% utuh secara otomatis kembali ke saldo rekening Anda detik itu juga.`,
+      },
+      {
+        q: `Apakah transaksi "${feat.title}" menerbitkan struk dan tercatat di mutasi?`,
+        a: `Ya, seluruh riwayat penggunaan tercatat abadi di Mutasi & Laporan Rekening serta dapat dicetak ulang di Simulator Mesin ATM.`,
+      },
+    ],
     sections: [
       {
         number: '01',

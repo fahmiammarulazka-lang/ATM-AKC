@@ -141,19 +141,41 @@ export const OfficialStampBadge: React.FC<{
   const secondary = (config.stampSecondaryName || 'RESMI • TERVERIFIKASI').toUpperCase();
   const tpl = config.stampTemplateId || 'royal_wax';
 
+  const glowStyle: Record<SealColorTheme, string> = {
+    amber: 'shadow-[0_0_28px_rgba(251,191,36,0.45),inset_0_0_16px_rgba(251,191,36,0.28)] ring-2 ring-amber-300/50',
+    white: 'shadow-[0_0_26px_rgba(248,250,252,0.35),inset_0_0_14px_rgba(248,250,252,0.22)] ring-2 ring-slate-200/50',
+    cyan: 'shadow-[0_0_28px_rgba(56,189,248,0.45),inset_0_0_16px_rgba(56,189,248,0.28)] ring-2 ring-cyan-300/50',
+    emerald: 'shadow-[0_0_28px_rgba(52,211,153,0.45),inset_0_0_16px_rgba(52,211,153,0.28)] ring-2 ring-emerald-300/50',
+    rose: 'shadow-[0_0_28px_rgba(251,113,133,0.45),inset_0_0_16px_rgba(251,113,133,0.28)] ring-2 ring-rose-300/50',
+  };
+  const activeGlow = glowStyle[config.stampColor || 'amber'] || glowStyle.amber;
+
   if (tpl === 'oval_notaris') {
     return (
       <div
-        className={`inline-flex flex-col items-center justify-center rounded-[50%] border-2 ${col.borderClass} ${col.bgClass} ${col.textClass} -rotate-6 shadow-inner select-none ${
-          compact ? 'px-3 py-1.5 min-w-[110px]' : 'px-5 py-2.5 min-w-[150px]'
+        className={`relative inline-flex flex-col items-center justify-center rounded-[50%] border-[3px] border-double ${col.borderClass} ${col.bgClass} ${col.textClass} ${activeGlow} -rotate-6 select-none transition-transform duration-300 hover:scale-105 ${
+          compact ? 'px-3.5 py-2 min-w-[116px]' : 'px-6 py-3.5 min-w-[172px]'
         }`}
       >
-        <div className={`w-full border border-dashed ${col.borderClass} rounded-[50%] px-3 py-1 text-center`}>
-          <span className="text-[7px] font-mono font-bold tracking-widest block opacity-85">
-            {secondary}
-          </span>
-          <span className={`${compact ? 'text-[10px]' : 'text-xs'} font-black tracking-wider block`}>
+        <div
+          className={`w-full border border-dashed ${col.borderClass} rounded-[50%] px-3 py-1.5 text-center relative overflow-hidden`}
+        >
+          <div className="flex items-center justify-center gap-1 mb-0.5 opacity-90">
+            <Star className="w-2.5 h-2.5 fill-current" />
+            <span className="text-[7px] font-mono font-black tracking-[0.22em] uppercase">
+              AKTA RESMI
+            </span>
+            <Star className="w-2.5 h-2.5 fill-current" />
+          </div>
+          <span
+            className={`${
+              compact ? 'text-[10px]' : 'text-xs'
+            } font-black tracking-wider block drop-shadow`}
+          >
             {primary}
+          </span>
+          <span className="text-[7px] font-mono font-bold tracking-widest block opacity-90 mt-0.5">
+            ✦ {secondary} ✦
           </span>
         </div>
       </div>
@@ -163,17 +185,31 @@ export const OfficialStampBadge: React.FC<{
   if (tpl === 'perisai_vip') {
     return (
       <div
-        className={`inline-flex flex-col items-center justify-center rounded-t-xl rounded-b-3xl border-2 ${col.borderClass} ${col.bgClass} ${col.textClass} -rotate-3 shadow-lg select-none text-center ${
-          compact ? 'w-20 py-2 px-1.5' : 'w-28 py-3 px-2.5'
+        className={`relative inline-flex flex-col items-center justify-center rounded-t-2xl rounded-b-[2.2rem] border-[3px] border-double ${col.borderClass} ${col.bgClass} ${col.textClass} ${activeGlow} -rotate-3 select-none text-center transition-transform duration-300 hover:scale-105 ${
+          compact ? 'w-22 py-2 px-2' : 'w-32 py-3.5 px-3'
         }`}
       >
-        <ShieldCheck className={compact ? 'w-4 h-4 mb-0.5' : 'w-6 h-6 mb-1'} />
-        <span className="text-[7px] font-mono font-bold tracking-wider leading-tight opacity-90 truncate max-w-full">
+        <div className="flex items-center justify-center gap-1 mb-0.5">
+          <Star className="w-2.5 h-2.5 fill-current opacity-80" />
+          <ShieldCheck className={compact ? 'w-4 h-4' : 'w-6 h-6'} />
+          <Star className="w-2.5 h-2.5 fill-current opacity-80" />
+        </div>
+        <span className="text-[6.5px] font-mono font-black tracking-[0.18em] leading-tight opacity-90 truncate max-w-full">
           {secondary}
         </span>
-        <span className={`${compact ? 'text-[8px]' : 'text-[10px]'} font-black tracking-wide leading-tight mt-0.5 truncate max-w-full`}>
+        <div className={`w-4/5 border-t ${col.borderClass} my-0.5 opacity-60`} />
+        <span
+          className={`${
+            compact ? 'text-[8.5px]' : 'text-[10.5px]'
+          } font-black tracking-wider leading-tight truncate max-w-full drop-shadow`}
+        >
           {primary}
         </span>
+        {!compact && (
+          <span className="text-[6px] font-mono tracking-widest opacity-80 mt-0.5">
+            ★ ROYAL SHIELD ★
+          </span>
+        )}
       </div>
     );
   }
@@ -181,20 +217,26 @@ export const OfficialStampBadge: React.FC<{
   if (tpl === 'bintang_emas') {
     return (
       <div
-        className={`inline-flex flex-col items-center justify-center rounded-2xl border-2 ${col.borderClass} ${col.bgClass} ${col.textClass} rotate-2 shadow-lg select-none text-center ${
-          compact ? 'px-2.5 py-2' : 'px-4 py-2.5'
+        className={`relative inline-flex flex-col items-center justify-center rounded-2xl border-[3px] border-double ${col.borderClass} ${col.bgClass} ${col.textClass} ${activeGlow} rotate-2 select-none text-center transition-transform duration-300 hover:scale-105 ${
+          compact ? 'px-3 py-2' : 'px-5 py-3'
         }`}
       >
         <div className="flex items-center gap-1 mb-0.5">
           <Star className="w-3 h-3 fill-current" />
+          <Crown className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
           <Award className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
           <Star className="w-3 h-3 fill-current" />
         </div>
-        <span className={`${compact ? 'text-[9px]' : 'text-[11px]'} font-black tracking-wider block`}>
+        <span
+          className={`${
+            compact ? 'text-[9px]' : 'text-xs'
+          } font-black tracking-wider block drop-shadow`}
+        >
           {primary}
         </span>
-        <span className="text-[7px] font-mono font-bold tracking-widest block opacity-85">
-          {secondary}
+        <div className={`w-full border-t border-dashed ${col.borderClass} my-0.5 opacity-60`} />
+        <span className="text-[7px] font-mono font-bold tracking-[0.2em] block opacity-90">
+          ★ {secondary} ★
         </span>
       </div>
     );
@@ -203,17 +245,34 @@ export const OfficialStampBadge: React.FC<{
   if (tpl === 'royal_wax') {
     return (
       <div
-        className={`inline-flex flex-col items-center justify-center rounded-full border-[3px] border-double ${col.borderClass} ${col.bgClass} ${col.textClass} -rotate-6 shadow-xl select-none text-center relative ${
-          compact ? 'w-16 h-16 p-1' : 'w-24 h-24 p-2'
+        className={`relative inline-flex flex-col items-center justify-center rounded-full border-4 border-double ${col.borderClass} ${col.bgClass} ${col.textClass} ${activeGlow} -rotate-6 select-none text-center transition-transform duration-300 hover:scale-105 ${
+          compact ? 'w-18 h-18 p-1.5' : 'w-28 h-28 p-2.5'
         }`}
       >
-        <Crown className={compact ? 'w-3.5 h-3.5 mb-0.5' : 'w-5 h-5 mb-0.5'} />
-        <span className={`${compact ? 'text-[7px]' : 'text-[9px]'} font-black leading-tight tracking-tight truncate max-w-full`}>
+        {/* Inner serrated micro-ring */}
+        <div
+          className={`pointer-events-none absolute inset-1 rounded-full border border-dashed ${col.borderClass} opacity-75`}
+        />
+        <div className="flex items-center gap-0.5 mb-0.5 relative z-10">
+          <Star className="w-2.5 h-2.5 fill-current opacity-85" />
+          <Crown className={compact ? 'w-3.5 h-3.5' : 'w-5 h-5'} />
+          <Star className="w-2.5 h-2.5 fill-current opacity-85" />
+        </div>
+        <span
+          className={`relative z-10 ${
+            compact ? 'text-[7.5px]' : 'text-[9.5px]'
+          } font-black leading-tight tracking-wider truncate max-w-full drop-shadow`}
+        >
           {primary}
         </span>
-        <span className="text-[6px] font-mono font-bold leading-tight opacity-85 truncate max-w-full mt-0.5">
+        <span className="relative z-10 text-[6px] font-mono font-bold leading-tight opacity-90 truncate max-w-full mt-0.5">
           {secondary}
         </span>
+        {!compact && (
+          <span className="relative z-10 text-[5.5px] font-mono font-black tracking-[0.22em] opacity-80 mt-0.5">
+            • SULTAN SEAL •
+          </span>
+        )}
       </div>
     );
   }
@@ -221,17 +280,29 @@ export const OfficialStampBadge: React.FC<{
   // Default: 'bulat_resmi'
   return (
     <div
-      className={`inline-flex flex-col items-center justify-center rounded-full border-2 border-dashed ${col.borderClass} ${col.bgClass} ${col.textClass} -rotate-6 shadow-inner select-none text-center ${
-        compact ? 'w-16 h-16 p-1' : 'w-24 h-24 p-2'
+      className={`relative inline-flex flex-col items-center justify-center rounded-full border-[3px] border-dashed ${col.borderClass} ${col.bgClass} ${col.textClass} ${activeGlow} -rotate-6 select-none text-center transition-transform duration-300 hover:scale-105 ${
+        compact ? 'w-18 h-18 p-1.5' : 'w-28 h-28 p-2.5'
       }`}
     >
-      <ShieldCheck className={compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
-      <span className="text-[6px] font-mono font-bold uppercase tracking-wider mt-0.5 truncate max-w-full">
+      <div
+        className={`pointer-events-none absolute inset-1.5 rounded-full border ${col.borderClass} opacity-60`}
+      />
+      <ShieldCheck className={`relative z-10 ${compact ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
+      <span className="relative z-10 text-[6px] font-mono font-bold uppercase tracking-widest mt-0.5 truncate max-w-full">
         {secondary}
       </span>
-      <span className={`${compact ? 'text-[7px]' : 'text-[9px]'} font-black uppercase tracking-tight leading-tight truncate max-w-full`}>
+      <span
+        className={`relative z-10 ${
+          compact ? 'text-[7.5px]' : 'text-[9.5px]'
+        } font-black uppercase tracking-wider leading-tight truncate max-w-full drop-shadow`}
+      >
         {primary}
       </span>
+      {!compact && (
+        <span className="relative z-10 text-[5.5px] font-mono tracking-widest opacity-80 mt-0.5">
+          ★ VERIFIED ★
+        </span>
+      )}
     </div>
   );
 };
@@ -247,20 +318,21 @@ export const OfficialSignatureBlock: React.FC<{
   const displayName = config.signatureName?.trim() || fallbackSenderName || 'Admin Bank Nusantara';
 
   return (
-    <div className="text-right min-w-[190px] flex flex-col items-end">
-      <span className="text-[10px] text-amber-300/80 font-mono uppercase block">
-        Hormat Kami, Tanda Tangan Pengirim:
+    <div className="text-right min-w-[200px] flex flex-col items-end bg-slate-950/65 px-4 py-2.5 rounded-2xl border border-amber-400/35 shadow-inner">
+      <span className="text-[9.5px] text-amber-300/90 font-mono uppercase tracking-wider flex items-center gap-1">
+        <Sparkles className="w-3 h-3 text-amber-400" />
+        <span>Otorisasi &amp; Tanda Tangan Resmi:</span>
       </span>
 
-      <div className="min-h-[56px] flex items-center justify-end py-1 border-b border-amber-400/50 w-full">
+      <div className="min-h-[58px] flex items-center justify-end py-1.5 border-b-2 border-double border-amber-400/60 w-full">
         {config.signatureMode === 'draw' && config.signatureDrawingDataUrl ? (
           <img
             src={config.signatureDrawingDataUrl}
             alt={`Tanda tangan ${displayName}`}
-            className="h-14 max-w-[200px] object-contain ml-auto"
+            className="h-14 max-w-[210px] object-contain ml-auto drop-shadow-[0_2px_8px_rgba(251,191,36,0.35)]"
           />
         ) : (
-          <div className={`${sigTpl.previewClass} ${sigColor.textClass} select-none`}>
+          <div className={`${sigTpl.previewClass} ${sigColor.textClass} select-none drop-shadow`}>
             {sigTpl.prefix || ''}
             {displayName}
             {sigTpl.suffix || ''}
@@ -268,8 +340,12 @@ export const OfficialSignatureBlock: React.FC<{
         )}
       </div>
 
-      <span className="text-[11px] font-black text-white block mt-1">
-        {displayName}
+      <div className="flex items-center justify-end gap-1.5 mt-1">
+        <Crown className="w-3 h-3 text-amber-400" />
+        <span className="text-[11px] font-black text-white tracking-wide">{displayName}</span>
+      </div>
+      <span className="text-[8.5px] font-mono text-emerald-300/90 uppercase tracking-widest">
+        ✓ Digital Royal Signature Verified
       </span>
     </div>
   );

@@ -8,6 +8,8 @@ interface VerifiedBadgeProps {
   size?: 'xs' | 'sm' | 'md' | 'lg';
   label?: string;
   showLabel?: boolean;
+  showText?: boolean;
+  text?: string;
   className?: string;
 }
 
@@ -15,6 +17,8 @@ export const VerifiedBadge: React.FC<VerifiedBadgeProps> = ({
   size = 'sm',
   label = 'Akun Terverifikasi Resmi (Centang Biru Admin)',
   showLabel = false,
+  showText = false,
+  text,
   className = '',
 }) => {
   const dimensions =
@@ -25,6 +29,9 @@ export const VerifiedBadge: React.FC<VerifiedBadgeProps> = ({
       : size === 'md'
       ? 'w-5 h-5'
       : 'w-6 h-6';
+
+  const shouldShowLabel = showLabel || showText;
+  const badgeText = text || label;
 
   return (
     <span
@@ -49,9 +56,9 @@ export const VerifiedBadge: React.FC<VerifiedBadgeProps> = ({
           fill="#FFFFFF"
         />
       </svg>
-      {showLabel && (
+      {shouldShowLabel && (
         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#1D9BF0]/20 text-sky-300 border border-[#1D9BF0]/40 tracking-wide">
-          {label}
+          {badgeText}
         </span>
       )}
     </span>

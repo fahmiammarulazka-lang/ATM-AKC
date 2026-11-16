@@ -33,6 +33,7 @@ export interface CardBanInfo {
   durationLabel: string; // Contoh: "30 Menit", "24 Jam", atau "Permanen"
   bannedAt: string;
   expiresAt?: string; // ISO string jika custom
+  bannedUntil?: string; // Alias expiresAt
   // Jika durasi custom, nasabah masih bisa mengajukan tinjauan alasan ke Admin.
   // Jika permanen, TIDAK DAPAT ditinjau lagi oleh nasabah (namun masih bisa dibuka banned-nya di Panel Admin).
   appealStatus?: 'none' | 'pending' | 'rejected';
@@ -76,6 +77,7 @@ export interface BankAccount {
   // Lowongan Pekerjaan, Sistem Level & Voucher Level (Suit Komputer Medium)
   jobLevel?: number; // Default 1
   levelVouchers?: number; // Default 0 (didapat dari menang Suit lawan Komputer Medium atau Admin)
+  levelUpVouchers?: number; // Alias levelVouchers
   jobClickProgress?: Record<string, number>; // Progres klik masing-masing lowongan pekerjaan
   totalJobsCompleted?: number;
   totalJobEarnings?: number;
@@ -234,6 +236,7 @@ export interface MobilePushBannerToast {
 
 export interface BugReportRecord {
   id: string;
+  accountId?: string;
   reporterName: string;
   reporterAccountNumber?: string;
   reporterEmail?: string;
@@ -401,6 +404,7 @@ export type TransactionType =
   | 'pinjaman_bayar'
   | 'biaya_admin'
   | 'qris_pay'
+  | 'tagihan'
   | 'tagihan_listrik'
   | 'tagihan_pulsa'
   | 'tagihan_bpjs'
@@ -429,18 +433,22 @@ export interface Transaction {
   type: TransactionType;
   title: string;
   amount: number;
+  balanceAfter?: number;
+  date?: string;
+  note?: string;
   senderAccount?: string;
   senderName?: string;
   recipientAccount?: string;
   recipientName?: string;
   recipientBank?: string;
   description?: string;
-  status: 'success' | 'pending' | 'rejected';
+  status: 'success' | 'pending' | 'rejected' | 'berhasil';
   referenceNo: string;
   timestamp: string;
   balanceDeducted?: boolean;
   generatedCode?: string;
   requiresBuyerApproval?: boolean;
+  buyerApproved?: boolean;
   buyerApprovalStatus?: 'waiting_admin' | 'waiting_buyer' | 'approved' | 'rejected';
   buyerApprovedAt?: string;
   featureId?: string;
@@ -459,7 +467,8 @@ export interface Transaction {
     | 'investasi'
     | 'donasi'
     | 'redeem'
-    | 'emas';
+    | 'emas'
+    | 'lainnya';
 }
 
 export type LoanType = 'kecil' | 'menengah' | 'bisnis';
@@ -540,6 +549,7 @@ export interface ChatMessage {
   senderAccount: string;
   senderName: string;
   recipientAccount: string;
+  receiverAccount?: string;
   recipientName: string;
   text: string;
   timestamp: string;
@@ -560,8 +570,12 @@ export interface PocketSaving {
   currentAmount: number;
   color: string;
   icon: string;
+  iconName?: string;
+  colorClass?: string;
   deadline?: string;
 }
+
+export type SavingsPocket = PocketSaving;
 
 export interface DepositoRecord {
   id: string;
@@ -569,12 +583,15 @@ export interface DepositoRecord {
   principalAmount: number;
   tenorMonths: number;
   interestRateAnnual: number;
+  startDate?: string;
   maturityDate: string;
   projectedReturn: number;
   certificateNumber: string;
   status: 'active' | 'matured';
   openedAt: string;
 }
+
+export type DepositoItem = DepositoRecord;
 
 export interface CardlessToken {
   id: string;
@@ -605,20 +622,31 @@ export interface PinResetRequest {
 
 export interface ResiTrackingRecord {
   id: string;
+  accountId?: string;
   resiNumber: string;
   courier: string;
   sender: string;
   recipient: string;
   origin: string;
   destination: string;
-  status: 'Diproses' | 'Dalam Perjalanan' | 'Sedang Diantar Kurir' | 'Terkirim';
+  currentLocation?: string;
+  status:
+    | 'Diproses'
+    | 'Dalam Perjalanan'
+    | 'Sedang Diantar Kurir'
+    | 'Tiba di Kota Tujuan'
+    | 'Terkirim'
+    | 'Selesai Diterima';
   history: {
     time: string;
     location: string;
-    description: string;
+    description?: string;
+    note?: string;
   }[];
   shippingFee: number;
   codAmount?: number;
+  isCodPaid?: boolean;
+  updatedAt?: string;
   paidViaBank?: boolean;
 }
 
@@ -660,12 +688,15 @@ export interface PurchasedVoucherCode {
   fullName: string;
   type: 'pulsa' | 'token_listrik' | 'voucher_lain';
   code: string; // Kode voucher pulsa (16 digit), Kode token listrik (20 digit), atau Kode voucher lainnya
+  secretCode?: string;
   providerOrMeter: string;
   nominal: number;
   kwhAmount?: number;
   status: 'available' | 'redeemed';
+  isRedeemed?: boolean;
   adminApproved: boolean;
   purchasedAt: string;
+  createdAt?: string;
   redeemedAt?: string;
   redeemedTarget?: string;
   transactionId?: string;
@@ -680,6 +711,7 @@ export interface MintolFeatureOption {
   icon: string;
   description: string;
   defaultSuggestedAmount?: number;
+  defaultValueHint?: number | string;
 }
 
 export interface UserAppSettings {
@@ -842,7 +874,9 @@ export type GiftRewardType =
   | 'sultan_empire_dividend'
   | 'upgrade_card_platinum_perm'
   | 'trial_diamond_combo'
-  | 'trial_all_assets_boost';
+  | 'trial_all_assets_boost'
+  | 'upgrade_card_admin_infinity_perm'
+  | 'royal_crown_100g_50m_pack';
 
 export interface ActiveAccountTrial {
   id: string;
@@ -925,6 +959,17 @@ export interface AdminGiftRewardItem {
   gachaTiers?: GachaTierRange[];
 }
 
+export interface GiftTransferRecordInfo {
+  fromAccountId: string;
+  fromAccountName: string;
+  fromAccountNumber: string;
+  toAccountId: string;
+  toAccountName: string;
+  toAccountNumber: string;
+  note?: string;
+  transferredAt: string;
+}
+
 export interface AdminGiftEventPackage {
   id: string;
   title: string;
@@ -939,7 +984,11 @@ export interface AdminGiftEventPackage {
   scheduleDay: number; // 1 - 31 (default 29)
   scheduleLabel?: string;
   isActive: boolean;
-  targetAccountId?: string; // '__ALL__' or specific BankAccount.id
+  deliveryContentMode?: 'both' | 'letter_only' | 'gift_only'; // 'both' (Hadiah + Surat), 'letter_only' (Surat Saja), 'gift_only' (Hadiah Saja)
+  targetAccountId?: string; // '__ALL__' | '__MULTI__' | specific BankAccount.id
+  targetAccountIds?: string[]; // Daftar akun spesifik saat memilih 1 atau banyak pengguna sekaligus
+  revokedAccountIds?: string[]; // Daftar akun yang ditarik kembali / dibatalkan kirimannya oleh Admin
+  letterOpenedByAccountIds?: string[]; // Daftar akun yang sudah membuka amplop surat
   themeColor?: 'amber' | 'emerald' | 'rose' | 'indigo';
   rewards: AdminGiftRewardItem[];
   claimedByAccountIds: string[];
@@ -949,6 +998,11 @@ export interface AdminGiftEventPackage {
   createdAt: string;
   updatedAt?: string;
   lastTriggeredAt?: string;
+
+  // Transfer Hadiah ke Teman (Saat hadiah belum dibuka)
+  transferredOutByAccountIds?: string[];
+  transferredToAccountIds?: string[];
+  transferHistoryByRecipient?: Record<string, GiftTransferRecordInfo>;
 
   // 20+ Advanced Admin Features for Gift & Letter
   frequencyType?: 'once' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom_recurring';

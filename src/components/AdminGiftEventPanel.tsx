@@ -22,6 +22,14 @@ import {
   Search,
   Crown,
   PenTool,
+  Mail,
+  Users,
+  CheckSquare,
+  Square,
+  Copy,
+  Ban,
+  CheckCircle2,
+  Sliders,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { GIFT_REWARD_CATALOG, MONTHS_INDO, formatTrialDurationLabel } from '../data/giftRewardsCatalog';
@@ -62,6 +70,10 @@ export const AdminGiftEventPanel: React.FC = () => {
     adminDeleteGiftEvent,
     adminToggleGiftEventActive,
     adminTriggerGiftEventNow,
+    adminResetGiftEventStatus,
+    adminToggleRevokeGiftEventRecipient,
+    adminDuplicateGiftEvent,
+    adminUpdateGiftEventQuickSettings,
     adminSetGiftDateTestOverride,
     openGiftEventModal,
     devRoles,
@@ -75,6 +87,7 @@ export const AdminGiftEventPanel: React.FC = () => {
   const [letterMessage, setLetterMessage] = useState<string>(
     'Terima kasih telah menjadi nasabah setia Bank Nusantara! Silakan nikmati paket hadiah spesial dan pesan hangat ini langsung di rekening Anda.'
   );
+  const [deliveryContentMode, setDeliveryContentMode] = useState<'both' | 'letter_only' | 'gift_only'>('both');
   const [triggerMode, setTriggerMode] = useState<'scheduled_date' | 'manual_instant' | 'both'>('both');
   const [autoPopupEnabled, setAutoPopupEnabled] = useState<boolean>(true);
   const [strictDateLock, setStrictDateLock] = useState<boolean>(true);
@@ -82,6 +95,11 @@ export const AdminGiftEventPanel: React.FC = () => {
   const [scheduleDay, setScheduleDay] = useState<number>(29);
   const [isActive, setIsActive] = useState<boolean>(true);
   const [targetAccountId, setTargetAccountId] = useState<string>('__ALL__');
+  const [recipientSelectionMode, setRecipientSelectionMode] = useState<'all' | 'single' | 'multi'>('all');
+  const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
+  const [recipientSearchQuery, setRecipientSearchQuery] = useState<string>('');
+  const [managingEventId, setManagingEventId] = useState<string | null>(null);
+  const [manageRecipientSearch, setManageRecipientSearch] = useState<string>('');
   const [themeColor, setThemeColor] = useState<'amber' | 'emerald' | 'rose' | 'indigo'>('amber');
 
   // Custom Signature & Stamp settings for this event (or use Default Global)
@@ -118,7 +136,7 @@ export const AdminGiftEventPanel: React.FC = () => {
   const [attachmentFileUrl, setAttachmentFileUrl] = useState<string>('');
   const [attachmentFileName, setAttachmentFileName] = useState<string>('');
   const [autoExpireHours, setAutoExpireHours] = useState<number>(72);
-  const [allowTransferableGift, setAllowTransferableGift] = useState<boolean>(false);
+  const [allowTransferableGift, setAllowTransferableGift] = useState<boolean>(true);
 
   const [selectedRewards, setSelectedRewards] = useState<AdminGiftRewardItem[]>(() =>
     GIFT_REWARD_CATALOG.slice(0, 4).map((meta, idx) => ({
@@ -208,6 +226,7 @@ export const AdminGiftEventPanel: React.FC = () => {
     setLetterMessage(
       'Terima kasih telah menjadi nasabah setia Bank Nusantara! Silakan nikmati paket hadiah spesial dan pesan hangat ini langsung di rekening Anda.'
     );
+    setDeliveryContentMode('both');
     setTriggerMode('both');
     setAutoPopupEnabled(true);
     setStrictDateLock(true);
@@ -215,6 +234,9 @@ export const AdminGiftEventPanel: React.FC = () => {
     setScheduleDay(29);
     setIsActive(true);
     setTargetAccountId('__ALL__');
+    setRecipientSelectionMode('all');
+    setSelectedRecipientIds([]);
+    setRecipientSearchQuery('');
     setThemeColor('amber');
     setSealScope('global');
     setCustomSealDraft(defaultLetterSealConfig);
@@ -238,7 +260,7 @@ export const AdminGiftEventPanel: React.FC = () => {
     setAttachmentFileUrl('');
     setAttachmentFileName('');
     setAutoExpireHours(72);
-    setAllowTransferableGift(false);
+    setAllowTransferableGift(true);
   };
 
   const loadEventIntoEditor = (ev: AdminGiftEventPackage) => {
@@ -246,13 +268,34 @@ export const AdminGiftEventPanel: React.FC = () => {
     setTitle(ev.title);
     setSenderName(ev.senderName);
     setLetterMessage(ev.letterMessage);
+    setDeliveryContentMode(ev.deliveryContentMode || 'both');
     setTriggerMode(ev.triggerMode);
     setAutoPopupEnabled(ev.autoPopupEnabled);
     setStrictDateLock(ev.strictDateLock !== undefined ? ev.strictDateLock : true);
     setScheduleMonth(ev.scheduleMonth);
     setScheduleDay(ev.scheduleDay);
     setIsActive(ev.isActive);
-    setTargetAccountId(ev.targetAccountId || '__ALL__');
+
+    const existingTargets = Array.isArray(ev.targetAccountIds) && ev.targetAccountIds.length > 0
+      ? ev.targetAccountIds
+      : ev.targetAccountId && ev.targetAccountId !== '__ALL__' && ev.targetAccountId !== '__MULTI__'
+      ? [ev.targetAccountId]
+      : [];
+
+    if (!ev.targetAccountId || ev.targetAccountId === '__ALL__') {
+      setRecipientSelectionMode('all');
+      setTargetAccountId('__ALL__');
+      setSelectedRecipientIds([]);
+    } else if (existingTargets.length === 1) {
+      setRecipientSelectionMode('single');
+      setTargetAccountId(existingTargets[0]);
+      setSelectedRecipientIds(existingTargets);
+    } else {
+      setRecipientSelectionMode('multi');
+      setTargetAccountId('__MULTI__');
+      setSelectedRecipientIds(existingTargets);
+    }
+
     setThemeColor(ev.themeColor || 'amber');
     setSelectedRewards(ev.rewards);
     if (ev.customSealConfig) {
@@ -282,31 +325,82 @@ export const AdminGiftEventPanel: React.FC = () => {
     setAttachmentFileUrl(ev.attachmentFileUrl || '');
     setAttachmentFileName(ev.attachmentFileName || '');
     setAutoExpireHours(ev.autoExpireHours || 72);
-    setAllowTransferableGift(ev.allowTransferableGift ?? false);
+    setAllowTransferableGift(ev.allowTransferableGift ?? true);
 
-    setFeedback(`Mengedit paket "${ev.title}" (Pengirim: ${ev.senderName}).`);
+    setFeedback(`✏️ Mengedit paket "${ev.title}" (Pengirim: ${ev.senderName}). Silakan ubah isi surat, hadiah, mode kirim, atau pengguna penerima lalu klik Simpan.`);
   };
 
+  const toggleRecipientAccountCheckbox = (accountId: string) => {
+    setSelectedRecipientIds((prev) =>
+      prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId]
+    );
+  };
+
+  const filteredRecipientAccounts = accounts.filter((acc) => {
+    if (!recipientSearchQuery.trim()) return true;
+    const q = recipientSearchQuery.toLowerCase();
+    return (
+      acc.fullName.toLowerCase().includes(q) ||
+      acc.accountNumber.toLowerCase().includes(q) ||
+      acc.cardTier.toLowerCase().includes(q) ||
+      (acc.phone || '').toLowerCase().includes(q)
+    );
+  });
+
   const handleSave = (alsoSendNow: boolean) => {
-    if (selectedRewards.length === 0) {
-      setFeedback(`Pilih minimal 1 hadiah dari daftar ${GIFT_REWARD_CATALOG.length} macam hadiah!`);
+    if (deliveryContentMode !== 'letter_only' && selectedRewards.length === 0) {
+      setFeedback(`Pilih minimal 1 hadiah dari daftar ${GIFT_REWARD_CATALOG.length} macam hadiah (atau ubah Mode Isi Kiriman menjadi "Surat Saja")!`);
       return;
     }
+
+    let finalTargetAccountId = '__ALL__';
+    let finalTargetAccountIds: string[] = [];
+
+    if (recipientSelectionMode === 'all') {
+      finalTargetAccountId = '__ALL__';
+      finalTargetAccountIds = [];
+    } else if (recipientSelectionMode === 'single') {
+      const chosenSingle =
+        targetAccountId && targetAccountId !== '__ALL__' && targetAccountId !== '__MULTI__'
+          ? targetAccountId
+          : selectedRecipientIds[0] || accounts[0]?.id || '__ALL__';
+      if (chosenSingle === '__ALL__') {
+        finalTargetAccountId = '__ALL__';
+        finalTargetAccountIds = [];
+      } else {
+        finalTargetAccountId = chosenSingle;
+        finalTargetAccountIds = [chosenSingle];
+      }
+    } else {
+      if (selectedRecipientIds.length === 0) {
+        setFeedback('Centang minimal 1 akun nasabah penerima pada daftar pemilihan pengguna (atau pilih Semua Nasabah)!');
+        return;
+      }
+      finalTargetAccountIds = Array.from(new Set(selectedRecipientIds));
+      finalTargetAccountId =
+        finalTargetAccountIds.length === 1 ? finalTargetAccountIds[0] : '__MULTI__';
+    }
+
     const res = adminCreateOrUpdateGiftEvent({
       id: editingEventId || undefined,
       title,
       senderName,
       letterMessage,
+      deliveryContentMode,
       triggerMode,
       autoPopupEnabled,
       strictDateLock,
-      isGachaBox: selectedRewards.some((r) => r.rewardMode === 'gacha'),
+      isGachaBox:
+        deliveryContentMode === 'letter_only'
+          ? false
+          : selectedRewards.some((r) => r.rewardMode === 'gacha'),
       scheduleMonth,
       scheduleDay,
       isActive,
-      targetAccountId,
+      targetAccountId: finalTargetAccountId,
+      targetAccountIds: finalTargetAccountIds,
       themeColor,
-      rewards: selectedRewards,
+      rewards: deliveryContentMode === 'letter_only' ? [] : selectedRewards,
       customSealConfig: sealScope === 'custom' ? customSealDraft : null,
       frequencyType,
       recurringIntervalHours,
@@ -548,69 +642,412 @@ export const AdminGiftEventPanel: React.FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                  Tanggal (1–31)
+            {/* Pengaturan Frekuensi Jadwal + Otomatisasi Tombol Tanggal & Bulan */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-amber-400/40 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Pengaturan Siklus Jadwal (Bulanan / Harian / Tahunan)</span>
                 </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={scheduleDay}
-                  onChange={(e) => setScheduleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono font-bold"
-                />
+                <span className="px-2 py-0.5 rounded-full bg-amber-400/15 border border-amber-400/40 text-amber-200 text-[9px] font-mono font-bold">
+                  {frequencyType === 'monthly'
+                    ? 'Bulan Otomatis Nonaktif (Aktif Tiap Bulan)'
+                    : frequencyType === 'daily' || frequencyType === 'hourly'
+                    ? 'Tanggal & Bulan Otomatis Nonaktif (Aktif Tiap Hari)'
+                    : 'Tanggal & Bulan Aktif'}
+                </span>
               </div>
+
               <div>
-                <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                  Bulan Jadwal
+                <label className="text-[10px] font-bold text-slate-300 block mb-1">
+                  Pilih Mode Jadwal Pengiriman
                 </label>
                 <select
-                  value={scheduleMonth}
-                  onChange={(e) => setScheduleMonth(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-semibold"
+                  value={frequencyType}
+                  onChange={(e) => setFrequencyType(e.target.value as any)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-amber-400/50 text-amber-200 font-bold text-xs"
                 >
-                  {MONTHS_INDO.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
+                  <option value="monthly">Setiap Bulan (Tombol Bulan Otomatis Mati — Aktif Tiap Tanggal Terpilih)</option>
+                  <option value="daily">Setiap Hari (Tombol Tanggal &amp; Bulan Otomatis Mati — Aktif Setiap Hari)</option>
+                  <option value="yearly">Setiap Tahun / Tanggal &amp; Bulan Spesifik (Tanggal &amp; Bulan Aktif)</option>
+                  <option value="once">Sekali Saja pada Tanggal &amp; Bulan Terpilih</option>
+                  <option value="weekly">Setiap Minggu</option>
+                  <option value="hourly">Setiap Jam (Tombol Tanggal &amp; Bulan Otomatis Mati)</option>
+                  <option value="custom_recurring">Kustom Berulang (Interval Jam)</option>
                 </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between gap-1 mb-1">
+                    <span>Tanggal (1–31)</span>
+                    {(frequencyType === 'daily' || frequencyType === 'hourly') && (
+                      <span className="px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-400/40 text-rose-300 text-[9px] font-mono">
+                        NONAKTIF OTOMATIS
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    disabled={frequencyType === 'daily' || frequencyType === 'hourly'}
+                    value={scheduleDay}
+                    onChange={(e) =>
+                      setScheduleDay(Math.min(31, Math.max(1, Number(e.target.value) || 1)))
+                    }
+                    className={`w-full px-3 py-2 rounded-xl border font-mono font-bold transition-all ${
+                      frequencyType === 'daily' || frequencyType === 'hourly'
+                        ? 'bg-slate-900/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-55'
+                        : 'bg-slate-950 border-slate-700 text-white'
+                    }`}
+                  />
+                  <span className="text-[9.5px] text-slate-400 block mt-1">
+                    {frequencyType === 'daily' || frequencyType === 'hourly'
+                      ? 'Tombol tanggal otomatis mati karena jadwal berjalan setiap hari.'
+                      : frequencyType === 'monthly'
+                      ? `Otomatis aktif setiap tanggal ${scheduleDay} di semua bulan.`
+                      : `Aktif pada tanggal ${scheduleDay}.`}
+                  </span>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between gap-1 mb-1">
+                    <span>Bulan Jadwal</span>
+                    {(frequencyType === 'monthly' ||
+                      frequencyType === 'daily' ||
+                      frequencyType === 'hourly') && (
+                      <span className="px-1.5 py-0.5 rounded bg-rose-500/20 border border-rose-400/40 text-rose-300 text-[9px] font-mono">
+                        NONAKTIF OTOMATIS
+                      </span>
+                    )}
+                  </label>
+                  <select
+                    value={scheduleMonth}
+                    disabled={
+                      frequencyType === 'monthly' ||
+                      frequencyType === 'daily' ||
+                      frequencyType === 'hourly'
+                    }
+                    onChange={(e) => setScheduleMonth(Number(e.target.value))}
+                    className={`w-full px-3 py-2 rounded-xl border font-semibold transition-all ${
+                      frequencyType === 'monthly' ||
+                      frequencyType === 'daily' ||
+                      frequencyType === 'hourly'
+                        ? 'bg-slate-900/50 border-slate-800 text-slate-500 cursor-not-allowed opacity-55'
+                        : 'bg-slate-950 border-slate-700 text-white'
+                    }`}
+                  >
+                    {MONTHS_INDO.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[9.5px] text-slate-400 block mt-1">
+                    {frequencyType === 'monthly'
+                      ? 'Tombol bulan otomatis mati karena berulang setiap bulan.'
+                      : frequencyType === 'daily' || frequencyType === 'hourly'
+                      ? 'Tombol bulan otomatis mati karena aktif setiap hari.'
+                      : `Aktif pada bulan ${MONTHS_INDO.find((m) => m.value === scheduleMonth)?.label}.`}
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            {/* MODE ISI KIRIMAN: HADIAH + SURAT SEKALIGUS / SURAT SAJA / HADIAH SAJA */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/95 border-2 border-amber-400/50 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
+                  <Gift className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Pilih Mode Isi Kiriman (Hadiah &amp; Surat / Surat Saja / Hadiah Saja)</span>
+                </label>
+                <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-200 text-[9.5px] font-mono font-bold">
+                  {deliveryContentMode === 'both'
+                    ? 'Tampil 2 Kartu (Amplop + Hadiah)'
+                    : deliveryContentMode === 'letter_only'
+                    ? 'Tampil Amplop Surat Saja'
+                    : 'Tampil Kotak Hadiah Saja'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDeliveryContentMode('both')}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer space-y-1 ${
+                    deliveryContentMode === 'both'
+                      ? 'bg-amber-400 text-slate-950 border-amber-200 font-black shadow-lg'
+                      : 'bg-slate-900/90 text-slate-200 border-slate-700 hover:border-amber-400/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-black">
+                    <Gift className="w-3.5 h-3.5 shrink-0" />
+                    <span>Keduanya Sekaligus</span>
+                  </div>
+                  <span
+                    className={`text-[9.5px] block leading-tight ${
+                      deliveryContentMode === 'both' ? 'text-slate-900 font-semibold' : 'text-slate-400'
+                    }`}
+                  >
+                    Kirim Amplop Surat + Kotak Hadiah berdampingan
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeliveryContentMode('letter_only')}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer space-y-1 ${
+                    deliveryContentMode === 'letter_only'
+                      ? 'bg-cyan-400 text-slate-950 border-cyan-200 font-black shadow-lg'
+                      : 'bg-slate-900/90 text-slate-200 border-slate-700 hover:border-cyan-400/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-black">
+                    <Mail className="w-3.5 h-3.5 shrink-0" />
+                    <span>Surat Saja</span>
+                  </div>
+                  <span
+                    className={`text-[9.5px] block leading-tight ${
+                      deliveryContentMode === 'letter_only' ? 'text-slate-900 font-semibold' : 'text-slate-400'
+                    }`}
+                  >
+                    Hanya tampilkan Amplop Surat Resmi (tanpa hadiah)
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeliveryContentMode('gift_only')}
+                  className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer space-y-1 ${
+                    deliveryContentMode === 'gift_only'
+                      ? 'bg-emerald-400 text-slate-950 border-emerald-200 font-black shadow-lg'
+                      : 'bg-slate-900/90 text-slate-200 border-slate-700 hover:border-emerald-400/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-xs font-black">
+                    <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                    <span>Hadiah Saja</span>
+                  </div>
+                  <span
+                    className={`text-[9.5px] block leading-tight ${
+                      deliveryContentMode === 'gift_only' ? 'text-slate-900 font-semibold' : 'text-slate-400'
+                    }`}
+                  >
+                    Hanya tampilkan Kotak Hadiah Sultan (tanpa surat)
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* PEMILIH PENGGUNA PENERIMA: SEMUA NASABAH / 1 AKUN / CENTANG BANYAK AKUN + PENCARIAN */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/95 border-2 border-emerald-400/50 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-[11px] font-black text-emerald-300 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Pilih Pengguna Penerima Kiriman</span>
+                </label>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[9.5px] font-mono font-bold">
+                  {recipientSelectionMode === 'all'
+                    ? `Semua Nasabah (${accounts.length} Akun)`
+                    : recipientSelectionMode === 'single'
+                    ? '1 Akun Spesifik'
+                    : `${selectedRecipientIds.length} Akun Dicentang`}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecipientSelectionMode('all');
+                    setTargetAccountId('__ALL__');
+                  }}
+                  className={`py-2 px-2.5 rounded-xl font-bold text-[11px] border cursor-pointer transition-all ${
+                    recipientSelectionMode === 'all'
+                      ? 'bg-emerald-400 text-slate-950 border-emerald-200 font-black'
+                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:text-white'
+                  }`}
+                >
+                  🌐 Semua ({accounts.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecipientSelectionMode('single');
+                    const fallbackId =
+                      targetAccountId !== '__ALL__' && targetAccountId !== '__MULTI__'
+                        ? targetAccountId
+                        : selectedRecipientIds[0] || accounts[0]?.id || '__ALL__';
+                    setTargetAccountId(fallbackId);
+                    if (fallbackId !== '__ALL__') {
+                      setSelectedRecipientIds([fallbackId]);
+                    }
+                  }}
+                  className={`py-2 px-2.5 rounded-xl font-bold text-[11px] border cursor-pointer transition-all ${
+                    recipientSelectionMode === 'single'
+                      ? 'bg-cyan-400 text-slate-950 border-cyan-200 font-black'
+                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:text-white'
+                  }`}
+                >
+                  👤 Pilih 1 Akun
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecipientSelectionMode('multi');
+                    setTargetAccountId('__MULTI__');
+                    if (
+                      selectedRecipientIds.length === 0 &&
+                      targetAccountId !== '__ALL__' &&
+                      targetAccountId !== '__MULTI__'
+                    ) {
+                      setSelectedRecipientIds([targetAccountId]);
+                    }
+                  }}
+                  className={`py-2 px-2.5 rounded-xl font-bold text-[11px] border cursor-pointer transition-all ${
+                    recipientSelectionMode === 'multi'
+                      ? 'bg-amber-400 text-slate-950 border-amber-200 font-black'
+                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:text-white'
+                  }`}
+                >
+                  ☑️ Banyak Akun
+                </button>
+              </div>
+
+              {recipientSelectionMode === 'single' && (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={recipientSearchQuery}
+                      onChange={(e) => setRecipientSearchQuery(e.target.value)}
+                      placeholder="Cari nama nasabah atau nomor rekening..."
+                      className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-[11px] text-white"
+                    />
+                  </div>
+                  <select
+                    value={
+                      targetAccountId !== '__ALL__' && targetAccountId !== '__MULTI__'
+                        ? targetAccountId
+                        : filteredRecipientAccounts[0]?.id || ''
+                    }
+                    onChange={(e) => {
+                      setTargetAccountId(e.target.value);
+                      setSelectedRecipientIds(e.target.value ? [e.target.value] : []);
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-cyan-400/50 text-cyan-200 font-bold text-xs"
+                  >
+                    {filteredRecipientAccounts.map((acc) => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.fullName} — No. Rek: {acc.accountNumber} ({acc.cardTier.toUpperCase()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {recipientSelectionMode === 'multi' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={recipientSearchQuery}
+                        onChange={(e) => setRecipientSearchQuery(e.target.value)}
+                        placeholder="Cari nama, no. rekening, atau tier kartu..."
+                        className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-[11px] text-white"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSelectedRecipientIds(
+                          Array.from(
+                            new Set([
+                              ...selectedRecipientIds,
+                              ...filteredRecipientAccounts.map((a) => a.id),
+                            ])
+                          )
+                        )
+                      }
+                      className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 font-bold text-[10px] cursor-pointer whitespace-nowrap"
+                    >
+                      + Centang Semua
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRecipientIds([])}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 font-bold text-[10px] cursor-pointer whitespace-nowrap"
+                    >
+                      Reset
+                    </button>
+                  </div>
+
+                  <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1 bg-slate-900/80 p-2 rounded-xl border border-slate-800">
+                    {filteredRecipientAccounts.map((acc) => {
+                      const isChecked = selectedRecipientIds.includes(acc.id);
+                      return (
+                        <button
+                          key={acc.id}
+                          type="button"
+                          onClick={() => toggleRecipientAccountCheckbox(acc.id)}
+                          className={`w-full p-2 rounded-lg border flex items-center justify-between gap-2 text-left cursor-pointer transition-all ${
+                            isChecked
+                              ? 'bg-emerald-950/60 border-emerald-400/70 text-white'
+                              : 'bg-slate-950/80 border-slate-800 text-slate-300 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            {isChecked ? (
+                              <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-500 shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <span className="font-bold text-xs block truncate">
+                                {acc.fullName}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-400 block">
+                                Rek: {acc.accountNumber} • {acc.cardTier.toUpperCase()}
+                              </span>
+                            </div>
+                          </div>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[9.5px] font-black shrink-0 ${
+                              isChecked
+                                ? 'bg-emerald-400 text-slate-950'
+                                : 'bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {isChecked ? '✓ Terpilih' : 'Pilih'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {filteredRecipientAccounts.length === 0 && (
+                      <div className="text-center py-3 text-slate-400 text-[11px]">
+                        Tidak ada akun yang cocok dengan pencarian &ldquo;{recipientSearchQuery}&rdquo;.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                  Mode Pengiriman
+                  Mode Trigger Pengiriman (Jadwal / Manual)
                 </label>
                 <select
                   value={triggerMode}
                   onChange={(e) => setTriggerMode(e.target.value as 'scheduled_date' | 'manual_instant' | 'both')}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-cyan-200 font-semibold"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-cyan-200 font-semibold"
                 >
-                  <option value="both">Otomatis Tanggal + Manual</option>
-                  <option value="scheduled_date">Hanya Otomatis Tanggal</option>
-                  <option value="manual_instant">Hanya Kirim Manual</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                  Target Nasabah
-                </label>
-                <select
-                  value={targetAccountId}
-                  onChange={(e) => setTargetAccountId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-emerald-200 font-semibold"
-                >
-                  <option value="__ALL__">Semua Nasabah ({accounts.length})</option>
-                  {accounts.map((acc) => (
-                    <option key={acc.id} value={acc.id}>
-                      {acc.fullName} ({acc.accountNumber})
-                    </option>
-                  ))}
+                  <option value="both">Otomatis Sesuai Jadwal + Bisa Kirim Manual</option>
+                  <option value="scheduled_date">Hanya Otomatis Sesuai Jadwal</option>
+                  <option value="manual_instant">Hanya Kirim Manual Instan</option>
                 </select>
               </div>
             </div>
@@ -933,7 +1370,7 @@ export const AdminGiftEventPanel: React.FC = () => {
                 type="text"
                 value={rewardSearch}
                 onChange={(e) => setRewardSearch(e.target.value)}
-                placeholder="Cari 58 hadiah..."
+                placeholder={`Cari ${GIFT_REWARD_CATALOG.length} hadiah...`}
                 className="w-full pl-8 pr-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-white"
               />
             </div>
@@ -1166,147 +1603,489 @@ export const AdminGiftEventPanel: React.FC = () => {
         </div>
       </div>
 
-      {/* Scheduled & Manual Event List */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-          <h3 className="font-black text-white text-base flex items-center gap-2">
-            <Gift className="w-5 h-5 text-amber-400" />
-            <span>Daftar Semua Paket &amp; Jadwal Hadiah Surat ({giftEvents.length} Paket)</span>
-          </h3>
+      {/* PUSAT PENGELOLAAN SURAT & HADIAH YANG SUDAH DIKIRIM / DIJADWALKAN */}
+      <div className="bg-slate-900/90 border-2 border-amber-400/50 rounded-3xl p-6 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <h3 className="font-black text-white text-base flex items-center gap-2">
+              <Gift className="w-5 h-5 text-amber-400" />
+              <span>
+                Pusat Kelola Surat &amp; Hadiah yang Sudah Dikirim / Dijadwalkan ({giftEvents.length} Paket)
+              </span>
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Atur kembali surat &amp; hadiah kapan saja: <strong>Edit Ulang Isi/Mode/Penerima</strong>,{' '}
+              <strong>Reset Status Klaim &amp; Baca</strong> (per pengguna atau semua),{' '}
+              <strong>Tarik Kembali / Batalkan</strong> dari pengguna tertentu, atau{' '}
+              <strong>Duplikasi &amp; Kirim Ulang Instan</strong>!
+            </p>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {giftEvents.map((ev) => (
-            <div
-              key={ev.id}
-              className={`p-4 rounded-2xl border-2 space-y-3 ${
-                ev.isActive
-                  ? 'bg-slate-950/90 border-amber-400/50'
-                  : 'bg-slate-950/50 border-slate-800 opacity-70'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                    <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 font-mono font-bold text-[10px] tabular-nums">
-                      📅 {ev.scheduleLabel}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                        ev.isActive
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-slate-800 text-slate-400'
-                      }`}
-                    >
-                      {ev.isActive ? 'Aktif' : 'Nonaktif'}
-                    </span>
-                    {ev.strictDateLock !== false && (
-                      <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold text-[10px]">
-                        🔒 Terkunci Tanggal
+        <div className="grid grid-cols-1 gap-4">
+          {giftEvents.map((ev) => {
+            const evMode = ev.deliveryContentMode || 'both';
+            const isManagingThis = managingEventId === ev.id;
+            const targetIds =
+              Array.isArray(ev.targetAccountIds) && ev.targetAccountIds.length > 0
+                ? ev.targetAccountIds
+                : ev.targetAccountId &&
+                  ev.targetAccountId !== '__ALL__' &&
+                  ev.targetAccountId !== '__MULTI__'
+                ? [ev.targetAccountId]
+                : [];
+            const isAllTarget = !ev.targetAccountId || ev.targetAccountId === '__ALL__';
+            const targetAccountsForEvent = isAllTarget
+              ? accounts
+              : accounts.filter(
+                  (a) =>
+                    targetIds.includes(a.id) ||
+                    (ev.transferredToAccountIds || []).includes(a.id)
+                );
+            const filteredManageAccounts = targetAccountsForEvent.filter((acc) => {
+              if (!manageRecipientSearch.trim()) return true;
+              const q = manageRecipientSearch.toLowerCase();
+              return (
+                acc.fullName.toLowerCase().includes(q) ||
+                acc.accountNumber.toLowerCase().includes(q)
+              );
+            });
+
+            return (
+              <div
+                key={ev.id}
+                className={`p-5 rounded-3xl border-2 space-y-3.5 transition-all ${
+                  ev.isActive
+                    ? 'bg-slate-950/95 border-amber-400/60 shadow-xl'
+                    : 'bg-slate-950/50 border-slate-800 opacity-75'
+                }`}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 font-mono font-bold text-[10px] tabular-nums">
+                        📅 {ev.scheduleLabel}
                       </span>
-                    )}
-                    {ev.rewards.some((r) => r.rewardMode === 'gacha') && (
-                      <span className="px-2 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-300 font-bold text-[10px]">
-                        🎲 Gacha
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full font-black text-[10px] ${
+                          evMode === 'letter_only'
+                            ? 'bg-cyan-500/20 border border-cyan-400/50 text-cyan-200'
+                            : evMode === 'gift_only'
+                            ? 'bg-emerald-500/20 border border-emerald-400/50 text-emerald-200'
+                            : 'bg-amber-500/20 border border-amber-400/50 text-amber-200'
+                        }`}
+                      >
+                        {evMode === 'letter_only'
+                          ? '✉️ Mode: Surat Saja'
+                          : evMode === 'gift_only'
+                          ? '🎁 Mode: Hadiah Saja'
+                          : '👑 Mode: Hadiah & Surat Sekaligus'}
                       </span>
-                    )}
-                    {ev.customSealConfig && (
-                      <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-bold text-[10px]">
-                        ✒️ TTD/Stempel Khusus
+                      <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 font-bold text-[10px]">
+                        👥 Penerima:{' '}
+                        {isAllTarget
+                          ? `Semua Nasabah (${accounts.length} Akun)`
+                          : targetIds.length === 1
+                          ? (() => {
+                              const singleAcc = accounts.find((a) => a.id === targetIds[0]);
+                              return singleAcc
+                                ? `${singleAcc.fullName} (${singleAcc.accountNumber})`
+                                : '1 Akun Spesifik';
+                            })()
+                          : `${targetIds.length} Akun Terpilih`}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
+                          ev.isActive
+                            ? 'bg-emerald-500/20 text-emerald-300'
+                            : 'bg-slate-800 text-slate-400'
+                        }`}
+                      >
+                        {ev.isActive ? 'Aktif' : 'Nonaktif'}
+                      </span>
+                      {ev.strictDateLock !== false && (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-bold text-[10px]">
+                          🔒 Terkunci Tanggal
+                        </span>
+                      )}
+                      {evMode !== 'letter_only' && ev.rewards.some((r) => r.rewardMode === 'gacha') && (
+                        <span className="px-2 py-0.5 rounded-full bg-fuchsia-500/20 text-fuchsia-300 font-bold text-[10px]">
+                          🎲 Gacha
+                        </span>
+                      )}
+                    </div>
+                    <h4 className="font-black text-white text-sm sm:text-base">{ev.title}</h4>
+                    <span className="text-[11px] text-amber-200 font-semibold block">
+                      Pengirim: {ev.senderName}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono">
+                    <span className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 text-emerald-300 font-bold">
+                      ✓ Diklaim: {(ev.claimedByAccountIds || []).length} akun
+                    </span>
+                    <span className="px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 text-cyan-300 font-bold">
+                      ✉️ Dibuka/Dibaca: {(ev.viewedByAccountIds || []).length} akun
+                    </span>
+                    {(ev.revokedAccountIds || []).length > 0 && (
+                      <span className="px-2.5 py-1 rounded-xl bg-rose-950/80 border border-rose-500/40 text-rose-300 font-bold">
+                        🚫 Ditarik: {(ev.revokedAccountIds || []).length} akun
                       </span>
                     )}
                   </div>
-                  <h4 className="font-black text-white text-sm">{ev.title}</h4>
-                  <span className="text-[11px] text-amber-200 font-semibold block">
-                    Pengirim Surat: {ev.senderName}
-                  </span>
                 </div>
-              </div>
 
-              <p className="text-[11px] text-slate-400 line-clamp-2">{ev.letterMessage}</p>
+                {evMode !== 'gift_only' && (
+                  <p className="text-[11px] text-slate-300 bg-slate-900/70 p-2.5 rounded-xl border border-slate-800/90 line-clamp-2">
+                    <strong className="text-amber-300">Isi Surat:</strong> {ev.letterMessage}
+                  </p>
+                )}
 
-              <div className="flex flex-wrap gap-1.5">
-                {ev.rewards.slice(0, 5).map((r) => (
-                  <span
-                    key={r.id}
-                    className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[10px] text-slate-200"
+                {evMode !== 'letter_only' && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {ev.rewards.slice(0, 6).map((r) => (
+                      <span
+                        key={r.id}
+                        className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-800 text-[10px] text-slate-200"
+                      >
+                        {r.emoji} {r.label}{' '}
+                        {r.rewardMode === 'gacha'
+                          ? '[🎲 Gacha]'
+                          : r.type.startsWith('role_')
+                          ? ''
+                          : `(${r.amount.toLocaleString('id-ID')})`}
+                      </span>
+                    ))}
+                    {ev.rewards.length > 6 && (
+                      <span className="px-2 py-0.5 rounded-lg bg-amber-400/20 text-amber-300 text-[10px] font-bold">
+                        +{ev.rewards.length - 6} lainnya
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* BARIS TOMBOL UTAMA PENGELOLAAN KIRIMAN */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminTriggerGiftEventNow(ev.id);
+                      setFeedback(res.message);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap shadow"
                   >
-                    {r.emoji} {r.label}{' '}
-                    {r.rewardMode === 'gacha'
-                      ? '[🎲 Gacha]'
-                      : r.type.startsWith('role_')
-                      ? ''
-                      : `(${r.amount.toLocaleString('id-ID')})`}
-                  </span>
-                ))}
-                {ev.rewards.length > 5 && (
-                  <span className="px-2 py-0.5 rounded-lg bg-amber-400/20 text-amber-300 text-[10px] font-bold">
-                    +{ev.rewards.length - 5} lainnya
-                  </span>
+                    <Send className="w-3 h-3" />
+                    <span>Kirim / Siarkan Sekarang</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setManagingEventId((prev) => (prev === ev.id ? null : ev.id))
+                    }
+                    className={`px-3 py-1.5 rounded-xl font-black text-[11px] cursor-pointer flex items-center gap-1.5 whitespace-nowrap border ${
+                      isManagingThis
+                        ? 'bg-cyan-400 text-slate-950 border-cyan-200'
+                        : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border-cyan-400/50'
+                    }`}
+                  >
+                    <Sliders className="w-3 h-3" />
+                    <span>
+                      {isManagingThis
+                        ? 'Tutup Panel Kelola'
+                        : 'Kelola Kiriman & Penerima'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminResetGiftEventStatus(ev.id, {
+                        resetType: 'all',
+                        retriggerPopup: true,
+                      });
+                      setFeedback(res.message);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-200 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Reset Semua Klaim &amp; Baca</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminDuplicateGiftEvent(ev.id, { sendNow: true });
+                      setFeedback(res.message);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-fuchsia-500/20 hover:bg-fuchsia-500/30 border border-fuchsia-400/40 text-fuchsia-200 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Duplikasi &amp; Kirim Ulang</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => openGiftEventModal(ev.id, true)}
+                    className="px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                  >
+                    <Eye className="w-3 h-3" />
+                    <span>Preview Penerima</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => loadEventIntoEditor(ev)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-200 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                  >
+                    <Edit3 className="w-3 h-3" />
+                    <span>Edit Lengkap di Form</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => adminToggleGiftEventActive(ev.id)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                  >
+                    <Power className="w-3 h-3" />
+                    <span>{ev.isActive ? 'Nonaktifkan' : 'Aktifkan'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminDeleteGiftEvent(ev.id);
+                      setFeedback(res.message);
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Hapus</span>
+                  </button>
+                </div>
+
+                {/* PANEL KELOLA KIRIMAN & PENERIMA (EXPANDABLE DRAWER PER EVENT) */}
+                {isManagingThis && (
+                  <div className="p-4 rounded-2xl bg-slate-900/95 border-2 border-cyan-400/60 space-y-4 animate-fadeIn">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                      <div>
+                        <h5 className="font-black text-cyan-200 text-xs sm:text-sm flex items-center gap-1.5">
+                          <Sliders className="w-4 h-4 text-cyan-400" />
+                          <span>Pengaturan Ulang &amp; Kendali Penerima: {ev.title}</span>
+                        </h5>
+                        <span className="text-[10px] text-slate-400 block">
+                          Ubah mode isi kiriman secara instan, reset status klaim/baca per pengguna, atau tarik kembali (batalkan) kiriman dari pengguna tertentu.
+                        </span>
+                      </div>
+
+                      {/* Quick Mode Switcher for Already-Sent Package */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-bold text-slate-300">Ubah Mode Cepat:</span>
+                        {(
+                          [
+                            { id: 'both', label: '🎁+✉️ Keduanya' },
+                            { id: 'letter_only', label: '✉️ Surat Saja' },
+                            { id: 'gift_only', label: '🎁 Hadiah Saja' },
+                          ] as const
+                        ).map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              const res = adminUpdateGiftEventQuickSettings(ev.id, {
+                                deliveryContentMode: m.id,
+                                retriggerPopup: false,
+                              });
+                              setFeedback(res.message);
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer border ${
+                              evMode === m.id
+                                ? 'bg-amber-400 text-slate-950 border-amber-200'
+                                : 'bg-slate-950 text-slate-300 border-slate-700 hover:text-white'
+                            }`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Bulk Reset Actions */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-slate-950 border border-slate-800">
+                      <span className="text-[11px] font-bold text-slate-200">
+                        Aksi Reset Massal untuk Semua Penerima Paket Ini:
+                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const res = adminResetGiftEventStatus(ev.id, {
+                              resetType: 'all',
+                              retriggerPopup: true,
+                            });
+                            setFeedback(res.message);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 text-emerald-200 font-bold text-[10px] cursor-pointer"
+                        >
+                          🔄 Reset Klaim Hadiah &amp; Status Baca (Semua)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const res = adminResetGiftEventStatus(ev.id, {
+                              resetType: 'claim_only',
+                              retriggerPopup: true,
+                            });
+                            setFeedback(res.message);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 font-bold text-[10px] cursor-pointer"
+                        >
+                          🎁 Reset Status Klaim Hadiah Saja
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const res = adminResetGiftEventStatus(ev.id, {
+                              resetType: 'letter_only',
+                              retriggerPopup: true,
+                            });
+                            setFeedback(res.message);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-200 font-bold text-[10px] cursor-pointer"
+                        >
+                          ✉️ Reset Status Baca Surat Saja
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Per-Recipient Status Table & Individual Controls */}
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[11px] font-black text-white">
+                          Daftar Pengguna Penerima ({filteredManageAccounts.length} Akun):
+                        </span>
+                        <div className="relative w-full sm:w-64">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={manageRecipientSearch}
+                            onChange={(e) => setManageRecipientSearch(e.target.value)}
+                            placeholder="Cari nama / no. rekening penerima..."
+                            className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-[11px] text-white"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1">
+                        {filteredManageAccounts.map((acc) => {
+                          const hasClaimed = (ev.claimedByAccountIds || []).includes(acc.id);
+                          const hasReadLetter =
+                            (ev.letterOpenedByAccountIds || []).includes(acc.id) ||
+                            (ev.viewedByAccountIds || []).includes(acc.id);
+                          const isRevoked = (ev.revokedAccountIds || []).includes(acc.id);
+
+                          return (
+                            <div
+                              key={acc.id}
+                              className={`p-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-2 ${
+                                isRevoked
+                                  ? 'bg-rose-950/40 border-rose-500/50 opacity-80'
+                                  : 'bg-slate-950/90 border-slate-800'
+                              }`}
+                            >
+                              <div className="min-w-0 space-y-0.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="font-bold text-white text-xs">
+                                    {acc.fullName}
+                                  </span>
+                                  <span className="font-mono text-[10px] text-slate-400">
+                                    ({acc.accountNumber})
+                                  </span>
+                                  {isRevoked ? (
+                                    <span className="px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-400/50 text-rose-300 font-black text-[9.5px]">
+                                      🚫 Ditarik Kembali / Dibatalkan
+                                    </span>
+                                  ) : (
+                                    <>
+                                      {evMode !== 'gift_only' && (
+                                        <span
+                                          className={`px-2 py-0.5 rounded-full text-[9.5px] font-bold ${
+                                            hasReadLetter
+                                              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40'
+                                              : 'bg-slate-800 text-slate-400'
+                                          }`}
+                                        >
+                                          {hasReadLetter ? '✉️ Surat Dibaca' : '✉️ Belum Dibaca'}
+                                        </span>
+                                      )}
+                                      {evMode !== 'letter_only' && (
+                                        <span
+                                          className={`px-2 py-0.5 rounded-full text-[9.5px] font-bold ${
+                                            hasClaimed
+                                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                                              : 'bg-amber-500/20 text-amber-300 border border-amber-400/40'
+                                          }`}
+                                        >
+                                          {hasClaimed ? '🎁 Sudah Diklaim' : '🎁 Belum Diklaim'}
+                                        </span>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const res = adminResetGiftEventStatus(ev.id, {
+                                      accountId: acc.id,
+                                      resetType: 'all',
+                                      retriggerPopup: true,
+                                    });
+                                    setFeedback(res.message);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-200 font-bold text-[10px] cursor-pointer flex items-center gap-1"
+                                >
+                                  <RotateCcw className="w-3 h-3" />
+                                  <span>Reset Klaim &amp; Baca</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const res = adminToggleRevokeGiftEventRecipient(ev.id, acc.id);
+                                    setFeedback(res.message);
+                                  }}
+                                  className={`px-2.5 py-1 rounded-lg font-bold text-[10px] cursor-pointer flex items-center gap-1 border ${
+                                    isRevoked
+                                      ? 'bg-cyan-500/20 hover:bg-cyan-500/30 border-cyan-400/50 text-cyan-200'
+                                      : 'bg-rose-500/20 hover:bg-rose-500/30 border-rose-400/50 text-rose-200'
+                                  }`}
+                                >
+                                  {isRevoked ? (
+                                    <>
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      <span>Pulihkan Kiriman</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Ban className="w-3 h-3" />
+                                      <span>Tarik Kembali / Batalkan</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
-
-              <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-1 border-t border-slate-800/80">
-                <span>
-                  Diklaim: {(ev.claimedByAccountIds || []).length} akun • Dibuka:{' '}
-                  {(ev.viewedByAccountIds || []).length} akun
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const res = adminTriggerGiftEventNow(ev.id);
-                    setFeedback(res.message);
-                  }}
-                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                >
-                  <Send className="w-3 h-3" />
-                  <span>Kirim Manual Sekarang</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => openGiftEventModal(ev.id, true)}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/40 text-indigo-200 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                >
-                  <Eye className="w-3 h-3" />
-                  <span>Preview Royal</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => loadEventIntoEditor(ev)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                >
-                  <Edit3 className="w-3 h-3" />
-                  <span>Edit</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => adminToggleGiftEventActive(ev.id)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                >
-                  <Power className="w-3 h-3" />
-                  <span>{ev.isActive ? 'Nonaktifkan' : 'Aktifkan'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const res = adminDeleteGiftEvent(ev.id);
-                    setFeedback(res.message);
-                  }}
-                  className="px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-bold text-[11px] cursor-pointer flex items-center gap-1 whitespace-nowrap"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  <span>Hapus</span>
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

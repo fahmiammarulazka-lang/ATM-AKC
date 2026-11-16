@@ -40,7 +40,14 @@ import {
 } from 'lucide-react';
 
 function BankAppContent() {
-  const { adminUnlocked, setAdminUnlocked, resetAllData, googleUser } = useBank();
+  const {
+    adminUnlocked,
+    setAdminUnlocked,
+    resetAllData,
+    googleUser,
+    enterBankPortal,
+    completeGoogleOnboarding,
+  } = useBank();
   const [activeView, setActiveView] = useState<AppNavView>('dashboard');
   const [requestedDashboardTab, setRequestedDashboardTab] = useState<{
     tab: DashboardTab;
@@ -226,6 +233,10 @@ function BankAppContent() {
         <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
           <AdminPortal
             onNavigateToCustomerDashboard={() => {
+              if (!googleUser) {
+                enterBankPortal();
+              }
+              completeGoogleOnboarding();
               setAdminViewDuringOnboarding(false);
               setActiveView('dashboard');
             }}

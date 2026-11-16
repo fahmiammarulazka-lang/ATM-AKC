@@ -607,6 +607,28 @@ export const GIFT_REWARD_CATALOG: GiftRewardCatalogMeta[] = [
     defaultTrialMinutes: 360,
     description: 'Boost pengali gaji sementara + bonus 1 Gram Emas 24K + 50 Coin!',
   },
+  {
+    type: 'upgrade_card_admin_infinity_perm',
+    label: 'Kartu Admin Infinity Unlimited Permanen',
+    emoji: '👑',
+    unitLabel: 'Kartu Infinity',
+    defaultAmount: 1,
+    step: 1,
+    category: 'VIP & Proteksi',
+    description:
+      'Hadiah #59: Meng-upgrade kartu rekening menjadi tier tertinggi Admin Infinity Unlimited permanen dengan limit tak terbatas & bebas biaya admin seumur hidup!',
+  },
+  {
+    type: 'royal_crown_100g_50m_pack',
+    label: 'Paket Royal Crown 100 Gram Emas 24K + 50 Juta Tunai',
+    emoji: '👑',
+    unitLabel: 'Paket Royal',
+    defaultAmount: 1,
+    step: 1,
+    category: 'Emas & Tabungan',
+    description:
+      'Hadiah #60: Paket supremasi kerajaan yang langsung menambahkan 100 Gram Emas Murni 24K ke Brankas Emas + Saldo Tunai Rp 50.000.000 ke rekening!',
+  },
 ];
 
 export const MONTHS_INDO: { value: number; label: string }[] = [

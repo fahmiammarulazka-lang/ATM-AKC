@@ -26,7 +26,9 @@ import {
   LoanType,
   CardUpgradeApplication,
   PocketSaving,
+  SavingsPocket,
   DepositoRecord,
+  DepositoItem,
   CardlessToken,
   TransactionType,
   PinResetRequest,
@@ -437,7 +439,10 @@ interface BankContextType {
   updatePhone: (accountId: string, newPhone: string) => { success: boolean; message: string };
 
   // Switch / Login to Old Card using that Old Card's 6-Digit PIN (Bukan PIN Admin!)
-  loginToCardWithPin: (targetAccountId: string, cardPin: string) => {
+  loginToCardWithPin: (
+    targetAccountIdOrObj: string | { targetAccountId: string; cardPin: string },
+    cardPin?: string
+  ) => {
     success: boolean;
     message: string;
   };
@@ -467,7 +472,7 @@ interface BankContextType {
     accountId: string,
     customLabel?: string
   ) => { success: boolean; message: string; isVerified: boolean };
-  adminVerifyAllAccounts: (verified: boolean) => { success: boolean; message: string };
+  adminVerifyAllAccounts: (verified: boolean, customLabel?: string) => { success: boolean; message: string };
 
   // Extra Admin Power Controls (Suntik Saldo, Ubah Kartu/PIN, Broadcast Sistem Website, Update Resi, Bulk Approve)
   adminAdjustAccountBalance: (
@@ -479,8 +484,8 @@ interface BankContextType {
           amount: number;
           note?: string;
         },
-    mode?: 'add' | 'subtract' | 'set' | 'unlimited',
-    amount?: number,
+    modeOrAmount?: 'add' | 'subtract' | 'set' | 'unlimited' | number,
+    amountOrMode?: number | 'add' | 'subtract' | 'set' | 'unlimited',
     note?: string
   ) => { success: boolean; message: string };
   adminDirectChangeAccountTier: (accountId: string, newTier: CardTier) => { success: boolean; message: string };
@@ -507,9 +512,15 @@ interface BankContextType {
   adminSetCustomAccountNumber: (accountId: string, newAccountNumber: string) => { success: boolean; message: string };
   adminSetCustomCardDetails: (
     accountId: string,
-    newCardNumber: string,
-    newCvv: string,
-    newExpiry: string
+    newCardNumberOrObj:
+      | string
+      | {
+          cardNumber?: string;
+          cvv?: string;
+          expiryDate?: string;
+        },
+    newCvv?: string,
+    newExpiry?: string
   ) => { success: boolean; message: string };
   adminAdjustRewardPoints: (
     accountId: string,
@@ -531,7 +542,8 @@ interface BankContextType {
     fullName: string;
     accountNumber?: string;
     pin: string;
-    balance: number;
+    balance?: number;
+    initialBalance?: number;
     cardTier: CardTier;
     isVerified?: boolean;
   }) => { success: boolean; message: string };
@@ -546,10 +558,13 @@ interface BankContextType {
   adminForgiveOrPayoffLoans: (accountId?: string) => { success: boolean; message: string };
   adminBoostDepositosAndPockets: (bonusPercent: number) => { success: boolean; message: string };
   adminGenerateInstantVoucher: (input: {
-    accountId: string;
-    type: 'pulsa' | 'token_listrik' | 'voucher_lain';
+    accountId?: string;
+    type?: 'pulsa' | 'token_listrik' | 'voucher_lain';
+    category?: 'pulsa' | 'token_listrik' | 'voucher_lain';
+    title?: string;
     nominal: number;
-    targetId: string;
+    targetId?: string;
+    targetNumber?: string;
   }) => { success: boolean; message: string; code?: string };
   adminGenerateBulkRedeemCodes: (
     count: number,
@@ -568,11 +583,11 @@ interface BankContextType {
   adminUpdateAccountIdentity: (
     accountId: string,
     input: {
-      fullName: string;
-      nik: string;
-      phone: string;
-      email: string;
-      address: string;
+      fullName?: string;
+      nik?: string;
+      phone?: string;
+      email?: string;
+      address?: string;
     }
   ) => { success: boolean; message: string };
   adminMultiplyAccountBalance: (accountId: string, multiplier: number) => { success: boolean; message: string };
@@ -657,7 +672,7 @@ interface BankContextType {
   adminSetAccountJobLevel: (
     accountId: string,
     level: number,
-    mode: 'add' | 'set' | 'max'
+    mode?: 'add' | 'set' | 'max'
   ) => { success: boolean; message: string };
   adminAdjustLevelVouchers: (
     accountId: string,
@@ -977,13 +992,26 @@ interface BankContextType {
   resetAllData: () => void;
   startFromZero: () => void;
 
-  // Sistem Hadiah & Surat Spesial Admin (Tanggal Tertentu / 29 Januari Otomatis + Kirim Manual + Kunci Tanggal + 30 Hadiah & Trial)
+  // Sistem Hadiah & Surat Spesial Admin (Tanggal Tertentu / 29 Januari Otomatis + Kirim Manual + Kunci Tanggal + 60 Hadiah & Trial + Transfer ke Teman)
   giftEvents: AdminGiftEventPackage[];
   activeGiftModal: { eventId: string; isReplay: boolean } | null;
   giftDateTestOverride: { month: number; day: number } | null;
   isGiftEventOpenableNow: (ev: AdminGiftEventPackage, accountId?: string) => boolean;
   openGiftEventModal: (eventId: string, isReplay?: boolean) => void;
   closeGiftEventModal: () => void;
+  markGiftLetterOpened: (eventId: string) => void;
+  beginOpeningGiftBox: (eventId: string) => void;
+  isGiftBoxTransferLocked: (eventId: string, accountId?: string) => boolean;
+  transferGiftEventToFriend: (
+    eventId: string,
+    recipientQuery: string,
+    personalNote?: string
+  ) => {
+    success: boolean;
+    message: string;
+    recipientName?: string;
+    recipientAccountNumber?: string;
+  };
   claimAndOpenGiftEvent: (eventId: string) => {
     success: boolean;
     alreadyClaimed: boolean;
@@ -997,6 +1025,7 @@ interface BankContextType {
     title: string;
     senderName: string;
     letterMessage: string;
+    deliveryContentMode?: 'both' | 'letter_only' | 'gift_only';
     triggerMode: 'scheduled_date' | 'manual_instant' | 'both';
     autoPopupEnabled: boolean;
     strictDateLock?: boolean;
@@ -1005,13 +1034,69 @@ interface BankContextType {
     scheduleDay: number;
     isActive: boolean;
     targetAccountId?: string;
+    targetAccountIds?: string[];
+    revokedAccountIds?: string[];
     themeColor?: 'amber' | 'emerald' | 'rose' | 'indigo';
     rewards: AdminGiftRewardItem[];
     customSealConfig?: LetterSignatureStampConfig | null;
+    frequencyType?: 'once' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom_recurring';
+    recurringIntervalHours?: number;
+    autoRotateRecurring?: boolean;
+    maxRedeemsPerUser?: number;
+    targetCardTier?: CardTier | 'all';
+    targetDevRoleOnly?: string;
+    celebrationEffect?: 'confetti' | 'gold_rain' | 'fireworks' | 'none';
+    soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
+    requireAdminVerifiedAccessForNotif?: boolean;
+    adminAuditLogTag?: string;
+    customStampText?: string;
+    watermarkText?: string;
+    securityHashToken?: string;
+    allowAnonymousClaim?: boolean;
+    notifyOnlyAdminVerifiedUsers?: boolean;
+    priorityLevel?: 'normal' | 'high' | 'vip_exclusive';
+    customCssTheme?: string;
+    attachmentFileUrl?: string;
+    attachmentFileName?: string;
+    autoExpireHours?: number;
+    allowTransferableGift?: boolean;
   }) => { success: boolean; message: string; event: AdminGiftEventPackage };
   adminDeleteGiftEvent: (eventId: string) => { success: boolean; message: string };
   adminToggleGiftEventActive: (eventId: string) => { success: boolean; message: string };
   adminTriggerGiftEventNow: (eventId: string) => { success: boolean; message: string };
+  adminResetGiftEventStatus: (
+    eventId: string,
+    options?: {
+      accountId?: string;
+      resetType?: 'all' | 'claim_only' | 'letter_only';
+      retriggerPopup?: boolean;
+    }
+  ) => { success: boolean; message: string };
+  adminToggleRevokeGiftEventRecipient: (
+    eventId: string,
+    accountId: string
+  ) => { success: boolean; message: string; isRevoked: boolean };
+  adminDuplicateGiftEvent: (
+    eventId: string,
+    options?: {
+      targetAccountId?: string;
+      targetAccountIds?: string[];
+      deliveryContentMode?: 'both' | 'letter_only' | 'gift_only';
+      sendNow?: boolean;
+    }
+  ) => { success: boolean; message: string; event?: AdminGiftEventPackage };
+  adminUpdateGiftEventQuickSettings: (
+    eventId: string,
+    patch: {
+      deliveryContentMode?: 'both' | 'letter_only' | 'gift_only';
+      targetAccountId?: string;
+      targetAccountIds?: string[];
+      letterMessage?: string;
+      title?: string;
+      senderName?: string;
+      retriggerPopup?: boolean;
+    }
+  ) => { success: boolean; message: string };
   adminSetGiftDateTestOverride: (override: { month: number; day: number } | null) => void;
 
   // Sistem Bonus Coin Lowongan Pekerjaan (Pengali & Bonus Ekstra) & Gacha Universal Admin
@@ -1775,6 +1860,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return DEFAULT_ADMIN_GIFT_EVENTS;
   });
   const [activeGiftModal, setActiveGiftModal] = useState<{ eventId: string; isReplay: boolean } | null>(null);
+  const [openingGiftBoxKeys, setOpeningGiftBoxKeys] = useState<string[]>([]);
+  const openingGiftBoxKeysRef = useRef<Set<string>>(new Set());
   const [giftDateTestOverride, setGiftDateTestOverride] = useState<{ month: number; day: number } | null>(null);
   const [jobCoinBonusConfig, setJobCoinBonusConfig] = useState<JobCoinBonusConfig>(() => {
     try {
@@ -1810,52 +1897,164 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch { /* empty */ }
   }, [devRoles]);
 
-  // Real-time Firestore Sync across devices & mobile (including deletedAccountIds)
+  // Real-time Firestore Sync across devices & mobile (Laptop/Admin as Master Data to HP)
+  const hasFirestoreHydratedRef = useRef<boolean>(false);
+  const isApplyingFirestoreRef = useRef<boolean>(false);
+  const lastFirestoreWriteMsRef = useRef<number>(0);
+
+  const flushMasterStateToCloud = (overrides?: {
+    accounts?: BankAccount[];
+    deletedAccountIds?: string[];
+    transactions?: Transaction[];
+    giftEvents?: AdminGiftEventPackage[];
+    pockets?: PocketSaving[];
+    depositos?: DepositoRecord[];
+  }) => {
+    const nowMs = Date.now();
+    lastFirestoreWriteMsRef.current = nowMs;
+    lastSyncEpochRef.current = nowMs;
+    const nextAccs = overrides?.accounts ?? accounts;
+    const nextDels = overrides?.deletedAccountIds ?? deletedAccountIds;
+    const nextTxs = overrides?.transactions ?? transactions;
+    const nextGifts = overrides?.giftEvents ?? giftEvents;
+    const nextPockets = overrides?.pockets ?? pockets;
+    const nextDepositos = overrides?.depositos ?? depositos;
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(nextAccs));
+      localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(nextDels));
+    } catch { /* empty */ }
+
+    try {
+      setDoc(
+        doc(db, 'bank_state_v1', 'master_state'),
+        {
+          accounts: nextAccs,
+          deletedAccountIds: nextDels,
+          transactions: nextTxs,
+          giftEvents: nextGifts,
+          pockets: nextPockets,
+          depositos: nextDepositos,
+          updatedAtMs: nowMs,
+          updatedAt: new Date(nowMs).toISOString(),
+        },
+        { merge: true }
+      ).catch(() => { /* offline silent catch */ });
+    } catch { /* empty */ }
+
+    try {
+      const snap = {
+        ...buildPersistableSnapshot(nowMs),
+        accounts: nextAccs,
+        deletedAccountIds: nextDels,
+        transactions: nextTxs,
+        pockets: nextPockets,
+        depositos: nextDepositos,
+      };
+      latestSnapshotRef.current = snap;
+      void saveSnapshotToDeviceStorage(snap, 'default');
+      fetch('/api/db/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scopeKey: 'default', snapshot: snap }),
+      }).catch(() => {});
+    } catch { /* empty */ }
+  };
+
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'bank_state_v1', 'master_state'), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data) {
-          if (data.deletedAccountIds && Array.isArray(data.deletedAccountIds)) {
-            setDeletedAccountIds(data.deletedAccountIds);
-            try {
-              localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(data.deletedAccountIds));
-            } catch { /* empty */ }
-          }
-          if (data.accounts && Array.isArray(data.accounts)) {
-            const delIds = data.deletedAccountIds || [];
-            const cleanAccounts = data.accounts.filter((a: BankAccount) => !delIds.includes(a.id));
-            setAccounts(cleanAccounts);
-            try {
-              localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(cleanAccounts));
-            } catch { /* empty */ }
-          }
-          if (data.transactions && Array.isArray(data.transactions)) setTransactions(data.transactions);
-          if (data.giftEvents && Array.isArray(data.giftEvents)) setGiftEvents(data.giftEvents);
-          if (data.pockets && Array.isArray(data.pockets)) setPockets(data.pockets);
-          if (data.depositos && Array.isArray(data.depositos)) setDepositos(data.depositos);
+    const unsub = onSnapshot(
+      doc(db, 'bank_state_v1', 'master_state'),
+      (docSnap) => {
+        if (docSnap.metadata.hasPendingWrites) {
+          return;
         }
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data) {
+            const incomingMs = typeof data.updatedAtMs === 'number' ? data.updatedAtMs : 0;
+            if (
+              hasFirestoreHydratedRef.current &&
+              incomingMs > 0 &&
+              incomingMs <= lastFirestoreWriteMsRef.current
+            ) {
+              return;
+            }
+            if (incomingMs > lastFirestoreWriteMsRef.current) {
+              lastFirestoreWriteMsRef.current = incomingMs;
+            }
+            isApplyingFirestoreRef.current = true;
+
+            const delIds: string[] = Array.isArray(data.deletedAccountIds)
+              ? Array.from(new Set([...deletedAccountIds, ...data.deletedAccountIds]))
+              : deletedAccountIds;
+
+            if (Array.isArray(data.deletedAccountIds)) {
+              setDeletedAccountIds(delIds);
+              try {
+                localStorage.setItem(STORAGE_KEYS.DELETED_ACCOUNTS, JSON.stringify(delIds));
+              } catch { /* empty */ }
+            }
+            if (data.accounts && Array.isArray(data.accounts) && data.accounts.length > 0) {
+              const cleanAccounts = data.accounts.filter((a: BankAccount) => !delIds.includes(a.id));
+              setAccounts(cleanAccounts);
+              try {
+                localStorage.setItem(STORAGE_KEYS.ACCOUNTS, JSON.stringify(cleanAccounts));
+              } catch { /* empty */ }
+            }
+            if (data.transactions && Array.isArray(data.transactions)) {
+              setTransactions(data.transactions);
+            }
+            if (data.giftEvents && Array.isArray(data.giftEvents) && data.giftEvents.length > 0) {
+              setGiftEvents(data.giftEvents);
+            }
+            if (data.pockets && Array.isArray(data.pockets)) setPockets(data.pockets);
+            if (data.depositos && Array.isArray(data.depositos)) setDepositos(data.depositos);
+
+            window.setTimeout(() => {
+              isApplyingFirestoreRef.current = false;
+            }, 120);
+          }
+        }
+        hasFirestoreHydratedRef.current = true;
+      },
+      (err) => {
+        console.error('Firestore sync error:', err);
+        hasFirestoreHydratedRef.current = true;
       }
-    }, (err) => {
-      console.error('Firestore sync error:', err);
-    });
+    );
     return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    if (
+      !hasFirestoreHydratedRef.current ||
+      !hasBootHydratedRef.current ||
+      isApplyingFirestoreRef.current ||
+      isApplyingExternalSnapshotRef.current
+    ) {
+      return;
+    }
     const t = window.setTimeout(() => {
+      const nowMs = Date.now();
+      lastFirestoreWriteMsRef.current = nowMs;
       try {
-        setDoc(doc(db, 'bank_state_v1', 'master_state'), {
-          accounts,
-          deletedAccountIds,
-          transactions,
-          giftEvents,
-          pockets,
-          depositos,
-          updatedAt: new Date().toISOString(),
-        }, { merge: true }).catch(() => { /* offline silent catch */ });
+        setDoc(
+          doc(db, 'bank_state_v1', 'master_state'),
+          {
+            accounts,
+            deletedAccountIds,
+            transactions,
+            giftEvents,
+            pockets,
+            depositos,
+            updatedAtMs: nowMs,
+            updatedAt: new Date(nowMs).toISOString(),
+          },
+          { merge: true }
+        ).catch(() => { /* offline silent catch */ });
       } catch { /* empty */ }
-    }, 1000);
+    }, 600);
     return () => window.clearTimeout(t);
   }, [accounts, deletedAccountIds, transactions, giftEvents, pockets, depositos]);
 
@@ -4821,44 +5020,70 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) return { success: false, message: 'Akun tidak ditemukan' };
 
     const existingNumbers = accounts.filter((a) => a.id !== accountId).map((a) => a.accountNumber);
-    const finalAccountNumber = generateRandomAccountNumber(existingNumbers);
+    const finalAccountNumber = /^\d{10}$/.test(target.accountNumber || '')
+      ? target.accountNumber
+      : generateRandomAccountNumber(existingNumbers);
 
-    setAccounts((prev) =>
-      prev.map((acc) => {
-        if (acc.id === accountId) {
-          return {
-            ...acc,
-            accountNumber: finalAccountNumber,
-            cardStatus: 'active',
-            balance: acc.initialDeposit,
-            rejectionReason: undefined,
-            tutorialApprovedByAdmin: true,
-            hasCompletedTutorial: true,
-          };
-        }
-        return acc;
-      })
-    );
+    const nextAccounts: BankAccount[] = accounts.map((acc) => {
+      if (acc.id === accountId) {
+        const nextBalance =
+          acc.cardTier === 'admin'
+            ? UNLIMITED_BALANCE
+            : acc.balance > 0
+            ? acc.balance
+            : acc.initialDeposit || 500_000;
+        return {
+          ...acc,
+          accountNumber: finalAccountNumber,
+          cardStatus: 'active' as const,
+          balance: nextBalance,
+          banInfo: undefined,
+          rejectionReason: undefined,
+          tutorialApprovedByAdmin: true,
+          hasCompletedTutorial: true,
+        };
+      }
+      return acc;
+    });
+
+    setAccounts(nextAccounts);
 
     const depositTx: Transaction = {
       id: `tx-init-${Date.now()}`,
       accountId: accountId,
       type: 'setor',
-      title: 'Setoran Awal Pembukaan Rekening',
-      amount: target.initialDeposit,
+      title: 'Aktivasi & Setoran Awal Rekening',
+      amount: target.balance > 0 ? target.balance : target.initialDeposit || 500_000,
       recipientAccount: finalAccountNumber,
       recipientName: target.fullName,
-      description: `Setoran awal pembukaan ${CARD_TIER_CONFIGS[target.cardTier].nameIndo}`,
+      description: `Aktivasi permanen ${CARD_TIER_CONFIGS[target.cardTier].nameIndo}`,
       status: 'success',
       referenceNo: `SET${Date.now()}`,
       timestamp: new Date().toISOString(),
       category: 'setor_tunai',
     };
-    setTransactions((prev) => [depositTx, ...prev]);
+    const nextTransactions = [depositTx, ...transactions];
+    setTransactions(nextTransactions);
+
+    // Ensure onboarding state is also marked completed so user is never asked to activate/register again
+    if (!googleUser || !googleUser.hasCompletedOnboarding) {
+      setGoogleUser({
+        email: googleUser?.email || target.email || 'nasabah@banknusantara.id',
+        name: googleUser?.name || target.fullName,
+        loggedInAt: googleUser?.loggedInAt || new Date().toISOString(),
+        hasCompletedOnboarding: true,
+      });
+    }
+
+    // Immediate 1-click permanent flush to Server & Cloud Firestore so background sync never reverts it
+    flushMasterStateToCloud({
+      accounts: nextAccounts,
+      transactions: nextTransactions,
+    });
 
     addNotification(
       'Kartu Disetujui Admin & Siap Digunakan! 🎉',
-      `Selamat! Pembuatan ${CARD_TIER_CONFIGS[target.cardTier].nameIndo} (${finalAccountNumber}) telah disetujui Admin dan kini aktif digunakan.`,
+      `Selamat! Pembuatan ${CARD_TIER_CONFIGS[target.cardTier].nameIndo} (${finalAccountNumber}) telah disetujui Admin dan kini aktif permanen.`,
       'success',
       {
         category: 'security',
@@ -4875,7 +5100,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     return {
       success: true,
-      message: `Kartu ${target.fullName} berhasil disetujui Admin dan kini aktif digunakan!`,
+      message: `Kartu ${target.fullName} (${finalAccountNumber}) berhasil diaktifkan permanen!`,
     };
   };
 
@@ -4999,7 +5224,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   /**
    * LOGIN / PINDAH KE KARTU LAMA MENGGUNAKAN PIN KARTU LAMA (6 DIGIT PIN KARTU, BUKAN PIN ADMIN!)
    */
-  const loginToCardWithPin = (targetAccountId: string, cardPin: string) => {
+  const loginToCardWithPin = (
+    targetAccountIdOrObj: string | { targetAccountId: string; cardPin: string },
+    cardPinArg?: string
+  ) => {
+    const targetAccountId =
+      typeof targetAccountIdOrObj === 'object'
+        ? targetAccountIdOrObj.targetAccountId
+        : targetAccountIdOrObj;
+    const cardPin =
+      typeof targetAccountIdOrObj === 'object'
+        ? targetAccountIdOrObj.cardPin
+        : cardPinArg || '';
     const targetAcc = accounts.find((a) => a.id === targetAccountId);
     if (!targetAcc) {
       playAtmSound('alert');
@@ -5449,14 +5685,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  const adminVerifyAllAccounts = (verified: boolean) => {
+  const adminVerifyAllAccounts = (verified: boolean, customLabel?: string) => {
     setAccounts((prev) =>
       prev.map((acc) => ({
         ...acc,
         isVerified: verified,
         verifiedAt: verified ? new Date().toISOString() : undefined,
         verifiedLabel: verified
-          ? acc.verifiedLabel || 'Akun Terverifikasi Resmi (Centang Biru Bank Nusantara)'
+          ? customLabel?.trim() || acc.verifiedLabel || 'Akun Terverifikasi Resmi (Centang Biru Bank Nusantara)'
           : undefined,
       }))
     );
@@ -5479,13 +5715,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           amount: number;
           note?: string;
         },
-    modeArg?: 'add' | 'subtract' | 'set' | 'unlimited',
-    amountArg?: number,
+    modeOrAmountArg?: 'add' | 'subtract' | 'set' | 'unlimited' | number,
+    amountOrModeArg?: number | 'add' | 'subtract' | 'set' | 'unlimited',
     noteArg?: string
   ) => {
     const accountId = typeof accountIdOrObj === 'object' ? accountIdOrObj.accountId : accountIdOrObj;
-    const mode = typeof accountIdOrObj === 'object' ? accountIdOrObj.mode : modeArg || 'add';
-    const amount = typeof accountIdOrObj === 'object' ? accountIdOrObj.amount : amountArg || 0;
+    const mode: 'add' | 'subtract' | 'set' | 'unlimited' =
+      typeof accountIdOrObj === 'object'
+        ? accountIdOrObj.mode
+        : typeof modeOrAmountArg === 'string'
+        ? modeOrAmountArg
+        : typeof amountOrModeArg === 'string'
+        ? amountOrModeArg
+        : 'add';
+    const amount: number =
+      typeof accountIdOrObj === 'object'
+        ? accountIdOrObj.amount
+        : typeof modeOrAmountArg === 'number'
+        ? modeOrAmountArg
+        : typeof amountOrModeArg === 'number'
+        ? amountOrModeArg
+        : 0;
     const note = typeof accountIdOrObj === 'object' ? accountIdOrObj.note : noteArg;
 
     const target = accounts.find((a) => a.id === accountId);
@@ -5762,15 +6012,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const adminSetCustomCardDetails = (
     accountId: string,
-    newCardNumber: string,
-    newCvv: string,
-    newExpiry: string
+    newCardNumberOrObj:
+      | string
+      | {
+          cardNumber?: string;
+          cvv?: string;
+          expiryDate?: string;
+        },
+    newCvvArg?: string,
+    newExpiryArg?: string
   ) => {
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan!' };
-    const formattedCard = newCardNumber.trim() || target.cardNumber;
-    const formattedCvv = newCvv.trim() || target.cvv;
-    const formattedExp = newExpiry.trim() || target.expiryDate;
+    const rawCardNum =
+      typeof newCardNumberOrObj === 'object' ? newCardNumberOrObj.cardNumber || '' : newCardNumberOrObj;
+    const rawCvv =
+      typeof newCardNumberOrObj === 'object' ? newCardNumberOrObj.cvv || '' : newCvvArg || '';
+    const rawExp =
+      typeof newCardNumberOrObj === 'object' ? newCardNumberOrObj.expiryDate || '' : newExpiryArg || '';
+    const formattedCard = rawCardNum.trim() || target.cardNumber;
+    const formattedCvv = rawCvv.trim() || target.cvv;
+    const formattedExp = rawExp.trim() || target.expiryDate;
     setAccounts((prev) =>
       prev.map((acc) =>
         acc.id === accountId
@@ -5905,7 +6167,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     fullName: string;
     accountNumber?: string;
     pin: string;
-    balance: number;
+    balance?: number;
+    initialBalance?: number;
     cardTier: CardTier;
     isVerified?: boolean;
   }) => {
@@ -5913,6 +6176,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!cleanName) return { success: false, message: 'Nama lengkap nasabah wajib diisi!' };
     const cleanPin = input.pin.replace(/\D/g, '').slice(0, 6);
     if (cleanPin.length !== 6) return { success: false, message: 'PIN harus 6 digit angka!' };
+    const baseBalance = input.balance ?? input.initialBalance ?? 0;
 
     const existingNums = accounts.map((a) => a.accountNumber);
     const accNum =
@@ -5929,7 +6193,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       email: `${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@nusantara.id`,
       address: 'Kantor Cabang Utama Bank Nusantara',
       pin: cleanPin,
-      balance: input.cardTier === 'admin' ? UNLIMITED_BALANCE : Math.max(0, input.balance),
+      balance: input.cardTier === 'admin' ? UNLIMITED_BALANCE : Math.max(0, baseBalance),
       cardTier: input.cardTier,
       cardNumber: generateRandomCardNumber(),
       cvv: generateRandomCVV(),
@@ -5937,7 +6201,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       cardStatus: 'active',
       dailyWithdrawnToday: 0,
       lastWithdrawalDate: '',
-      initialDeposit: input.balance,
+      initialDeposit: baseBalance,
       createdAt: new Date().toISOString(),
       rewardPoints: 1000,
       allowInternational: true,
@@ -6090,16 +6354,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const adminGenerateInstantVoucher = (input: {
-    accountId: string;
-    type: 'pulsa' | 'token_listrik' | 'voucher_lain';
+    accountId?: string;
+    type?: 'pulsa' | 'token_listrik' | 'voucher_lain';
+    category?: 'pulsa' | 'token_listrik' | 'voucher_lain';
+    title?: string;
     nominal: number;
-    targetId: string;
+    targetId?: string;
+    targetNumber?: string;
   }) => {
-    const target = accounts.find((a) => a.id === input.accountId) || accounts[0];
+    const target =
+      (input.accountId ? accounts.find((a) => a.id === input.accountId) : currentAccount) ||
+      accounts[0];
     if (!target) return { success: false, message: 'Rekening tidak ditemukan!' };
+    const resolvedType = input.type || input.category || 'voucher_lain';
+    const resolvedTarget = input.targetId || input.targetNumber || target.phone;
 
     const code =
-      input.type === 'token_listrik'
+      resolvedType === 'token_listrik'
         ? `${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(
             1000 + Math.random() * 9000
           )}-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}`
@@ -6112,11 +6383,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       accountId: target.id,
       accountNumber: target.accountNumber,
       fullName: target.fullName,
-      type: input.type,
+      type: resolvedType,
       code,
-      providerOrMeter: input.targetId || target.phone,
+      providerOrMeter: resolvedTarget,
       nominal: input.nominal,
-      kwhAmount: input.type === 'token_listrik' ? Number((input.nominal / 1460).toFixed(1)) : undefined,
+      kwhAmount: resolvedType === 'token_listrik' ? Number((input.nominal / 1460).toFixed(1)) : undefined,
       status: 'available',
       adminApproved: true,
       purchasedAt: new Date().toISOString(),
@@ -6126,7 +6397,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       code,
-      message: `Kode Voucher ${input.type.toUpperCase()} senilai ${formatRupiah(
+      message: `Kode Voucher ${resolvedType.toUpperCase()} senilai ${formatRupiah(
         input.nominal
       )} berhasil diterbitkan untuk ${target.fullName}: ${code}`,
     };
@@ -6220,11 +6491,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const adminUpdateAccountIdentity = (
     accountId: string,
     input: {
-      fullName: string;
-      nik: string;
-      phone: string;
-      email: string;
-      address: string;
+      fullName?: string;
+      nik?: string;
+      phone?: string;
+      email?: string;
+      address?: string;
     }
   ) => {
     const target = accounts.find((a) => a.id === accountId);
@@ -6234,11 +6505,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         acc.id === accountId
           ? {
               ...acc,
-              fullName: input.fullName.trim() || acc.fullName,
-              nik: input.nik.trim() || acc.nik,
-              phone: input.phone.trim() || acc.phone,
-              email: input.email.trim() || acc.email,
-              address: input.address.trim() || acc.address,
+              fullName: input.fullName?.trim() || acc.fullName,
+              nik: input.nik?.trim() || acc.nik,
+              phone: input.phone?.trim() || acc.phone,
+              email: input.email?.trim() || acc.email,
+              address: input.address?.trim() || acc.address,
             }
           : acc
       )
@@ -8001,6 +8272,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       amount: UPGRADE_COST,
       balanceAfter: newBalance,
       date: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
       referenceNo: `LVL-${Date.now().toString().slice(-6)}`,
       status: 'berhasil',
       note: `Pembayaran Rp 1.000.000 untuk meningkatkan Level Pekerjaan ke Level ${newLevel}.`,
@@ -8152,6 +8424,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         amount: SUIT_COST,
         balanceAfter: afterEntryBal,
         date: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
         referenceNo: `SUIT-${Date.now().toString().slice(-6)}`,
         status: 'berhasil',
       };
@@ -8163,6 +8436,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         amount: WIN_CASH_PRIZE,
         balanceAfter: finalBal,
         date: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
         referenceNo: `WIN-${Date.now().toString().slice(-6)}`,
         status: 'berhasil',
       };
@@ -8223,6 +8497,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         amount: SUIT_COST,
         balanceAfter: finalBal,
         date: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
         referenceNo: `SUIT-${Date.now().toString().slice(-6)}`,
         status: 'berhasil',
       };
@@ -8247,7 +8522,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const adminSetAccountJobLevel = (
     accountId: string,
     level: number,
-    mode: 'add' | 'set' | 'max'
+    mode: 'add' | 'set' | 'max' = 'set'
   ): { success: boolean; message: string } => {
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan.' };
@@ -8323,6 +8598,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       amount: totalPay,
       balanceAfter: nextBal,
       date: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
       referenceNo: `ADMJOB-${Date.now().toString().slice(-6)}`,
       status: 'berhasil',
     };
@@ -8653,14 +8929,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ): { success: boolean; message: string } => {
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan.' };
+    const cleanPrinc = Math.max(1_000_000, principal);
+    const cleanTenor = Math.max(1, tenorMonths);
+    const annualRate = Math.max(5, bonusRatePercent) / 100;
     const newDepo: DepositoItem = {
       id: `depo-vip-${Date.now()}`,
       accountId,
-      principalAmount: Math.max(1_000_000, principal),
-      tenorMonths: Math.max(1, tenorMonths),
-      interestRateAnnual: Math.max(5, bonusRatePercent) / 100,
+      principalAmount: cleanPrinc,
+      tenorMonths: cleanTenor,
+      interestRateAnnual: annualRate,
       startDate: new Date().toISOString().slice(0, 10),
-      maturityDate: new Date(Date.now() + tenorMonths * 30 * 86400000).toISOString().slice(0, 10),
+      maturityDate: new Date(Date.now() + cleanTenor * 30 * 86400000).toISOString().slice(0, 10),
+      projectedReturn: Math.round(cleanPrinc + cleanPrinc * annualRate * (cleanTenor / 12)),
+      certificateNumber: `DEP-VIP-${Date.now().toString().slice(-6)}`,
+      openedAt: new Date().toISOString(),
       status: 'active',
     };
     setDepositos((prev) => [newDepo, ...prev]);
@@ -8718,6 +9000,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       title: title.trim() || 'Kantong Impian Hadiah Admin',
       targetAmount: cleanAmt,
       currentAmount: cleanAmt,
+      color: 'from-emerald-500 to-teal-600',
+      icon: '✨',
       iconName: 'Sparkles',
       colorClass: 'from-emerald-500 to-teal-600',
     };
@@ -8804,6 +9088,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       balanceAfter:
         accounts.find((a) => a.id === s.accountId)?.balance || 10_000_000,
       date: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
       referenceNo: `SCH-${Date.now().toString().slice(-5)}${idx}`,
       status: 'berhasil',
     }));
@@ -8860,19 +9145,24 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const adminDuplicateCustomerVouchers = (
     accountId: string
   ): { success: boolean; message: string } => {
-    const myCodes = purchasedCodes.filter((c) => c.accountId === accountId && !c.isRedeemed);
+    const myCodes = purchasedCodes.filter((c) => c.accountId === accountId && !c.isRedeemed && c.status !== 'redeemed');
     if (myCodes.length === 0) {
       return {
         success: false,
         message: 'Nasabah ini belum memiliki voucher aktif untuk digandakan.',
       };
     }
-    const clones: PurchasedVoucherCode[] = myCodes.map((c, idx) => ({
-      ...c,
-      id: `vc-clone-${Date.now()}-${idx}`,
-      secretCode: `${c.secretCode.slice(0, -4)}${Math.floor(1000 + Math.random() * 9000)}`,
-      createdAt: new Date().toISOString(),
-    }));
+    const clones: PurchasedVoucherCode[] = myCodes.map((c, idx) => {
+      const baseCode = c.secretCode || c.code || '00000000';
+      const newCode = `${baseCode.slice(0, -4)}${Math.floor(1000 + Math.random() * 9000)}`;
+      return {
+        ...c,
+        id: `vc-clone-${Date.now()}-${idx}`,
+        code: newCode,
+        secretCode: newCode,
+        createdAt: new Date().toISOString(),
+      };
+    });
     setPurchasedCodes((prev) => [...clones, ...prev]);
     playAtmSound('success');
     return {
@@ -10791,7 +11081,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const reqCoins = req.requestedCoins && req.requestedCoins > 0 ? req.requestedCoins : 5_000;
       const reqLevel = req.requestedLevel && req.requestedLevel > 0 ? req.requestedLevel : 50;
 
-      req.selectedFeatures.forEach((fid) => {
+      (req.selectedFeatures || req.selectedFeatureIds || []).forEach((fid) => {
         switch (fid) {
           case 'mintol_suntik_saldo':
             adminAdjustAccountBalance({
@@ -10986,12 +11276,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
 
     if (targetAcc) {
-      addNotification({
-        accountId: targetAcc.id,
-        title: '✅ Permintaan Minta Tolong (Mintol) Dikabulkan Admin!',
-        message: summaryReply,
-        type: 'success',
-      });
+      addNotification(
+        '✅ Permintaan Minta Tolong (Mintol) Dikabulkan Admin!',
+        summaryReply,
+        'success',
+        { accountId: targetAcc.id }
+      );
     }
 
     playAtmSound('cash');
@@ -11073,9 +11363,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Akun tidak ditemukan.' };
     }
     const nextStatus: CardStatus = target.cardStatus === 'frozen' ? 'active' : 'frozen';
-    setAccounts((prev) =>
-      prev.map((a) => (a.id === accountId ? { ...a, cardStatus: nextStatus } : a))
+    const nextAccounts = accounts.map((a) =>
+      a.id === accountId ? { ...a, cardStatus: nextStatus } : a
     );
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
     playAtmSound('beep');
     return {
       success: true,
@@ -11095,16 +11387,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) {
       return { success: false, message: 'Akun tidak ditemukan.' };
     }
-    setAccounts((prev) =>
-      prev.map((a) =>
-        a.id === accountId
-          ? {
-              ...a,
-              ...updates,
-            }
-          : a
-      )
+    const nextAccounts = accounts.map((a) =>
+      a.id === accountId
+        ? {
+            ...a,
+            ...updates,
+          }
+        : a
     );
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
     playAtmSound('success');
     return {
       success: true,
@@ -11115,11 +11407,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // ============================================================================
-  // SISTEM HADIAH & SURAT EVENT ADMIN (KUNCI TANGGAL KETAT + 30 HADIAH & TRIAL)
+  // SISTEM HADIAH & SURAT EVENT ADMIN (KUNCI TANGGAL KETAT + 60 HADIAH & TRIAL + FREKUENSI BULANAN/HARIAN)
   // ============================================================================
   const isGiftEventOpenableNow = (ev: AdminGiftEventPackage, accountId?: string): boolean => {
     if (!ev.isActive) return false;
     if (accountId && (ev.claimedByAccountIds || []).includes(accountId)) {
+      return true;
+    }
+    if (accountId && (ev.transferredToAccountIds || []).includes(accountId)) {
       return true;
     }
     if (ev.strictDateLock === false) {
@@ -11128,9 +11423,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (ev.unlockedByManualSend) {
       return true;
     }
+    if (ev.frequencyType === 'daily' || ev.frequencyType === 'hourly') {
+      return true;
+    }
     const now = new Date();
     const activeMonth = giftDateTestOverride ? giftDateTestOverride.month : now.getMonth() + 1;
     const activeDay = giftDateTestOverride ? giftDateTestOverride.day : now.getDate();
+    if (ev.frequencyType === 'monthly') {
+      return ev.scheduleDay === activeDay;
+    }
     return ev.scheduleMonth === activeMonth && ev.scheduleDay === activeDay;
   };
 
@@ -11264,7 +11565,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const matchingPendingEvent = giftEvents.find((ev) => {
       if (!ev.isActive) return false;
-      if (ev.targetAccountId && ev.targetAccountId !== '__ALL__' && ev.targetAccountId !== currentAccount.id) {
+      if ((ev.revokedAccountIds || []).includes(currentAccount.id)) return false;
+      if ((ev.transferredOutByAccountIds || []).includes(currentAccount.id)) return false;
+      const isTransferredRecipient = (ev.transferredToAccountIds || []).includes(currentAccount.id);
+      const hasMultiTargets = Array.isArray(ev.targetAccountIds) && ev.targetAccountIds.length > 0;
+      const isTargetedRecipient =
+        isTransferredRecipient ||
+        !ev.targetAccountId ||
+        ev.targetAccountId === '__ALL__' ||
+        ev.targetAccountId === currentAccount.id ||
+        (hasMultiTargets && ev.targetAccountIds!.includes(currentAccount.id));
+      if (!isTargetedRecipient) {
         return false;
       }
       if ((ev.viewedByAccountIds || []).includes(currentAccount.id)) return false;
@@ -11273,14 +11584,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const isDateMatch =
         ev.autoPopupEnabled &&
         (ev.triggerMode === 'scheduled_date' || ev.triggerMode === 'both') &&
-        ev.scheduleMonth === activeMonth &&
-        ev.scheduleDay === activeDay;
+        (ev.frequencyType === 'daily' ||
+          ev.frequencyType === 'hourly' ||
+          (ev.frequencyType === 'monthly' && ev.scheduleDay === activeDay) ||
+          (ev.scheduleMonth === activeMonth && ev.scheduleDay === activeDay));
 
       const isManualTriggered =
         (ev.triggerMode === 'manual_instant' || ev.triggerMode === 'both') &&
         Boolean(ev.lastTriggeredAt);
 
-      return isDateMatch || isManualTriggered;
+      return isDateMatch || isManualTriggered || isTransferredRecipient;
     });
 
     if (matchingPendingEvent) {
@@ -11309,6 +11622,197 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
     setActiveGiftModal(null);
+  };
+
+  // Buka Amplop Surat saja tanpa mengklaim Kotak Hadiah (agar Kotak Hadiah tetap bisa diklaim atau ditransfer ke teman)
+  const markGiftLetterOpened = (eventId: string) => {
+    if (!currentAccount) return;
+    const updated = giftEvents.map((ev) => {
+      if (ev.id !== eventId) return ev;
+      const viewed = ev.viewedByAccountIds || [];
+      const letterOpened = ev.letterOpenedByAccountIds || [];
+      const nextViewed = viewed.includes(currentAccount.id) ? viewed : [...viewed, currentAccount.id];
+      const nextLetterOpened = letterOpened.includes(currentAccount.id)
+        ? letterOpened
+        : [...letterOpened, currentAccount.id];
+      return {
+        ...ev,
+        viewedByAccountIds: nextViewed,
+        letterOpenedByAccountIds: nextLetterOpened,
+      };
+    });
+    setGiftEvents(updated);
+    syncGiftEventsToServer(updated);
+    flushMasterStateToCloud({ giftEvents: updated });
+    playAtmSound('beep');
+  };
+
+  // Matikan fitur Transfer Hadiah ke Teman seketika saat tombol Buka Kotak Hadiah ditekan
+  const beginOpeningGiftBox = (eventId: string) => {
+    if (!currentAccount) return;
+    const key = `${eventId}:${currentAccount.id}`;
+    if (!openingGiftBoxKeysRef.current.has(key)) {
+      openingGiftBoxKeysRef.current.add(key);
+      setOpeningGiftBoxKeys(Array.from(openingGiftBoxKeysRef.current));
+    }
+  };
+
+  const isGiftBoxTransferLocked = (eventId: string, accountId?: string): boolean => {
+    const accId = accountId || currentAccount?.id;
+    if (!accId) return true;
+    const ev = giftEvents.find((item) => item.id === eventId);
+    if (!ev) return true;
+    if ((ev.claimedByAccountIds || []).includes(accId)) return true;
+    if ((ev.transferredOutByAccountIds || []).includes(accId)) return true;
+    if (openingGiftBoxKeysRef.current.has(`${eventId}:${accId}`)) return true;
+    if (openingGiftBoxKeys.includes(`${eventId}:${accId}`)) return true;
+    return false;
+  };
+
+  // Kirim / Transfer Kotak Hadiah yang belum dibuka ke Teman
+  const transferGiftEventToFriend = (
+    eventId: string,
+    recipientQuery: string,
+    personalNote?: string
+  ): {
+    success: boolean;
+    message: string;
+    recipientName?: string;
+    recipientAccountNumber?: string;
+  } => {
+    if (!currentAccount) {
+      return { success: false, message: 'Silakan masuk ke rekening terlebih dahulu.' };
+    }
+    const ev = giftEvents.find((item) => item.id === eventId);
+    if (!ev) {
+      return { success: false, message: 'Kotak Hadiah tidak ditemukan.' };
+    }
+    if (
+      (ev.claimedByAccountIds || []).includes(currentAccount.id) ||
+      openingGiftBoxKeysRef.current.has(`${eventId}:${currentAccount.id}`)
+    ) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'Kotak Hadiah ini sudah dibuka sehingga fitur Transfer ke Teman otomatis dimatikan dan tidak dapat ditransfer lagi.',
+      };
+    }
+    if ((ev.transferredOutByAccountIds || []).includes(currentAccount.id)) {
+      return {
+        success: false,
+        message: 'Kotak Hadiah ini sudah pernah Anda transfer ke teman.',
+      };
+    }
+
+    const q = recipientQuery.trim();
+    if (!q) {
+      return {
+        success: false,
+        message: 'Pilih teman dari daftar atau ketik nomor rekening teman terlebih dahulu.',
+      };
+    }
+
+    const cleanDigits = q.replace(/\D/g, '');
+    const friend = accounts.find(
+      (a) =>
+        a.id !== currentAccount.id &&
+        (a.id === q ||
+          (cleanDigits.length >= 6 &&
+            (a.accountNumber === cleanDigits || a.phone === cleanDigits)) ||
+          a.fullName.toLowerCase() === q.toLowerCase())
+    );
+
+    if (!friend) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Rekening teman "${q}" tidak ditemukan. Pastikan nomor rekening 10 digit benar atau pilih dari daftar akun teman.`,
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedEvents = giftEvents.map((item) => {
+      if (item.id !== eventId) return item;
+      const nextTransferredOut = Array.from(
+        new Set([...(item.transferredOutByAccountIds || []), currentAccount.id])
+      ).filter((id) => id !== friend.id);
+      const nextTransferredTo = Array.from(
+        new Set([...(item.transferredToAccountIds || []), friend.id])
+      );
+      const nextViewed = Array.from(
+        new Set([...(item.viewedByAccountIds || []), currentAccount.id])
+      ).filter((id) => id !== friend.id);
+      const nextClaimed = (item.claimedByAccountIds || []).filter((id) => id !== friend.id);
+
+      const nextTargetAccountId =
+        item.targetAccountId &&
+        item.targetAccountId !== '__ALL__' &&
+        item.targetAccountId === currentAccount.id
+          ? friend.id
+          : item.targetAccountId;
+
+      return {
+        ...item,
+        targetAccountId: nextTargetAccountId,
+        unlockedByManualSend: true,
+        transferredOutByAccountIds: nextTransferredOut,
+        transferredToAccountIds: nextTransferredTo,
+        viewedByAccountIds: nextViewed,
+        claimedByAccountIds: nextClaimed,
+        transferHistoryByRecipient: {
+          ...(item.transferHistoryByRecipient || {}),
+          [friend.id]: {
+            fromAccountId: currentAccount.id,
+            fromAccountName: currentAccount.fullName,
+            fromAccountNumber: currentAccount.accountNumber,
+            toAccountId: friend.id,
+            toAccountName: friend.fullName,
+            toAccountNumber: friend.accountNumber,
+            note: personalNote?.trim() || undefined,
+            transferredAt: nowIso,
+          },
+        },
+        updatedAt: nowIso,
+      };
+    });
+
+    setGiftEvents(updatedEvents);
+    syncGiftEventsToServer(updatedEvents);
+    flushMasterStateToCloud({ giftEvents: updatedEvents });
+
+    addNotification(
+      `🎁 Kotak Hadiah Ditransfer ke ${friend.fullName}`,
+      `Anda berhasil mengirim Kotak Hadiah "${ev.title}" dalam keadaan utuh ke ${friend.fullName} (${friend.accountNumber}).`,
+      'success',
+      {
+        category: 'promo',
+        targetView: 'dashboard',
+        targetDashboardTab: 'ringkasan',
+        accountId: currentAccount.id,
+      }
+    );
+
+    addNotification(
+      `🎁 Kiriman Kotak Hadiah dari ${currentAccount.fullName}!`,
+      `${currentAccount.fullName} mengirim Kotak Hadiah "${ev.title}"${
+        personalNote?.trim() ? ` dengan pesan: "${personalNote.trim()}"` : ''
+      } untuk Anda buka!`,
+      'success',
+      {
+        category: 'promo',
+        targetView: 'dashboard',
+        targetDashboardTab: 'ringkasan',
+        accountId: friend.id,
+      }
+    );
+
+    playAtmSound('success');
+    return {
+      success: true,
+      recipientName: friend.fullName,
+      recipientAccountNumber: friend.accountNumber,
+      message: `Berhasil! Kotak Hadiah "${ev.title}" telah dikirim ke ${friend.fullName} (No. Rek: ${friend.accountNumber}).`,
+    };
   };
 
   const claimAndOpenGiftEvent = (
@@ -11738,6 +12242,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             forceCardTier = 'platinum';
           }
           break;
+        case 'upgrade_card_admin_infinity_perm':
+          forceCardTier = 'admin';
+          enableShield = true;
+          enableBlueCheck = true;
+          break;
+        case 'royal_crown_100g_50m_pack':
+          addGoldGrams += 100 * qty;
+          addCash += 50_000_000 * qty;
+          break;
         case 'trial_diamond_combo':
           addCash += 2_000_000 * qty;
           enableBlueCheck = true;
@@ -11782,22 +12295,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const tierOrder: CardTier[] = ['regular', 'gold', 'premium', 'platinum'];
-    const isUnlim = currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+    const isUnlim =
+      currentAccount.cardTier === 'admin' ||
+      forceCardTier === 'admin' ||
+      isUnlimitedNumber(currentAccount.balance);
 
     setAccounts((prev) =>
       prev.map((acc) => {
         if (acc.id !== currentAccount.id) return acc;
         let nextTier = acc.cardTier;
-        if (tierUpgradeSteps > 0 && acc.cardTier !== 'admin') {
-          const idx = tierOrder.indexOf(acc.cardTier);
-          const nextIdx = Math.min(tierOrder.length - 1, Math.max(0, idx) + tierUpgradeSteps);
-          nextTier = tierOrder[nextIdx];
-        }
-        if (forceCardTier && acc.cardTier !== 'admin') {
-          const curIdx = tierOrder.indexOf(nextTier);
-          const forceIdx = tierOrder.indexOf(forceCardTier);
-          if (forceIdx > curIdx) {
-            nextTier = forceCardTier;
+        if (forceCardTier === 'admin') {
+          nextTier = 'admin';
+        } else {
+          if (tierUpgradeSteps > 0 && acc.cardTier !== 'admin') {
+            const idx = tierOrder.indexOf(acc.cardTier);
+            const nextIdx = Math.min(tierOrder.length - 1, Math.max(0, idx) + tierUpgradeSteps);
+            nextTier = tierOrder[nextIdx];
+          }
+          if (forceCardTier && acc.cardTier !== 'admin') {
+            const curIdx = tierOrder.indexOf(nextTier);
+            const forceIdx = tierOrder.indexOf(forceCardTier);
+            if (forceIdx > curIdx) {
+              nextTier = forceCardTier;
+            }
           }
         }
         const nextBiz = { ...(acc.empireBusinesses || {}) };
@@ -11939,8 +12459,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     syncGiftEventsToServer(updatedEvents);
 
     addNotification(
-      `🎁 Hadiah & Surat Dibuka: ${ev.title}`,
-      `Dari ${ev.senderName}: ${summaryLines.slice(0, 3).join(', ')}${summaryLines.length > 3 ? ` (+${summaryLines.length - 3} lainnya)` : ''}.`,
+      `🎁 Kotak Hadiah Berhasil Diklaim`,
+      `Kotak Hadiah "${ev.title}" dari ${ev.senderName} berhasil diklaim ke akun Anda.`,
       'success',
       {
         category: 'promo',
@@ -11960,7 +12480,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       alreadyClaimed: false,
       summaryLines,
       rolledResults,
-      message: `Selamat! Seluruh ${ev.rewards.length} hadiah dari ${ev.senderName} berhasil diklaim ke rekening Anda!`,
+      message: `Kotak Hadiah dari ${ev.senderName} berhasil diklaim dan seluruh isinya langsung masuk otomatis ke akun Anda!`,
     };
   };
 
@@ -11969,6 +12489,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     title: string;
     senderName: string;
     letterMessage: string;
+    deliveryContentMode?: 'both' | 'letter_only' | 'gift_only';
     triggerMode: 'scheduled_date' | 'manual_instant' | 'both';
     autoPopupEnabled: boolean;
     strictDateLock?: boolean;
@@ -11977,6 +12498,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     scheduleDay: number;
     isActive: boolean;
     targetAccountId?: string;
+    targetAccountIds?: string[];
+    revokedAccountIds?: string[];
     themeColor?: 'amber' | 'emerald' | 'rose' | 'indigo';
     rewards: AdminGiftRewardItem[];
     customSealConfig?: LetterSignatureStampConfig | null;
@@ -12003,26 +12526,75 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     allowTransferableGift?: boolean;
   }): { success: boolean; message: string; event: AdminGiftEventPackage } => {
     const monthLabel = MONTHS_INDO.find((m) => m.value === input.scheduleMonth)?.label || `Bulan ${input.scheduleMonth}`;
-    const scheduleLabel = `${input.scheduleDay} ${monthLabel}`;
+    const freq = input.frequencyType || 'monthly';
+    const scheduleLabel =
+      freq === 'daily'
+        ? 'Setiap Hari (Otomatis)'
+        : freq === 'hourly'
+        ? 'Setiap Jam (Otomatis)'
+        : freq === 'monthly'
+        ? `Setiap Bulan • Tgl ${input.scheduleDay}`
+        : `${input.scheduleDay} ${monthLabel}`;
     const existing = input.id ? giftEvents.find((e) => e.id === input.id) : null;
+    const contentMode: 'both' | 'letter_only' | 'gift_only' =
+      input.deliveryContentMode || existing?.deliveryContentMode || 'both';
+
+    // Normalize recipient targets (All accounts vs 1 specific account vs Multiple selected accounts)
+    let resolvedTargetAccountId: string = '__ALL__';
+    let resolvedTargetAccountIds: string[] = [];
+
+    if (input.targetAccountId === '__ALL__') {
+      resolvedTargetAccountId = '__ALL__';
+      resolvedTargetAccountIds = [];
+    } else if (Array.isArray(input.targetAccountIds) && input.targetAccountIds.length > 0) {
+      resolvedTargetAccountIds = Array.from(new Set(input.targetAccountIds.filter(Boolean)));
+      resolvedTargetAccountId =
+        resolvedTargetAccountIds.length === 1 ? resolvedTargetAccountIds[0] : '__MULTI__';
+    } else if (input.targetAccountId && input.targetAccountId !== '__MULTI__') {
+      resolvedTargetAccountId = input.targetAccountId;
+      resolvedTargetAccountIds = [input.targetAccountId];
+    }
+
+    const resolvedRewards =
+      contentMode === 'letter_only'
+        ? input.rewards
+        : input.rewards.length > 0
+        ? input.rewards
+        : DEFAULT_ADMIN_GIFT_EVENTS[0].rewards;
 
     const savedEvent: AdminGiftEventPackage = {
       id: existing ? existing.id : `gift-ev-${Date.now()}-${Math.floor(Math.random() * 999)}`,
-      title: input.title.trim() || `Hadiah & Surat ${scheduleLabel}`,
+      title:
+        input.title.trim() ||
+        (contentMode === 'letter_only'
+          ? `Surat Resmi ${scheduleLabel}`
+          : contentMode === 'gift_only'
+          ? `Kotak Hadiah ${scheduleLabel}`
+          : `Hadiah & Surat ${scheduleLabel}`),
       senderName: input.senderName.trim() || 'Admin Utama Bank Nusantara',
-      letterMessage: input.letterMessage.trim() || 'Selamat menerima hadiah spesial dari Bank Nusantara!',
+      letterMessage: input.letterMessage.trim() || 'Selamat menerima kiriman spesial dari Bank Nusantara!',
+      deliveryContentMode: contentMode,
       triggerMode: input.triggerMode,
       autoPopupEnabled: input.autoPopupEnabled,
       strictDateLock: input.strictDateLock !== undefined ? input.strictDateLock : true,
       unlockedByManualSend: existing?.unlockedByManualSend ?? false,
-      isGachaBox: input.isGachaBox ?? input.rewards.some((r) => r.rewardMode === 'gacha'),
+      isGachaBox:
+        contentMode === 'letter_only'
+          ? false
+          : input.isGachaBox ?? resolvedRewards.some((r) => r.rewardMode === 'gacha'),
       scheduleMonth: Math.min(12, Math.max(1, input.scheduleMonth || 1)),
       scheduleDay: Math.min(31, Math.max(1, input.scheduleDay || 29)),
       scheduleLabel,
       isActive: input.isActive,
-      targetAccountId: input.targetAccountId || '__ALL__',
+      targetAccountId: resolvedTargetAccountId,
+      targetAccountIds: resolvedTargetAccountIds,
+      revokedAccountIds:
+        input.revokedAccountIds !== undefined
+          ? input.revokedAccountIds
+          : existing?.revokedAccountIds || [],
+      letterOpenedByAccountIds: existing?.letterOpenedByAccountIds || [],
       themeColor: input.themeColor || 'amber',
-      rewards: input.rewards.length > 0 ? input.rewards : DEFAULT_ADMIN_GIFT_EVENTS[0].rewards,
+      rewards: resolvedRewards,
       claimedByAccountIds: existing ? existing.claimedByAccountIds : [],
       viewedByAccountIds: existing ? existing.viewedByAccountIds : [],
       gachaResultsByAccount: existing?.gachaResultsByAccount,
@@ -12030,6 +12602,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       createdAt: existing ? existing.createdAt : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       lastTriggeredAt: existing?.lastTriggeredAt,
+      transferredOutByAccountIds: existing?.transferredOutByAccountIds,
+      transferredToAccountIds: existing?.transferredToAccountIds,
+      transferHistoryByRecipient: existing?.transferHistoryByRecipient,
 
       frequencyType: input.frequencyType || 'monthly',
       recurringIntervalHours: input.recurringIntervalHours || 24,
@@ -12051,7 +12626,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       attachmentFileUrl: input.attachmentFileUrl || '',
       attachmentFileName: input.attachmentFileName || '',
       autoExpireHours: input.autoExpireHours || 72,
-      allowTransferableGift: input.allowTransferableGift ?? false,
+      allowTransferableGift: input.allowTransferableGift ?? true,
     };
 
     const nextList = existing
@@ -12059,14 +12634,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       : [savedEvent, ...giftEvents];
     setGiftEvents(nextList);
     syncGiftEventsToServer(nextList);
+    flushMasterStateToCloud({ giftEvents: nextList });
     playAtmSound('success');
+
+    const modeLabel =
+      contentMode === 'letter_only'
+        ? 'Surat Saja'
+        : contentMode === 'gift_only'
+        ? 'Hadiah Saja'
+        : 'Hadiah & Surat Sekaligus';
+    const recipientSummary =
+      resolvedTargetAccountId === '__ALL__'
+        ? `Semua Nasabah (${accounts.length} akun)`
+        : `${resolvedTargetAccountIds.length} akun terpilih`;
 
     return {
       success: true,
       event: savedEvent,
       message: existing
-        ? `Paket Hadiah & Surat "${savedEvent.title}" (Pengirim: ${savedEvent.senderName}) berhasil diperbarui!`
-        : `Paket Hadiah & Surat baru "${savedEvent.title}" dijadwalkan untuk ${scheduleLabel}!`,
+        ? `Paket "${savedEvent.title}" [Mode: ${modeLabel} • Penerima: ${recipientSummary}] berhasil diperbarui!`
+        : `Paket baru "${savedEvent.title}" [Mode: ${modeLabel} • Penerima: ${recipientSummary}] dijadwalkan untuk ${scheduleLabel}!`,
     };
   };
 
@@ -12074,6 +12661,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextList = giftEvents.filter((e) => e.id !== eventId);
     setGiftEvents(nextList);
     syncGiftEventsToServer(nextList);
+    flushMasterStateToCloud({ giftEvents: nextList });
     playAtmSound('beep');
     return { success: true, message: 'Paket Hadiah & Surat berhasil dihapus.' };
   };
@@ -12084,6 +12672,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
     setGiftEvents(nextList);
     syncGiftEventsToServer(nextList);
+    flushMasterStateToCloud({ giftEvents: nextList });
     return { success: true, message: 'Status aktif paket Hadiah & Surat berhasil diubah.' };
   };
 
@@ -12100,17 +12689,301 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             triggerMode: e.triggerMode === 'scheduled_date' ? ('both' as const) : e.triggerMode,
             lastTriggeredAt: nowIso,
             viewedByAccountIds: [],
+            letterOpenedByAccountIds: [],
             claimedByAccountIds: [],
             updatedAt: nowIso,
           }
         : e
     );
     setGiftEvents(nextList);
+    Array.from(openingGiftBoxKeysRef.current).forEach((k) => {
+      if (k.startsWith(`${eventId}:`)) {
+        openingGiftBoxKeysRef.current.delete(k);
+      }
+    });
+    setOpeningGiftBoxKeys(Array.from(openingGiftBoxKeysRef.current));
     syncGiftEventsToServer(nextList);
+    flushMasterStateToCloud({ giftEvents: nextList });
     playAtmSound('success');
+    const modeLabel =
+      target.deliveryContentMode === 'letter_only'
+        ? 'Surat Resmi'
+        : target.deliveryContentMode === 'gift_only'
+        ? 'Kotak Hadiah'
+        : 'Hadiah & Surat';
     return {
       success: true,
-      message: `🎁 Kiriman Manual "${target.title}" dari "${target.senderName}" langsung disiarkan ke seluruh nasabah! Layar akan otomatis blur saat masuk.`,
+      message: `🎁 Kiriman Manual ${modeLabel} "${target.title}" dari "${target.senderName}" langsung dikirimkan ke penerima terpilih!`,
+    };
+  };
+
+  const adminResetGiftEventStatus = (
+    eventId: string,
+    options?: {
+      accountId?: string;
+      resetType?: 'all' | 'claim_only' | 'letter_only';
+      retriggerPopup?: boolean;
+    }
+  ): { success: boolean; message: string } => {
+    const target = giftEvents.find((e) => e.id === eventId);
+    if (!target) return { success: false, message: 'Paket hadiah & surat tidak ditemukan.' };
+    const resetType = options?.resetType || 'all';
+    const specificAccId = options?.accountId;
+    const retrigger = options?.retriggerPopup !== false;
+    const nowIso = new Date().toISOString();
+
+    const nextList = giftEvents.map((e) => {
+      if (e.id !== eventId) return e;
+      let nextClaimed = e.claimedByAccountIds || [];
+      let nextViewed = e.viewedByAccountIds || [];
+      let nextLetterOpened = e.letterOpenedByAccountIds || [];
+      let nextGachaMap = { ...(e.gachaResultsByAccount || {}) };
+      let nextTransferredOut = e.transferredOutByAccountIds || [];
+      let nextRevoked = e.revokedAccountIds || [];
+
+      if (specificAccId) {
+        nextRevoked = nextRevoked.filter((id) => id !== specificAccId);
+        if (resetType === 'all' || resetType === 'claim_only') {
+          nextClaimed = nextClaimed.filter((id) => id !== specificAccId);
+          nextTransferredOut = nextTransferredOut.filter((id) => id !== specificAccId);
+          delete nextGachaMap[specificAccId];
+        }
+        if (resetType === 'all' || resetType === 'letter_only') {
+          nextViewed = nextViewed.filter((id) => id !== specificAccId);
+          nextLetterOpened = nextLetterOpened.filter((id) => id !== specificAccId);
+        } else if (retrigger) {
+          nextViewed = nextViewed.filter((id) => id !== specificAccId);
+        }
+      } else {
+        nextRevoked = [];
+        if (resetType === 'all' || resetType === 'claim_only') {
+          nextClaimed = [];
+          nextTransferredOut = [];
+          nextGachaMap = {};
+        }
+        if (resetType === 'all' || resetType === 'letter_only') {
+          nextViewed = [];
+          nextLetterOpened = [];
+        } else if (retrigger) {
+          nextViewed = [];
+        }
+      }
+
+      return {
+        ...e,
+        isActive: true,
+        unlockedByManualSend: retrigger ? true : e.unlockedByManualSend,
+        lastTriggeredAt: retrigger ? nowIso : e.lastTriggeredAt,
+        claimedByAccountIds: nextClaimed,
+        viewedByAccountIds: nextViewed,
+        letterOpenedByAccountIds: nextLetterOpened,
+        gachaResultsByAccount: nextGachaMap,
+        transferredOutByAccountIds: nextTransferredOut,
+        revokedAccountIds: nextRevoked,
+        updatedAt: nowIso,
+      };
+    });
+
+    setGiftEvents(nextList);
+    syncGiftEventsToServer(nextList);
+    flushMasterStateToCloud({ giftEvents: nextList });
+
+    // Aktifkan kembali fitur Transfer Hadiah ke Teman saat Admin mereset status klaim
+    if (resetType === 'all' || resetType === 'claim_only') {
+      if (specificAccId) {
+        openingGiftBoxKeysRef.current.delete(`${eventId}:${specificAccId}`);
+      } else {
+        Array.from(openingGiftBoxKeysRef.current).forEach((k) => {
+          if (k.startsWith(`${eventId}:`)) {
+            openingGiftBoxKeysRef.current.delete(k);
+          }
+        });
+      }
+      setOpeningGiftBoxKeys(Array.from(openingGiftBoxKeysRef.current));
+    }
+
+    playAtmSound('success');
+
+    const accObj = specificAccId ? accounts.find((a) => a.id === specificAccId) : null;
+    const targetName = accObj ? `${accObj.fullName} (${accObj.accountNumber})` : 'Seluruh Penerima';
+    const typeLabel =
+      resetType === 'claim_only'
+        ? 'Status Klaim Hadiah'
+        : resetType === 'letter_only'
+        ? 'Status Baca Surat'
+        : 'Status Klaim Hadiah & Baca Surat';
+
+    return {
+      success: true,
+      message: `🔄 ${typeLabel} untuk ${targetName} pada paket "${target.title}" berhasil di-reset! Pengguna dapat membuka/mengklaim ulang sekarang.`,
+    };
+  };
+
+  const adminToggleRevokeGiftEventRecipient = (
+    eventId: string,
+    accountId: string
+  ): { success: boolean; message: string; isRevoked: boolean } => {
+    const target = giftEvents.find((e) => e.id === eventId);
+    if (!target) {
+      return { success: false, message: 'Paket tidak ditemukan.', isRevoked: false };
+    }
+    const accObj = accounts.find((a) => a.id === accountId);
+    const currentlyRevoked = (target.revokedAccountIds || []).includes(accountId);
+    const nowIso = new Date().toISOString();
+
+    const nextList = giftEvents.map((e) => {
+      if (e.id !== eventId) return e;
+      const prevRevoked = e.revokedAccountIds || [];
+      const nextRevoked = currentlyRevoked
+        ? prevRevoked.filter((id) => id !== accountId)
+        : Array.from(new Set([...prevRevoked, accountId]));
+      const nextViewed = currentlyRevoked
+        ? (e.viewedByAccountIds || []).filter((id) => id !== accountId)
+        : e.viewedByAccountIds || [];
+      return {
+        ...e,
+        revokedAccountIds: nextRevoked,
+        viewedByAccountIds: nextViewed,
+        updatedAt: nowIso,
+      };
+    });
+
+    setGiftEvents(nextList);
+    syncGiftEventsToServer(nextList);
+    flushMasterStateToCloud({ giftEvents: nextList });
+    if (
+      !currentlyRevoked &&
+      currentAccount?.id === accountId &&
+      activeGiftModal?.eventId === eventId
+    ) {
+      setActiveGiftModal(null);
+    }
+    playAtmSound('beep');
+
+    const accLabel = accObj ? `${accObj.fullName} (${accObj.accountNumber})` : accountId;
+    return {
+      success: true,
+      isRevoked: !currentlyRevoked,
+      message: !currentlyRevoked
+        ? `🚫 Kiriman "${target.title}" telah ditarik kembali / dibatalkan dari akun ${accLabel}.`
+        : `✅ Kiriman "${target.title}" telah dipulihkan kembali untuk akun ${accLabel}!`,
+    };
+  };
+
+  const adminDuplicateGiftEvent = (
+    eventId: string,
+    options?: {
+      targetAccountId?: string;
+      targetAccountIds?: string[];
+      deliveryContentMode?: 'both' | 'letter_only' | 'gift_only';
+      sendNow?: boolean;
+    }
+  ): { success: boolean; message: string; event?: AdminGiftEventPackage } => {
+    const source = giftEvents.find((e) => e.id === eventId);
+    if (!source) return { success: false, message: 'Paket sumber tidak ditemukan.' };
+    const nowIso = new Date().toISOString();
+
+    let nextTargetId = options?.targetAccountId ?? source.targetAccountId ?? '__ALL__';
+    let nextTargetIds = options?.targetAccountIds ?? source.targetAccountIds ?? [];
+    if (nextTargetId === '__ALL__') {
+      nextTargetIds = [];
+    } else if (nextTargetIds.length > 0) {
+      nextTargetIds = Array.from(new Set(nextTargetIds));
+      nextTargetId = nextTargetIds.length === 1 ? nextTargetIds[0] : '__MULTI__';
+    } else if (nextTargetId && nextTargetId !== '__MULTI__') {
+      nextTargetIds = [nextTargetId];
+    }
+
+    const sendNow = options?.sendNow !== false;
+    const duplicated: AdminGiftEventPackage = {
+      ...source,
+      id: `gift-ev-dup-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      title: `${source.title} (Salinan)`,
+      deliveryContentMode: options?.deliveryContentMode || source.deliveryContentMode || 'both',
+      targetAccountId: nextTargetId,
+      targetAccountIds: nextTargetIds,
+      revokedAccountIds: [],
+      claimedByAccountIds: [],
+      viewedByAccountIds: [],
+      letterOpenedByAccountIds: [],
+      gachaResultsByAccount: {},
+      transferredOutByAccountIds: [],
+      transferredToAccountIds: [],
+      transferHistoryByRecipient: {},
+      isActive: true,
+      unlockedByManualSend: sendNow ? true : source.unlockedByManualSend,
+      lastTriggeredAt: sendNow ? nowIso : undefined,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    const nextList = [duplicated, ...giftEvents];
+    setGiftEvents(nextList);
+    syncGiftEventsToServer(nextList);
+    flushMasterStateToCloud({ giftEvents: nextList });
+    playAtmSound('success');
+
+    return {
+      success: true,
+      event: duplicated,
+      message: sendNow
+        ? `✨ Paket "${source.title}" berhasil diduplikasi dan langsung dikirimkan ulang!`
+        : `✨ Paket "${source.title}" berhasil diduplikasi ke daftar paket!`,
+    };
+  };
+
+  const adminUpdateGiftEventQuickSettings = (
+    eventId: string,
+    patch: {
+      deliveryContentMode?: 'both' | 'letter_only' | 'gift_only';
+      targetAccountId?: string;
+      targetAccountIds?: string[];
+      letterMessage?: string;
+      title?: string;
+      senderName?: string;
+      retriggerPopup?: boolean;
+    }
+  ): { success: boolean; message: string } => {
+    const target = giftEvents.find((e) => e.id === eventId);
+    if (!target) return { success: false, message: 'Paket tidak ditemukan.' };
+    const nowIso = new Date().toISOString();
+
+    const nextList = giftEvents.map((e) => {
+      if (e.id !== eventId) return e;
+      let nextTargetId = patch.targetAccountId ?? e.targetAccountId ?? '__ALL__';
+      let nextTargetIds = patch.targetAccountIds ?? e.targetAccountIds ?? [];
+      if (nextTargetId === '__ALL__') {
+        nextTargetIds = [];
+      } else if (nextTargetIds.length > 0) {
+        nextTargetIds = Array.from(new Set(nextTargetIds));
+        nextTargetId = nextTargetIds.length === 1 ? nextTargetIds[0] : '__MULTI__';
+      } else if (nextTargetId && nextTargetId !== '__MULTI__') {
+        nextTargetIds = [nextTargetId];
+      }
+
+      return {
+        ...e,
+        title: patch.title !== undefined ? patch.title : e.title,
+        senderName: patch.senderName !== undefined ? patch.senderName : e.senderName,
+        letterMessage: patch.letterMessage !== undefined ? patch.letterMessage : e.letterMessage,
+        deliveryContentMode: patch.deliveryContentMode || e.deliveryContentMode || 'both',
+        targetAccountId: nextTargetId,
+        targetAccountIds: nextTargetIds,
+        unlockedByManualSend: patch.retriggerPopup ? true : e.unlockedByManualSend,
+        lastTriggeredAt: patch.retriggerPopup ? nowIso : e.lastTriggeredAt,
+        viewedByAccountIds: patch.retriggerPopup ? [] : e.viewedByAccountIds,
+        updatedAt: nowIso,
+      };
+    });
+
+    setGiftEvents(nextList);
+    syncGiftEventsToServer(nextList);
+    flushMasterStateToCloud({ giftEvents: nextList });
+    playAtmSound('success');
+
+    return {
+      success: true,
+      message: `✅ Pengaturan paket "${target.title}" berhasil diperbarui secara real-time!`,
     };
   };
 
@@ -12912,11 +13785,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isGiftEventOpenableNow,
         openGiftEventModal,
         closeGiftEventModal,
+        markGiftLetterOpened,
+        beginOpeningGiftBox,
+        isGiftBoxTransferLocked,
+        transferGiftEventToFriend,
         claimAndOpenGiftEvent,
         adminCreateOrUpdateGiftEvent,
         adminDeleteGiftEvent,
         adminToggleGiftEventActive,
         adminTriggerGiftEventNow,
+        adminResetGiftEventStatus,
+        adminToggleRevokeGiftEventRecipient,
+        adminDuplicateGiftEvent,
+        adminUpdateGiftEventQuickSettings,
         adminSetGiftDateTestOverride,
         jobCoinBonusConfig,
         adminUpdateJobCoinBonusConfig,

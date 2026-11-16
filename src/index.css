@@ -29,6 +29,44 @@
   transform: rotateY(180deg);
 }
 
+@keyframes giftRibbonWiggle {
+  0%, 100% {
+    transform: rotate(-3deg) scale(1.06);
+  }
+  25% {
+    transform: rotate(3deg) scale(1.08);
+  }
+  50% {
+    transform: rotate(-2.5deg) scale(1.07);
+  }
+  75% {
+    transform: rotate(2.5deg) scale(1.08);
+  }
+}
+
+.group:hover .gift-box-hover-wiggle {
+  animation: giftRibbonWiggle 0.9s ease-in-out infinite;
+}
+
+@keyframes giftMysteryGlowSpin {
+  0% {
+    transform: rotate(0deg) scale(1);
+    box-shadow: 0 0 24px rgba(251, 191, 36, 0.45);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.08);
+    box-shadow: 0 0 44px rgba(251, 191, 36, 0.85);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+    box-shadow: 0 0 24px rgba(251, 191, 36, 0.45);
+  }
+}
+
+.gift-mystery-open-spin {
+  animation: giftMysteryGlowSpin 1.3s linear infinite;
+}
+
 /* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;

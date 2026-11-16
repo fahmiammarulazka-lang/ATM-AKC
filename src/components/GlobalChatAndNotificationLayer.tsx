@@ -825,7 +825,7 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
                         </p>
 
                         <div className="flex flex-wrap gap-1.5">
-                          {req.featureLabels.map((lbl, idx) => (
+                          {(req.featureLabels || req.selectedFeatureLabels || []).map((lbl, idx) => (
                             <span
                               key={idx}
                               className="px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 text-[11px] font-bold"

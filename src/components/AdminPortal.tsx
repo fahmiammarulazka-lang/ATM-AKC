@@ -1660,7 +1660,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                               setEditingUpdateId(upd.id);
                               setEditUpdateVersion(upd.version);
                               setEditUpdateTitle(upd.title);
-                              setEditUpdateDateText(upd.dateText);
+                              setEditUpdateDateText(upd.dateText || upd.fullDate || '');
                               setEditUpdateDesc(upd.description);
                               setEditUpdateChangesText((upd.changes || []).join('\n'));
                             }
@@ -6690,10 +6690,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     {/* Daftar Fitur yang Dimintol */}
                     <div className="space-y-1.5">
                       <span className="text-[10px] font-bold text-slate-400 uppercase block">
-                        Fitur yang Diminta ({req.featureLabels.length} Fitur):
+                        Fitur yang Diminta ({(req.featureLabels || req.selectedFeatureLabels || []).length} Fitur):
                       </span>
                       <div className="flex flex-wrap gap-1.5">
-                        {req.featureLabels.map((lbl, i) => (
+                        {(req.featureLabels || req.selectedFeatureLabels || []).map((lbl, i) => (
                           <span
                             key={i}
                             className="px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 font-bold text-[11px]"
