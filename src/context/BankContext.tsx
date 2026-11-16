@@ -55,7 +55,27 @@ import {
   BudgetCategoryIcon,
   BudgetCategoryColor,
   ManualExpenseRecord,
+  AdminGiftEventPackage,
+  AdminGiftRewardItem,
+  ActiveAccountTrial,
+  GachaTierRange,
+  GachaClaimedItemResult,
+  JobGachaBonusConfig,
+  GiftRewardType,
+  DevRoleConfig,
+  LetterSignatureStampConfig,
 } from '../types/bank';
+import {
+  DEFAULT_ADMIN_GIFT_EVENTS,
+  GIFT_REWARD_CATALOG,
+  MONTHS_INDO,
+  formatTrialDurationLabel,
+} from '../data/giftRewardsCatalog';
+import { DEFAULT_DEV_ROLES_10 } from '../data/devRolesCatalog';
+import {
+  DEFAULT_JOB_GACHA_BONUS_CONFIG,
+  rollGachaOutcome,
+} from '../utils/gachaUtils';
 import { type FirebaseUser } from '../firebase';
 import {
   saveSnapshotToDeviceStorage,
@@ -596,19 +616,27 @@ interface BankContextType {
     requireAdminApproval: boolean;
   }) => { success: boolean; message: string };
 
-  // Lowongan Pekerjaan, Sistem Level & Arena Suit Lawan Komputer Medium
+  // Lowongan Pekerjaan (25 Jenjang Rp 100.000 - Rp 10.000.000), Ikon Uang & Coin, Sistem Level & Arena Suit
   workJobClick: (
     jobId: string,
     salary: number,
     targetClicks: number,
     requiredLevel: number,
-    jobTitle: string
+    jobTitle: string,
+    coinReward?: number
   ) => {
     success: boolean;
     completed: boolean;
     currentClicks: number;
     targetClicks: number;
     paidAmount?: number;
+    coinsEarned?: number;
+    gachaBonusResult?: {
+      tierLabel: string;
+      probabilityPercent: number;
+      amount: number;
+      rewardType: JobGachaBonusConfig['rewardType'];
+    };
     message: string;
   };
   upgradeJobLevelWithCash: () => { success: boolean; newLevel?: number; message: string };
@@ -948,6 +976,80 @@ interface BankContextType {
   // Reset to default or start from zero
   resetAllData: () => void;
   startFromZero: () => void;
+
+  // Sistem Hadiah & Surat Spesial Admin (Tanggal Tertentu / 29 Januari Otomatis + Kirim Manual + Kunci Tanggal + 30 Hadiah & Trial)
+  giftEvents: AdminGiftEventPackage[];
+  activeGiftModal: { eventId: string; isReplay: boolean } | null;
+  giftDateTestOverride: { month: number; day: number } | null;
+  isGiftEventOpenableNow: (ev: AdminGiftEventPackage, accountId?: string) => boolean;
+  openGiftEventModal: (eventId: string, isReplay?: boolean) => void;
+  closeGiftEventModal: () => void;
+  claimAndOpenGiftEvent: (eventId: string) => {
+    success: boolean;
+    alreadyClaimed: boolean;
+    lockedByDate?: boolean;
+    summaryLines: string[];
+    rolledResults?: GachaClaimedItemResult[];
+    message: string;
+  };
+  adminCreateOrUpdateGiftEvent: (input: {
+    id?: string;
+    title: string;
+    senderName: string;
+    letterMessage: string;
+    triggerMode: 'scheduled_date' | 'manual_instant' | 'both';
+    autoPopupEnabled: boolean;
+    strictDateLock?: boolean;
+    isGachaBox?: boolean;
+    scheduleMonth: number;
+    scheduleDay: number;
+    isActive: boolean;
+    targetAccountId?: string;
+    themeColor?: 'amber' | 'emerald' | 'rose' | 'indigo';
+    rewards: AdminGiftRewardItem[];
+    customSealConfig?: LetterSignatureStampConfig | null;
+  }) => { success: boolean; message: string; event: AdminGiftEventPackage };
+  adminDeleteGiftEvent: (eventId: string) => { success: boolean; message: string };
+  adminToggleGiftEventActive: (eventId: string) => { success: boolean; message: string };
+  adminTriggerGiftEventNow: (eventId: string) => { success: boolean; message: string };
+  adminSetGiftDateTestOverride: (override: { month: number; day: number } | null) => void;
+
+  // Sistem Gacha Universal Admin & Bonus Gacha Pekerjaan
+  jobGachaBonusConfig: JobGachaBonusConfig;
+  adminUpdateJobGachaBonusConfig: (config: JobGachaBonusConfig) => { success: boolean; message: string };
+  adminExecuteUniversalGachaDrop: (input: {
+    targetAccountId: string | '__ALL__';
+    rewardType: GiftRewardType;
+    title: string;
+    senderName: string;
+    letterMessage?: string;
+    deliveryMode: 'send_animated_box' | 'instant_roll_to_accounts';
+    tiers: GachaTierRange[];
+    trialDurationMinutes?: number;
+  }) => {
+    success: boolean;
+    message: string;
+    logs: { accountName: string; accountNumber: string; tierLabel: string; amount: number; unitLabel: string }[];
+  };
+
+  // Sistem 10 Role Dev / Own / Admin yang dapat di-setting di Panel Admin
+  devRoles: DevRoleConfig[];
+  adminUpdateDevRole: (roleId: string, patch: Partial<Omit<DevRoleConfig, 'id' | 'slotNumber'>>) => {
+    success: boolean;
+    message: string;
+  };
+  adminResetDevRoles: () => { success: boolean; message: string };
+  adminAssignAccountDevRole: (accountId: string, roleId: string | null) => {
+    success: boolean;
+    message: string;
+  };
+
+  // Konfigurasi Tanda Tangan & Stempel Surat Admin (Default Global)
+  defaultLetterSealConfig: LetterSignatureStampConfig;
+  adminUpdateDefaultLetterSealConfig: (config: LetterSignatureStampConfig) => {
+    success: boolean;
+    message: string;
+  };
 }
 
 const BankContext = createContext<BankContextType | undefined>(undefined);
@@ -991,6 +1093,10 @@ const STORAGE_KEYS = {
   BUDGET_TX_MAP: 'bank_nusantara_budget_tx_map_v1',
   BUDGET_ALERTS: 'bank_nusantara_budget_alerts_v1',
   SPIN_VAULT: 'bank_nusantara_spin_vault_v1',
+  GIFT_EVENTS: 'bank_nusantara_gift_events_v1',
+  JOB_GACHA_BONUS: 'bank_nusantara_job_gacha_v1',
+  DEV_ROLES: 'bank_nusantara_dev_roles_v1',
+  LETTER_SEAL: 'bank_nusantara_letter_seal_v1',
 };
 
 interface SpinVaultEntry {
@@ -1623,6 +1729,97 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return [];
     }
   });
+
+  const [giftEvents, setGiftEvents] = useState<AdminGiftEventPackage[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.GIFT_EVENTS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch { /* empty */ }
+    return DEFAULT_ADMIN_GIFT_EVENTS;
+  });
+  const [activeGiftModal, setActiveGiftModal] = useState<{ eventId: string; isReplay: boolean } | null>(null);
+  const [giftDateTestOverride, setGiftDateTestOverride] = useState<{ month: number; day: number } | null>(null);
+  const [jobGachaBonusConfig, setJobGachaBonusConfig] = useState<JobGachaBonusConfig>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.JOB_GACHA_BONUS);
+      if (saved) return JSON.parse(saved);
+    } catch { /* empty */ }
+    return DEFAULT_JOB_GACHA_BONUS_CONFIG;
+  });
+
+  const [devRoles, setDevRoles] = useState<DevRoleConfig[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.DEV_ROLES);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === 10) return parsed;
+      }
+    } catch { /* empty */ }
+    return DEFAULT_DEV_ROLES_10;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.DEV_ROLES, JSON.stringify(devRoles));
+    } catch { /* empty */ }
+  }, [devRoles]);
+
+  const [defaultLetterSealConfig, setDefaultLetterSealConfig] = useState<LetterSignatureStampConfig>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.LETTER_SEAL);
+      if (saved) return JSON.parse(saved);
+    } catch { /* empty */ }
+    return {
+      signatureMode: 'template',
+      signatureDrawingDataUrl: '',
+      signatureTemplateId: 'kaligrafi_royal',
+      signatureName: 'Admin Utama Bank Nusantara',
+      signatureColor: 'amber',
+      stampTemplateId: 'royal_wax',
+      stampPrimaryName: 'BANK NUSANTARA',
+      stampSecondaryName: 'RESMI • TERVERIFIKASI',
+      stampColor: 'amber',
+    };
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.LETTER_SEAL, JSON.stringify(defaultLetterSealConfig));
+    } catch { /* empty */ }
+  }, [defaultLetterSealConfig]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.JOB_GACHA_BONUS, JSON.stringify(jobGachaBonusConfig));
+    } catch { /* empty */ }
+  }, [jobGachaBonusConfig]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.GIFT_EVENTS, JSON.stringify(giftEvents));
+    } catch { /* empty */ }
+  }, [giftEvents]);
+
+  const syncGiftEventsToServer = (eventsToSync: AdminGiftEventPackage[]) => {
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'gift_events:sync',
+            payload: { giftEvents: eventsToSync },
+          })
+        );
+      }
+    } catch { /* empty */ }
+    fetch('/api/gift-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ giftEvents: eventsToSync }),
+    }).catch(() => { /* ignore offline */ });
+  };
 
   // Sync to local storage + Spin Vault
   useEffect(() => {
@@ -2687,6 +2884,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setBugReports(data.bugReports);
         }
 
+        if (Array.isArray(data.giftEvents) && data.giftEvents.length > 0) {
+          setGiftEvents(data.giftEvents as AdminGiftEventPackage[]);
+        }
+
         if (Array.isArray(data.pushAlerts)) {
           const incomingAlerts: AppNotification[] = data.pushAlerts;
           incomingAlerts.forEach((incomingAlert) => {
@@ -2767,12 +2968,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               if (Array.isArray(msg.payload.bugReports)) {
                 setBugReports(msg.payload.bugReports);
               }
+              if (Array.isArray(msg.payload.giftEvents) && msg.payload.giftEvents.length > 0) {
+                setGiftEvents(msg.payload.giftEvents as AdminGiftEventPackage[]);
+              }
               if (Array.isArray(msg.payload.pushAlerts)) {
                 msg.payload.pushAlerts.forEach((pa: AppNotification) => seenPushIdsRef.current.add(pa.id));
               }
               if (typeof msg.payload.connectedDevices === 'number') {
                 setConnectedDevicesCount(Math.max(1, msg.payload.connectedDevices));
               }
+            } else if (msg.type === 'gift_events:updated' && Array.isArray(msg.payload?.giftEvents)) {
+              setGiftEvents(msg.payload.giftEvents as AdminGiftEventPackage[]);
             } else if (msg.type === 'presence' && msg.payload) {
               if (typeof msg.payload.connectedDevices === 'number') {
                 setConnectedDevicesCount(Math.max(1, msg.payload.connectedDevices));
@@ -4451,7 +4657,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       'info',
       {
         category: 'security',
-        targetView: 'simulasi_rekening',
+        targetView: 'dashboard',
         targetDashboardTab: 'keamanan',
         accountId: newAccount.id,
       }
@@ -4511,7 +4717,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       'success',
       {
         category: 'security',
-        targetView: 'simulasi_rekening',
+        targetView: 'dashboard',
         targetDashboardTab: 'keamanan',
         accountId,
       }
@@ -4551,7 +4757,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       'alert',
       {
         category: 'security',
-        targetView: 'simulasi_rekening',
+        targetView: 'dashboard',
         targetDashboardTab: 'keamanan',
         accountId,
       }
@@ -7359,13 +7565,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     salary: number,
     targetClicks: number,
     requiredLevel: number,
-    jobTitle: string
+    jobTitle: string,
+    coinReward = 0
   ): {
     success: boolean;
     completed: boolean;
     currentClicks: number;
     targetClicks: number;
     paidAmount?: number;
+    coinsEarned?: number;
+    gachaBonusResult?: {
+      tierLabel: string;
+      probabilityPercent: number;
+      amount: number;
+      rewardType: JobGachaBonusConfig['rewardType'];
+    };
     message: string;
   } => {
     if (!currentAccount) {
@@ -7397,9 +7611,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (nextClicks >= targetClicks) {
       const finalSalary = Math.round(salary * mult);
+      const baseCoins = coinReward > 0 ? coinReward : Math.max(2, Math.round(salary / 50_000));
+      const finalCoins = Math.max(1, Math.round(baseCoins * mult));
+
+      let extraGachaCash = 0;
+      let extraGachaCoins = 0;
+      let extraGachaVouchers = 0;
+      let extraGachaPoints = 0;
+      let gachaBonusResult:
+        | {
+            tierLabel: string;
+            probabilityPercent: number;
+            amount: number;
+            rewardType: JobGachaBonusConfig['rewardType'];
+          }
+        | undefined;
+
+      if (jobGachaBonusConfig.enabled && jobGachaBonusConfig.tiers.length > 0) {
+        const gStep = jobGachaBonusConfig.rewardType === 'cash_balance' ? 5000 : 1;
+        const roll = rollGachaOutcome(jobGachaBonusConfig.tiers, gStep);
+        gachaBonusResult = {
+          tierLabel: roll.tierLabel,
+          probabilityPercent: roll.probabilityPercent,
+          amount: roll.rolledAmount,
+          rewardType: jobGachaBonusConfig.rewardType,
+        };
+        if (jobGachaBonusConfig.rewardType === 'cash_balance') extraGachaCash = roll.rolledAmount;
+        if (jobGachaBonusConfig.rewardType === 'spin_coins') extraGachaCoins = roll.rolledAmount;
+        if (jobGachaBonusConfig.rewardType === 'level_voucher') extraGachaVouchers = roll.rolledAmount;
+        if (jobGachaBonusConfig.rewardType === 'reward_points') extraGachaPoints = roll.rolledAmount;
+      }
+
+      const totalCashCredited = finalSalary + extraGachaCash;
+      const totalCoinsCredited = finalCoins + extraGachaCoins;
       const isUnlim =
         currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
-      const newBalance = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance + finalSalary;
+      const newBalance = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance + totalCashCredited;
 
       setAccounts((prev) =>
         prev.map((a) => {
@@ -7408,25 +7655,45 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return {
             ...a,
             balance: newBalance,
+            spinCoins: (a.spinCoins || 0) + totalCoinsCredited,
+            levelVouchers: (a.levelVouchers || 0) + extraGachaVouchers,
             jobClickProgress: nextMap,
             totalJobsCompleted: (a.totalJobsCompleted || 0) + 1,
-            totalJobEarnings: (a.totalJobEarnings || 0) + finalSalary,
-            rewardPoints: (a.rewardPoints || 0) + Math.max(10, Math.round(finalSalary / 10_000)),
+            totalJobEarnings: (a.totalJobEarnings || 0) + totalCashCredited,
+            rewardPoints:
+              (a.rewardPoints || 0) + Math.max(10, Math.round(finalSalary / 10_000)) + extraGachaPoints,
           };
         })
       );
+
+      const gachaDesc = gachaBonusResult
+        ? ` + Gacha Bonus [${gachaBonusResult.tierLabel} • ${gachaBonusResult.probabilityPercent}%]: +${
+            gachaBonusResult.rewardType === 'cash_balance'
+              ? formatRupiah(gachaBonusResult.amount)
+              : `${gachaBonusResult.amount.toLocaleString('id-ID')} ${
+                  gachaBonusResult.rewardType === 'spin_coins'
+                    ? 'Coin'
+                    : gachaBonusResult.rewardType === 'level_voucher'
+                    ? 'Voucher Level'
+                    : 'Poin'
+                }`
+          }`
+        : '';
 
       const salaryTx: Transaction = {
         id: `tx-job-${Date.now()}-${Math.floor(Math.random() * 999)}`,
         accountId: currentAccount.id,
         type: 'setor',
-        title: `💼 Gaji Pekerjaan Cair: ${jobTitle} (${targetClicks}/${targetClicks} Klik)`,
-        amount: finalSalary,
-        balanceAfter: newBalance,
-        date: new Date().toISOString(),
+        title: `💼 Gaji & Coin Cair: ${jobTitle} (${targetClicks}/${targetClicks} Klik)`,
+        amount: totalCashCredited,
+        coinAmount: totalCoinsCredited,
+        recipientAccount: currentAccount.accountNumber,
+        recipientName: currentAccount.fullName,
+        description: `Gaji ${formatRupiah(finalSalary)} + ${finalCoins.toLocaleString('id-ID')} Coin${gachaDesc}`,
         referenceNo: `JOB-${Date.now().toString().slice(-6)}`,
-        status: 'berhasil',
-        note: `Gaji langsung masuk rekening setelah menyelesaikan target ${targetClicks} klik.`,
+        timestamp: new Date().toISOString(),
+        status: 'success',
+        category: 'setor_tunai',
       };
       setTransactions((prev) => [salaryTx, ...prev]);
 
@@ -7436,10 +7703,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         completed: true,
         currentClicks: 0,
         targetClicks,
-        paidAmount: finalSalary,
-        message: `🎉 TARGET ${targetClicks} KLIK TERCAPAI! Anda langsung digaji ${formatRupiah(
+        paidAmount: totalCashCredited,
+        coinsEarned: totalCoinsCredited,
+        gachaBonusResult,
+        message: `🎉 TARGET ${targetClicks.toLocaleString('id-ID')} KLIK TERCAPAI! Anda langsung digaji ${formatRupiah(
           finalSalary
-        )} dari pekerjaan "${jobTitle}"! Saldo langsung bertambah.`,
+        )} + ${finalCoins.toLocaleString('id-ID')} Coin${gachaDesc}!`,
       };
     } else {
       setAccounts((prev) =>
@@ -10599,6 +10868,1460 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
+  // ============================================================================
+  // SISTEM HADIAH & SURAT EVENT ADMIN (KUNCI TANGGAL KETAT + 30 HADIAH & TRIAL)
+  // ============================================================================
+  const isGiftEventOpenableNow = (ev: AdminGiftEventPackage, accountId?: string): boolean => {
+    if (!ev.isActive) return false;
+    if (accountId && (ev.claimedByAccountIds || []).includes(accountId)) {
+      return true;
+    }
+    if (ev.strictDateLock === false) {
+      return true;
+    }
+    if (ev.unlockedByManualSend) {
+      return true;
+    }
+    const now = new Date();
+    const activeMonth = giftDateTestOverride ? giftDateTestOverride.month : now.getMonth() + 1;
+    const activeDay = giftDateTestOverride ? giftDateTestOverride.day : now.getDate();
+    return ev.scheduleMonth === activeMonth && ev.scheduleDay === activeDay;
+  };
+
+  // Auto-Expiration Watcher untuk Hadiah Trial (Centang Biru Trial, VIP Shield Trial, Kartu Tier Trial, Boost Trial)
+  useEffect(() => {
+    const sweepExpiredTrials = () => {
+      const nowMs = Date.now();
+      let anyExpired = false;
+      const currentExpiredLabels: string[] = [];
+
+      setAccounts((prev) => {
+        const hasAnyToExpire = prev.some((acc) =>
+          (acc.activeTrials || []).some((t) => new Date(t.expiresAt).getTime() <= nowMs)
+        );
+        if (!hasAnyToExpire) return prev;
+        anyExpired = true;
+
+        return prev.map((acc) => {
+          const trials = acc.activeTrials || [];
+          const expired = trials.filter((t) => new Date(t.expiresAt).getTime() <= nowMs);
+          if (expired.length === 0) return acc;
+
+          const remaining = trials.filter((t) => new Date(t.expiresAt).getTime() > nowMs);
+          let nextVerified = acc.isVerified;
+          let nextVerifiedLabel = acc.verifiedLabel;
+          let nextVipShield = acc.vipShieldActive;
+          let nextCardTier = acc.cardTier;
+          let nextClickPower = acc.clickPower || 1;
+          let nextSalaryMult = acc.salaryMultiplier || 1;
+          let nextDevRoleId = acc.devRoleId;
+
+          for (const exp of expired) {
+            if (acc.id === currentAccountId) {
+              currentExpiredLabels.push(exp.label);
+            }
+            if (exp.rewardType === 'trial_blue_checkmark' || exp.rewardType === 'sultan_starter_pack' || exp.rewardType === 'trial_diamond_combo') {
+              const stillHasTrialBlue = remaining.some(
+                (r) => r.rewardType === 'trial_blue_checkmark' || r.rewardType === 'sultan_starter_pack' || r.rewardType === 'trial_diamond_combo'
+              );
+              if (!stillHasTrialBlue && !exp.revertSnapshot.previousVerified) {
+                nextVerified = false;
+                if (nextVerifiedLabel?.includes('Trial')) {
+                  nextVerifiedLabel = undefined;
+                }
+              } else if (!stillHasTrialBlue && exp.revertSnapshot.previousVerified) {
+                nextVerified = true;
+                nextVerifiedLabel = exp.revertSnapshot.previousVerifiedLabel;
+              }
+            }
+
+            if (exp.rewardType === 'trial_vip_shield' || exp.rewardType === 'trial_diamond_combo') {
+              const stillHasShield = remaining.some(
+                (r) => r.rewardType === 'trial_vip_shield' || r.rewardType === 'trial_diamond_combo'
+              );
+              if (!stillHasShield) {
+                nextVipShield = Boolean(exp.revertSnapshot.previousVipShield);
+              }
+            }
+
+            if (
+              exp.rewardType === 'trial_gold_card' ||
+              exp.rewardType === 'trial_platinum_card' ||
+              exp.rewardType === 'sultan_starter_pack' ||
+              exp.rewardType === 'trial_diamond_combo'
+            ) {
+              const stillPlat = remaining.some(
+                (r) => r.rewardType === 'trial_platinum_card' || r.rewardType === 'sultan_starter_pack' || r.rewardType === 'trial_diamond_combo'
+              );
+              const stillGold = remaining.some((r) => r.rewardType === 'trial_gold_card');
+              if (acc.cardTier !== 'admin') {
+                if (stillPlat) {
+                  nextCardTier = 'platinum';
+                } else if (stillGold) {
+                  nextCardTier = 'gold';
+                } else if (exp.revertSnapshot.previousCardTier) {
+                  nextCardTier = exp.revertSnapshot.previousCardTier;
+                }
+              }
+            }
+
+            if (exp.rewardType === 'trial_career_boost' || exp.rewardType === 'trial_all_assets_boost') {
+              nextClickPower = Math.max(1, nextClickPower - (exp.revertSnapshot.deltaClickPower || 0));
+              nextSalaryMult = Math.max(1, nextSalaryMult - (exp.revertSnapshot.deltaSalaryMultiplier || 0));
+            }
+
+            if (exp.rewardType === 'role_grant_trial' || exp.rewardType === 'role_gacha_random_trial') {
+              const stillHasRoleTrial = remaining.some(
+                (r) => r.rewardType === 'role_grant_trial' || r.rewardType === 'role_gacha_random_trial'
+              );
+              if (!stillHasRoleTrial) {
+                nextDevRoleId = exp.revertSnapshot.previousDevRoleId ?? null;
+              }
+            }
+          }
+
+          return {
+            ...acc,
+            isVerified: nextVerified,
+            verifiedLabel: nextVerifiedLabel,
+            vipShieldActive: nextVipShield,
+            cardTier: nextCardTier,
+            clickPower: nextClickPower,
+            salaryMultiplier: nextSalaryMult,
+            devRoleId: nextDevRoleId,
+            activeTrials: remaining,
+          };
+        });
+      });
+
+      if (anyExpired && currentExpiredLabels.length > 0 && currentAccountId) {
+        addNotification(
+          '⏳ Masa Trial Hadiah Berakhir',
+          `Durasi ${currentExpiredLabels.join(', ')} telah habis dan status kartu dikembalikan seperti semula.`,
+          'info',
+          { category: 'promo', targetView: 'dashboard', targetDashboardTab: 'ringkasan', accountId: currentAccountId }
+        );
+      }
+    };
+
+    sweepExpiredTrials();
+    const timer = setInterval(sweepExpiredTrials, 10_000);
+    return () => clearInterval(timer);
+  }, [currentAccountId, accounts.length]);
+
+  useEffect(() => {
+    if (!currentAccount || !googleUser?.hasCompletedOnboarding || activeGiftModal) return;
+
+    const now = new Date();
+    const activeMonth = giftDateTestOverride ? giftDateTestOverride.month : now.getMonth() + 1;
+    const activeDay = giftDateTestOverride ? giftDateTestOverride.day : now.getDate();
+
+    const matchingPendingEvent = giftEvents.find((ev) => {
+      if (!ev.isActive) return false;
+      if (ev.targetAccountId && ev.targetAccountId !== '__ALL__' && ev.targetAccountId !== currentAccount.id) {
+        return false;
+      }
+      if ((ev.viewedByAccountIds || []).includes(currentAccount.id)) return false;
+      if (!isGiftEventOpenableNow(ev, currentAccount.id)) return false;
+
+      const isDateMatch =
+        ev.autoPopupEnabled &&
+        (ev.triggerMode === 'scheduled_date' || ev.triggerMode === 'both') &&
+        ev.scheduleMonth === activeMonth &&
+        ev.scheduleDay === activeDay;
+
+      const isManualTriggered =
+        (ev.triggerMode === 'manual_instant' || ev.triggerMode === 'both') &&
+        Boolean(ev.lastTriggeredAt);
+
+      return isDateMatch || isManualTriggered;
+    });
+
+    if (matchingPendingEvent) {
+      setActiveGiftModal({ eventId: matchingPendingEvent.id, isReplay: false });
+    }
+  }, [currentAccount, googleUser?.hasCompletedOnboarding, giftEvents, giftDateTestOverride, activeGiftModal]);
+
+  const openGiftEventModal = (eventId: string, isReplay = true) => {
+    setActiveGiftModal({ eventId, isReplay });
+  };
+
+  const closeGiftEventModal = () => {
+    if (activeGiftModal && currentAccount) {
+      const targetId = activeGiftModal.eventId;
+      const targetEv = giftEvents.find((ev) => ev.id === targetId);
+      const canMarkViewed = targetEv ? isGiftEventOpenableNow(targetEv, currentAccount.id) : false;
+      if (canMarkViewed) {
+        const updated = giftEvents.map((ev) => {
+          if (ev.id !== targetId) return ev;
+          const viewed = ev.viewedByAccountIds || [];
+          if (viewed.includes(currentAccount.id)) return ev;
+          return { ...ev, viewedByAccountIds: [...viewed, currentAccount.id] };
+        });
+        setGiftEvents(updated);
+        syncGiftEventsToServer(updated);
+      }
+    }
+    setActiveGiftModal(null);
+  };
+
+  const claimAndOpenGiftEvent = (
+    eventId: string
+  ): {
+    success: boolean;
+    alreadyClaimed: boolean;
+    lockedByDate?: boolean;
+    summaryLines: string[];
+    rolledResults?: GachaClaimedItemResult[];
+    message: string;
+  } => {
+    if (!currentAccount) {
+      return {
+        success: false,
+        alreadyClaimed: false,
+        summaryLines: [],
+        message: 'Silakan masuk ke kartu terlebih dahulu.',
+      };
+    }
+
+    const ev = giftEvents.find((item) => item.id === eventId);
+    if (!ev) {
+      return {
+        success: false,
+        alreadyClaimed: false,
+        summaryLines: [],
+        message: 'Paket hadiah & surat tidak ditemukan.',
+      };
+    }
+
+    const alreadyClaimed = (ev.claimedByAccountIds || []).includes(currentAccount.id);
+    if (!alreadyClaimed && !isGiftEventOpenableNow(ev, currentAccount.id)) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        alreadyClaimed: false,
+        lockedByDate: true,
+        summaryLines: [],
+        message: `Kotak hadiah ini terkunci! Hanya dapat dibuka pada tanggal ${ev.scheduleLabel}.`,
+      };
+    }
+
+    if (alreadyClaimed) {
+      const updated = giftEvents.map((item) =>
+        item.id === eventId && !(item.viewedByAccountIds || []).includes(currentAccount.id)
+          ? { ...item, viewedByAccountIds: [...(item.viewedByAccountIds || []), currentAccount.id] }
+          : item
+      );
+      setGiftEvents(updated);
+      const savedRolls = ev.gachaResultsByAccount?.[currentAccount.id] || [];
+      return {
+        success: true,
+        alreadyClaimed: true,
+        rolledResults: savedRolls,
+        summaryLines: ev.rewards.map((r) => `${r.emoji} ${r.label}: ${r.amount.toLocaleString('id-ID')} ${r.unitLabel}`),
+        message: 'Anda sudah pernah mengklaim hadiah ini. Menampilkan kembali surat & daftar hadiah!',
+      };
+    }
+
+    let addCash = 0;
+    let addCoins = 0;
+    let addVouchers = 0;
+    let addJobLevels = 0;
+    let addGoldGrams = 0;
+    let addPoints = 0;
+    let addPulsa = 0;
+    let addPlnKwh = 0;
+    let addClickPower = 0;
+    let addSalaryMult = 0;
+    let setCashbackPct: number | null = null;
+    let enableShield = false;
+    let enableBlueCheck = false;
+    let tierUpgradeSteps = 0;
+    let depositoAmount = 0;
+    let pocketAmount = 0;
+    const addBusinesses: Record<string, number> = {};
+    const addTrading: Record<string, number> = {};
+    let shouldForgiveLoans = false;
+    let forceCardTier: CardTier | null = null;
+    let grantedDevRoleId: string | null | undefined = undefined;
+    const createdTrials: ActiveAccountTrial[] = [];
+    const rolledResults: GachaClaimedItemResult[] = [];
+    const summaryLines: string[] = [];
+
+    const existingActiveTrials = (currentAccount.activeTrials || []).filter(
+      (t) => new Date(t.expiresAt).getTime() > Date.now()
+    );
+    const nonTrialCardTier: CardTier =
+      existingActiveTrials.find((t) => t.revertSnapshot.previousCardTier)?.revertSnapshot.previousCardTier ||
+      currentAccount.cardTier;
+    const nonTrialVerified: boolean =
+      existingActiveTrials.some((t) => t.rewardType === 'trial_blue_checkmark' || t.rewardType === 'sultan_starter_pack' || t.rewardType === 'trial_diamond_combo')
+        ? Boolean(existingActiveTrials.find((t) => t.revertSnapshot.previousVerified !== undefined)?.revertSnapshot.previousVerified)
+        : Boolean(currentAccount.isVerified);
+    const nonTrialVerifiedLabel: string | undefined =
+      existingActiveTrials.find((t) => t.revertSnapshot.previousVerifiedLabel !== undefined)?.revertSnapshot
+        .previousVerifiedLabel || currentAccount.verifiedLabel;
+    const nonTrialVipShield: boolean =
+      existingActiveTrials.some((t) => t.rewardType === 'trial_vip_shield' || t.rewardType === 'trial_diamond_combo')
+        ? Boolean(existingActiveTrials.find((t) => t.revertSnapshot.previousVipShield !== undefined)?.revertSnapshot.previousVipShield)
+        : Boolean(currentAccount.vipShieldActive);
+    const nonTrialDevRoleId: string | null | undefined =
+      existingActiveTrials.some((t) => t.rewardType === 'role_grant_trial' || t.rewardType === 'role_gacha_random_trial')
+        ? existingActiveTrials.find((t) => t.revertSnapshot.previousDevRoleId !== undefined)?.revertSnapshot.previousDevRoleId ?? null
+        : currentAccount.devRoleId ?? null;
+
+    for (const rew of ev.rewards) {
+      const catMeta = GIFT_REWARD_CATALOG.find((c) => c.type === rew.type);
+      const step = catMeta?.step || 1;
+      let qty = Math.max(1, Number(rew.amount) || 1);
+      if (rew.rewardMode === 'gacha' && rew.gachaTiers && rew.gachaTiers.length > 0) {
+        const rolled = rollGachaOutcome(rew.gachaTiers, step);
+        qty = rolled.rolledAmount;
+        rolledResults.push({
+          rewardId: rew.id,
+          type: rew.type,
+          label: rew.label,
+          emoji: rew.emoji,
+          unitLabel: rew.unitLabel,
+          tierLabel: rolled.tierLabel,
+          probabilityPercent: rolled.probabilityPercent,
+          rolledAmount: rolled.rolledAmount,
+          minAmount: rolled.minAmount,
+          maxAmount: rolled.maxAmount,
+        });
+      }
+      const trialMins = catMeta?.isTrial
+        ? Math.max(1, Number(rew.trialDurationMinutes) || (rew.rewardMode === 'gacha' ? qty : 1440))
+        : 0;
+      const trialSuffix = trialMins > 0 ? ` [Trial ${formatTrialDurationLabel(trialMins)}]` : '';
+      const gachaTag = rolledResults.find((gr) => gr.rewardId === rew.id)
+        ? ` [🎲 Gacha: ${rolledResults.find((gr) => gr.rewardId === rew.id)?.tierLabel}]`
+        : '';
+      summaryLines.push(`${rew.emoji} ${rew.label} (${qty.toLocaleString('id-ID')} ${rew.unitLabel})${trialSuffix}${gachaTag}`);
+
+      const nowDate = new Date();
+      const expiresIso = new Date(nowDate.getTime() + (trialMins || 1440) * 60_000).toISOString();
+
+      switch (rew.type) {
+        case 'cash_balance':
+          addCash += qty;
+          break;
+        case 'spin_coins':
+          addCoins += qty;
+          break;
+        case 'level_voucher':
+          addVouchers += qty;
+          break;
+        case 'job_level_up':
+          addJobLevels += qty;
+          break;
+        case 'gold_grams':
+          addGoldGrams += qty;
+          break;
+        case 'reward_points':
+          addPoints += qty;
+          break;
+        case 'pulsa_balance':
+          addPulsa += qty;
+          break;
+        case 'pln_kwh':
+          addPlnKwh += qty;
+          break;
+        case 'click_power_boost':
+          addClickPower += qty;
+          break;
+        case 'salary_multiplier_boost':
+          addSalaryMult += qty;
+          break;
+        case 'cashback_percent':
+          setCashbackPct = Math.max(setCashbackPct || 0, Math.min(100, qty));
+          break;
+        case 'vip_shield':
+          enableShield = true;
+          break;
+        case 'blue_checkmark':
+          enableBlueCheck = true;
+          break;
+        case 'upgrade_card_tier':
+          tierUpgradeSteps += qty;
+          break;
+        case 'special_deposito':
+          depositoAmount += qty;
+          break;
+        case 'dream_pocket_fund':
+          pocketAmount += qty;
+          break;
+        case 'mining_rig_rtx':
+          addBusinesses['mining_rtx_rig'] = (addBusinesses['mining_rtx_rig'] || 0) + qty;
+          break;
+        case 'mining_ai_cluster':
+          addBusinesses['mining_ai_datacenter'] = (addBusinesses['mining_ai_datacenter'] || 0) + qty;
+          break;
+        case 'supercar_porsche':
+          addBusinesses['auction_porsche_gt3rs'] = (addBusinesses['auction_porsche_gt3rs'] || 0) + qty;
+          break;
+        case 'supercar_lambo':
+          addBusinesses['auction_lambo_revuelto'] = (addBusinesses['auction_lambo_revuelto'] || 0) + qty;
+          break;
+        case 'trading_gold_kg':
+          addTrading['gold_antam_kg'] = (addTrading['gold_antam_kg'] || 0) + qty;
+          break;
+        case 'trading_btc_vip':
+          addTrading['crypto_btc_vip'] = (addTrading['crypto_btc_vip'] || 0) + qty;
+          break;
+        case 'forgive_loans':
+          shouldForgiveLoans = true;
+          break;
+        case 'mystery_thr_combo':
+          addCash += 1_500_000 * qty;
+          addCoins += 100 * qty;
+          addPoints += 2_000 * qty;
+          break;
+        case 'trial_blue_checkmark':
+          enableBlueCheck = true;
+          createdTrials.push({
+            id: `trial-blue-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_blue_checkmark',
+            label: `Centang Biru Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '☑️',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+            },
+          });
+          break;
+        case 'trial_vip_shield':
+          enableShield = true;
+          createdTrials.push({
+            id: `trial-vip-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_vip_shield',
+            label: `VIP Shield Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🛡️',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              previousVipShield: nonTrialVipShield,
+            },
+          });
+          break;
+        case 'trial_gold_card':
+          if (currentAccount.cardTier !== 'admin') {
+            forceCardTier = forceCardTier === 'platinum' ? 'platinum' : 'gold';
+          }
+          createdTrials.push({
+            id: `trial-gold-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_gold_card',
+            label: `Kartu Emas Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🌟',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              previousCardTier: nonTrialCardTier,
+            },
+          });
+          break;
+        case 'trial_platinum_card':
+          if (currentAccount.cardTier !== 'admin') {
+            forceCardTier = 'platinum';
+          }
+          createdTrials.push({
+            id: `trial-plat-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_platinum_card',
+            label: `Kartu Platinum Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '💎',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              previousCardTier: nonTrialCardTier,
+            },
+          });
+          break;
+        case 'trial_career_boost':
+          addClickPower += 5;
+          addSalaryMult += qty;
+          createdTrials.push({
+            id: `trial-boost-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_career_boost',
+            label: `Boost Gaji +${qty}x & Klik +5 Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '⚡',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              deltaClickPower: 5,
+              deltaSalaryMultiplier: qty,
+            },
+          });
+          break;
+        case 'sultan_starter_pack':
+          addCash += 5_000_000 * qty;
+          addCoins += 300 * qty;
+          enableBlueCheck = true;
+          if (currentAccount.cardTier !== 'admin') {
+            forceCardTier = 'platinum';
+          }
+          createdTrials.push({
+            id: `trial-sultan-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'sultan_starter_pack',
+            label: `Paket Kartu Sultan Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '👑',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+              previousCardTier: nonTrialCardTier,
+            },
+          });
+          break;
+        // === 4 HADIAH ROLE DEV / OWN / ADMIN (PERMANEN & TRIAL) ===
+        case 'role_grant_permanent': {
+          const roleObj = devRoles.find((r) => r.id === rew.targetDevRoleId) || devRoles[0];
+          if (roleObj) {
+            grantedDevRoleId = roleObj.id;
+          }
+          break;
+        }
+        case 'role_grant_trial': {
+          const roleObj = devRoles.find((r) => r.id === rew.targetDevRoleId) || devRoles[0];
+          if (roleObj) {
+            grantedDevRoleId = roleObj.id;
+            createdTrials.push({
+              id: `trial-role-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+              rewardType: 'role_grant_trial',
+              label: `Role ${roleObj.name} Trial (${formatTrialDurationLabel(trialMins)})`,
+              emoji: '⏳',
+              startedAt: nowDate.toISOString(),
+              expiresAt: expiresIso,
+              durationMinutes: trialMins,
+              revertSnapshot: { previousDevRoleId: nonTrialDevRoleId },
+            });
+          }
+          break;
+        }
+        case 'role_gacha_random_permanent': {
+          const randRole = devRoles[Math.floor(Math.random() * devRoles.length)] || devRoles[0];
+          if (randRole) {
+            grantedDevRoleId = randRole.id;
+          }
+          break;
+        }
+        case 'role_gacha_random_trial': {
+          const randRole = devRoles[Math.floor(Math.random() * devRoles.length)] || devRoles[0];
+          if (randRole) {
+            grantedDevRoleId = randRole.id;
+            createdTrials.push({
+              id: `trial-randrole-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+              rewardType: 'role_gacha_random_trial',
+              label: `Gacha Role ${randRole.name} Trial (${formatTrialDurationLabel(trialMins)})`,
+              emoji: '🎟️',
+              startedAt: nowDate.toISOString(),
+              expiresAt: expiresIso,
+              durationMinutes: trialMins,
+              revertSnapshot: { previousDevRoleId: nonTrialDevRoleId },
+            });
+          }
+          break;
+        }
+        // === 24+ HADIAH TAMBAHAN KATALOG 58 MACAM HADIAH ===
+        case 'salary_jackpot_drop':
+        case 'fee_waiver_pass':
+        case 'sultan_empire_dividend':
+          addCash += qty;
+          break;
+        case 'coin_jackpot_rain':
+          addCoins += qty;
+          break;
+        case 'cashback_tier_max':
+          setCashbackPct = Math.max(setCashbackPct || 0, Math.min(100, qty));
+          break;
+        case 'double_wallet_bonus':
+          addCash += 3_000_000 * qty;
+          addCoins += 200 * qty;
+          break;
+        case 'loyalty_point_chest':
+          addPoints += qty;
+          break;
+        case 'career_turbo_pack':
+          addJobLevels += 2 * qty;
+          addVouchers += 3 * qty;
+          addClickPower += 2 * qty;
+          break;
+        case 'job_progress_boost':
+          addClickPower += qty;
+          break;
+        case 'suit_victory_charm':
+        case 'voucher_bundle_pro':
+          addVouchers += qty;
+          break;
+        case 'instant_executive_unlock':
+          addJobLevels += qty;
+          break;
+        case 'gold_bar_royal_10g':
+        case 'gold_jewel_bonus':
+          addGoldGrams += qty;
+          break;
+        case 'high_yield_deposito_vip':
+          depositoAmount += qty;
+          break;
+        case 'emergency_vault_fund':
+          pocketAmount += qty;
+          break;
+        case 'pln_super_pack':
+          addPlnKwh += qty;
+          break;
+        case 'mining_quantum_datacenter':
+          addBusinesses['mining_ai_datacenter'] = (addBusinesses['mining_ai_datacenter'] || 0) + qty;
+          break;
+        case 'supercar_bugatti_chiron':
+        case 'supercar_ferrari_sf90':
+          addBusinesses['auction_lambo_revuelto'] = (addBusinesses['auction_lambo_revuelto'] || 0) + qty;
+          break;
+        case 'trading_sp500_vip':
+          addTrading['gold_antam_kg'] = (addTrading['gold_antam_kg'] || 0) + qty;
+          break;
+        case 'upgrade_card_platinum_perm':
+          if (currentAccount.cardTier !== 'admin') {
+            forceCardTier = 'platinum';
+          }
+          break;
+        case 'trial_diamond_combo':
+          addCash += 2_000_000 * qty;
+          enableBlueCheck = true;
+          enableShield = true;
+          if (currentAccount.cardTier !== 'admin') forceCardTier = 'platinum';
+          createdTrials.push({
+            id: `trial-diamond-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_diamond_combo',
+            label: `Paket Diamond VIP Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '💠',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+              previousVipShield: nonTrialVipShield,
+              previousCardTier: nonTrialCardTier,
+            },
+          });
+          break;
+        case 'trial_all_assets_boost':
+          addGoldGrams += 1 * qty;
+          addCoins += 50 * qty;
+          addSalaryMult += qty;
+          addClickPower += 4;
+          createdTrials.push({
+            id: `trial-allboost-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_all_assets_boost',
+            label: `Turbo Boost Kerja & Emas Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🌟',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              deltaClickPower: 4,
+              deltaSalaryMultiplier: qty,
+            },
+          });
+          break;
+      }
+    }
+
+    const tierOrder: CardTier[] = ['regular', 'gold', 'premium', 'platinum'];
+    const isUnlim = currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+
+    setAccounts((prev) =>
+      prev.map((acc) => {
+        if (acc.id !== currentAccount.id) return acc;
+        let nextTier = acc.cardTier;
+        if (tierUpgradeSteps > 0 && acc.cardTier !== 'admin') {
+          const idx = tierOrder.indexOf(acc.cardTier);
+          const nextIdx = Math.min(tierOrder.length - 1, Math.max(0, idx) + tierUpgradeSteps);
+          nextTier = tierOrder[nextIdx];
+        }
+        if (forceCardTier && acc.cardTier !== 'admin') {
+          const curIdx = tierOrder.indexOf(nextTier);
+          const forceIdx = tierOrder.indexOf(forceCardTier);
+          if (forceIdx > curIdx) {
+            nextTier = forceCardTier;
+          }
+        }
+        const nextBiz = { ...(acc.empireBusinesses || {}) };
+        Object.entries(addBusinesses).forEach(([k, v]) => {
+          nextBiz[k] = (nextBiz[k] || 0) + v;
+        });
+        const nextTrd = { ...(acc.empireTradingHoldings || {}) };
+        Object.entries(addTrading).forEach(([k, v]) => {
+          nextTrd[k] = (nextTrd[k] || 0) + v;
+        });
+        const newGoldBatches =
+          addGoldGrams > 0
+            ? [
+                ...(acc.goldBatches || []),
+                {
+                  id: `gold-gift-${Date.now()}`,
+                  purchasedAt: new Date().toISOString(),
+                  purchaseDateKey: new Date().toISOString().slice(0, 10),
+                  grams: addGoldGrams,
+                  costRupiah: 0,
+                  pricePerGramAtBuy: goldMarketConfig.currentPricePerGram,
+                  goldForm: 'batangan' as const,
+                  motif: 'royal_platinum' as const,
+                  note: `Hadiah Surat dari ${ev.senderName}`,
+                },
+              ]
+            : acc.goldBatches;
+
+        const hasBlueTrial = createdTrials.some(
+          (t) =>
+            t.rewardType === 'trial_blue_checkmark' ||
+            t.rewardType === 'sultan_starter_pack' ||
+            t.rewardType === 'trial_diamond_combo'
+        );
+
+        return {
+          ...acc,
+          balance: isUnlim ? UNLIMITED_BALANCE : acc.balance + addCash,
+          spinCoins: (acc.spinCoins || 0) + addCoins,
+          levelVouchers: (acc.levelVouchers || 0) + addVouchers,
+          jobLevel: (acc.jobLevel || 1) + addJobLevels,
+          goldGrams: (acc.goldGrams || 0) + addGoldGrams,
+          goldBatches: newGoldBatches,
+          rewardPoints: (acc.rewardPoints || 0) + addPoints,
+          pulsaBalance: (acc.pulsaBalance || 0) + addPulsa,
+          plnKwhBalance: (acc.plnKwhBalance || 0) + addPlnKwh,
+          clickPower: (acc.clickPower || 1) + addClickPower,
+          salaryMultiplier: (acc.salaryMultiplier || 1) + addSalaryMult,
+          cashbackPercent: setCashbackPct !== null ? Math.max(acc.cashbackPercent || 0, setCashbackPct) : acc.cashbackPercent,
+          vipShieldActive: enableShield ? true : acc.vipShieldActive,
+          isVerified: enableBlueCheck ? true : acc.isVerified,
+          verifiedAt: enableBlueCheck ? acc.verifiedAt || new Date().toISOString() : acc.verifiedAt,
+          verifiedLabel: enableBlueCheck
+            ? acc.verifiedLabel || (hasBlueTrial ? 'Centang Biru Trial' : 'Nasabah Prioritas Terverifikasi')
+            : acc.verifiedLabel,
+          cardTier: nextTier,
+          devRoleId: grantedDevRoleId !== undefined ? grantedDevRoleId : acc.devRoleId,
+          empireBusinesses: nextBiz,
+          empireTradingHoldings: nextTrd,
+          activeTrials: [...existingActiveTrials, ...createdTrials],
+        };
+      })
+    );
+
+    if (depositoAmount > 0) {
+      const dep: DepositoRecord = {
+        id: `depo-gift-${Date.now()}`,
+        accountId: currentAccount.id,
+        principalAmount: depositoAmount,
+        tenorMonths: 6,
+        interestRateAnnual: 12,
+        maturityDate: new Date(Date.now() + 180 * 86400 * 1000).toISOString(),
+        projectedReturn: Math.round(depositoAmount * 1.06),
+        certificateNumber: `DEP-GIFT-${Date.now().toString().slice(-6)}`,
+        status: 'active',
+        openedAt: new Date().toISOString(),
+      };
+      setDepositos((prev) => [dep, ...prev]);
+    }
+
+    if (pocketAmount > 0) {
+      const pkt: PocketSaving = {
+        id: `pkt-gift-${Date.now()}`,
+        accountId: currentAccount.id,
+        title: `Celengan Hadiah: ${ev.title.slice(0, 28)}`,
+        targetAmount: pocketAmount,
+        currentAmount: pocketAmount,
+        color: 'amber',
+        icon: '🎁',
+      };
+      setPockets((prev) => [pkt, ...prev]);
+    }
+
+    if (shouldForgiveLoans) {
+      setLoans((prev) =>
+        prev.map((ln) =>
+          ln.accountId === currentAccount.id && ln.status === 'approved'
+            ? { ...ln, status: 'approved', remainingInstallments: 0, adminNotes: `Dilunasi oleh Hadiah ${ev.senderName}` }
+            : ln
+        )
+      );
+    }
+
+    if (addCash > 0 || addCoins > 0) {
+      const tx: Transaction = {
+        id: `tx-gift-${Date.now()}`,
+        accountId: currentAccount.id,
+        type: 'setor',
+        title: `🎁 Hadiah & Surat Spesial: ${ev.title} (Dari ${ev.senderName})`,
+        amount: addCash,
+        coinAmount: addCoins,
+        recipientAccount: currentAccount.accountNumber,
+        recipientName: currentAccount.fullName,
+        description: summaryLines.join(' • '),
+        status: 'success',
+        referenceNo: `GIFT-${Date.now().toString().slice(-6)}`,
+        timestamp: new Date().toISOString(),
+        category: 'redeem',
+      };
+      setTransactions((prev) => [tx, ...prev]);
+    }
+
+    const updatedEvents = giftEvents.map((item) => {
+      if (item.id !== eventId) return item;
+      const nextClaimed = Array.from(new Set([...(item.claimedByAccountIds || []), currentAccount.id]));
+      const nextViewed = Array.from(new Set([...(item.viewedByAccountIds || []), currentAccount.id]));
+      const nextGachaMap =
+        rolledResults.length > 0
+          ? { ...(item.gachaResultsByAccount || {}), [currentAccount.id]: rolledResults }
+          : item.gachaResultsByAccount;
+      return {
+        ...item,
+        claimedByAccountIds: nextClaimed,
+        viewedByAccountIds: nextViewed,
+        gachaResultsByAccount: nextGachaMap,
+      };
+    });
+    setGiftEvents(updatedEvents);
+    syncGiftEventsToServer(updatedEvents);
+
+    addNotification(
+      `🎁 Hadiah & Surat Dibuka: ${ev.title}`,
+      `Dari ${ev.senderName}: ${summaryLines.slice(0, 3).join(', ')}${summaryLines.length > 3 ? ` (+${summaryLines.length - 3} lainnya)` : ''}.`,
+      'success',
+      {
+        category: 'promo',
+        targetView: 'dashboard',
+        targetDashboardTab: 'ringkasan',
+        accountId: currentAccount.id,
+      }
+    );
+
+    try {
+      confetti({ particleCount: 95, spread: 80, origin: { y: 0.55 } });
+    } catch { /* empty */ }
+    playAtmSound('success');
+
+    return {
+      success: true,
+      alreadyClaimed: false,
+      summaryLines,
+      rolledResults,
+      message: `Selamat! Seluruh ${ev.rewards.length} hadiah dari ${ev.senderName} berhasil diklaim ke rekening Anda!`,
+    };
+  };
+
+  const adminCreateOrUpdateGiftEvent = (input: {
+    id?: string;
+    title: string;
+    senderName: string;
+    letterMessage: string;
+    triggerMode: 'scheduled_date' | 'manual_instant' | 'both';
+    autoPopupEnabled: boolean;
+    strictDateLock?: boolean;
+    isGachaBox?: boolean;
+    scheduleMonth: number;
+    scheduleDay: number;
+    isActive: boolean;
+    targetAccountId?: string;
+    themeColor?: 'amber' | 'emerald' | 'rose' | 'indigo';
+    rewards: AdminGiftRewardItem[];
+    customSealConfig?: LetterSignatureStampConfig | null;
+  }): { success: boolean; message: string; event: AdminGiftEventPackage } => {
+    const monthLabel = MONTHS_INDO.find((m) => m.value === input.scheduleMonth)?.label || `Bulan ${input.scheduleMonth}`;
+    const scheduleLabel = `${input.scheduleDay} ${monthLabel}`;
+    const existing = input.id ? giftEvents.find((e) => e.id === input.id) : null;
+
+    const savedEvent: AdminGiftEventPackage = {
+      id: existing ? existing.id : `gift-ev-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      title: input.title.trim() || `Hadiah & Surat ${scheduleLabel}`,
+      senderName: input.senderName.trim() || 'Admin Utama Bank Nusantara',
+      letterMessage: input.letterMessage.trim() || 'Selamat menerima hadiah spesial dari Bank Nusantara!',
+      triggerMode: input.triggerMode,
+      autoPopupEnabled: input.autoPopupEnabled,
+      strictDateLock: input.strictDateLock !== undefined ? input.strictDateLock : true,
+      unlockedByManualSend: existing?.unlockedByManualSend ?? false,
+      isGachaBox: input.isGachaBox ?? input.rewards.some((r) => r.rewardMode === 'gacha'),
+      scheduleMonth: Math.min(12, Math.max(1, input.scheduleMonth || 1)),
+      scheduleDay: Math.min(31, Math.max(1, input.scheduleDay || 29)),
+      scheduleLabel,
+      isActive: input.isActive,
+      targetAccountId: input.targetAccountId || '__ALL__',
+      themeColor: input.themeColor || 'amber',
+      rewards: input.rewards.length > 0 ? input.rewards : DEFAULT_ADMIN_GIFT_EVENTS[0].rewards,
+      claimedByAccountIds: existing ? existing.claimedByAccountIds : [],
+      viewedByAccountIds: existing ? existing.viewedByAccountIds : [],
+      gachaResultsByAccount: existing?.gachaResultsByAccount,
+      customSealConfig: input.customSealConfig !== undefined ? input.customSealConfig : existing?.customSealConfig,
+      createdAt: existing ? existing.createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastTriggeredAt: existing?.lastTriggeredAt,
+    };
+
+    const nextList = existing
+      ? giftEvents.map((e) => (e.id === existing.id ? savedEvent : e))
+      : [savedEvent, ...giftEvents];
+    setGiftEvents(nextList);
+    syncGiftEventsToServer(nextList);
+    playAtmSound('success');
+
+    return {
+      success: true,
+      event: savedEvent,
+      message: existing
+        ? `Paket Hadiah & Surat "${savedEvent.title}" (Pengirim: ${savedEvent.senderName}) berhasil diperbarui!`
+        : `Paket Hadiah & Surat baru "${savedEvent.title}" dijadwalkan untuk ${scheduleLabel}!`,
+    };
+  };
+
+  const adminDeleteGiftEvent = (eventId: string) => {
+    const nextList = giftEvents.filter((e) => e.id !== eventId);
+    setGiftEvents(nextList);
+    syncGiftEventsToServer(nextList);
+    playAtmSound('beep');
+    return { success: true, message: 'Paket Hadiah & Surat berhasil dihapus.' };
+  };
+
+  const adminToggleGiftEventActive = (eventId: string) => {
+    const nextList = giftEvents.map((e) =>
+      e.id === eventId ? { ...e, isActive: !e.isActive, updatedAt: new Date().toISOString() } : e
+    );
+    setGiftEvents(nextList);
+    syncGiftEventsToServer(nextList);
+    return { success: true, message: 'Status aktif paket Hadiah & Surat berhasil diubah.' };
+  };
+
+  const adminTriggerGiftEventNow = (eventId: string) => {
+    const target = giftEvents.find((e) => e.id === eventId);
+    if (!target) return { success: false, message: 'Paket hadiah tidak ditemukan.' };
+    const nowIso = new Date().toISOString();
+    const nextList = giftEvents.map((e) =>
+      e.id === eventId
+        ? {
+            ...e,
+            isActive: true,
+            unlockedByManualSend: true,
+            triggerMode: e.triggerMode === 'scheduled_date' ? ('both' as const) : e.triggerMode,
+            lastTriggeredAt: nowIso,
+            viewedByAccountIds: [],
+            claimedByAccountIds: [],
+            updatedAt: nowIso,
+          }
+        : e
+    );
+    setGiftEvents(nextList);
+    syncGiftEventsToServer(nextList);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `🎁 Kiriman Manual "${target.title}" dari "${target.senderName}" langsung disiarkan ke seluruh nasabah! Layar akan otomatis blur saat masuk.`,
+    };
+  };
+
+  const adminSetGiftDateTestOverride = (override: { month: number; day: number } | null) => {
+    setGiftDateTestOverride(override);
+    if (override) {
+      // Allow re-viewing scheduled events for that test date when testing in Admin
+      const nextList = giftEvents.map((e) =>
+        e.scheduleMonth === override.month && e.scheduleDay === override.day
+          ? { ...e, viewedByAccountIds: [] }
+          : e
+      );
+      setGiftEvents(nextList);
+    }
+  };
+
+  const adminUpdateJobGachaBonusConfig = (config: JobGachaBonusConfig) => {
+    setJobGachaBonusConfig(config);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: config.enabled
+        ? `✅ Gacha Bonus Lowongan Pekerjaan AKTIF (${config.tiers.length} Tier Min–Max • % Peluang)!`
+        : '⏸️ Gacha Bonus Lowongan Pekerjaan dinonaktifkan.',
+    };
+  };
+
+  const adminExecuteUniversalGachaDrop = (input: {
+    targetAccountId: string | '__ALL__';
+    rewardType: GiftRewardType;
+    title: string;
+    senderName: string;
+    letterMessage?: string;
+    deliveryMode: 'send_animated_box' | 'instant_roll_to_accounts';
+    tiers: GachaTierRange[];
+    trialDurationMinutes?: number;
+  }): {
+    success: boolean;
+    message: string;
+    logs: { accountName: string; accountNumber: string; tierLabel: string; amount: number; unitLabel: string }[];
+  } => {
+    const meta = GIFT_REWARD_CATALOG.find((c) => c.type === input.rewardType) || GIFT_REWARD_CATALOG[0];
+    if (!input.tiers || input.tiers.length === 0) {
+      return { success: false, message: 'Tambahkan minimal 1 tier rentang Min–Max.', logs: [] };
+    }
+
+    if (input.deliveryMode === 'send_animated_box') {
+      const now = new Date();
+      const nowMonth = now.getMonth() + 1;
+      const nowDay = now.getDate();
+      const monthLabel = MONTHS_INDO.find((m) => m.value === nowMonth)?.label || '';
+      const gachaPackage: AdminGiftEventPackage = {
+        id: `gacha-box-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+        title: input.title.trim() || `🎲 Kotak Gacha Spesial: ${meta.label}`,
+        senderName: input.senderName.trim() || 'Admin Gacha Nusantara',
+        letterMessage:
+          input.letterMessage?.trim() ||
+          `Anda mendapat kiriman Kotak Gacha berpeluang dari ${input.senderName || 'Admin'}! Periksa rentang Min–Max dan peluang % di bawah lalu putar Gacha untuk mengklaim hadiah Anda.`,
+        triggerMode: 'manual_instant',
+        autoPopupEnabled: true,
+        strictDateLock: false,
+        unlockedByManualSend: true,
+        isGachaBox: true,
+        scheduleMonth: nowMonth,
+        scheduleDay: nowDay,
+        scheduleLabel: `${nowDay} ${monthLabel}`,
+        isActive: true,
+        targetAccountId: input.targetAccountId || '__ALL__',
+        themeColor: 'indigo',
+        rewards: [
+          {
+            id: `gacha-rew-${Date.now()}`,
+            type: meta.type,
+            label: meta.label,
+            amount: meta.defaultAmount,
+            unitLabel: meta.unitLabel,
+            emoji: meta.emoji,
+            trialDurationMinutes: meta.isTrial ? input.trialDurationMinutes || meta.defaultTrialMinutes || 1440 : undefined,
+            rewardMode: 'gacha',
+            gachaTiers: input.tiers,
+          },
+        ],
+        claimedByAccountIds: [],
+        viewedByAccountIds: [],
+        lastTriggeredAt: now.toISOString(),
+        createdAt: now.toISOString(),
+      };
+
+      const nextEvents = [gachaPackage, ...giftEvents];
+      setGiftEvents(nextEvents);
+      syncGiftEventsToServer(nextEvents);
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `🎲 Kotak Gacha "${gachaPackage.title}" langsung dikirim ke layar nasabah! Nasabah bisa melihat info Min–Max & % peluang sebelum menekan Roll.`,
+        logs: [],
+      };
+    }
+
+    // Instant roll & credit to target account(s)
+    const targetAccs =
+      input.targetAccountId === '__ALL__'
+        ? accounts
+        : accounts.filter((a) => a.id === input.targetAccountId);
+    if (targetAccs.length === 0) {
+      return { success: false, message: 'Tidak ada rekening tujuan yang valid.', logs: [] };
+    }
+
+    const logs: { accountName: string; accountNumber: string; tierLabel: string; amount: number; unitLabel: string }[] = [];
+    const perAccountRoll = new Map<
+      string,
+      { tierLabel: string; probabilityPercent: number; amount: number }
+    >();
+    targetAccs.forEach((acc) => {
+      const r = rollGachaOutcome(input.tiers, meta.step);
+      perAccountRoll.set(acc.id, {
+        tierLabel: r.tierLabel,
+        probabilityPercent: r.probabilityPercent,
+        amount: r.rolledAmount,
+      });
+      logs.push({
+        accountName: acc.fullName,
+        accountNumber: acc.accountNumber,
+        tierLabel: r.tierLabel,
+        amount: r.rolledAmount,
+        unitLabel: meta.unitLabel,
+      });
+    });
+
+    const newTxs: Transaction[] = [];
+    const tierOrder: CardTier[] = ['regular', 'gold', 'premium', 'platinum'];
+
+    setAccounts((prev) =>
+      prev.map((acc) => {
+        const res = perAccountRoll.get(acc.id);
+        if (!res) return acc;
+        const qty = Math.max(1, res.amount);
+        const isUnlim = acc.cardTier === 'admin' || isUnlimitedNumber(acc.balance);
+        const trialMins = Math.max(1, input.trialDurationMinutes || meta.defaultTrialMinutes || 1440);
+        const nowDate = new Date();
+        const expiresIso = new Date(nowDate.getTime() + trialMins * 60_000).toISOString();
+        const activeTrials = (acc.activeTrials || []).filter(
+          (t) => new Date(t.expiresAt).getTime() > Date.now()
+        );
+
+        let next = { ...acc };
+        switch (meta.type) {
+          case 'cash_balance':
+            next.balance = isUnlim ? UNLIMITED_BALANCE : acc.balance + qty;
+            break;
+          case 'spin_coins':
+            next.spinCoins = (acc.spinCoins || 0) + qty;
+            break;
+          case 'level_voucher':
+            next.levelVouchers = (acc.levelVouchers || 0) + qty;
+            break;
+          case 'job_level_up':
+            next.jobLevel = (acc.jobLevel || 1) + qty;
+            break;
+          case 'gold_grams':
+            next.goldGrams = (acc.goldGrams || 0) + qty;
+            break;
+          case 'reward_points':
+            next.rewardPoints = (acc.rewardPoints || 0) + qty;
+            break;
+          case 'pulsa_balance':
+            next.pulsaBalance = (acc.pulsaBalance || 0) + qty;
+            break;
+          case 'pln_kwh':
+            next.plnKwhBalance = (acc.plnKwhBalance || 0) + qty;
+            break;
+          case 'click_power_boost':
+            next.clickPower = (acc.clickPower || 1) + qty;
+            break;
+          case 'salary_multiplier_boost':
+            next.salaryMultiplier = (acc.salaryMultiplier || 1) + qty;
+            break;
+          case 'cashback_percent':
+            next.cashbackPercent = Math.max(acc.cashbackPercent || 0, Math.min(100, qty));
+            break;
+          case 'vip_shield':
+            next.vipShieldActive = true;
+            break;
+          case 'blue_checkmark':
+            next.isVerified = true;
+            next.verifiedAt = acc.verifiedAt || nowDate.toISOString();
+            next.verifiedLabel = acc.verifiedLabel || 'Terverifikasi Admin';
+            break;
+          case 'upgrade_card_tier':
+            if (acc.cardTier !== 'admin') {
+              const idx = Math.min(tierOrder.length - 1, Math.max(0, tierOrder.indexOf(acc.cardTier)) + qty);
+              next.cardTier = tierOrder[idx];
+            }
+            break;
+          case 'trial_blue_checkmark':
+            next.isVerified = true;
+            next.verifiedLabel = acc.verifiedLabel || 'Centang Biru Trial';
+            next.activeTrials = [
+              ...activeTrials,
+              {
+                id: `trial-gacha-blue-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+                rewardType: 'trial_blue_checkmark',
+                label: `Centang Biru Trial (${formatTrialDurationLabel(trialMins)})`,
+                emoji: '☑️',
+                startedAt: nowDate.toISOString(),
+                expiresAt: expiresIso,
+                durationMinutes: trialMins,
+                revertSnapshot: { previousVerified: acc.isVerified, previousVerifiedLabel: acc.verifiedLabel },
+              },
+            ];
+            break;
+          case 'trial_vip_shield':
+            next.vipShieldActive = true;
+            next.activeTrials = [
+              ...activeTrials,
+              {
+                id: `trial-gacha-vip-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+                rewardType: 'trial_vip_shield',
+                label: `VIP Shield Trial (${formatTrialDurationLabel(trialMins)})`,
+                emoji: '🛡️',
+                startedAt: nowDate.toISOString(),
+                expiresAt: expiresIso,
+                durationMinutes: trialMins,
+                revertSnapshot: { previousVipShield: acc.vipShieldActive },
+              },
+            ];
+            break;
+          case 'trial_gold_card':
+          case 'trial_platinum_card':
+            if (acc.cardTier !== 'admin') {
+              next.cardTier = meta.type === 'trial_platinum_card' ? 'platinum' : 'gold';
+            }
+            next.activeTrials = [
+              ...activeTrials,
+              {
+                id: `trial-gacha-tier-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+                rewardType: meta.type,
+                label: `${meta.label} (${formatTrialDurationLabel(trialMins)})`,
+                emoji: meta.emoji,
+                startedAt: nowDate.toISOString(),
+                expiresAt: expiresIso,
+                durationMinutes: trialMins,
+                revertSnapshot: { previousCardTier: acc.cardTier },
+              },
+            ];
+            break;
+          case 'trial_career_boost':
+            next.clickPower = (acc.clickPower || 1) + 5;
+            next.salaryMultiplier = (acc.salaryMultiplier || 1) + qty;
+            next.activeTrials = [
+              ...activeTrials,
+              {
+                id: `trial-gacha-boost-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+                rewardType: 'trial_career_boost',
+                label: `Boost Karir Trial (${formatTrialDurationLabel(trialMins)})`,
+                emoji: '⚡',
+                startedAt: nowDate.toISOString(),
+                expiresAt: expiresIso,
+                durationMinutes: trialMins,
+                revertSnapshot: { deltaClickPower: 5, deltaSalaryMultiplier: qty },
+              },
+            ];
+            break;
+          case 'sultan_starter_pack':
+            next.balance = isUnlim ? UNLIMITED_BALANCE : acc.balance + 5_000_000 * qty;
+            next.spinCoins = (acc.spinCoins || 0) + 300 * qty;
+            next.isVerified = true;
+            if (acc.cardTier !== 'admin') next.cardTier = 'platinum';
+            next.activeTrials = [
+              ...activeTrials,
+              {
+                id: `trial-gacha-sultan-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+                rewardType: 'sultan_starter_pack',
+                label: `Paket Sultan Trial (${formatTrialDurationLabel(trialMins)})`,
+                emoji: '👑',
+                startedAt: nowDate.toISOString(),
+                expiresAt: expiresIso,
+                durationMinutes: trialMins,
+                revertSnapshot: {
+                  previousVerified: acc.isVerified,
+                  previousVerifiedLabel: acc.verifiedLabel,
+                  previousCardTier: acc.cardTier,
+                },
+              },
+            ];
+            break;
+          case 'mystery_thr_combo':
+            next.balance = isUnlim ? UNLIMITED_BALANCE : acc.balance + 1_500_000 * qty;
+            next.spinCoins = (acc.spinCoins || 0) + 100 * qty;
+            next.rewardPoints = (acc.rewardPoints || 0) + 2_000 * qty;
+            break;
+          case 'salary_jackpot_drop':
+          case 'fee_waiver_pass':
+          case 'sultan_empire_dividend':
+            next.balance = isUnlim ? UNLIMITED_BALANCE : acc.balance + qty;
+            break;
+          case 'coin_jackpot_rain':
+            next.spinCoins = (acc.spinCoins || 0) + qty;
+            break;
+          case 'cashback_tier_max':
+            next.cashbackPercent = Math.max(acc.cashbackPercent || 0, Math.min(100, qty));
+            break;
+          case 'double_wallet_bonus':
+            next.balance = isUnlim ? UNLIMITED_BALANCE : acc.balance + 3_000_000 * qty;
+            next.spinCoins = (acc.spinCoins || 0) + 200 * qty;
+            break;
+          case 'loyalty_point_chest':
+            next.rewardPoints = (acc.rewardPoints || 0) + qty;
+            break;
+          case 'career_turbo_pack':
+            next.jobLevel = (acc.jobLevel || 1) + 2 * qty;
+            next.levelVouchers = (acc.levelVouchers || 0) + 3 * qty;
+            next.clickPower = (acc.clickPower || 1) + 2 * qty;
+            break;
+          case 'job_progress_boost':
+            next.clickPower = (acc.clickPower || 1) + qty;
+            break;
+          case 'suit_victory_charm':
+          case 'voucher_bundle_pro':
+            next.levelVouchers = (acc.levelVouchers || 0) + qty;
+            break;
+          case 'instant_executive_unlock':
+            next.jobLevel = (acc.jobLevel || 1) + qty;
+            break;
+          case 'gold_bar_royal_10g':
+          case 'gold_jewel_bonus':
+            next.goldGrams = (acc.goldGrams || 0) + qty;
+            break;
+          case 'pln_super_pack':
+            next.plnKwhBalance = (acc.plnKwhBalance || 0) + qty;
+            break;
+          case 'upgrade_card_platinum_perm':
+            if (acc.cardTier !== 'admin') next.cardTier = 'platinum';
+            break;
+          case 'role_grant_permanent':
+          case 'role_gacha_random_permanent': {
+            const randRole = devRoles[Math.floor(Math.random() * devRoles.length)] || devRoles[0];
+            if (randRole) next.devRoleId = randRole.id;
+            break;
+          }
+          case 'role_grant_trial':
+          case 'role_gacha_random_trial': {
+            const randRole = devRoles[Math.floor(Math.random() * devRoles.length)] || devRoles[0];
+            if (randRole) {
+              next.devRoleId = randRole.id;
+              next.activeTrials = [
+                ...activeTrials,
+                {
+                  id: `trial-ugacha-role-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+                  rewardType: meta.type,
+                  label: `Role ${randRole.name} Trial (${formatTrialDurationLabel(trialMins)})`,
+                  emoji: '👑',
+                  startedAt: nowDate.toISOString(),
+                  expiresAt: expiresIso,
+                  durationMinutes: trialMins,
+                  revertSnapshot: { previousDevRoleId: acc.devRoleId ?? null },
+                },
+              ];
+            }
+            break;
+          }
+          case 'trial_diamond_combo':
+            next.balance = isUnlim ? UNLIMITED_BALANCE : acc.balance + 2_000_000 * qty;
+            next.isVerified = true;
+            next.vipShieldActive = true;
+            if (acc.cardTier !== 'admin') next.cardTier = 'platinum';
+            next.activeTrials = [
+              ...activeTrials,
+              {
+                id: `trial-ugacha-dia-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+                rewardType: 'trial_diamond_combo',
+                label: `Diamond VIP Trial (${formatTrialDurationLabel(trialMins)})`,
+                emoji: '💠',
+                startedAt: nowDate.toISOString(),
+                expiresAt: expiresIso,
+                durationMinutes: trialMins,
+                revertSnapshot: {
+                  previousVerified: acc.isVerified,
+                  previousVerifiedLabel: acc.verifiedLabel,
+                  previousVipShield: acc.vipShieldActive,
+                  previousCardTier: acc.cardTier,
+                },
+              },
+            ];
+            break;
+          case 'trial_all_assets_boost':
+            next.goldGrams = (acc.goldGrams || 0) + 1 * qty;
+            next.spinCoins = (acc.spinCoins || 0) + 50 * qty;
+            next.clickPower = (acc.clickPower || 1) + 4;
+            next.salaryMultiplier = (acc.salaryMultiplier || 1) + qty;
+            next.activeTrials = [
+              ...activeTrials,
+              {
+                id: `trial-ugacha-all-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+                rewardType: 'trial_all_assets_boost',
+                label: `Turbo Boost Trial (${formatTrialDurationLabel(trialMins)})`,
+                emoji: '🌟',
+                startedAt: nowDate.toISOString(),
+                expiresAt: expiresIso,
+                durationMinutes: trialMins,
+                revertSnapshot: { deltaClickPower: 4, deltaSalaryMultiplier: qty },
+              },
+            ];
+            break;
+          default:
+            break;
+        }
+
+        if (meta.type === 'cash_balance' || meta.type === 'spin_coins' || meta.type === 'mystery_thr_combo' || meta.type === 'sultan_starter_pack') {
+          newTxs.push({
+            id: `tx-ugacha-${Date.now()}-${acc.id.slice(-4)}`,
+            accountId: acc.id,
+            type: 'setor',
+            title: `🎲 Gacha Admin [${res.tierLabel}]: ${meta.label}`,
+            amount:
+              meta.type === 'cash_balance'
+                ? qty
+                : meta.type === 'mystery_thr_combo'
+                ? 1_500_000 * qty
+                : meta.type === 'sultan_starter_pack'
+                ? 5_000_000 * qty
+                : 0,
+            coinAmount:
+              meta.type === 'spin_coins'
+                ? qty
+                : meta.type === 'mystery_thr_combo'
+                ? 100 * qty
+                : meta.type === 'sultan_starter_pack'
+                ? 300 * qty
+                : undefined,
+            recipientAccount: acc.accountNumber,
+            recipientName: acc.fullName,
+            description: `Hasil Gacha Admin (${res.tierLabel} • Peluang ${res.probabilityPercent}%) dari ${input.senderName}`,
+            referenceNo: `GACHA-${Date.now().toString().slice(-6)}`,
+            timestamp: nowDate.toISOString(),
+            status: 'success',
+            category: 'redeem',
+          });
+        }
+        return next;
+      })
+    );
+
+    if (newTxs.length > 0) {
+      setTransactions((prev) => [...newTxs, ...prev]);
+    }
+
+    playAtmSound('cash');
+    return {
+      success: true,
+      logs,
+      message: `🎲 Roll Gacha Langsung selesai untuk ${targetAccs.length} nasabah (${meta.label})!`,
+    };
+  };
+
+  const adminUpdateDevRole = (
+    roleId: string,
+    patch: Partial<Omit<DevRoleConfig, 'id' | 'slotNumber'>>
+  ): { success: boolean; message: string } => {
+    setDevRoles((prev) =>
+      prev.map((r) => (r.id === roleId ? { ...r, ...patch } : r))
+    );
+    return { success: true, message: `Konfigurasi Role ${roleId} berhasil diperbarui.` };
+  };
+
+  const adminResetDevRoles = (): { success: boolean; message: string } => {
+    setDevRoles(DEFAULT_DEV_ROLES_10);
+    return { success: true, message: 'Ke-10 Role Dev/Own/Admin dikembalikan ke setelan awal.' };
+  };
+
+  const adminAssignAccountDevRole = (
+    accountId: string,
+    roleId: string | null
+  ): { success: boolean; message: string } => {
+    const targetAcc = accounts.find((a) => a.id === accountId);
+    if (!targetAcc) return { success: false, message: 'Rekening tidak ditemukan.' };
+    const roleObj = roleId ? devRoles.find((r) => r.id === roleId) : null;
+    setAccounts((prev) =>
+      prev.map((acc) =>
+        acc.id === accountId ? { ...acc, devRoleId: roleObj ? roleObj.id : null } : acc
+      )
+    );
+    return {
+      success: true,
+      message: roleObj
+        ? `Akun ${targetAcc.fullName} resmi ditugaskan menjadi ${roleObj.name}!`
+        : `Role Dev pada akun ${targetAcc.fullName} dilepas kembali ke Nasabah Biasa.`,
+    };
+  };
+
+  const adminUpdateDefaultLetterSealConfig = (
+    config: LetterSignatureStampConfig
+  ): { success: boolean; message: string } => {
+    setDefaultLetterSealConfig(config);
+    return {
+      success: true,
+      message: 'Desain Tanda Tangan & Stempel Default Global berhasil disimpan!',
+    };
+  };
+
   const reprintReceipts = currentAccountTransactions.slice(0, 10);
   const pendingFinancialTransactions = transactions.filter((t) => t.status === 'pending');
   const pendingBuyerApprovalTransactions = transactions.filter(
@@ -10875,6 +12598,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setTransactionBudgetCategory,
         resetAllData,
         startFromZero,
+        giftEvents,
+        activeGiftModal,
+        giftDateTestOverride,
+        isGiftEventOpenableNow,
+        openGiftEventModal,
+        closeGiftEventModal,
+        claimAndOpenGiftEvent,
+        adminCreateOrUpdateGiftEvent,
+        adminDeleteGiftEvent,
+        adminToggleGiftEventActive,
+        adminTriggerGiftEventNow,
+        adminSetGiftDateTestOverride,
+        jobGachaBonusConfig,
+        adminUpdateJobGachaBonusConfig,
+        adminExecuteUniversalGachaDrop,
+        devRoles,
+        adminUpdateDevRole,
+        adminResetDevRoles,
+        adminAssignAccountDevRole,
+        defaultLetterSealConfig,
+        adminUpdateDefaultLetterSealConfig,
       }}
     >
       {children}

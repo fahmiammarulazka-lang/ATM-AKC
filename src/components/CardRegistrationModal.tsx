@@ -9,12 +9,7 @@ import {
   CheckCircle2,
   Clock,
   XCircle,
-  ShieldCheck,
-  Sparkles,
-  ArrowRight,
-  UserCheck,
   AlertCircle,
-  RotateCcw,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CARD_TIER_CONFIGS, formatRupiah, validateStrongPin } from '../utils/bankUtils';
@@ -24,7 +19,6 @@ import { GoogleMapsAddressPicker } from './GoogleMapsAddressPicker';
 interface CardRegistrationModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onOpenSimulationPage?: () => void;
 }
 
 const SELECTABLE_TIERS: CardTier[] = ['regular', 'gold', 'premium', 'platinum'];
@@ -32,9 +26,8 @@ const SELECTABLE_TIERS: CardTier[] = ['regular', 'gold', 'premium', 'platinum'];
 export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
   isOpen,
   onClose,
-  onOpenSimulationPage,
 }) => {
-  const { registerCard, adminApproveCard, adminRejectCard, accounts } = useBank();
+  const { registerCard, accounts } = useBank();
 
   // Step wizard: 1 (Data Diri), 2 (Buat PIN), 3 (Pilih Jenis Kartu), 4 (Konfirmasi & Kirim), 5 (Status Permohonan)
   const [step, setStep] = useState<number>(1);
@@ -136,23 +129,12 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
               <p className="text-xs text-slate-400">Formulir Pembukaan Rekening & Penerbitan Kartu Baru</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {onOpenSimulationPage && (
-              <button
-                type="button"
-                onClick={onOpenSimulationPage}
-                className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 text-amber-300 font-bold text-[11px] cursor-pointer whitespace-nowrap"
-              >
-                Simulasi Penuh ➔
-              </button>
-            )}
-            <button
-              onClick={onClose}
-              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
-            >
-              ✕
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+          >
+            ✕
+          </button>
         </div>
 
         {/* Step Indicator */}
@@ -481,30 +463,6 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
                     Permohonan pendaftaran <strong>{activeTierConfig.nameIndo}</strong> Anda telah masuk ke antrean verifikasi Admin Bank Nusantara.
                   </p>
                 </div>
-
-                {trackedAccount && (
-                  <div className="grid grid-cols-2 gap-2 max-w-md mx-auto">
-                    <button
-                      type="button"
-                      onClick={() => adminApproveCard(trackedAccount.id)}
-                      className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] cursor-pointer"
-                    >
-                      Uji Setujui Admin
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        adminRejectCard(
-                          trackedAccount.id,
-                          'Foto KTP atau data identitas belum sesuai syarat verifikasi.'
-                        )
-                      }
-                      className="py-2 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] cursor-pointer"
-                    >
-                      Uji Tolak Admin
-                    </button>
-                  </div>
-                )}
               </>
             )}
 

@@ -56,7 +56,7 @@ import { formatRupiah, CARD_TIER_CONFIGS, LOAN_TIER_CONFIGS } from '../utils/ban
 
 interface InformationGuideProps {
   onNavigateToTab: (
-    tab: 'dashboard' | 'atm' | 'admin' | 'updates' | 'chat' | 'simulasi_rekening',
+    tab: 'dashboard' | 'atm' | 'admin' | 'updates' | 'chat',
     subTab?: string
   ) => void;
   onOpenRegisterModal: () => void;
@@ -817,10 +817,10 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                 Mesin ATM ➔
               </button>
               <button
-                onClick={() => onNavigateToTab('simulasi_rekening')}
-                className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-emerald-300 text-[11px] text-center font-medium border border-emerald-500/30 cursor-pointer"
+                onClick={onOpenRegisterModal}
+                className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-amber-300 text-[11px] text-center font-medium border border-amber-500/30 cursor-pointer"
               >
-                Simulasi Rekening ➔
+                Daftar Kartu Baru ➔
               </button>
             </div>
           </div>
@@ -1076,18 +1076,10 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
               <div className="pt-2 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => onNavigateToTab('simulasi_rekening')}
-                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-black text-xs cursor-pointer flex items-center gap-2 shadow-lg shadow-amber-500/20"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>Coba Simulasi Interaktif Pembukaan Rekening ➔</span>
-                </button>
-                <button
-                  type="button"
                   onClick={onOpenRegisterModal}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer border border-slate-700"
+                  className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-lg shadow-amber-500/20"
                 >
-                  Buka Formulir Pendaftaran Cepat
+                  Buka Formulir Pendaftaran Kartu Baru
                 </button>
               </div>
             </div>

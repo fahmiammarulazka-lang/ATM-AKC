@@ -48,6 +48,7 @@ import {
   Bell,
   BellRing,
   BellOff,
+  Dices,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -77,6 +78,9 @@ import {
 import { VerifiedBadge } from './VerifiedBadge';
 import { AdminQuickAccountControlPanel } from './AdminQuickAccountControlPanel';
 import { AdminGoldTransferPanel } from './AdminGoldTransferPanel';
+import { AdminGiftEventPanel } from './AdminGiftEventPanel';
+import { AdminDevRolesPanel } from './AdminDevRolesPanel';
+import { AdminUniversalGachaPanel } from './AdminUniversalGachaPanel';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -217,10 +221,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     setBackgroundAutoNotifEnabled,
     sendBulkNotifications,
     sendTestNotificationNow,
+    giftEvents,
   } = useBank();
 
   const [activeAdminTab, setActiveAdminTab] = useState<
     | 'super_tools'
+    | 'gift_letters'
+    | 'dev_roles'
+    | 'universal_gacha'
     | 'spin_wheel_admin'
     | 'gold_transfer_admin'
     | 'empire_admin'
@@ -729,6 +737,42 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         </button>
 
         <button
+          onClick={() => setActiveAdminTab('gift_letters')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
+            activeAdminTab === 'gift_letters'
+              ? 'bg-gradient-to-r from-amber-400 via-orange-400 to-rose-400 text-slate-950 font-black shadow-lg shadow-amber-500/30'
+              : 'text-amber-300 hover:text-white hover:bg-amber-950/60 border border-amber-400/60'
+          }`}
+        >
+          <Gift className="w-4 h-4" />
+          <span>🎁 Hadiah &amp; Surat (58 Hadiah, Role &amp; Stempel) ({giftEvents.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('dev_roles')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
+            activeAdminTab === 'dev_roles'
+              ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-400 text-slate-950 font-black shadow-lg shadow-amber-500/30'
+              : 'text-amber-200 hover:text-white hover:bg-amber-950/60 border border-amber-400/50'
+          }`}
+        >
+          <Crown className="w-4 h-4" />
+          <span>👑 10 Role Dev &amp; Staff</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('universal_gacha')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
+            activeAdminTab === 'universal_gacha'
+              ? 'bg-gradient-to-r from-fuchsia-500 via-purple-500 to-indigo-500 text-white font-black shadow-lg shadow-fuchsia-500/30'
+              : 'text-fuchsia-300 hover:text-white hover:bg-fuchsia-950/60 border border-fuchsia-400/50'
+          }`}
+        >
+          <Dices className="w-4 h-4" />
+          <span>🎲 Gacha Universal (Semua Fitur)</span>
+        </button>
+
+        <button
           onClick={() => setActiveAdminTab('spin_wheel_admin')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
             activeAdminTab === 'spin_wheel_admin'
@@ -937,6 +981,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <span>Brankas & SOP 100x</span>
         </button>
       </div>
+
+      {/* ================= ADMIN TAB: HADIAH & SURAT SPESIAL (58 HADIAH + ROLE + STAMP) ================= */}
+      {activeAdminTab === 'gift_letters' && <AdminGiftEventPanel />}
+
+      {/* ================= ADMIN TAB: 10 ROLE DEV & STAFF ================= */}
+      {activeAdminTab === 'dev_roles' && <AdminDevRolesPanel />}
+
+      {/* ================= ADMIN TAB: GACHA UNIVERSAL (SEMUA FITUR) ================= */}
+      {activeAdminTab === 'universal_gacha' && <AdminUniversalGachaPanel />}
 
       {/* ================= ADMIN TAB: KONTROL EMAS 24K & TRANSFER BEBAS 5% ================= */}
       {activeAdminTab === 'gold_transfer_admin' && <AdminGoldTransferPanel />}
@@ -2656,6 +2709,35 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   🔓 Buka Semua Banned ({bannedCards.length})
                 </button>
               </div>
+            </div>
+
+            {/* Shortcut Strip ke Studio Role Dev, Gacha Universal, dan Surat Hadiah */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-[11px] font-bold text-slate-400 mr-1">Akses Cepat Studio:</span>
+              <button
+                type="button"
+                onClick={() => setActiveAdminTab('dev_roles')}
+                className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/50 text-amber-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Crown className="w-3.5 h-3.5 text-amber-400" />
+                <span>Kelola 10 Role Dev &amp; Own</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveAdminTab('universal_gacha')}
+                className="px-3 py-1.5 rounded-xl bg-fuchsia-500/15 hover:bg-fuchsia-500/25 border border-fuchsia-400/50 text-fuchsia-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Dices className="w-3.5 h-3.5 text-fuchsia-400" />
+                <span>Gacha Universal (58 Hadiah &amp; Kerja)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveAdminTab('gift_letters')}
+                className="px-3 py-1.5 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 border border-orange-400/50 text-orange-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Gift className="w-3.5 h-3.5 text-orange-400" />
+                <span>Surat Royal, Tanda Tangan &amp; Stempel</span>
+              </button>
             </div>
 
             {/* Master Target Account Selector */}

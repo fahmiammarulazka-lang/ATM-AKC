@@ -22,7 +22,7 @@ import {
 import { useBank } from '../context/BankContext';
 
 interface UpdateHistoryViewProps {
-  onNavigateToView: (view: 'dashboard' | 'atm' | 'admin' | 'guide' | 'chat' | 'updates' | 'simulasi_rekening') => void;
+  onNavigateToView: (view: 'dashboard' | 'atm' | 'admin' | 'guide' | 'chat' | 'updates') => void;
 }
 
 export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({

@@ -21,14 +21,19 @@ import {
   Cpu,
   Send,
   PieChart,
-  FileCheck2,
+  Banknote,
+  Coins,
+  Zap,
+  Lock,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
 import { VerifiedBadge } from './VerifiedBadge';
+import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
 import { computeMonthlyBudgetReport, getCurrentMonthKey } from '../utils/budgetUtils';
 import { useSecretAdminSequence } from '../utils/useSecretAdminSequence';
-import { NotificationCategory } from '../types/bank';
+import { DevRoleConfig, NotificationCategory } from '../types/bank';
+import { getDevBadgeColorStyle } from '../data/devRolesCatalog';
 
 export type AppNavView =
   | 'dashboard'
@@ -42,14 +47,14 @@ export type AppNavView =
   | 'admin'
   | 'guide'
   | 'chat'
-  | 'updates'
-  | 'simulasi_rekening';
+  | 'updates';
 
 interface NavbarProps {
   activeView: AppNavView;
   setActiveView: (view: AppNavView) => void;
   onOpenRegisterModal: () => void;
   onSecretAdminTrigger: () => void;
+  onQuickAdminAccess?: (role: DevRoleConfig) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -57,6 +62,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveView,
   onOpenRegisterModal,
   onSecretAdminTrigger,
+  onQuickAdminAccess,
 }) => {
   const {
     accounts,
@@ -76,7 +82,13 @@ export const Navbar: React.FC<NavbarProps> = ({
     transactions,
     manualExpenses,
     budgetTxCategoryMap,
+    devRoles,
   } = useBank();
+
+  const activeDevRole = currentAccount?.devRoleId
+    ? devRoles.find((r) => r.id === currentAccount.devRoleId) || null
+    : null;
+  const activeDevStyle = activeDevRole ? getDevBadgeColorStyle(activeDevRole.badgeColor) : null;
 
   const currentUpdateVersion =
     appUpdates.find((u) => u.isCurrent)?.version || appUpdates[0]?.version || 'v7.0';
@@ -309,23 +321,76 @@ export const Navbar: React.FC<NavbarProps> = ({
               {currentUpdateVersion}
             </span>
           </button>
-
-          {/* Simulasi Interaktif Pembukaan Rekening */}
-          <button
-            onClick={() => setActiveView('simulasi_rekening')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'simulasi_rekening'
-                ? 'bg-amber-500 text-slate-950 font-black shadow-md'
-                : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-500/30'
-            }`}
-          >
-            <FileCheck2 className="w-4 h-4 text-amber-400" />
-            <span>Simulasi Rekening</span>
-          </button>
         </nav>
 
         {/* Right Action Bar */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
+          {activeDevRole && activeDevStyle && (
+            <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+              <span
+                className={`px-2 py-1 rounded-lg border text-[10px] font-black tracking-wide whitespace-nowrap shrink-0 ${activeDevStyle.pillClass}`}
+                title={activeDevRole.description || activeDevRole.name}
+              >
+                {activeDevRole.name}
+              </span>
+              {activeDevRole.canQuickOpenAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onQuickAdminAccess) {
+                      onQuickAdminAccess(activeDevRole);
+                    } else {
+                      onSecretAdminTrigger();
+                    }
+                  }}
+                  className={`px-2.5 py-1.5 rounded-xl font-black text-[11px] flex items-center gap-1 cursor-pointer shadow-md transition-transform active:scale-95 whitespace-nowrap shrink-0 ${
+                    activeView === 'admin'
+                      ? 'ring-2 ring-white ' + activeDevStyle.quickBtnClass
+                      : activeDevStyle.quickBtnClass
+                  }`}
+                  title={
+                    activeDevRole.bypassAdminPin
+                      ? 'Buka Panel Admin Instan (Bebas PIN)'
+                      : 'Buka Panel Admin (Wajib PIN Admin)'
+                  }
+                >
+                  {activeDevRole.bypassAdminPin ? (
+                    <Zap className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <Lock className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>{activeDevRole.bypassAdminPin ? 'Panel Admin' : 'Admin (PIN)'}</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Money & Coin Icon Indicator Bar */}
+          {currentAccount && (
+            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700/80 whitespace-nowrap shrink-0 font-mono text-[11px] tabular-nums">
+              <span
+                className="flex items-center gap-1 text-emerald-300 font-bold pr-1.5 border-r border-slate-700"
+                title="Saldo Uang Rekening"
+              >
+                <Banknote className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>
+                  {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
+                    ? '∞'
+                    : formatRupiah(currentAccount.balance)}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setActiveView('spin_wheel')}
+                className="flex items-center gap-1 text-amber-300 font-bold hover:text-amber-200 cursor-pointer"
+                title="Total Coin Nusantara (Klik ke Spin the Wheel)"
+              >
+                <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>{(currentAccount.spinCoins ?? 0).toLocaleString('id-ID')}</span>
+              </button>
+            </div>
+          )}
+
           {/* 🔔 Tombol Notifikasi */}
           <div className="relative">
             <button
@@ -684,13 +749,28 @@ export const Navbar: React.FC<NavbarProps> = ({
           <History className="w-4 h-4 text-emerald-400" />
           <span>Update</span>
         </button>
-        <button
-          onClick={() => setActiveView('simulasi_rekening')}
-          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'simulasi_rekening' ? 'text-amber-400 font-bold' : 'text-amber-300/80'}`}
-        >
-          <FileCheck2 className="w-4 h-4 text-amber-400" />
-          <span>Simulasi</span>
-        </button>
+        {activeDevRole && activeDevRole.canQuickOpenAdmin && (
+          <button
+            type="button"
+            onClick={() => {
+              if (onQuickAdminAccess) {
+                onQuickAdminAccess(activeDevRole);
+              } else {
+                onSecretAdminTrigger();
+              }
+            }}
+            className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${
+              activeView === 'admin' ? 'text-amber-300 font-black' : 'text-amber-400 font-bold'
+            }`}
+          >
+            {activeDevRole.bypassAdminPin ? (
+              <Zap className="w-4 h-4 text-amber-400" />
+            ) : (
+              <Lock className="w-4 h-4 text-amber-400" />
+            )}
+            <span>Admin</span>
+          </button>
+        )}
       </div>
 
       {/* Card PIN Prompt when switching/logging into an Old Card or Another Card */}

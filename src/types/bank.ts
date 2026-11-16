@@ -103,6 +103,10 @@ export interface BankAccount {
   goldPreferredForm?: GoldFormType;
   goldPreferredMotif?: GoldMotifType;
   customUserGoldPricePerGram?: number | null;
+  // Active Temporary Trial Perks (Centang Biru Trial, VIP Shield Trial, Card Tier Trial, Boost Trial)
+  activeTrials?: ActiveAccountTrial[];
+  // Custom Dev / Own / Admin Role Slot (10 Role yang dapat dikustomisasi di Panel Admin)
+  devRoleId?: string | null;
 }
 
 export type GoldFormType = 'batangan' | 'perhiasan';
@@ -260,6 +264,7 @@ export interface JobVacancyItem {
   title: string;
   department: string;
   salary: number;
+  coinReward?: number;
   requiredLevel: number;
   targetClicks: number;
   isFreeStarter?: boolean;
@@ -762,3 +767,224 @@ export interface ManualExpenseRecord {
   note?: string;
   timestamp: string;
 }
+
+export type GiftRewardType =
+  | 'cash_balance'
+  | 'spin_coins'
+  | 'level_voucher'
+  | 'job_level_up'
+  | 'gold_grams'
+  | 'reward_points'
+  | 'pulsa_balance'
+  | 'pln_kwh'
+  | 'click_power_boost'
+  | 'salary_multiplier_boost'
+  | 'cashback_percent'
+  | 'vip_shield'
+  | 'blue_checkmark'
+  | 'upgrade_card_tier'
+  | 'special_deposito'
+  | 'dream_pocket_fund'
+  | 'mining_rig_rtx'
+  | 'mining_ai_cluster'
+  | 'supercar_porsche'
+  | 'supercar_lambo'
+  | 'trading_gold_kg'
+  | 'trading_btc_vip'
+  | 'forgive_loans'
+  | 'mystery_thr_combo'
+  | 'trial_blue_checkmark'
+  | 'trial_vip_shield'
+  | 'trial_gold_card'
+  | 'trial_platinum_card'
+  | 'trial_career_boost'
+  | 'sultan_starter_pack'
+  // Hadiah Role Dev / Own / Admin (Permanen, Trial & Gacha Role)
+  | 'role_grant_permanent'
+  | 'role_grant_trial'
+  | 'role_gacha_random_permanent'
+  | 'role_gacha_random_trial'
+  // Hadiah Tambahan 50+ Katalog (Saldo, Koin, Karir, Emas, Bisnis, VIP)
+  | 'salary_jackpot_drop'
+  | 'coin_jackpot_rain'
+  | 'cashback_tier_max'
+  | 'double_wallet_bonus'
+  | 'loyalty_point_chest'
+  | 'fee_waiver_pass'
+  | 'career_turbo_pack'
+  | 'job_progress_boost'
+  | 'suit_victory_charm'
+  | 'instant_executive_unlock'
+  | 'voucher_bundle_pro'
+  | 'gold_bar_royal_10g'
+  | 'gold_jewel_bonus'
+  | 'high_yield_deposito_vip'
+  | 'emergency_vault_fund'
+  | 'pln_super_pack'
+  | 'mining_quantum_datacenter'
+  | 'supercar_bugatti_chiron'
+  | 'supercar_ferrari_sf90'
+  | 'trading_sp500_vip'
+  | 'sultan_empire_dividend'
+  | 'upgrade_card_platinum_perm'
+  | 'trial_diamond_combo'
+  | 'trial_all_assets_boost';
+
+export interface ActiveAccountTrial {
+  id: string;
+  rewardType: GiftRewardType;
+  label: string;
+  emoji: string;
+  startedAt: string;
+  expiresAt: string;
+  durationMinutes: number;
+  revertSnapshot: {
+    previousVerified?: boolean;
+    previousVerifiedLabel?: string;
+    previousVipShield?: boolean;
+    previousCardTier?: CardTier;
+    previousDevRoleId?: string | null;
+    deltaClickPower?: number;
+    deltaSalaryMultiplier?: number;
+  };
+}
+
+export interface GiftRewardCatalogMeta {
+  type: GiftRewardType;
+  label: string;
+  emoji: string;
+  unitLabel: string;
+  defaultAmount: number;
+  step: number;
+  category:
+    | 'Hadiah Role'
+    | 'Uang & Koin'
+    | 'Karir & Level'
+    | 'Emas & Tabungan'
+    | 'Aset & Bisnis'
+    | 'VIP & Proteksi'
+    | 'Hadiah Trial';
+  description: string;
+  isTrial?: boolean;
+  defaultTrialMinutes?: number;
+  isRoleGrant?: boolean;
+}
+
+export interface GachaTierRange {
+  id: string;
+  label: string;
+  minAmount: number;
+  maxAmount: number;
+  probabilityPercent: number;
+}
+
+export interface GachaClaimedItemResult {
+  rewardId: string;
+  type: GiftRewardType;
+  label: string;
+  emoji: string;
+  unitLabel: string;
+  tierLabel: string;
+  probabilityPercent: number;
+  rolledAmount: number;
+  minAmount: number;
+  maxAmount: number;
+}
+
+export interface JobGachaBonusConfig {
+  enabled: boolean;
+  rewardType: 'cash_balance' | 'spin_coins' | 'level_voucher' | 'reward_points';
+  tiers: GachaTierRange[];
+}
+
+export interface AdminGiftRewardItem {
+  id: string;
+  type: GiftRewardType;
+  label: string;
+  amount: number;
+  unitLabel: string;
+  emoji: string;
+  customNote?: string;
+  trialDurationMinutes?: number;
+  targetDevRoleId?: string;
+  rewardMode?: 'fixed' | 'gacha';
+  gachaTiers?: GachaTierRange[];
+}
+
+export interface AdminGiftEventPackage {
+  id: string;
+  title: string;
+  senderName: string;
+  letterMessage: string;
+  triggerMode: 'scheduled_date' | 'manual_instant' | 'both';
+  autoPopupEnabled: boolean;
+  strictDateLock?: boolean; // Default true: hanya bisa dibuka tepat pada tanggal jadwal
+  unlockedByManualSend?: boolean; // True jika Admin baru klik Kirim Manual Sekarang
+  isGachaBox?: boolean;
+  scheduleMonth: number; // 1 - 12 (default 1 = Januari)
+  scheduleDay: number; // 1 - 31 (default 29)
+  scheduleLabel?: string;
+  isActive: boolean;
+  targetAccountId?: string; // '__ALL__' or specific BankAccount.id
+  themeColor?: 'amber' | 'emerald' | 'rose' | 'indigo';
+  rewards: AdminGiftRewardItem[];
+  claimedByAccountIds: string[];
+  viewedByAccountIds: string[];
+  gachaResultsByAccount?: Record<string, GachaClaimedItemResult[]>;
+  customSealConfig?: LetterSignatureStampConfig | null;
+  createdAt: string;
+  updatedAt?: string;
+  lastTriggeredAt?: string;
+}
+
+export type SignatureTemplateId =
+  | 'kaligrafi_royal'
+  | 'kursif_klasik'
+  | 'modern_eksekutif'
+  | 'minimalis_tajam'
+  | 'aristokrat_garis';
+
+export type StampTemplateId =
+  | 'bulat_resmi'
+  | 'royal_wax'
+  | 'oval_notaris'
+  | 'perisai_vip'
+  | 'bintang_emas';
+
+export type SealColorTheme = 'amber' | 'emerald' | 'cyan' | 'rose' | 'white';
+
+export interface LetterSignatureStampConfig {
+  signatureMode: 'draw' | 'template';
+  signatureDrawingDataUrl?: string;
+  signatureTemplateId: SignatureTemplateId;
+  signatureName: string;
+  signatureColor: SealColorTheme;
+  stampTemplateId: StampTemplateId;
+  stampPrimaryName: string;
+  stampSecondaryName: string;
+  stampColor: SealColorTheme;
+}
+
+export type DevRoleBadgeColor =
+  | 'amber'
+  | 'orange'
+  | 'cyan'
+  | 'indigo'
+  | 'rose'
+  | 'purple'
+  | 'emerald'
+  | 'teal'
+  | 'sky'
+  | 'slate';
+
+export interface DevRoleConfig {
+  id: string; // 'dev_1' .. 'dev_10'
+  slotNumber: number; // 1 .. 10
+  name: string;
+  badgeColor: DevRoleBadgeColor;
+  canQuickOpenAdmin: boolean;
+  bypassAdminPin: boolean;
+  description: string;
+}
+
+

@@ -8,7 +8,7 @@ import { CustomerDashboard, DashboardTab } from './components/CustomerDashboard'
 import { TransferWorkspace } from './components/TransferWorkspace';
 import { TabEmasView } from './components/TabEmasView';
 import { BudgetingWorkspace } from './components/BudgetingWorkspace';
-import { TransferBebasAssetMode } from './types/bank';
+import { TransferBebasAssetMode, DevRoleConfig } from './types/bank';
 import { AtmSimulator } from './components/AtmSimulator';
 import { AdminPortal } from './components/AdminPortal';
 import { InformationGuide } from './components/InformationGuide';
@@ -17,7 +17,6 @@ import { JobVacancyView } from './components/JobVacancyView';
 import { SpinTheWheelView } from './components/SpinTheWheelView';
 import { SultanEmpireView } from './components/SultanEmpireView';
 import { CardRegistrationModal } from './components/CardRegistrationModal';
-import { AccountOpeningSimulationView } from './components/AccountOpeningSimulationView';
 import { NusantaraChat } from './components/NusantaraChat';
 import { AdminPinModal } from './components/AdminPinModal';
 import { GoogleAuthOnboardingGate } from './components/GoogleAuthOnboardingGate';
@@ -26,6 +25,7 @@ import {
   GlobalChatAndNotificationLayer,
   AllowNotificationFooterButton,
 } from './components/GlobalChatAndNotificationLayer';
+import { GiftLetterOverlayAndCornerPopup } from './components/GiftLetterOverlayAndCornerPopup';
 import {
   CreditCard,
   Building,
@@ -77,7 +77,6 @@ function BankAppContent() {
         'guide',
         'chat',
         'updates',
-        'simulasi_rekening',
       ];
       const safeView: AppNavView = validViews.includes(targetView as AppNavView)
         ? (targetView as AppNavView)
@@ -149,6 +148,24 @@ function BankAppContent() {
       setActiveView('admin');
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleQuickAdminAccess = (role?: DevRoleConfig | null) => {
+    if (!role || !role.canQuickOpenAdmin) {
+      handleSecretAdminTrigger();
+      return;
+    }
+    if (role.bypassAdminPin || adminUnlocked) {
+      setAdminUnlocked(true);
+      if (!googleUser || !googleUser.hasCompletedOnboarding) {
+        setAdminViewDuringOnboarding(true);
+      } else {
+        setActiveView('admin');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      setShowAdminPinModal(true);
+    }
   };
 
   // Show Google Sign-In -> Card Registration / Old Card Login Onboarding Gate at the start
@@ -242,6 +259,7 @@ function BankAppContent() {
       {/* Global Closable Website System Notification Modal & Lapor Bug Modal */}
       <WebsiteSystemNotificationModal />
       <GlobalChatAndNotificationLayer />
+      <GiftLetterOverlayAndCornerPopup />
 
       {/* Top Navbar (Includes Transfer & Emas 24K between Mobile Banking & Lowongan Kerja on Desktop) */}
       <Navbar
@@ -254,12 +272,16 @@ function BankAppContent() {
         }}
         onOpenRegisterModal={() => setIsRegisterModalOpen(true)}
         onSecretAdminTrigger={handleSecretAdminTrigger}
+        onQuickAdminAccess={handleQuickAdminAccess}
       />
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
         {activeView === 'dashboard' && (
-          <CustomerDashboard requestedSubTab={requestedDashboardTab} />
+          <CustomerDashboard
+            requestedSubTab={requestedDashboardTab}
+            onQuickAdminAccess={handleQuickAdminAccess}
+          />
         )}
         {activeView === 'transfer' && (
           <TransferWorkspace
@@ -323,15 +345,6 @@ function BankAppContent() {
             onOpenRegisterModal={() => setIsRegisterModalOpen(true)}
           />
         )}
-        {activeView === 'simulasi_rekening' && (
-          <AccountOpeningSimulationView
-            onNavigateToDashboard={() => {
-              setRequestedDashboardTab({ tab: 'ringkasan', nonce: Date.now() });
-              setActiveView('dashboard');
-            }}
-            onOpenRegisterModal={() => setIsRegisterModalOpen(true)}
-          />
-        )}
         {activeView === 'updates' && (
           <UpdateHistoryView
             onNavigateToView={(view) => setActiveView(view)}
@@ -343,11 +356,6 @@ function BankAppContent() {
       <CardRegistrationModal
         isOpen={isRegisterModalOpen}
         onClose={() => setIsRegisterModalOpen(false)}
-        onOpenSimulationPage={() => {
-          setIsRegisterModalOpen(false);
-          setActiveView('simulasi_rekening');
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
       />
 
       {/* Admin Authorization PIN Modal */}

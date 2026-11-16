@@ -75,6 +75,7 @@ interface PersistedGlobalState {
   websitePopups: ServerPopupNotification[];
   bugReports: ServerBugReport[];
   pushAlerts: ServerPushAlert[];
+  giftEvents: unknown[];
   sharedBankData: Record<string, unknown>;
   userSnapshotsByScope: Record<string, Record<string, unknown>>;
   lastUpdated: number;
@@ -110,6 +111,7 @@ const DEFAULT_STATE: PersistedGlobalState = {
   sharedBankData: {},
   userSnapshotsByScope: {},
   pushAlerts: [],
+  giftEvents: [],
   lastUpdated: Date.now(),
 };
 
@@ -131,6 +133,7 @@ function loadPersistedState(): PersistedGlobalState {
         websitePopups: Array.isArray(parsed.websitePopups) ? parsed.websitePopups : [],
         bugReports: Array.isArray(parsed.bugReports) ? parsed.bugReports : DEFAULT_STATE.bugReports,
         pushAlerts: Array.isArray(parsed.pushAlerts) ? parsed.pushAlerts : [],
+        giftEvents: Array.isArray(parsed.giftEvents) ? parsed.giftEvents : [],
         sharedBankData: parsed.sharedBankData || {},
         userSnapshotsByScope:
           parsed.userSnapshotsByScope && typeof parsed.userSnapshotsByScope === 'object'
@@ -195,6 +198,7 @@ async function startServer() {
             websitePopups: serverState.websitePopups,
             bugReports: serverState.bugReports,
             pushAlerts: serverState.pushAlerts,
+            giftEvents: serverState.giftEvents,
             sharedBankData: serverState.sharedBankData,
             connectedDevices: clients.size,
             lastUpdated: serverState.lastUpdated,
@@ -221,6 +225,16 @@ async function startServer() {
           handleNewBugReport(msg.payload);
         } else if (msg.type === 'push_alert:send' && msg.payload) {
           handleNewPushAlert(msg.payload);
+        } else if (msg.type === 'gift_events:sync' && Array.isArray(msg.payload?.giftEvents)) {
+          serverState.giftEvents = msg.payload.giftEvents;
+          savePersistedState();
+          broadcastToAll({
+            type: 'gift_events:updated',
+            payload: {
+              giftEvents: serverState.giftEvents,
+              lastUpdated: serverState.lastUpdated,
+            },
+          });
         } else if (msg.type === 'bank_data:sync' && msg.payload) {
           serverState.sharedBankData = {
             ...serverState.sharedBankData,
@@ -417,10 +431,37 @@ async function startServer() {
       websitePopups: serverState.websitePopups,
       bugReports: serverState.bugReports,
       pushAlerts: serverState.pushAlerts,
+      giftEvents: serverState.giftEvents,
       sharedBankData: serverState.sharedBankData,
       connectedDevices: Math.max(1, clients.size),
       lastUpdated: serverState.lastUpdated,
     });
+  });
+
+  app.get('/api/gift-events', (_req, res) => {
+    res.json({
+      success: true,
+      giftEvents: serverState.giftEvents,
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/gift-events', (req, res) => {
+    const incoming = req.body?.giftEvents;
+    if (!Array.isArray(incoming)) {
+      res.status(400).json({ success: false, message: 'Daftar giftEvents tidak valid.' });
+      return;
+    }
+    serverState.giftEvents = incoming;
+    savePersistedState();
+    broadcastToAll({
+      type: 'gift_events:updated',
+      payload: {
+        giftEvents: serverState.giftEvents,
+        lastUpdated: serverState.lastUpdated,
+      },
+    });
+    res.json({ success: true, giftEvents: serverState.giftEvents, lastUpdated: serverState.lastUpdated });
   });
 
   app.post('/api/push-alert', (req, res) => {

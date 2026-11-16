@@ -32,6 +32,8 @@ import {
   MessageSquare,
   Briefcase,
   Crown,
+  Zap,
+  Clock,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CardVisualizer } from './CardVisualizer';
@@ -50,7 +52,8 @@ import {
   CARD_TIER_CONFIGS,
   LOAN_TIER_CONFIGS,
 } from '../utils/bankUtils';
-import { CardTier, LoanType, TransferBebasAssetMode } from '../types/bank';
+import { CardTier, DevRoleConfig, LoanType, TransferBebasAssetMode } from '../types/bank';
+import { getDevBadgeColorStyle } from '../data/devRolesCatalog';
 
 export type DashboardTab =
   | 'ringkasan'
@@ -66,9 +69,13 @@ export type DashboardTab =
 
 interface CustomerDashboardProps {
   requestedSubTab?: { tab: DashboardTab; nonce: number } | null;
+  onQuickAdminAccess?: (role: DevRoleConfig) => void;
 }
 
-export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ requestedSubTab }) => {
+export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
+  requestedSubTab,
+  onQuickAdminAccess,
+}) => {
   const {
     currentAccount,
     currentAccountTransactions,
@@ -88,7 +95,17 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ requestedS
     toggleScheduledPayment,
     deleteScheduledPayment,
     featureConfigs,
+    devRoles,
   } = useBank();
+
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const activeTrialCount = currentAccount?.activeTrials?.length || 0;
+  useEffect(() => {
+    if (activeTrialCount === 0) return;
+    setNowMs(Date.now());
+    const id = window.setInterval(() => setNowMs(Date.now()), 5000);
+    return () => window.clearInterval(id);
+  }, [activeTrialCount]);
 
   // Active sub-tab in dashboard
   const [activeTab, setActiveTab] = useState<DashboardTab>(requestedSubTab?.tab || 'ringkasan');
@@ -152,6 +169,25 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ requestedS
   }
 
   const tierConfig = CARD_TIER_CONFIGS[currentAccount.cardTier] || CARD_TIER_CONFIGS.regular;
+  const activeDevRole = currentAccount.devRoleId
+    ? devRoles.find((r) => r.id === currentAccount.devRoleId) || null
+    : null;
+  const activeDevStyle = activeDevRole ? getDevBadgeColorStyle(activeDevRole.badgeColor) : null;
+  const activeTrials = (currentAccount.activeTrials || []).filter(
+    (t) => new Date(t.expiresAt).getTime() > nowMs
+  );
+
+  const formatRemainingTrial = (expiresAt: string) => {
+    const diffMs = Math.max(0, new Date(expiresAt).getTime() - nowMs);
+    const totalMinutes = Math.floor(diffMs / 60_000);
+    if (totalMinutes < 1) return '< 1m';
+    const days = Math.floor(totalMinutes / (60 * 24));
+    const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+    const mins = totalMinutes % 60;
+    if (days > 0) return `${days}h ${hours}j`;
+    if (hours > 0) return `${hours}j ${mins}m`;
+    return `${mins}m`;
+  };
 
   // Loan calculator
   const activeLoanConfig = LOAN_TIER_CONFIGS[selectedLoanType];
@@ -230,8 +266,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ requestedS
             {currentAccount.isVerified && (
               <VerifiedBadge size="sm" showText text={currentAccount.verifiedLabel || 'Terverifikasi Centang Biru'} label={currentAccount.verifiedLabel} />
             )}
+            {activeDevRole && activeDevStyle && (
+              <span
+                className={`text-[10px] px-2.5 py-0.5 rounded-full border font-black tracking-wide whitespace-nowrap ${activeDevStyle.pillClass}`}
+              >
+                👑 {activeDevRole.name}
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl sm:text-2xl font-bold text-white tracking-wide">
               Selamat Datang, {currentAccount.fullName}
             </h1>
@@ -246,6 +289,48 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({ requestedS
             </strong>{' '}
             • Terdaftar sejak {new Date(currentAccount.createdAt).getFullYear()}
           </p>
+
+          {activeDevRole && activeDevStyle && activeDevRole.canQuickOpenAdmin && onQuickAdminAccess && (
+            <div className="pt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onQuickAdminAccess(activeDevRole)}
+                className={`px-3.5 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-lg transition-transform active:scale-95 whitespace-nowrap shrink-0 ${activeDevStyle.quickBtnClass}`}
+              >
+                {activeDevRole.bypassAdminPin ? (
+                  <Zap className="w-3.5 h-3.5 shrink-0" />
+                ) : (
+                  <Lock className="w-3.5 h-3.5 shrink-0" />
+                )}
+                <span>
+                  {activeDevRole.bypassAdminPin
+                    ? '⚡ Buka Panel Admin Cepat'
+                    : '🔐 Buka Panel Admin (PIN)'}
+                </span>
+              </button>
+              <span className="text-[11px] text-slate-300">
+                Akses Role: <strong className="text-white">{activeDevRole.name}</strong>
+                {activeDevRole.bypassAdminPin ? ' • Bebas PIN' : ' • Wajib PIN Admin'}
+              </span>
+            </div>
+          )}
+
+          {activeTrials.length > 0 && (
+            <div className="pt-2 flex flex-wrap items-center gap-1.5">
+              {activeTrials.map((trial) => (
+                <span
+                  key={trial.id}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-cyan-500/15 border border-cyan-400/40 text-cyan-200 text-[10px] font-bold whitespace-nowrap"
+                >
+                  <Clock className="w-3 h-3 text-cyan-300 shrink-0" />
+                  <span>{trial.label}:</span>
+                  <span className="font-mono tabular-nums text-white">
+                    {formatRemainingTrial(trial.expiresAt)}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Balance Card Highlight */}
