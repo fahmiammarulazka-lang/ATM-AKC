@@ -6358,6 +6358,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         localStorage.removeItem(STORAGE_KEYS.GOOGLE_USER);
       }
       writeSpinVaultFromAccounts(remaining, nowEpoch);
+
+      // Immediate Firestore sync to prevent deleted accounts from reappearing
+      setDoc(doc(db, 'bank_state_v1', 'master_state'), {
+        accounts: remaining,
+        deletedAccountIds: nextDeletedAccountIds,
+        transactions: nextTransactions,
+        pockets: nextPockets,
+        depositos: nextDepositos,
+        updatedAt: new Date().toISOString(),
+      }, { merge: true }).catch(() => {});
     } catch { /* empty */ }
 
     try {
