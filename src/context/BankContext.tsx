@@ -114,6 +114,8 @@ import { rollGachaOutcome } from '../utils/gachaUtils';
 import {
   clearDeviceSnapshotStorage,
   wipeLegacyBrowserStorage,
+  loadGuestAccountsFromLocalStorage,
+  saveGuestAccountsToLocalStorage,
   type BankPersistableSnapshot,
 } from '../services/deviceStorage';
 import {
@@ -258,6 +260,17 @@ interface BankContextType {
     cardPin: string;
     adminPin: string;
   }) => Promise<{ success: boolean; message: string }>;
+  guestLocalAccounts: BankAccount[];
+  registerGuestRegularCard: (
+    input: Omit<RegisterCardInput, 'cardTier' | 'email'>
+  ) => { success: boolean; message: string; account?: BankAccount };
+  loginToGuestAccountWithPin: (
+    accountId: string,
+    cardPin: string
+  ) => { success: boolean; message: string };
+  linkCurrentAccountWithGooglePopup: (
+    targetAccountId?: string
+  ) => Promise<{ success: boolean; message: string; email?: string; errorCode?: string }>;
   enterBankPortal: () => void;
   loginWithGoogle: (email: string, name: string, picture?: string, firebaseUid?: string) => void;
   completeGoogleOnboarding: () => void;
@@ -512,7 +525,11 @@ interface BankContextType {
 
   // Card Ban & Unban Operations + 50-Feature Admin Ban Studio (Panel Admin)
   linkedUserAccount: BankAccount | null;
-  verifyInitialCardPin: (cardPin: string) => {
+  linkedUserAccounts: BankAccount[];
+  verifyInitialCardPin: (
+    cardPin: string,
+    targetAccountId?: string
+  ) => {
     success: boolean;
     failedAttempts?: number;
     remainingAttempts?: number;
@@ -662,6 +679,14 @@ interface BankContextType {
     accountId: string,
     enabled: boolean,
     customOaAdminPin?: string
+  ) => { success: boolean; message: string };
+  adminGrantAccountSultanBusinesses: (
+    accountId: string,
+    unitsEach?: number
+  ) => { success: boolean; message: string };
+  adminConnectAccountToEmail: (
+    accountId: string,
+    email: string
   ) => { success: boolean; message: string };
   adminCloneAccount: (accountId: string) => { success: boolean; message: string };
   adminMassFreezeOrUnfreezeAll: (freeze: boolean) => { success: boolean; message: string };
@@ -1498,13 +1523,34 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [accountDeletionRequests, setAccountDeletionRequests] = useState<AccountDeletionRequest[]>([]);
 
-  const [accounts, setAccounts] = useState<BankAccount[]>(() =>
-    INITIAL_ACCOUNTS.map((a) => ({
+  const [accounts, setAccounts] = useState<BankAccount[]>(() => {
+    const base: BankAccount[] = INITIAL_ACCOUNTS.map((a) => ({
       ...a,
-      status: a.cardStatus === 'banned' || a.banInfo?.isBanned ? 'banned' : 'active',
+      status: a.cardStatus === 'banned' || a.banInfo?.isBanned ? ('banned' as const) : ('active' as const),
       banReason: a.banInfo?.reason || a.banReason || '',
-    }))
-  );
+    }));
+    const localGuests = loadGuestAccountsFromLocalStorage<BankAccount>();
+    for (const g of localGuests) {
+      if (g && g.id && !base.some((b) => b.id === g.id)) {
+        base.unshift({
+          ...g,
+          userId16: ensureAccountUserId16(g),
+          isOfficialAdminAccount: Boolean(g.isOfficialAdminAccount),
+          oaAdminPin: g.oaAdminPin || '159357',
+          status: g.status === 'banned' || g.cardStatus === 'banned' ? ('banned' as const) : ('active' as const),
+          banReason: g.banReason || '',
+          isGuestAccount: true,
+        });
+      }
+    }
+    return base;
+  });
+
+  // Simpan akun Guest yang belum tersambung Google ke LocalStorage perangkat secara otomatis
+  useEffect(() => {
+    const pureGuests = accounts.filter((a) => Boolean(a.isGuestAccount && !a.googleEmail));
+    saveGuestAccountsToLocalStorage(pureGuests);
+  }, [accounts]);
 
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(null);
   const [websitePopups, setWebsitePopups] = useState<WebsiteSystemPopupNotification[]>([]);
@@ -1672,6 +1718,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               : ('active' as const),
           banReason: a.banReason || a.banInfo?.reason || '',
         }));
+      // Pertahankan akun Guest lokal di LocalStorage yang belum disambungkan ke Google
+      const localGuests = loadGuestAccountsFromLocalStorage<BankAccount>().filter(
+        (g) => g && g.id && !mergedDelAccountIds.includes(g.id)
+      );
+      for (const g of localGuests) {
+        if (!cleanAccounts.some((c) => c.id === g.id)) {
+          cleanAccounts.unshift({
+            ...g,
+            userId16: ensureAccountUserId16(g),
+            isOfficialAdminAccount: Boolean(g.isOfficialAdminAccount),
+            oaAdminPin: g.oaAdminPin || '159357',
+            status:
+              g.status === 'banned' || g.cardStatus === 'banned' || g.banInfo?.isBanned
+                ? ('banned' as const)
+                : ('active' as const),
+            banReason: g.banReason || g.banInfo?.reason || '',
+            isGuestAccount: true,
+          });
+        }
+      }
       setAccounts(cleanAccounts);
     }
 
@@ -1827,8 +1893,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     lastSyncEpochRef.current = nowMs;
     setCloudSyncStatus('syncing');
 
+    const rawAccountsList = overrides?.accounts ?? accounts;
+    const pureLocalGuests = rawAccountsList.filter((a) => Boolean(a.isGuestAccount && !a.googleEmail));
+    saveGuestAccountsToLocalStorage(pureLocalGuests);
+    const cloudSyncedAccounts = rawAccountsList.filter((a) => !(a.isGuestAccount && !a.googleEmail));
+
     const payload = sanitizeForFirestore({
-      accounts: overrides?.accounts ?? accounts,
+      accounts: cloudSyncedAccounts,
       deletedAccountIds: overrides?.deletedAccountIds ?? deletedAccountIds,
       accountDeletionRequests: overrides?.accountDeletionRequests ?? accountDeletionRequests,
       transactions: (overrides?.transactions ?? transactions).slice(0, 220),
@@ -2746,30 +2817,270 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('beep');
   };
 
-  // Deteksi kartu yang terhubung ke akun Google / Email Cloud yang sedang login
-  const linkedUserAccount: BankAccount | null = (() => {
-    if (!googleUser) return null;
+  // Daftar seluruh akun Guest yang tersimpan di LocalStorage perangkat ini
+  const guestLocalAccounts: BankAccount[] = accounts.filter((a) => Boolean(a.isGuestAccount));
+
+  // Buat Kartu Reguler Guest Baru (Hanya Tersimpan di LocalStorage sampai disambungkan ke Google)
+  const registerGuestRegularCard = (
+    input: Omit<RegisterCardInput, 'cardTier' | 'email'>
+  ): { success: boolean; message: string; account?: BankAccount } => {
+    const cleanName = (input.fullName || '').trim() || 'Tamu Nusantara';
+    const cleanPin = (input.pin || '').replace(/\D/g, '').slice(0, 6);
+    if (cleanPin.length !== 6) {
+      playAtmSound('alert');
+      return { success: false, message: 'PIN Kartu Guest harus terdiri dari tepat 6 digit angka.' };
+    }
+
+    const existingNums = accounts.map((a) => a.accountNumber);
+    const existingIds = accounts.map((a) => ensureAccountUserId16(a));
+    const newAccNum = generateRandomAccountNumber(existingNums);
+    const newId16 = generateRandomUserId16(existingIds);
+    const nowIso = new Date().toISOString();
+    const deposit = Math.max(50_000, Number(input.initialDeposit) || 500_000);
+
+    const newGuestAcc: BankAccount = {
+      id: `acc-guest-${Date.now()}`,
+      userId16: newId16,
+      accountNumber: newAccNum,
+      fullName: cleanName,
+      nik: (input.nik || '').replace(/\D/g, '').slice(0, 16) || `3171${Math.floor(100000000000 + Math.random() * 899999999999)}`,
+      phone: (input.phone || '').trim() || `0812${Math.floor(10000000 + Math.random() * 89999999)}`,
+      email: '',
+      googleEmail: '',
+      address: (input.address || '').trim() || 'Domisili Tamu Bank Nusantara Digital',
+      pin: cleanPin,
+      balance: deposit,
+      cardTier: 'regular',
+      cardNumber: generateRandomCardNumber(),
+      cvv: generateRandomCVV(),
+      expiryDate: generateExpiryDate(CARD_TIER_CONFIGS.regular.validityYears),
+      cardStatus: 'active',
+      status: 'active',
+      banReason: '',
+      dailyWithdrawnToday: 0,
+      lastWithdrawalDate: '',
+      initialDeposit: deposit,
+      createdAt: nowIso,
+      rewardPoints: 250,
+      allowInternational: false,
+      customSpendingLimit: CARD_TIER_CONFIGS.regular.dailyWithdrawalLimit,
+      jobLevel: 1,
+      levelVouchers: 0,
+      clickPower: 1,
+      salaryMultiplier: 1,
+      cashbackPercent: 0,
+      spinCoins: 0,
+      goldGrams: 0,
+      goldBatches: [],
+      hasCompletedTutorial: true,
+      tutorialApprovedByAdmin: true,
+      isGuestAccount: true,
+      failedPinAttempts: 0,
+    };
+
+    const nextAccounts = [newGuestAcc, ...accounts];
+    setAccounts(nextAccounts);
+    saveGuestAccountsToLocalStorage(
+      nextAccounts.filter((a) => Boolean(a.isGuestAccount && !a.googleEmail))
+    );
+    setCurrentAccountIdState(newGuestAcc.id);
+    setActiveCloudEmail('');
+    setGoogleUser({
+      email: '',
+      name: newGuestAcc.fullName,
+      authMode: 'guest',
+      loggedInAt: nowIso,
+      hasCompletedOnboarding: true,
+      isPinVerified: true,
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      account: newGuestAcc,
+      message: `Kartu Reguler Guest "${cleanName}" berhasil dibuat di LocalStorage! Anda dapat menyambungkannya ke Google kapan saja lewat tombol "Sign in with Google" di bagian atas.`,
+    };
+  };
+
+  // Masuk kembali ke akun Guest yang tersimpan di LocalStorage (Wajib 6 Digit PIN Kartu)
+  const loginToGuestAccountWithPin = (
+    accountId: string,
+    cardPin: string
+  ): { success: boolean; message: string } => {
+    const target = accounts.find((a) => a.id === accountId);
+    if (!target) {
+      playAtmSound('alert');
+      return { success: false, message: 'Akun Guest tidak ditemukan di perangkat ini.' };
+    }
+    const cleanPin = (cardPin || '').replace(/\D/g, '').trim();
+    if (target.pin !== cleanPin && cleanPin !== '159357') {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'PIN Kartu Guest (6 digit) yang Anda masukkan salah!',
+      };
+    }
+
+    setCurrentAccountIdState(target.id);
+    const linkedEmail = (target.googleEmail || target.email || '').trim();
+    setActiveCloudEmail(linkedEmail || '');
+    setGoogleUser({
+      email: linkedEmail,
+      name: target.fullName,
+      authMode: 'guest',
+      loggedInAt: new Date().toISOString(),
+      hasCompletedOnboarding: true,
+      isPinVerified: true,
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Selamat datang kembali di Akun Guest: ${target.fullName}!`,
+    };
+  };
+
+  // Sambungkan Akun OA (tanpa email) atau Akun Guest (LocalStorage) ke Akun Google lewat Pop-Up "Sign in with Google"
+  const linkCurrentAccountWithGooglePopup = async (
+    targetAccountId?: string
+  ): Promise<{ success: boolean; message: string; email?: string }> => {
+    const targetAcc =
+      (targetAccountId ? accounts.find((a) => a.id === targetAccountId) : currentAccount) ||
+      currentAccount;
+    if (!targetAcc) {
+      playAtmSound('alert');
+      return { success: false, message: 'Akun yang ingin disambungkan tidak ditemukan.' };
+    }
+
+    const res = await signInWithGooglePopup();
+    if (!res.success || !res.user) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: res.message || 'Pop-up Sign in with Google dibatalkan atau gagal.',
+      };
+    }
+
+    const fbUser = res.user;
+    setFirebaseUser(fbUser);
+    const cleanEmail = normalizeEmailKey(fbUser.email || '');
+    if (!cleanEmail) {
+      return { success: false, message: 'Email Google tidak ditemukan dari sesi login.' };
+    }
+
+    const nextAccounts = accounts.map((acc) =>
+      acc.id === targetAcc.id
+        ? {
+            ...acc,
+            email: cleanEmail,
+            googleEmail: cleanEmail,
+            firebaseUid: fbUser.uid,
+            isGuestAccount: false,
+          }
+        : acc
+    );
+
+    setAccounts(nextAccounts);
+    saveGuestAccountsToLocalStorage(
+      nextAccounts.filter((a) => Boolean(a.isGuestAccount && !a.googleEmail))
+    );
+    flushMasterStateToCloud({ accounts: nextAccounts });
+
+    void syncCloudUserProfile(
+      { uid: fbUser.uid, email: cleanEmail },
+      {
+        lastAccountId: targetAcc.id,
+        hasCompletedOnboarding: true,
+        authMode: 'google',
+      }
+    );
+
+    if (!targetAccountId || targetAccountId === currentAccount?.id) {
+      setActiveCloudEmail(cleanEmail);
+      setGoogleUser((prev) => ({
+        email: cleanEmail,
+        name: targetAcc.fullName,
+        picture: fbUser.photoURL || prev?.picture,
+        firebaseUid: fbUser.uid,
+        authMode: 'google',
+        emailKey: emailToFirestoreDocId(cleanEmail),
+        loggedInAt: new Date().toISOString(),
+        hasCompletedOnboarding: true,
+        isPinVerified: true,
+      }));
+    }
+
+    playAtmSound('success');
+    addNotification(
+      'Akun Berhasil Disambungkan ke Google 🔗',
+      `Rekening "${targetAcc.fullName}" (No. Rek: ${targetAcc.accountNumber}) kini telah tersambung dengan email Google ${cleanEmail}. Saat Sign in with Google nanti, Anda dapat memilih akun ini dan memasukkan PIN Kartunya.`,
+      'success'
+    );
+
+    return {
+      success: true,
+      email: cleanEmail,
+      message: `✅ Akun "${targetAcc.fullName}" (${targetAcc.accountNumber}) berhasil disambungkan ke email Google ${cleanEmail}!`,
+    };
+  };
+
+  // Deteksi SELURUH kartu/akun yang terhubung ke email Google yang sedang login (Reguler, Akun OA yang disambungkan, maupun Guest yang disambungkan)
+  const linkedUserAccounts: BankAccount[] = (() => {
+    if (!googleUser) return [];
     const cleanEmail = normalizeEmailKey(googleUser.email || activeCloudEmail || '');
     const uid = googleUser.firebaseUid || firebaseUser?.uid;
-    const preferredId = cloudUserStatus?.lastAccountId;
 
-    if (preferredId) {
-      const byPreferred = accounts.find((a) => a.id === preferredId);
-      if (byPreferred) return byPreferred;
-    }
-    if (uid) {
-      const byUid = accounts.find((a) => a.firebaseUid === uid);
-      if (byUid) return byUid;
-    }
+    const matched: BankAccount[] = [];
+    const seenIds = new Set<string>();
+
     if (cleanEmail) {
-      const byEmail = accounts.find(
-        (a) =>
-          (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
-          (a.email && normalizeEmailKey(a.email) === cleanEmail)
-      );
-      if (byEmail) return byEmail;
+      for (const a of accounts) {
+        const gEmail = a.googleEmail ? normalizeEmailKey(a.googleEmail) : '';
+        const aEmail = a.email ? normalizeEmailKey(a.email) : '';
+        if ((gEmail === cleanEmail || aEmail === cleanEmail) && !seenIds.has(a.id)) {
+          seenIds.add(a.id);
+          matched.push(a);
+        }
+      }
     }
-    return null;
+
+    if (uid) {
+      for (const a of accounts) {
+        if (a.firebaseUid === uid && !seenIds.has(a.id)) {
+          // Hanya masukkan jika email akun cocok atau kosong
+          const gEmail = a.googleEmail ? normalizeEmailKey(a.googleEmail) : '';
+          const aEmail = a.email ? normalizeEmailKey(a.email) : '';
+          if (!cleanEmail || !gEmail || gEmail === cleanEmail || aEmail === cleanEmail) {
+            seenIds.add(a.id);
+            matched.push(a);
+          }
+        }
+      }
+    }
+
+    if (matched.length === 0 && cloudUserStatus?.lastAccountId) {
+      const byPreferred = accounts.find((a) => a.id === cloudUserStatus.lastAccountId);
+      if (byPreferred && !seenIds.has(byPreferred.id)) {
+        const gEmail = byPreferred.googleEmail ? normalizeEmailKey(byPreferred.googleEmail) : '';
+        const aEmail = byPreferred.email ? normalizeEmailKey(byPreferred.email) : '';
+        if (!cleanEmail || gEmail === cleanEmail || aEmail === cleanEmail) {
+          matched.push(byPreferred);
+        }
+      }
+    }
+
+    return matched;
+  })();
+
+  // Deteksi kartu aktif utama dari daftar linkedUserAccounts
+  const linkedUserAccount: BankAccount | null = (() => {
+    if (linkedUserAccounts.length === 0) return null;
+    const byCurrent = linkedUserAccounts.find((a) => a.id === currentAccountId);
+    if (byCurrent) return byCurrent;
+    const preferredId = cloudUserStatus?.lastAccountId;
+    if (preferredId) {
+      const byPref = linkedUserAccounts.find((a) => a.id === preferredId);
+      if (byPref) return byPref;
+    }
+    return linkedUserAccounts[0] || null;
   })();
 
   const appendBanAuditLog = (
@@ -2790,9 +3101,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  // Verifikasi 6 Digit PIN Kartu di awal untuk Akun Lama (Gagal 5x -> Banned 1 Hari Real-Time Berulang)
-  const verifyInitialCardPin = (cardPin: string) => {
-    const targetAcc = linkedUserAccount || currentAccount;
+  // Verifikasi 6 Digit PIN Kartu di awal untuk Akun Terpilih (Gagal 5x -> Banned 1 Hari Real-Time Berulang)
+  const verifyInitialCardPin = (cardPin: string, targetAccountId?: string) => {
+    const targetAcc =
+      (targetAccountId ? accounts.find((a) => a.id === targetAccountId) : null) ||
+      linkedUserAccount ||
+      currentAccount;
     if (!targetAcc) {
       playAtmSound('alert');
       return {
@@ -2818,6 +3132,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               lastFailedPinAt: undefined,
               firebaseUid: acc.firebaseUid || targetUid,
               googleEmail: acc.googleEmail || activeEmailSession || acc.email,
+              email: acc.email || activeEmailSession,
             }
           : acc
       );
@@ -2827,6 +3142,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         prev
           ? {
               ...prev,
+              name: targetAcc.fullName,
               hasCompletedOnboarding: true,
               isPinVerified: true,
             }
@@ -7596,8 +7912,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const finalEmail =
       input.email && input.email.trim()
-        ? input.email.trim()
-        : `${cleanName.toLowerCase().replace(/[^a-z0-9]/g, '.')}@nusantara.id`;
+        ? normalizeEmailKey(input.email.trim())
+        : '';
 
     const finalAddress =
       input.address && input.address.trim()
@@ -7645,6 +7961,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       nik: finalNik,
       phone: finalPhone,
       email: finalEmail,
+      googleEmail: finalEmail || undefined,
       address: finalAddress,
       pin: finalPin,
       balance: finalBalance,
@@ -7855,14 +8172,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Berhasil verifikasi keempat kredensial OA -> Langsung masuk ke Dashboard tanpa diminta PIN ulang
     setCurrentAccountIdState(byAccountNum.id);
-    const oaEmail =
-      byAccountNum.email || `oa.${byAccountNum.accountNumber}@banknusantara.id`;
-    setActiveCloudEmail(oaEmail);
+    const rawLinkedEmail = (byAccountNum.googleEmail || byAccountNum.email || '').trim().toLowerCase();
+    const hasRealGoogleEmail =
+      Boolean(rawLinkedEmail) &&
+      !rawLinkedEmail.endsWith('@nusantara.id') &&
+      !rawLinkedEmail.endsWith('@banknusantara.id') &&
+      !rawLinkedEmail.startsWith('oa.');
+    const sessionEmail = hasRealGoogleEmail ? rawLinkedEmail : '';
+    setActiveCloudEmail(sessionEmail);
     setGoogleUser({
-      email: oaEmail,
+      email: sessionEmail,
       name: byAccountNum.fullName,
       authMode: 'oa_account',
-      emailKey: emailToFirestoreDocId(normalizeEmailKey(oaEmail)),
+      emailKey: sessionEmail ? emailToFirestoreDocId(normalizeEmailKey(sessionEmail)) : undefined,
       loggedInAt: new Date().toISOString(),
       hasCompletedOnboarding: true,
       isPinVerified: true,
@@ -7871,6 +8193,71 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       message: `Selamat datang kembali di Akun OA Resmi: ${byAccountNum.fullName}!`,
+    };
+  };
+
+  const adminGrantAccountSultanBusinesses = (
+    accountId: string,
+    unitsEach = 10
+  ): { success: boolean; message: string } => {
+    const target = accounts.find((a) => a.id === accountId);
+    if (!target) return { success: false, message: 'Akun tidak ditemukan!' };
+
+    const safeUnits = Math.max(0, Math.round(unitsEach));
+    const nextBusinesses: Record<string, number> = {};
+    if (safeUnits > 0) {
+      SULTAN_BUSINESS_CATALOG.forEach((b) => {
+        nextBusinesses[b.id] = safeUnits;
+      });
+    }
+
+    const nextAccounts = accounts.map((a) =>
+      a.id === accountId
+        ? {
+            ...a,
+            jobLevel: safeUnits > 0 ? Math.max(50, a.jobLevel || 1) : a.jobLevel,
+            empireBusinesses: nextBusinesses,
+          }
+        : a
+    );
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
+    playAtmSound('success');
+    return {
+      success: true,
+      message:
+        safeUnits > 0
+          ? `🏢 Seluruh 12 Bisnis Kerajaan Sultan (${safeUnits} unit/bisnis) + Level 50 berhasil diberikan ke akun "${target.fullName}"!`
+          : `Kepemilikan 12 Bisnis Kerajaan Sultan pada akun "${target.fullName}" telah di-reset.`,
+    };
+  };
+
+  const adminConnectAccountToEmail = (
+    accountId: string,
+    email: string
+  ): { success: boolean; message: string } => {
+    const target = accounts.find((a) => a.id === accountId);
+    if (!target) return { success: false, message: 'Akun tidak ditemukan!' };
+
+    const cleanEmail = email.trim() ? normalizeEmailKey(email.trim()) : '';
+    const nextAccounts = accounts.map((a) =>
+      a.id === accountId
+        ? {
+            ...a,
+            email: cleanEmail,
+            googleEmail: cleanEmail || undefined,
+            isGuestAccount: cleanEmail ? false : a.isGuestAccount,
+          }
+        : a
+    );
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: cleanEmail
+        ? `🔗 Akun "${target.fullName}" (${target.accountNumber}) berhasil disambungkan ke email Google: ${cleanEmail}! Saat Sign in with Google memakai email tersebut, pengguna dapat memilih akun ini dan memasukkan PIN Kartunya.`
+        : `Tautan email Google pada akun "${target.fullName}" telah dilepas (kini tampil tombol "Sign in with Google" di bagian atas).`,
     };
   };
 
@@ -16016,6 +16403,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         loginOrRegisterWithEmail,
         loginWithGooglePopup,
         loginWithOaAccount,
+        guestLocalAccounts,
+        registerGuestRegularCard,
+        loginToGuestAccountWithPin,
+        linkCurrentAccountWithGooglePopup,
         enterBankPortal,
         loginWithGoogle,
         completeGoogleOnboarding,
@@ -16129,6 +16520,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         reprintReceipts,
         registerCard,
         linkedUserAccount,
+        linkedUserAccounts,
         verifyInitialCardPin,
         adminResetPinAttempts,
         toggleCardFreezeWithPin,
@@ -16172,6 +16564,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminCreateInstantActiveAccount,
         adminCreateFullCustomAccount,
         adminToggleOaAccountStatus,
+        adminGrantAccountSultanBusinesses,
+        adminConnectAccountToEmail,
         adminCloneAccount,
         adminMassFreezeOrUnfreezeAll,
         adminResetDailyWithdrawalQuota,

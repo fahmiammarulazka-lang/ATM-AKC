@@ -87,6 +87,19 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
     adminDeleteAccount,
     approveAccountDeletionRequest,
     rejectAccountDeletionRequest,
+    adminSetAccountJobLevel,
+    adminToggleVerifyAccount,
+    adminAssignAccountDevRole,
+    adminBanCard,
+    adminUnbanCard,
+    adminResetPinAttempts,
+    adminCloneAccount,
+    adminForgiveOrPayoffLoans,
+    adminClearTransactionHistory,
+    adminGrantAccountSultanBusinesses,
+    adminConnectAccountToEmail,
+    adminSendWebsiteBroadcast,
+    linkCurrentAccountWithGooglePopup,
   } = useBank();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -179,6 +192,76 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
   // State Konfirmasi Hapus Permanen Akun
   const [confirmDeleteAccountId, setConfirmDeleteAccountId] = useState<string | null>(null);
   const [reviewNoteMap, setReviewNoteMap] = useState<Record<string, string>>({});
+
+  // State Laci Super Kontrol & Suntik Aset Lengkap per akun di Kelola Akun
+  const [expandedControlDrawerMap, setExpandedControlDrawerMap] = useState<Record<string, boolean>>({});
+  const [linkingGoogleAccId, setLinkingGoogleAccId] = useState<string | null>(null);
+  const [customEmailInputMap, setCustomEmailInputMap] = useState<Record<string, string>>({});
+  const [customInjectInputMap, setCustomInjectInputMap] = useState<
+    Record<
+      string,
+      {
+        balance?: string;
+        gold?: string;
+        coins?: string;
+        pulsa?: string;
+        pln?: string;
+        points?: string;
+        vouchers?: string;
+        clickPower?: string;
+        salaryMult?: string;
+        cashback?: string;
+        spendingLimit?: string;
+        popupTitle?: string;
+        popupMsg?: string;
+      }
+    >
+  >({});
+
+  // Daftar email Google nyata yang sudah terdaftar di sistem untuk dropdown sambung cepat
+  const registeredGoogleEmails = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const a of accounts) {
+      const em = (a.email || '').trim().toLowerCase();
+      if (
+        em &&
+        em.includes('@') &&
+        !em.endsWith('@nusantara.id') &&
+        !em.endsWith('@banknusantara.id') &&
+        !em.startsWith('oa.')
+      ) {
+        set.add(em);
+      }
+    }
+    return Array.from(set);
+  }, [accounts]);
+
+  const updateInjectInput = (
+    accId: string,
+    field: keyof NonNullable<typeof customInjectInputMap[string]>,
+    value: string
+  ) => {
+    setCustomInjectInputMap((prev) => ({
+      ...prev,
+      [accId]: {
+        ...(prev[accId] || {}),
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleLinkAccountWithGooglePopupFromAdmin = async (accId: string) => {
+    if (linkingGoogleAccId) return;
+    setLinkingGoogleAccId(accId);
+    try {
+      const res = await linkCurrentAccountWithGooglePopup(accId);
+      if (res.success || res.errorCode !== 'auth/popup-closed-by-user') {
+        showNotice(res.success ? 'success' : 'error', res.message);
+      }
+    } finally {
+      setLinkingGoogleAccId(null);
+    }
+  };
 
   const showNotice = (type: 'success' | 'error', text: string) => {
     setFeedbackBanner({ type, text });
@@ -1558,6 +1641,880 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                     </div>
                   </div>
                 </div>
+
+                {/* =========================================================================
+                    BAR TOMBOL SAKLAR 1-KLIK LANGSUNG DI TIAP KARTU AKUN (KELOLA AKUN SUPER)
+                    - Toggle Perlindungan VIP (VIP Shield), Centang Biru, Saldo Unlimited
+                    - Ganti Kasta Kartu Cepat, Level 50, 12 Bisnis Sultan
+                    - Reset 5x Salah PIN, Buka Banned / Banned Cepat, Duplikat Akun
+                    - Sign in with Google (Sambungkan Akun OA / Guest ke Email Google)
+                    - Tombol Buka Laci Super Kontrol & Suntik Aset Lengkap
+                   ========================================================================= */}
+                <div className="p-3 rounded-2xl bg-slate-900/95 border border-cyan-500/30 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-cyan-300 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Bar Saklar 1-Klik & Kontrol Cepat Akun:</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedControlDrawerMap((prev) => ({
+                          ...prev,
+                          [acc.id]: !prev[acc.id],
+                        }))
+                      }
+                      className={`px-3 py-1.5 rounded-xl font-black text-[11px] flex items-center gap-1.5 cursor-pointer transition shadow ${
+                        expandedControlDrawerMap[acc.id]
+                          ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950'
+                          : 'bg-gradient-to-r from-cyan-500/20 to-indigo-500/20 hover:from-cyan-500/30 hover:to-indigo-500/30 border border-cyan-400/50 text-cyan-200'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>
+                        {expandedControlDrawerMap[acc.id]
+                          ? '▲ Tutup Laci Super Kontrol & Suntik Aset'
+                          : '⚡ Buka Laci Super Kontrol & Suntik Aset Lengkap'}
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Deretan Tombol Saklar 1-Klik */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    {/* 1. Toggle Perlindungan VIP (VIP Shield) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextShield = !acc.vipShieldActive;
+                        const res = adminQuickFullEditAccount(acc.id, {
+                          vipShieldActive: nextShield,
+                        });
+                        showNotice(
+                          res.success ? 'success' : 'error',
+                          `🛡️ Perlindungan VIP (VIP Shield) untuk "${acc.fullName}" ${
+                            nextShield ? 'DIAKTIFKAN (Anti-Pajak & Proteksi Penuh)' : 'DIMATIKAN'
+                          }.`
+                        );
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl font-black flex items-center gap-1 cursor-pointer border transition ${
+                        acc.vipShieldActive
+                          ? 'bg-amber-500/25 border-amber-400 text-amber-200 shadow-sm shadow-amber-500/20'
+                          : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                      title="Toggle Perlindungan VIP (Anti-Pajak, Proteksi Saldo & Prioritas VIP)"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>Perlindungan VIP: {acc.vipShieldActive ? 'ON' : 'OFF'}</span>
+                    </button>
+
+                    {/* 2. Toggle Centang Biru (Verified) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminToggleVerifyAccount(
+                          acc.id,
+                          acc.verifiedLabel || 'Nasabah VIP Terverifikasi Resmi'
+                        );
+                        showNotice(res.success ? 'success' : 'error', res.message);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl font-black flex items-center gap-1 cursor-pointer border transition ${
+                        acc.isVerified
+                          ? 'bg-sky-500/25 border-sky-400 text-sky-200'
+                          : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <UserCheck className="w-3.5 h-3.5" />
+                      <span>Centang Biru: {acc.isVerified ? 'ON' : 'OFF'}</span>
+                    </button>
+
+                    {/* 3. Toggle Saldo Unlimited ∞ */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const currentlyUnlim = isUnlimitedNumber(acc.balance);
+                        const res = adminQuickFullEditAccount(acc.id, {
+                          balance: currentlyUnlim ? 100_000_000 : UNLIMITED_BALANCE,
+                        });
+                        showNotice(
+                          res.success ? 'success' : 'error',
+                          currentlyUnlim
+                            ? `Saldo "${acc.fullName}" dikembalikan ke Rp 100.000.000.`
+                            : `∞ Saldo "${acc.fullName}" diubah menjadi UNLIMITED (Tak Terbatas)!`
+                        );
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl font-black flex items-center gap-1 cursor-pointer border transition ${
+                        isUnlimitedNumber(acc.balance)
+                          ? 'bg-fuchsia-500/25 border-fuchsia-400 text-fuchsia-200'
+                          : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <InfinityIcon className="w-3.5 h-3.5" />
+                      <span>
+                        Unlimited ∞: {isUnlimitedNumber(acc.balance) ? 'ON' : 'OFF'}
+                      </span>
+                    </button>
+
+                    {/* 4. Ganti Kasta Kartu Cepat */}
+                    <div className="inline-flex items-center gap-1 px-2 py-1 rounded-xl bg-slate-950 border border-indigo-500/40">
+                      <CreditCard className="w-3.5 h-3.5 text-indigo-400" />
+                      <select
+                        value={acc.cardTier}
+                        onChange={(e) => {
+                          const nextTier = e.target.value as CardTier;
+                          const res = adminQuickFullEditAccount(acc.id, {
+                            cardTier: nextTier,
+                            ...(nextTier === 'admin'
+                              ? {
+                                  balance: UNLIMITED_BALANCE,
+                                  expiryDate: '∞ / SELAMANYA',
+                                }
+                              : {}),
+                          });
+                          showNotice(
+                            res.success ? 'success' : 'error',
+                            `💳 Kasta kartu "${acc.fullName}" diubah ke ${nextTier.toUpperCase()}!`
+                          );
+                        }}
+                        className="bg-transparent text-indigo-200 font-black text-[11px] focus:outline-none cursor-pointer"
+                        title="Ganti Kasta Kartu Instan"
+                      >
+                        <option value="regular" className="bg-slate-900">
+                          Kasta: Reguler
+                        </option>
+                        <option value="gold" className="bg-slate-900">
+                          Kasta: Gold
+                        </option>
+                        <option value="premium" className="bg-slate-900">
+                          Kasta: Premium
+                        </option>
+                        <option value="platinum" className="bg-slate-900">
+                          Kasta: Platinum VIP
+                        </option>
+                        <option value="admin" className="bg-slate-900">
+                          Kasta: Admin ∞
+                        </option>
+                      </select>
+                    </div>
+
+                    {/* 5. Tombol 1-Klik Level 50 */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminSetAccountJobLevel(acc.id, 50);
+                        showNotice(res.success ? 'success' : 'error', res.message);
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 text-emerald-200 font-black flex items-center gap-1 cursor-pointer"
+                    >
+                      <Briefcase className="w-3.5 h-3.5" />
+                      <span>Level 50 Max</span>
+                    </button>
+
+                    {/* 6. Tombol 1-Klik 12 Bisnis Sultan */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminGrantAccountSultanBusinesses(acc.id, 10);
+                        showNotice(res.success ? 'success' : 'error', res.message);
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 font-black flex items-center gap-1 cursor-pointer"
+                    >
+                      <Crown className="w-3.5 h-3.5" />
+                      <span>+12 Bisnis Sultan</span>
+                    </button>
+
+                    {/* 7. Tombol 1-Klik Reset 5x Salah PIN */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminResetPinAttempts(acc.id);
+                        showNotice(res.success ? 'success' : 'error', res.message);
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-200 font-bold flex items-center gap-1 cursor-pointer"
+                      title="Reset percobaan salah PIN kembali ke 0/5"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Reset Salah PIN ({acc.failedPinAttempts || 0}/5)</span>
+                    </button>
+
+                    {/* 8. Tombol 1-Klik Buka Banned / Banned Cepat */}
+                    {acc.cardStatus === 'banned' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = adminUnbanCard(acc.id);
+                          showNotice(res.success ? 'success' : 'error', res.message);
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black flex items-center gap-1 cursor-pointer"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>🔓 Buka Banned</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = adminBanCard({
+                            accountId: acc.id,
+                            durationType: 'custom',
+                            durationMinutes: 1440,
+                            durationLabel: '1 Hari',
+                            reason: 'Diblokir sementara oleh Otoritas Panel Admin',
+                          });
+                          showNotice(res.success ? 'success' : 'error', res.message);
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-200 font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        <span>🚫 Banned 1 Hari</span>
+                      </button>
+                    )}
+
+                    {/* 9. Tombol 1-Klik Duplikat Akun */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminCloneAccount(acc.id);
+                        showNotice(res.success ? 'success' : 'error', res.message);
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400/50 text-purple-200 font-bold flex items-center gap-1 cursor-pointer"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>🧬 Duplikat Akun</span>
+                    </button>
+
+                    {/* 10. Tombol Sign in with Google / Status Email Terhubung */}
+                    {(() => {
+                      const rawEm = (acc.email || '').trim().toLowerCase();
+                      const isUnlinked =
+                        acc.isGuestAccount ||
+                        !rawEm ||
+                        rawEm.endsWith('@nusantara.id') ||
+                        rawEm.endsWith('@banknusantara.id') ||
+                        rawEm.startsWith('oa.');
+                      return isUnlinked ? (
+                        <button
+                          type="button"
+                          onClick={() => handleLinkAccountWithGooglePopupFromAdmin(acc.id)}
+                          disabled={linkingGoogleAccId === acc.id}
+                          className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-black flex items-center gap-1.5 cursor-pointer shadow"
+                          title="Sambungkan akun ini ke email Google lewat popup Sign in with Google"
+                        >
+                          <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                            <path
+                              fill="#4285F4"
+                              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                            />
+                            <path
+                              fill="#34A853"
+                              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                            />
+                            <path
+                              fill="#FBBC05"
+                              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                            />
+                            <path
+                              fill="#EA4335"
+                              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                            />
+                          </svg>
+                          <span>
+                            {linkingGoogleAccId === acc.id
+                              ? 'Menyambungkan...'
+                              : 'Sign in with Google'}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="px-2.5 py-1.5 rounded-xl bg-emerald-950/90 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-bold">
+                          🔗 Google: {acc.email}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* =========================================================================
+                    LACI SUPER KONTROL & SUNTIK ASET LENGKAP (EXPANDABLE DRAWER PER AKUN)
+                   ========================================================================= */}
+                {expandedControlDrawerMap[acc.id] && (
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-950 to-indigo-950/60 border-2 border-cyan-500/50 space-y-4 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-amber-400" />
+                        <span className="font-black text-white text-sm">
+                          Laci Super Kontrol, Suntik Aset, Boost & Sambung Email Google — "{acc.fullName}"
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedControlDrawerMap((prev) => ({ ...prev, [acc.id]: false }))
+                        }
+                        className="text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* SEKSI 1: SUNTIK & ATUR 6 ASET INSTAN */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {/* 1. Suntik Saldo Rupiah */}
+                      <div className="p-3 rounded-xl bg-slate-950/90 border border-emerald-500/35 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-emerald-300">1. Suntik Saldo Rupiah</span>
+                          <span className="font-mono text-[11px] text-white font-bold">
+                            {isUnlimitedNumber(acc.balance) ? '∞ UNLIMITED' : formatRupiah(acc.balance)}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            { label: '+10 Jt', add: 10_000_000 },
+                            { label: '+100 Jt', add: 100_000_000 },
+                            { label: '+1 Miliar', add: 1_000_000_000 },
+                            { label: '+100 M', add: 100_000_000_000 },
+                          ].map((b) => (
+                            <button
+                              key={b.label}
+                              type="button"
+                              onClick={() => {
+                                const base = isUnlimitedNumber(acc.balance) ? 0 : acc.balance;
+                                const res = adminQuickFullEditAccount(acc.id, {
+                                  balance: base + b.add,
+                                });
+                                showNotice(
+                                  res.success ? 'success' : 'error',
+                                  `💰 Saldo "${acc.fullName}" ditambah ${b.label}!`
+                                );
+                              }}
+                              className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold text-[10px] cursor-pointer"
+                            >
+                              {b.label}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminQuickFullEditAccount(acc.id, {
+                                balance: UNLIMITED_BALANCE,
+                              });
+                              showNotice(
+                                res.success ? 'success' : 'error',
+                                `∞ Saldo "${acc.fullName}" diset ke UNLIMITED!`
+                              );
+                            }}
+                            className="px-2 py-1 rounded-lg bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 font-black text-[10px] cursor-pointer"
+                          >
+                            Set ∞
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            value={customInjectInputMap[acc.id]?.balance || ''}
+                            onChange={(e) => updateInjectInput(acc.id, 'balance', e.target.value)}
+                            placeholder="Nominal Rp bebas..."
+                            className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-[11px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = Number(customInjectInputMap[acc.id]?.balance || 0);
+                              if (!val) return;
+                              const base = isUnlimitedNumber(acc.balance) ? 0 : acc.balance;
+                              adminQuickFullEditAccount(acc.id, { balance: Math.max(0, base + val) });
+                              showNotice('success', `Saldo "${acc.fullName}" ditambah ${formatRupiah(val)}.`);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[10px] cursor-pointer"
+                          >
+                            +Tambah
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = Number(customInjectInputMap[acc.id]?.balance || 0);
+                              adminQuickFullEditAccount(acc.id, { balance: Math.max(0, val) });
+                              showNotice('success', `Saldo "${acc.fullName}" diatur ke ${formatRupiah(val)}.`);
+                            }}
+                            className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            Set
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 2. Suntik Emas 24K */}
+                      <div className="p-3 rounded-xl bg-slate-950/90 border border-amber-500/35 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-amber-300">2. Suntik Emas 24K (Gram)</span>
+                          <span className="font-mono text-[11px] text-amber-200 font-bold">
+                            {(acc.goldGrams || 0).toFixed(2)} g
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {[10, 100, 1000, 10000].map((g) => (
+                            <button
+                              key={g}
+                              type="button"
+                              onClick={() => {
+                                adminQuickFullEditAccount(acc.id, {
+                                  goldGrams: (acc.goldGrams || 0) + g,
+                                });
+                                showNotice('success', `🪙 +${g}g Emas 24K ditambahkan ke "${acc.fullName}"!`);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-[10px] cursor-pointer"
+                            >
+                              +{g.toLocaleString('id-ID')}g
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={customInjectInputMap[acc.id]?.gold || ''}
+                            onChange={(e) => updateInjectInput(acc.id, 'gold', e.target.value)}
+                            placeholder="Gram emas..."
+                            className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-[11px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = Number(customInjectInputMap[acc.id]?.gold || 0);
+                              adminQuickFullEditAccount(acc.id, {
+                                goldGrams: Math.max(0, (acc.goldGrams || 0) + val),
+                              });
+                              showNotice('success', `Emas 24K "${acc.fullName}" ditambah ${val}g.`);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[10px] cursor-pointer"
+                          >
+                            +Gram
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3. Suntik Koin Spin */}
+                      <div className="p-3 rounded-xl bg-slate-950/90 border border-fuchsia-500/35 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-fuchsia-300">3. Suntik Koin Spin</span>
+                          <span className="font-mono text-[11px] text-fuchsia-200 font-bold">
+                            {(acc.spinCoins || 0).toLocaleString('id-ID')} Koin
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {[1000, 10000, 100000, 1000000].map((c) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => {
+                                const res = adminQuickFullEditAccount(acc.id, {
+                                  spinCoins: (acc.spinCoins || 0) + c,
+                                });
+                                showNotice(
+                                  res.success ? 'success' : 'error',
+                                  `🎰 +${c.toLocaleString('id-ID')} Koin Spin ditambahkan ke "${acc.fullName}"!`
+                                );
+                              }}
+                              className="px-2 py-1 rounded-lg bg-fuchsia-500/20 hover:bg-fuchsia-500/30 border border-fuchsia-500/40 text-fuchsia-200 font-bold text-[10px] cursor-pointer"
+                            >
+                              +{c.toLocaleString('id-ID')}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            value={customInjectInputMap[acc.id]?.coins || ''}
+                            onChange={(e) => updateInjectInput(acc.id, 'coins', e.target.value)}
+                            placeholder="Jumlah koin..."
+                            className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-[11px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const val = Number(customInjectInputMap[acc.id]?.coins || 0);
+                              const res = adminQuickFullEditAccount(acc.id, {
+                                spinCoins: Math.max(0, (acc.spinCoins || 0) + val),
+                              });
+                              showNotice(
+                                res.success ? 'success' : 'error',
+                                `Koin Spin "${acc.fullName}" ditambah ${val.toLocaleString('id-ID')} koin.`
+                              );
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-fuchsia-500 hover:bg-fuchsia-400 text-slate-950 font-black text-[10px] cursor-pointer"
+                          >
+                            +Koin
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 4. Suntik Pulsa & Token PLN kWh */}
+                      <div className="p-3 rounded-xl bg-slate-950/90 border border-cyan-500/35 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-cyan-300">4. Suntik Pulsa & Token PLN</span>
+                          <span className="font-mono text-[10px] text-cyan-200">
+                            {formatRupiah(acc.pulsaBalance || 0)} • {acc.plnKwhBalance || 0} kWh
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              adminQuickFullEditAccount(acc.id, {
+                                pulsaBalance: (acc.pulsaBalance || 0) + 1_000_000,
+                              });
+                              showNotice('success', `📱 +Rp 1.000.000 Pulsa ditambahkan ke "${acc.fullName}".`);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            +1 Jt Pulsa
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              adminQuickFullEditAccount(acc.id, {
+                                plnKwhBalance: (acc.plnKwhBalance || 0) + 500,
+                              });
+                              showNotice('success', `⚡ +500 kWh Token PLN ditambahkan ke "${acc.fullName}".`);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            +500 kWh PLN
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              adminQuickFullEditAccount(acc.id, {
+                                pulsaBalance: (acc.pulsaBalance || 0) + 10_000_000,
+                                plnKwhBalance: (acc.plnKwhBalance || 0) + 5000,
+                              });
+                              showNotice(
+                                'success',
+                                `⚡ Paket +10 Jt Pulsa & +5.000 kWh PLN disuntikkan ke "${acc.fullName}"!`
+                              );
+                            }}
+                            className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            +10 Jt & +5.000 kWh
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={customInjectInputMap[acc.id]?.pulsa || ''}
+                              onChange={(e) => updateInjectInput(acc.id, 'pulsa', e.target.value)}
+                              placeholder="Pulsa Rp"
+                              className="w-full px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-[10px]"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const val = Number(customInjectInputMap[acc.id]?.pulsa || 0);
+                                adminQuickFullEditAccount(acc.id, {
+                                  pulsaBalance: Math.max(0, (acc.pulsaBalance || 0) + val),
+                                });
+                                showNotice('success', `Pulsa ditambah ${formatRupiah(val)}.`);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-cyan-500 text-slate-950 font-black text-[10px] cursor-pointer"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={customInjectInputMap[acc.id]?.pln || ''}
+                              onChange={(e) => updateInjectInput(acc.id, 'pln', e.target.value)}
+                              placeholder="PLN kWh"
+                              className="w-full px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-white font-mono text-[10px]"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const val = Number(customInjectInputMap[acc.id]?.pln || 0);
+                                adminQuickFullEditAccount(acc.id, {
+                                  plnKwhBalance: Math.max(0, (acc.plnKwhBalance || 0) + val),
+                                });
+                                showNotice('success', `Token PLN ditambah ${val} kWh.`);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-amber-500 text-slate-950 font-black text-[10px] cursor-pointer"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 5. Suntik Poin Reward & Voucher Level Kerja */}
+                      <div className="p-3 rounded-xl bg-slate-950/90 border border-indigo-500/35 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-indigo-300">5. Poin Reward & Voucher Lv</span>
+                          <span className="font-mono text-[10px] text-indigo-200">
+                            {(acc.rewardPoints || 0).toLocaleString('id-ID')} Poin • {acc.levelVouchers || 0} Vch
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              adminQuickFullEditAccount(acc.id, {
+                                rewardPoints: (acc.rewardPoints || 0) + 50_000,
+                              });
+                              showNotice('success', `🎁 +50.000 Poin Reward ditambahkan!`);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            +50.000 Poin
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminQuickFullEditAccount(acc.id, {
+                                levelVouchers: (acc.levelVouchers || 0) + 10,
+                              });
+                              showNotice(
+                                res.success ? 'success' : 'error',
+                                `🎟️ +10 Voucher Level Kerja ditambahkan ke "${acc.fullName}"!`
+                              );
+                            }}
+                            className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            +10 Voucher Lv
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminQuickFullEditAccount(acc.id, {
+                                levelVouchers: (acc.levelVouchers || 0) + 50,
+                              });
+                              showNotice(
+                                res.success ? 'success' : 'error',
+                                `🎟️ +50 Voucher Level Kerja ditambahkan ke "${acc.fullName}"!`
+                              );
+                            }}
+                            className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            +50 Voucher Lv
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 6. Atur Kekuatan Klik, Pengali Gaji, Cashback & Limit Harian */}
+                      <div className="p-3 rounded-xl bg-slate-950/90 border border-amber-500/35 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-black text-amber-300">
+                            6. Boost Klik, Gaji, Cashback & Limit
+                          </span>
+                          <span className="font-mono text-[10px] text-emerald-300">
+                            Klik {acc.clickPower || 1}x • Gaji {acc.salaryMultiplier || 1}x • CB{' '}
+                            {acc.cashbackPercent || 0}%
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            { label: 'Klik 50x', patch: { clickPower: 50 } },
+                            { label: 'Klik 500x', patch: { clickPower: 500 } },
+                            { label: 'Gaji 25x', patch: { salaryMultiplier: 25 } },
+                            { label: 'Gaji 100x', patch: { salaryMultiplier: 100 } },
+                            { label: 'Cashback 25%', patch: { cashbackPercent: 25 } },
+                            { label: 'Cashback 100%', patch: { cashbackPercent: 100 } },
+                          ].map((b) => (
+                            <button
+                              key={b.label}
+                              type="button"
+                              onClick={() => {
+                                adminQuickFullEditAccount(acc.id, b.patch);
+                                showNotice('success', `⚡ Boost "${b.label}" diaktifkan untuk "${acc.fullName}"!`);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-[10px] cursor-pointer"
+                            >
+                              {b.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex flex-wrap gap-1 pt-1 border-t border-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              adminQuickFullEditAccount(acc.id, {
+                                dailyWithdrawnToday: 0,
+                                customSpendingLimit: 1_000_000_000,
+                                allowInternational: true,
+                              });
+                              showNotice(
+                                'success',
+                                `💳 Kuota tarik harian di-reset ke Rp 0, Limit Belanja diset Rp 1 Miliar & Internasional ON!`
+                              );
+                            }}
+                            className="px-2 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            Reset Limit Harian + Set Rp 1 M + Intl ON
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminForgiveOrPayoffLoans(acc.id);
+                              showNotice(res.success ? 'success' : 'error', res.message);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            Lunasi Pinjaman 100%
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminClearTransactionHistory(acc.id);
+                              showNotice(res.success ? 'success' : 'error', res.message);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-200 font-bold text-[10px] cursor-pointer"
+                          >
+                            Bersihkan Mutasi
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SEKSI 2: SAMBUNGKAN AKUN KE EMAIL GOOGLE TERDAFTAR & KIRIM POPUP PRIBADI */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+                      {/* Kiri: Sambungkan ke Email Google Terdaftar / Popup Sign in with Google */}
+                      <div className="p-3 rounded-xl bg-slate-950/90 border border-cyan-500/40 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-black text-cyan-300">
+                            🔗 Sambungkan Akun Ini ke Email Google (Bisa Pilih Saat Sign in with Google)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleLinkAccountWithGooglePopupFromAdmin(acc.id)}
+                            disabled={linkingGoogleAccId === acc.id}
+                            className="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-900 font-black text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
+                          >
+                            <span>
+                              {linkingGoogleAccId === acc.id
+                                ? 'Membuka Popup...'
+                                : 'Popup Sign in with Google'}
+                            </span>
+                          </button>
+                        </div>
+
+                        {registeredGoogleEmails.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="text-[10px] text-slate-400">Pilih Email Terdaftar:</span>
+                            {registeredGoogleEmails.map((em) => (
+                              <button
+                                key={em}
+                                type="button"
+                                onClick={() => {
+                                  const res = adminConnectAccountToEmail(acc.id, em);
+                                  showNotice(res.success ? 'success' : 'error', res.message);
+                                }}
+                                className={`px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold cursor-pointer border ${
+                                  (acc.email || '').toLowerCase() === em
+                                    ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                                    : 'bg-slate-900 hover:bg-slate-800 text-cyan-200 border-slate-700'
+                                }`}
+                              >
+                                {em}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="email"
+                            value={customEmailInputMap[acc.id] ?? acc.email ?? ''}
+                            onChange={(e) =>
+                              setCustomEmailInputMap((prev) => ({
+                                ...prev,
+                                [acc.id]: e.target.value,
+                              }))
+                            }
+                            placeholder="Ketik email Google tujuan (contoh: nama@gmail.com)..."
+                            className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-[11px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetEm = (
+                                customEmailInputMap[acc.id] ??
+                                acc.email ??
+                                ''
+                              ).trim();
+                              const res = adminConnectAccountToEmail(acc.id, targetEm);
+                              showNotice(res.success ? 'success' : 'error', res.message);
+                            }}
+                            className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-[10px] cursor-pointer shrink-0"
+                          >
+                            Sambungkan Email
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Kanan: Kirim Popup Langsung ke Layar Akun Ini & Atur Role Dev */}
+                      <div className="p-3 rounded-xl bg-slate-950/90 border border-amber-500/40 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-black text-amber-300">
+                            📣 Kirim Popup ke Akun Ini & Role Otoritas
+                          </span>
+                          <select
+                            value={acc.devRoleId || ''}
+                            onChange={(e) => {
+                              const val = e.target.value || null;
+                              const res = adminAssignAccountDevRole(acc.id, val);
+                              showNotice(res.success ? 'success' : 'error', res.message);
+                            }}
+                            className="px-2 py-1 rounded-lg bg-slate-900 border border-amber-500/40 text-amber-200 font-bold text-[10px]"
+                          >
+                            <option value="">— Tanpa Role Dev —</option>
+                            {devRoles.map((r) => (
+                              <option key={r.id} value={r.id}>
+                                #{r.slotNumber} {r.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                          <input
+                            type="text"
+                            value={customInjectInputMap[acc.id]?.popupTitle || ''}
+                            onChange={(e) => updateInjectInput(acc.id, 'popupTitle', e.target.value)}
+                            placeholder="Judul Popup (misal: Hadiah VIP)"
+                            className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-[11px]"
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={customInjectInputMap[acc.id]?.popupMsg || ''}
+                              onChange={(e) => updateInjectInput(acc.id, 'popupMsg', e.target.value)}
+                              placeholder="Isi pesan popup ke layar..."
+                              className="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white text-[11px]"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const title =
+                                  (customInjectInputMap[acc.id]?.popupTitle || '').trim() ||
+                                  `Pesan Resmi Otoritas Admin untuk ${acc.fullName}`;
+                                const msg =
+                                  (customInjectInputMap[acc.id]?.popupMsg || '').trim() ||
+                                  `Halo ${acc.fullName}, akun Anda telah diperbarui oleh Panel Admin Bank Nusantara.`;
+                                const res = adminSendWebsiteBroadcast({
+                                  title,
+                                  message: msg,
+                                  targetAccountId: acc.id,
+                                });
+                                showNotice(res.success ? 'success' : 'error', res.message);
+                              }}
+                              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[10px] cursor-pointer shrink-0"
+                            >
+                              Kirim Popup
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Inline Confirmation for Permanent Delete */}
                 {isConfirmingDelete && (

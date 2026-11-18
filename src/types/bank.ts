@@ -191,7 +191,7 @@ export interface CloudUserRecord {
   currentAccountId?: string;
   lastAccountId?: string;
   hasCompletedOnboarding?: boolean;
-  authMode?: 'email_direct' | 'google' | 'oa_account';
+  authMode?: 'email_direct' | 'google' | 'oa_account' | 'guest';
   emailKey?: string;
   emailVerified?: boolean;
   notificationCategoryPermissions?: Record<NotificationCategory10Key, boolean>;
@@ -280,6 +280,8 @@ export interface BankAccount {
   // Akun OA Resmi buatan Panel Admin (Bisa login lewat tombol "Login Dengan Akun OA" di Lobi Awal)
   isOfficialAdminAccount?: boolean;
   oaAdminPin?: string; // Default '159357' atau PIN Admin khusus per Akun OA
+  // Akun Guest (Tamu - Hanya tersimpan di LocalStorage sampai disambungkan ke Google lewat tombol Sync)
+  isGuestAccount?: boolean;
 }
 
 export type GoldFormType = 'batangan' | 'perhiasan';
@@ -357,7 +359,7 @@ export interface GoogleUserSession {
   name: string;
   picture?: string;
   firebaseUid?: string;
-  authMode?: 'email_direct' | 'google' | 'oa_account';
+  authMode?: 'email_direct' | 'google' | 'oa_account' | 'guest';
   emailKey?: string;
   loggedInAt: string;
   hasCompletedOnboarding: boolean;

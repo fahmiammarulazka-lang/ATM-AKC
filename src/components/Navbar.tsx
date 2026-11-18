@@ -98,7 +98,44 @@ export const Navbar: React.FC<NavbarProps> = ({
     devRoles,
     cloudSyncStatus,
     googleUser,
+    linkCurrentAccountWithGooglePopup,
   } = useBank();
+
+  const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
+  const [googleLinkFeedback, setGoogleLinkFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
+  const rawAccountEmail = (currentAccount?.email || '').trim().toLowerCase();
+  const isCurrentAccountUnlinkedToGoogle = Boolean(
+    currentAccount &&
+      (currentAccount.isGuestAccount ||
+        googleUser?.authMode === 'guest' ||
+        !rawAccountEmail ||
+        rawAccountEmail.endsWith('@nusantara.id') ||
+        rawAccountEmail.endsWith('@banknusantara.id') ||
+        rawAccountEmail.startsWith('oa.'))
+  );
+
+  const handleLinkCurrentAccountToGoogle = async () => {
+    if (isLinkingGoogle) return;
+    setIsLinkingGoogle(true);
+    setGoogleLinkFeedback(null);
+    try {
+      const res = await linkCurrentAccountWithGooglePopup();
+      if (res.success) {
+        setGoogleLinkFeedback({ type: 'success', text: res.message });
+      } else if (res.errorCode !== 'auth/popup-closed-by-user') {
+        setGoogleLinkFeedback({ type: 'error', text: res.message });
+      }
+    } finally {
+      setIsLinkingGoogle(false);
+      setTimeout(() => {
+        setGoogleLinkFeedback(null);
+      }, 6000);
+    }
+  };
 
   const activeDevRole = currentAccount?.devRoleId
     ? devRoles.find((r) => r.id === currentAccount.devRoleId) || null
@@ -403,35 +440,65 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           )}
 
-          {/* Indikator Status Koneksi Cloud Real-Time */}
-          <div
-            className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[10px] font-mono font-bold whitespace-nowrap shrink-0 ${
-              cloudSyncStatus === 'synced'
-                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
-                : cloudSyncStatus === 'syncing'
-                ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
-                : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
-            }`}
-            title="Status koneksi & sinkronisasi real-time Cloud Firestore"
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
+          {/* Tombol Atas Sync / "Sign in with Google" untuk Akun OA & Akun Guest yang Belum Tersambung Email Google */}
+          {isCurrentAccountUnlinkedToGoogle ? (
+            <button
+              type="button"
+              onClick={handleLinkCurrentAccountToGoogle}
+              disabled={isLinkingGoogle}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-900 border border-cyan-400/60 text-[11px] font-black whitespace-nowrap shrink-0 shadow-md shadow-cyan-500/20 cursor-pointer transition disabled:opacity-60"
+              title="Sambungkan Akun OA / Akun Guest ini ke email Google Anda agar tersinkronisasi di Cloud"
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                />
+              </svg>
+              <span>{isLinkingGoogle ? 'Menyambungkan...' : 'Sign in with Google'}</span>
+            </button>
+          ) : (
+            <div
+              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[10px] font-mono font-bold whitespace-nowrap shrink-0 ${
                 cloudSyncStatus === 'synced'
-                  ? 'bg-emerald-400'
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
                   : cloudSyncStatus === 'syncing'
-                  ? 'bg-amber-400 animate-pulse'
-                  : 'bg-rose-400'
+                  ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                  : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
               }`}
-            />
-            <Cloud className="w-3 h-3 shrink-0" />
-            <span>
-              {cloudSyncStatus === 'synced'
-                ? 'Tersinkronisasi'
-                : cloudSyncStatus === 'syncing'
-                ? 'Menyinkronkan...'
-                : 'Offline'}
-            </span>
-          </div>
+              title={`Tersinkronisasi ke Cloud (${currentAccount?.email || googleUser?.email || 'Cloud Firestore'})`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  cloudSyncStatus === 'synced'
+                    ? 'bg-emerald-400'
+                    : cloudSyncStatus === 'syncing'
+                    ? 'bg-amber-400 animate-pulse'
+                    : 'bg-rose-400'
+                }`}
+              />
+              <Cloud className="w-3 h-3 shrink-0" />
+              <span>
+                {cloudSyncStatus === 'synced'
+                  ? 'Tersinkronisasi'
+                  : cloudSyncStatus === 'syncing'
+                  ? 'Menyinkronkan...'
+                  : 'Offline'}
+              </span>
+            </div>
+          )}
 
           {/* Money & Coin Icon Indicator Bar */}
           {currentAccount && (
@@ -823,13 +890,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                         {currentAccount?.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
                       </span>
                       <span className="text-[9px] font-mono text-emerald-400 block truncate">
-                        {googleUser?.email
-                          ? `${googleUser.email} · ${
-                              googleUser.authMode === 'oa_account'
-                                ? 'Akun OA Resmi'
+                        {isCurrentAccountUnlinkedToGoogle
+                          ? currentAccount?.isGuestAccount || googleUser?.authMode === 'guest'
+                            ? 'Akun Guest (LocalStorage) · Belum Tersambung Google'
+                            : 'Akun OA Resmi · Belum Tersambung Email Google'
+                          : `${currentAccount?.email || googleUser?.email || ''} · ${
+                              currentAccount?.isOfficialAdminAccount
+                                ? 'Akun OA + Google Cloud'
                                 : 'Google Cloud'
-                            }`
-                          : 'Cloud Firestore Real-Time'}
+                            }`}
                       </span>
                     </div>
                     <button
@@ -844,6 +913,38 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <span>Keluar Akun</span>
                     </button>
                   </div>
+                  {isCurrentAccountUnlinkedToGoogle && (
+                    <button
+                      type="button"
+                      onClick={handleLinkCurrentAccountToGoogle}
+                      disabled={isLinkingGoogle}
+                      className="w-full mt-1.5 py-2 px-3 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-black text-[11px] flex items-center justify-center gap-2 shadow cursor-pointer transition disabled:opacity-60"
+                    >
+                      <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                        <path
+                          fill="#4285F4"
+                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                        />
+                        <path
+                          fill="#34A853"
+                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                        />
+                        <path
+                          fill="#FBBC05"
+                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                        />
+                        <path
+                          fill="#EA4335"
+                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                        />
+                      </svg>
+                      <span>
+                        {isLinkingGoogle
+                          ? 'Menyambungkan ke Google...'
+                          : 'Sign in with Google (Sambungkan Akun Ini)'}
+                      </span>
+                    </button>
+                  )}
                 </div>
 
                 <div className="px-2 py-1 text-[11px] font-semibold text-slate-300 border-b border-slate-800 flex items-center justify-between">
@@ -1030,6 +1131,18 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         )}
       </div>
+
+      {googleLinkFeedback && (
+        <div
+          className={`px-4 py-2 text-xs font-bold text-center border-t ${
+            googleLinkFeedback.type === 'success'
+              ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200'
+              : 'bg-rose-950/90 border-rose-500/40 text-rose-200'
+          }`}
+        >
+          {googleLinkFeedback.text}
+        </div>
+      )}
 
       {/* Card PIN Prompt when switching/logging into an Old Card or Another Card */}
       {pendingTargetAccount && (

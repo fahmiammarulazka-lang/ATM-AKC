@@ -57,9 +57,12 @@ export interface BankPersistableSnapshot {
   adminUnlocked: boolean;
 }
 
+export const GUEST_LOCAL_STORAGE_KEY = 'bank_nusantara_guest_accounts_v1';
+
 /**
  * Membersihkan seluruh sisa key localStorage & sessionStorage lama agar tidak ada
- * cache lokal tertinggal yang mengakali status banned atau memunculkan data lama.
+ * cache lokal tertinggal yang mengakali status banned atau memunculkan data lama,
+ * KECUALI penyimpanan khusus Akun Guest (bank_nusantara_guest_accounts_v1).
  */
 export function wipeLegacyBrowserStorage(): void {
   if (typeof window === 'undefined') return;
@@ -67,7 +70,7 @@ export function wipeLegacyBrowserStorage(): void {
     const keysToRemove: string[] = [];
     for (let i = 0; i < window.localStorage.length; i++) {
       const k = window.localStorage.key(i);
-      if (k && k.startsWith('bank_nusantara_')) {
+      if (k && k.startsWith('bank_nusantara_') && k !== GUEST_LOCAL_STORAGE_KEY) {
         keysToRemove.push(k);
       }
     }
@@ -77,12 +80,33 @@ export function wipeLegacyBrowserStorage(): void {
     const sKeysToRemove: string[] = [];
     for (let i = 0; i < window.sessionStorage.length; i++) {
       const k = window.sessionStorage.key(i);
-      if (k && k.startsWith('bank_nusantara_')) {
+      if (k && k.startsWith('bank_nusantara_') && k !== GUEST_LOCAL_STORAGE_KEY) {
         sKeysToRemove.push(k);
       }
     }
     sKeysToRemove.forEach((k) => window.sessionStorage.removeItem(k));
   } catch { /* empty */ }
+}
+
+export function loadGuestAccountsFromLocalStorage<T>(): T[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(GUEST_LOCAL_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveGuestAccountsToLocalStorage<T>(guestAccounts: T[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(GUEST_LOCAL_STORAGE_KEY, JSON.stringify(guestAccounts));
+  } catch {
+    // ignore quota error
+  }
 }
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
