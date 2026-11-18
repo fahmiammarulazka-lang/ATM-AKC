@@ -3517,35 +3517,7 @@ export const INITIAL_REDEEM_CODES: RedeemCode[] = [
   },
 ];
 
-export const INITIAL_PURCHASED_CODES: PurchasedVoucherCode[] = [
-  {
-    id: 'vc-init-1',
-    accountId: 'acc-1',
-    accountNumber: '1029384756',
-    fullName: 'Raden Satrio (Saya)',
-    type: 'pulsa',
-    code: '8841-2903-7712-5590',
-    providerOrMeter: 'Telkomsel - 081289102345',
-    nominal: 50_000,
-    status: 'available',
-    adminApproved: true,
-    purchasedAt: new Date(Date.now() - 3600 * 1000).toISOString(),
-  },
-  {
-    id: 'vc-init-2',
-    accountId: 'acc-1',
-    accountNumber: '1029384756',
-    fullName: 'Raden Satrio (Saya)',
-    type: 'token_listrik',
-    code: '4491-8820-3319-7462-1098',
-    providerOrMeter: 'ID Pel PLN: 542109847163',
-    nominal: 100_000,
-    kwhAmount: 68.5,
-    status: 'available',
-    adminApproved: true,
-    purchasedAt: new Date(Date.now() - 7200 * 1000).toISOString(),
-  },
-];
+export const INITIAL_PURCHASED_CODES: PurchasedVoucherCode[] = [];
 
 export const INITIAL_RESI_LIST: ResiTrackingRecord[] = [
   {

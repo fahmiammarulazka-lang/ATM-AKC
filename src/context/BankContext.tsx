@@ -136,6 +136,8 @@ import {
   INITIAL_POCKETS,
   INITIAL_DEPOSITOS,
   INITIAL_CARDLESS,
+  PURGED_BOT_ACCOUNT_IDS,
+  PURGED_BOT_ACCOUNT_NUMBERS,
 } from '../data/initialData';
 import {
   INITIAL_FEATURE_CONFIGS,
@@ -1517,21 +1519,45 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     auditLogs: [],
   });
 
-  const [deletedAccountIds, setDeletedAccountIds] = useState<string[]>([]);
-  const deletedAccountIdsRef = useRef<string[]>([]);
+  const [deletedAccountIds, setDeletedAccountIds] = useState<string[]>(() => [
+    ...PURGED_BOT_ACCOUNT_IDS,
+  ]);
+  const deletedAccountIdsRef = useRef<string[]>([...PURGED_BOT_ACCOUNT_IDS]);
   deletedAccountIdsRef.current = deletedAccountIds;
 
   const [accountDeletionRequests, setAccountDeletionRequests] = useState<AccountDeletionRequest[]>([]);
 
+  const isRealGoogleLinkedEmail = (rawEmail?: string): boolean => {
+    const em = (rawEmail || '').trim().toLowerCase();
+    return Boolean(
+      em &&
+        em.includes('@') &&
+        !em.endsWith('@nusantara.id') &&
+        !em.endsWith('@banknusantara.id') &&
+        !em.startsWith('oa.')
+    );
+  };
+
   const [accounts, setAccounts] = useState<BankAccount[]>(() => {
-    const base: BankAccount[] = INITIAL_ACCOUNTS.map((a) => ({
+    const base: BankAccount[] = INITIAL_ACCOUNTS.filter(
+      (a) =>
+        !PURGED_BOT_ACCOUNT_IDS.includes(a.id) &&
+        !PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
+    ).map((a) => ({
       ...a,
       status: a.cardStatus === 'banned' || a.banInfo?.isBanned ? ('banned' as const) : ('active' as const),
       banReason: a.banInfo?.reason || a.banReason || '',
     }));
     const localGuests = loadGuestAccountsFromLocalStorage<BankAccount>();
     for (const g of localGuests) {
-      if (g && g.id && !base.some((b) => b.id === g.id)) {
+      if (
+        g &&
+        g.id &&
+        !PURGED_BOT_ACCOUNT_IDS.includes(g.id) &&
+        !PURGED_BOT_ACCOUNT_NUMBERS.includes(g.accountNumber) &&
+        !base.some((b) => b.id === g.id)
+      ) {
+        const hasGoogle = isRealGoogleLinkedEmail(g.googleEmail || g.email);
         base.unshift({
           ...g,
           userId16: ensureAccountUserId16(g),
@@ -1539,16 +1565,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           oaAdminPin: g.oaAdminPin || '159357',
           status: g.status === 'banned' || g.cardStatus === 'banned' ? ('banned' as const) : ('active' as const),
           banReason: g.banReason || '',
-          isGuestAccount: true,
+          isGuestAccount: !hasGoogle,
+          googleEmail: hasGoogle ? normalizeEmailKey(g.googleEmail || g.email || '') : g.googleEmail,
+          email: hasGoogle ? normalizeEmailKey(g.email || g.googleEmail || '') : g.email,
         });
       }
     }
     return base;
   });
 
-  // Simpan akun Guest yang belum tersambung Google ke LocalStorage perangkat secara otomatis
+  // Simpan akun Guest murni yang belum tersambung Google ke LocalStorage perangkat secara otomatis
   useEffect(() => {
-    const pureGuests = accounts.filter((a) => Boolean(a.isGuestAccount && !a.googleEmail));
+    const pureGuests = accounts.filter(
+      (a) =>
+        Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email)) &&
+        !PURGED_BOT_ACCOUNT_IDS.includes(a.id)
+    );
     saveGuestAccountsToLocalStorage(pureGuests);
   }, [accounts]);
 
@@ -1606,7 +1638,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return 'default';
   });
 
-  const [currentAccountId, setCurrentAccountIdState] = useState<string>('acc-1');
+  const [currentAccountId, setCurrentAccountIdState] = useState<string>('acc-admin');
   const [userRole, setUserRoleState] = useState<'customer' | 'admin'>('customer');
   const [adminUnlocked, setAdminUnlockedState] = useState<boolean>(false);
 
@@ -1665,6 +1697,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const hasFirestoreHydratedRef = useRef<boolean>(false);
   const isApplyingFirestoreRef = useRef<boolean>(false);
   const lastFirestoreWriteMsRef = useRef<number>(0);
+  const isLinkingAccountToGoogleRef = useRef<boolean>(false);
 
   const applyMasterCloudData = (
     data: Record<string, any>,
@@ -1676,9 +1709,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const incomingMs = typeof data.updatedAtMs === 'number' ? data.updatedAtMs : 0;
+    // Hanya abaikan snapshot basi dari sesi writer yang SAMA; jika berasal dari perangkat berbeda (HP <-> Laptop), tetap terapkan meskipun jam sistem selisih beberapa detik
     if (
       !options?.forceInitial &&
       hasFirestoreHydratedRef.current &&
+      data.writerSessionId === clientSessionId &&
       incomingMs > 0 &&
       incomingMs <= lastFirestoreWriteMsRef.current
     ) {
@@ -1690,12 +1725,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     isApplyingFirestoreRef.current = true;
 
-    const mergedDelAccountIds: string[] = Array.isArray(data.deletedAccountIds)
-      ? Array.from(new Set([...deletedAccountIdsRef.current, ...data.deletedAccountIds]))
-      : deletedAccountIdsRef.current;
-    if (Array.isArray(data.deletedAccountIds)) {
-      setDeletedAccountIds(mergedDelAccountIds);
-    }
+    const mergedDelAccountIds: string[] = Array.from(
+      new Set([
+        ...PURGED_BOT_ACCOUNT_IDS,
+        ...deletedAccountIdsRef.current,
+        ...(Array.isArray(data.deletedAccountIds) ? (data.deletedAccountIds as string[]) : []),
+      ])
+    );
+    setDeletedAccountIds(mergedDelAccountIds);
+    deletedAccountIdsRef.current = mergedDelAccountIds;
 
     const mergedDelGiftIds: string[] = Array.isArray(data.deletedGiftEventIds)
       ? Array.from(new Set([...deletedGiftEventIdsRef.current, ...data.deletedGiftEventIds]))
@@ -1704,59 +1742,184 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setDeletedGiftEventIds(mergedDelGiftIds);
     }
 
+    let hadPurgedBotAccountsInCloud = false;
+
     if (Array.isArray(data.accounts)) {
-      const cleanAccounts = (data.accounts as BankAccount[])
-        .filter((a) => !mergedDelAccountIds.includes(a.id))
-        .map((a) => ({
-          ...a,
-          userId16: ensureAccountUserId16(a),
-          isOfficialAdminAccount: Boolean(a.isOfficialAdminAccount || a.id === 'acc-admin'),
-          oaAdminPin: a.oaAdminPin || '159357',
-          status:
-            a.status === 'banned' || a.cardStatus === 'banned' || a.banInfo?.isBanned
-              ? ('banned' as const)
-              : ('active' as const),
-          banReason: a.banReason || a.banInfo?.reason || '',
-        }));
-      // Pertahankan akun Guest lokal di LocalStorage yang belum disambungkan ke Google
-      const localGuests = loadGuestAccountsFromLocalStorage<BankAccount>().filter(
-        (g) => g && g.id && !mergedDelAccountIds.includes(g.id)
+      const incomingAccounts = data.accounts as BankAccount[];
+      hadPurgedBotAccountsInCloud = incomingAccounts.some(
+        (a) =>
+          PURGED_BOT_ACCOUNT_IDS.includes(a.id) ||
+          PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
       );
-      for (const g of localGuests) {
-        if (!cleanAccounts.some((c) => c.id === g.id)) {
-          cleanAccounts.unshift({
-            ...g,
-            userId16: ensureAccountUserId16(g),
-            isOfficialAdminAccount: Boolean(g.isOfficialAdminAccount),
-            oaAdminPin: g.oaAdminPin || '159357',
+
+      const cleanAccounts: BankAccount[] = incomingAccounts
+        .filter(
+          (a) =>
+            a &&
+            a.id &&
+            !mergedDelAccountIds.includes(a.id) &&
+            !PURGED_BOT_ACCOUNT_IDS.includes(a.id) &&
+            !PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
+        )
+        .map((a) => {
+          const hasGoogle = isRealGoogleLinkedEmail(a.googleEmail || a.email);
+          const normEmail = hasGoogle
+            ? normalizeEmailKey(a.googleEmail || a.email || '')
+            : a.email || '';
+          return {
+            ...a,
+            userId16: ensureAccountUserId16(a),
+            email: normEmail,
+            googleEmail: hasGoogle ? normEmail : a.googleEmail,
+            // Jika sudah tersambung ke email Google di Firebase, otomatis statusnya BUKAN lagi Akun Guest
+            isGuestAccount: hasGoogle ? false : Boolean(a.isGuestAccount),
+            isOfficialAdminAccount: Boolean(a.isOfficialAdminAccount || a.id === 'acc-admin'),
+            oaAdminPin: a.oaAdminPin || '159357',
             status:
-              g.status === 'banned' || g.cardStatus === 'banned' || g.banInfo?.isBanned
+              a.status === 'banned' || a.cardStatus === 'banned' || a.banInfo?.isBanned
                 ? ('banned' as const)
                 : ('active' as const),
-            banReason: g.banReason || g.banInfo?.reason || '',
-            isGuestAccount: true,
+            banReason: a.banReason || a.banInfo?.reason || '',
+          };
+        });
+
+      // Pastikan Kartu Admin Utama ('acc-admin') selalu tersedia
+      if (!cleanAccounts.some((c) => c.id === 'acc-admin') && !mergedDelAccountIds.includes('acc-admin')) {
+        const defaultAdmin = INITIAL_ACCOUNTS.find((a) => a.id === 'acc-admin');
+        if (defaultAdmin) {
+          cleanAccounts.push({
+            ...defaultAdmin,
+            status: 'active',
+            banReason: '',
           });
         }
       }
+
+      // Pertahankan akun Guest lokal di LocalStorage yang BELUM disambungkan ke Google
+      // Jika akun Guest di LocalStorage ternyata sudah ada di Cloud sebagai Akun Google, otomatis bersihkan dari LocalStorage Guest
+      const rawLocalGuests = loadGuestAccountsFromLocalStorage<BankAccount>().filter(
+        (g) =>
+          g &&
+          g.id &&
+          !mergedDelAccountIds.includes(g.id) &&
+          !PURGED_BOT_ACCOUNT_IDS.includes(g.id) &&
+          !PURGED_BOT_ACCOUNT_NUMBERS.includes(g.accountNumber)
+      );
+      const remainingPureGuests: BankAccount[] = [];
+      for (const g of rawLocalGuests) {
+        const cloudVersion = cleanAccounts.find((c) => c.id === g.id);
+        if (cloudVersion && isRealGoogleLinkedEmail(cloudVersion.googleEmail || cloudVersion.email)) {
+          // Sudah berubah menjadi Akun Google di Cloud Firebase -> jangan masukkan lagi sebagai Guest lokal
+          continue;
+        }
+        const gHasGoogle = isRealGoogleLinkedEmail(g.googleEmail || g.email);
+        const normalizedGuest: BankAccount = {
+          ...g,
+          userId16: ensureAccountUserId16(g),
+          isOfficialAdminAccount: Boolean(g.isOfficialAdminAccount),
+          oaAdminPin: g.oaAdminPin || '159357',
+          status:
+            g.status === 'banned' || g.cardStatus === 'banned' || g.banInfo?.isBanned
+              ? ('banned' as const)
+              : ('active' as const),
+          banReason: g.banReason || g.banInfo?.reason || '',
+          isGuestAccount: !gHasGoogle,
+          email: gHasGoogle ? normalizeEmailKey(g.googleEmail || g.email || '') : g.email || '',
+          googleEmail: gHasGoogle ? normalizeEmailKey(g.googleEmail || g.email || '') : g.googleEmail,
+        };
+        if (!gHasGoogle) {
+          remainingPureGuests.push(normalizedGuest);
+        }
+        if (!cleanAccounts.some((c) => c.id === g.id)) {
+          cleanAccounts.unshift(normalizedGuest);
+        }
+      }
+      saveGuestAccountsToLocalStorage(remainingPureGuests);
+      accountsRef.current = cleanAccounts;
       setAccounts(cleanAccounts);
     }
 
-    if (Array.isArray(data.transactions)) setTransactions(data.transactions as Transaction[]);
-    if (Array.isArray(data.loans)) setLoans(data.loans as LoanApplication[]);
-    if (Array.isArray(data.scheduledPayments)) setScheduledPayments(data.scheduledPayments as ScheduledPayment[]);
-    if (Array.isArray(data.favorites)) setFavorites(data.favorites as FavoriteAccount[]);
-    if (Array.isArray(data.notifications)) setNotifications(data.notifications as AppNotification[]);
-    if (Array.isArray(data.chats)) setChats(data.chats as ChatMessage[]);
-    if (Array.isArray(data.cardUpgrades)) setCardUpgrades(data.cardUpgrades as CardUpgradeApplication[]);
-    if (Array.isArray(data.pinResetRequests)) setPinResetRequests(data.pinResetRequests as PinResetRequest[]);
+    const isNotBotAccountId = (accId?: string) =>
+      !accId || !PURGED_BOT_ACCOUNT_IDS.includes(accId);
+    const isNotBotAccountNum = (accNum?: string) =>
+      !accNum || !PURGED_BOT_ACCOUNT_NUMBERS.includes(accNum);
+
+    if (Array.isArray(data.transactions)) {
+      setTransactions(
+        (data.transactions as Transaction[]).filter(
+          (t) =>
+            isNotBotAccountId(t.accountId) &&
+            isNotBotAccountNum(t.senderAccount) &&
+            isNotBotAccountNum(t.recipientAccount)
+        )
+      );
+    }
+    if (Array.isArray(data.loans)) {
+      setLoans((data.loans as LoanApplication[]).filter((l) => isNotBotAccountId(l.accountId)));
+    }
+    if (Array.isArray(data.scheduledPayments)) {
+      setScheduledPayments(
+        (data.scheduledPayments as ScheduledPayment[]).filter((s) => isNotBotAccountId(s.accountId))
+      );
+    }
+    if (Array.isArray(data.favorites)) {
+      setFavorites(
+        (data.favorites as FavoriteAccount[]).filter((f) => isNotBotAccountNum(f.accountNumber))
+      );
+    }
+    if (Array.isArray(data.notifications)) {
+      setNotifications(data.notifications as AppNotification[]);
+    }
+    if (Array.isArray(data.chats)) {
+      setChats(
+        (data.chats as ChatMessage[]).filter(
+          (c) => isNotBotAccountNum(c.senderAccount) && isNotBotAccountNum(c.recipientAccount)
+        )
+      );
+    }
+    if (Array.isArray(data.cardUpgrades)) {
+      setCardUpgrades(
+        (data.cardUpgrades as CardUpgradeApplication[]).filter((u) => isNotBotAccountId(u.accountId))
+      );
+    }
+    if (Array.isArray(data.pinResetRequests)) {
+      setPinResetRequests(
+        (data.pinResetRequests as PinResetRequest[]).filter((p) => isNotBotAccountId(p.accountId))
+      );
+    }
     if (Array.isArray(data.redeemCodes)) setRedeemCodes(data.redeemCodes as RedeemCode[]);
-    if (Array.isArray(data.purchasedCodes)) setPurchasedCodes(data.purchasedCodes as PurchasedVoucherCode[]);
+    if (Array.isArray(data.purchasedCodes)) {
+      setPurchasedCodes(
+        (data.purchasedCodes as PurchasedVoucherCode[]).filter((v) => isNotBotAccountId(v.accountId))
+      );
+    }
     if (Array.isArray(data.resiList)) setResiList(data.resiList as ResiTrackingRecord[]);
-    if (Array.isArray(data.cardlessTokens)) setCardlessTokens(data.cardlessTokens as CardlessToken[]);
-    if (Array.isArray(data.pockets)) setPockets(data.pockets as PocketSaving[]);
-    if (Array.isArray(data.depositos)) setDepositos(data.depositos as DepositoRecord[]);
+    if (Array.isArray(data.cardlessTokens)) {
+      setCardlessTokens(
+        (data.cardlessTokens as CardlessToken[]).filter((c) => isNotBotAccountId(c.accountId))
+      );
+    }
+    if (Array.isArray(data.pockets)) {
+      setPockets((data.pockets as PocketSaving[]).filter((p) => isNotBotAccountId(p.accountId)));
+    }
+    if (Array.isArray(data.depositos)) {
+      setDepositos((data.depositos as DepositoRecord[]).filter((d) => isNotBotAccountId(d.accountId)));
+    }
     if (Array.isArray(data.accountDeletionRequests)) {
-      setAccountDeletionRequests(data.accountDeletionRequests as AccountDeletionRequest[]);
+      setAccountDeletionRequests(
+        (data.accountDeletionRequests as AccountDeletionRequest[]).filter((r) =>
+          isNotBotAccountId(r.accountId)
+        )
+      );
+    }
+
+    if (hadPurgedBotAccountsInCloud) {
+      window.setTimeout(() => {
+        void flushMasterStateToCloud({
+          accounts: accountsRef.current,
+          deletedAccountIds: mergedDelAccountIds,
+        });
+      }, 250);
     }
 
     if (Boolean(data.giftEventsInitialized) || Array.isArray(data.giftEvents)) {
@@ -1893,33 +2056,90 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     lastSyncEpochRef.current = nowMs;
     setCloudSyncStatus('syncing');
 
-    const rawAccountsList = overrides?.accounts ?? accounts;
-    const pureLocalGuests = rawAccountsList.filter((a) => Boolean(a.isGuestAccount && !a.googleEmail));
+    const rawAccountsList = (overrides?.accounts ?? accounts).filter(
+      (a) =>
+        a &&
+        a.id &&
+        !PURGED_BOT_ACCOUNT_IDS.includes(a.id) &&
+        !PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
+    );
+    const normalizedAccountsList = rawAccountsList.map((a) => {
+      const hasGoogle = isRealGoogleLinkedEmail(a.googleEmail || a.email);
+      const normEmail = hasGoogle ? normalizeEmailKey(a.googleEmail || a.email || '') : a.email || '';
+      return {
+        ...a,
+        email: normEmail,
+        googleEmail: hasGoogle ? normEmail : a.googleEmail,
+        // Setiap akun yang sudah memiliki email Google otomatis berstatus Akun Google (bukan Guest) di Firebase
+        isGuestAccount: hasGoogle ? false : Boolean(a.isGuestAccount),
+      };
+    });
+
+    const pureLocalGuests = normalizedAccountsList.filter((a) =>
+      Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email))
+    );
     saveGuestAccountsToLocalStorage(pureLocalGuests);
-    const cloudSyncedAccounts = rawAccountsList.filter((a) => !(a.isGuestAccount && !a.googleEmail));
+    const cloudSyncedAccounts = normalizedAccountsList.filter(
+      (a) => !Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email))
+    );
+
+    const mergedDeletedAccountIds = Array.from(
+      new Set([
+        ...PURGED_BOT_ACCOUNT_IDS,
+        ...(overrides?.deletedAccountIds ?? deletedAccountIds),
+      ])
+    );
+
+    const isNotBotAccountId = (accId?: string) =>
+      !accId || !PURGED_BOT_ACCOUNT_IDS.includes(accId);
+    const isNotBotAccountNum = (accNum?: string) =>
+      !accNum || !PURGED_BOT_ACCOUNT_NUMBERS.includes(accNum);
 
     const payload = sanitizeForFirestore({
       accounts: cloudSyncedAccounts,
-      deletedAccountIds: overrides?.deletedAccountIds ?? deletedAccountIds,
-      accountDeletionRequests: overrides?.accountDeletionRequests ?? accountDeletionRequests,
-      transactions: (overrides?.transactions ?? transactions).slice(0, 220),
+      deletedAccountIds: mergedDeletedAccountIds,
+      accountDeletionRequests: (
+        overrides?.accountDeletionRequests ?? accountDeletionRequests
+      ).filter((r) => isNotBotAccountId(r.accountId)),
+      transactions: (overrides?.transactions ?? transactions)
+        .filter(
+          (t) =>
+            isNotBotAccountId(t.accountId) &&
+            isNotBotAccountNum(t.senderAccount) &&
+            isNotBotAccountNum(t.recipientAccount)
+        )
+        .slice(0, 220),
       giftEvents: overrides?.giftEvents ?? giftEvents,
       deletedGiftEventIds: overrides?.deletedGiftEventIds ?? deletedGiftEventIds,
       giftEventsInitialized: overrides?.giftEventsInitialized ?? true,
       banSupportConfig: overrides?.banSupportConfig ?? banSupportConfig,
-      pockets: overrides?.pockets ?? pockets,
-      depositos: overrides?.depositos ?? depositos,
-      loans: overrides?.loans ?? loans,
-      scheduledPayments: overrides?.scheduledPayments ?? scheduledPayments,
-      favorites: overrides?.favorites ?? favorites,
+      pockets: (overrides?.pockets ?? pockets).filter((p) => isNotBotAccountId(p.accountId)),
+      depositos: (overrides?.depositos ?? depositos).filter((d) => isNotBotAccountId(d.accountId)),
+      loans: (overrides?.loans ?? loans).filter((l) => isNotBotAccountId(l.accountId)),
+      scheduledPayments: (overrides?.scheduledPayments ?? scheduledPayments).filter((s) =>
+        isNotBotAccountId(s.accountId)
+      ),
+      favorites: (overrides?.favorites ?? favorites).filter((f) =>
+        isNotBotAccountNum(f.accountNumber)
+      ),
       notifications: (overrides?.notifications ?? notifications).slice(0, 120),
-      chats: (overrides?.chats ?? chats).slice(0, 120),
-      cardUpgrades: overrides?.cardUpgrades ?? cardUpgrades,
-      pinResetRequests: overrides?.pinResetRequests ?? pinResetRequests,
+      chats: (overrides?.chats ?? chats)
+        .filter((c) => isNotBotAccountNum(c.senderAccount) && isNotBotAccountNum(c.recipientAccount))
+        .slice(0, 120),
+      cardUpgrades: (overrides?.cardUpgrades ?? cardUpgrades).filter((u) =>
+        isNotBotAccountId(u.accountId)
+      ),
+      pinResetRequests: (overrides?.pinResetRequests ?? pinResetRequests).filter((p) =>
+        isNotBotAccountId(p.accountId)
+      ),
       redeemCodes: overrides?.redeemCodes ?? redeemCodes,
-      purchasedCodes: overrides?.purchasedCodes ?? purchasedCodes,
+      purchasedCodes: (overrides?.purchasedCodes ?? purchasedCodes).filter((v) =>
+        isNotBotAccountId(v.accountId)
+      ),
       resiList: overrides?.resiList ?? resiList,
-      cardlessTokens: overrides?.cardlessTokens ?? cardlessTokens,
+      cardlessTokens: (overrides?.cardlessTokens ?? cardlessTokens).filter((c) =>
+        isNotBotAccountId(c.accountId)
+      ),
       spinWheelConfig: overrides?.spinWheelConfig ?? spinWheelConfig,
       spinHistory: (overrides?.spinHistory ?? spinHistory).slice(0, 80),
       sultanEmpireConfig: overrides?.sultanEmpireConfig ?? sultanEmpireConfig,
@@ -1944,7 +2164,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       updatedAt: new Date(nowMs).toISOString(),
     }) as Record<string, unknown>;
 
-    setDoc(doc(db, 'bank_state_v1', 'master_state'), payload, { merge: true })
+    return setDoc(doc(db, 'bank_state_v1', 'master_state'), payload, { merge: true })
       .then(() => {
         setCloudSyncStatus('synced');
         setLastCloudSyncAt(new Date().toISOString());
@@ -2106,6 +2326,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       setFirebaseUser(fbUser);
 
+      // Jika sedang proses menyambungkan Akun Guest / Akun OA ke Google (linkCurrentAccountWithGooglePopup),
+      // jangan timpa state accounts lokal dengan master_state lama sebelum proses merge & write selesai!
+      if (isLinkingAccountToGoogleRef.current) {
+        hasFirestoreHydratedRef.current = true;
+        hasBootHydratedRef.current = true;
+        setIsCloudBootReady(true);
+        return;
+      }
+
       // Wajib cek master_state dari server cloud sebelum membuka halaman utama
       let cloudAccountsLoaded: BankAccount[] = [];
       try {
@@ -2119,7 +2348,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const masterData = masterSnap.data();
           applyMasterCloudData(masterData, { forceInitial: true });
           if (Array.isArray(masterData.accounts)) {
-            cloudAccountsLoaded = masterData.accounts as BankAccount[];
+            cloudAccountsLoaded = (masterData.accounts as BankAccount[]).filter(
+              (a) =>
+                !PURGED_BOT_ACCOUNT_IDS.includes(a.id) &&
+                !PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
+            );
           }
           setCloudSyncStatus('synced');
           setLastCloudSyncAt(new Date().toISOString());
@@ -2321,9 +2554,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (docSnap.exists()) {
           const data = docSnap.data();
-          applyMasterCloudData(data);
+          if (!isLinkingAccountToGoogleRef.current) {
+            applyMasterCloudData(data);
+          }
         }
-        hasFirestoreHydratedRef.current = true;
+        if (!docSnap.metadata.fromCache || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+          hasFirestoreHydratedRef.current = true;
+        }
       },
       (err) => {
         setCloudSyncStatus('offline');
@@ -2939,10 +3176,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // Sambungkan Akun OA (tanpa email) atau Akun Guest (LocalStorage) ke Akun Google lewat Pop-Up "Sign in with Google"
+  // Otomatis mengubah status akun dari Akun Guest menjadi Akun Google di aplikasi & Firebase, serta menyimpannya ke dalam email Google tersebut agar langsung muncul di HP & Laptop
   const linkCurrentAccountWithGooglePopup = async (
     targetAccountId?: string
-  ): Promise<{ success: boolean; message: string; email?: string }> => {
+  ): Promise<{ success: boolean; message: string; email?: string; errorCode?: string }> => {
     const targetAcc =
+      (targetAccountId ? accountsRef.current.find((a) => a.id === targetAccountId) : currentAccount) ||
       (targetAccountId ? accounts.find((a) => a.id === targetAccountId) : currentAccount) ||
       currentAccount;
     if (!targetAcc) {
@@ -2950,76 +3189,163 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Akun yang ingin disambungkan tidak ditemukan.' };
     }
 
-    const res = await signInWithGooglePopup();
-    if (!res.success || !res.user) {
-      playAtmSound('alert');
-      return {
-        success: false,
-        message: res.message || 'Pop-up Sign in with Google dibatalkan atau gagal.',
-      };
-    }
-
-    const fbUser = res.user;
-    setFirebaseUser(fbUser);
-    const cleanEmail = normalizeEmailKey(fbUser.email || '');
-    if (!cleanEmail) {
-      return { success: false, message: 'Email Google tidak ditemukan dari sesi login.' };
-    }
-
-    const nextAccounts = accounts.map((acc) =>
-      acc.id === targetAcc.id
-        ? {
-            ...acc,
-            email: cleanEmail,
-            googleEmail: cleanEmail,
-            firebaseUid: fbUser.uid,
-            isGuestAccount: false,
-          }
-        : acc
-    );
-
-    setAccounts(nextAccounts);
-    saveGuestAccountsToLocalStorage(
-      nextAccounts.filter((a) => Boolean(a.isGuestAccount && !a.googleEmail))
-    );
-    flushMasterStateToCloud({ accounts: nextAccounts });
-
-    void syncCloudUserProfile(
-      { uid: fbUser.uid, email: cleanEmail },
-      {
-        lastAccountId: targetAcc.id,
-        hasCompletedOnboarding: true,
-        authMode: 'google',
+    isLinkingAccountToGoogleRef.current = true;
+    try {
+      const res = await signInWithGooglePopup();
+      if (!res.success || !res.user) {
+        playAtmSound('alert');
+        return {
+          success: false,
+          errorCode: res.errorCode,
+          message: res.message || 'Pop-up Sign in with Google dibatalkan atau gagal.',
+        };
       }
-    );
 
-    if (!targetAccountId || targetAccountId === currentAccount?.id) {
-      setActiveCloudEmail(cleanEmail);
-      setGoogleUser((prev) => ({
+      const fbUser = res.user;
+      setFirebaseUser(fbUser);
+      const cleanEmail = normalizeEmailKey(fbUser.email || '');
+      if (!cleanEmail) {
+        return { success: false, message: 'Email Google tidak ditemukan dari sesi login.' };
+      }
+
+      // 1. Ambil snapshot terbaru dari Cloud Firestore agar akun yang sudah ada di HP/Cloud tidak tertimpa
+      let serverCloudAccounts: BankAccount[] = [];
+      let serverDeletedIds: string[] = [];
+      try {
+        const masterSnap = await getDocFromServer(doc(db, 'bank_state_v1', 'master_state')).catch(
+          () => getDoc(doc(db, 'bank_state_v1', 'master_state'))
+        );
+        if (masterSnap && masterSnap.exists()) {
+          const mData = masterSnap.data();
+          if (Array.isArray(mData.accounts)) {
+            serverCloudAccounts = mData.accounts as BankAccount[];
+          }
+          if (Array.isArray(mData.deletedAccountIds)) {
+            serverDeletedIds = mData.deletedAccountIds as string[];
+          }
+        }
+      } catch {
+        // fallback ke state lokal jika gagal baca server
+      }
+
+      const mergedDeletedIds = Array.from(
+        new Set([...PURGED_BOT_ACCOUNT_IDS, ...deletedAccountIdsRef.current, ...serverDeletedIds])
+      ).filter((id) => id !== targetAcc.id);
+      setDeletedAccountIds(mergedDeletedIds);
+      deletedAccountIdsRef.current = mergedDeletedIds;
+
+      // 2. Transformasi penuh Akun Guest (atau Akun OA) menjadi Akun Google yang terikat ke email Google tersebut
+      const wasGuest = Boolean(targetAcc.isGuestAccount);
+      const convertedGoogleAccount: BankAccount = {
+        ...targetAcc,
+        userId16: ensureAccountUserId16(targetAcc),
         email: cleanEmail,
-        name: targetAcc.fullName,
-        picture: fbUser.photoURL || prev?.picture,
+        googleEmail: cleanEmail,
         firebaseUid: fbUser.uid,
-        authMode: 'google',
-        emailKey: emailToFirestoreDocId(cleanEmail),
-        loggedInAt: new Date().toISOString(),
-        hasCompletedOnboarding: true,
-        isPinVerified: true,
-      }));
+        isGuestAccount: false,
+        isOfficialAdminAccount: wasGuest ? false : Boolean(targetAcc.isOfficialAdminAccount),
+        cardStatus: targetAcc.cardStatus === 'banned' ? 'banned' : 'active',
+        status: targetAcc.status === 'banned' ? 'banned' : 'active',
+      };
+
+      // 3. Gabungkan daftar akun dari Server Cloud + State Lokal + Akun yang baru dikonversi ke Google
+      const combinedMap = new Map<string, BankAccount>();
+      for (const sAcc of serverCloudAccounts) {
+        if (
+          sAcc &&
+          sAcc.id &&
+          !mergedDeletedIds.includes(sAcc.id) &&
+          !PURGED_BOT_ACCOUNT_IDS.includes(sAcc.id) &&
+          !PURGED_BOT_ACCOUNT_NUMBERS.includes(sAcc.accountNumber)
+        ) {
+          combinedMap.set(sAcc.id, sAcc);
+        }
+      }
+      for (const lAcc of accountsRef.current) {
+        if (
+          lAcc &&
+          lAcc.id &&
+          !mergedDeletedIds.includes(lAcc.id) &&
+          !PURGED_BOT_ACCOUNT_IDS.includes(lAcc.id) &&
+          !PURGED_BOT_ACCOUNT_NUMBERS.includes(lAcc.accountNumber)
+        ) {
+          if (!combinedMap.has(lAcc.id)) {
+            combinedMap.set(lAcc.id, lAcc);
+          }
+        }
+      }
+      combinedMap.set(convertedGoogleAccount.id, convertedGoogleAccount);
+
+      const nextAccounts: BankAccount[] = [
+        convertedGoogleAccount,
+        ...Array.from(combinedMap.values()).filter((a) => a.id !== convertedGoogleAccount.id),
+      ];
+
+      // 4. Hapus dari LocalStorage Guest (karena sekarang sudah resmi menjadi Akun Google di Cloud Firebase)
+      const remainingLocalGuests = nextAccounts.filter((a) =>
+        Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email))
+      );
+      saveGuestAccountsToLocalStorage(remainingLocalGuests);
+
+      // 5. Perbarui state aplikasi & tulis langsung ke Firebase Cloud Firestore (tunggu hingga selesai 100%)
+      accountsRef.current = nextAccounts;
+      setAccounts(nextAccounts);
+
+      await Promise.all([
+        flushMasterStateToCloud({
+          accounts: nextAccounts,
+          deletedAccountIds: mergedDeletedIds,
+        }),
+        syncCloudUserProfile(
+          { uid: fbUser.uid, email: cleanEmail },
+          {
+            lastAccountId: convertedGoogleAccount.id,
+            hasCompletedOnboarding: true,
+            authMode: 'google',
+            displayName: convertedGoogleAccount.fullName,
+            photoURL: fbUser.photoURL || undefined,
+          }
+        ),
+      ]);
+
+      hasFirestoreHydratedRef.current = true;
+      hasBootHydratedRef.current = true;
+
+      if (!targetAccountId || targetAccountId === currentAccount?.id) {
+        setCurrentAccountIdState(convertedGoogleAccount.id);
+        setActiveCloudEmail(cleanEmail);
+        setGoogleUser((prev) => ({
+          email: cleanEmail,
+          name: convertedGoogleAccount.fullName,
+          picture: fbUser.photoURL || prev?.picture,
+          firebaseUid: fbUser.uid,
+          authMode: 'google',
+          emailKey: emailToFirestoreDocId(cleanEmail),
+          loggedInAt: new Date().toISOString(),
+          hasCompletedOnboarding: true,
+          isPinVerified: true,
+        }));
+      }
+
+      playAtmSound('success');
+      addNotification(
+        wasGuest
+          ? 'Akun Guest Berubah Menjadi Akun Google ☁️'
+          : 'Akun OA Berhasil Disambungkan ke Google 🔗',
+        `Rekening "${convertedGoogleAccount.fullName}" (No. Rek: ${convertedGoogleAccount.accountNumber}) kini resmi berstatus Akun Google di Firebase pada email ${cleanEmail} dan otomatis muncul di HP maupun Laptop.`,
+        'success'
+      );
+
+      return {
+        success: true,
+        email: cleanEmail,
+        message: wasGuest
+          ? `✅ Akun Guest "${convertedGoogleAccount.fullName}" (${convertedGoogleAccount.accountNumber}) resmi berubah menjadi Akun Google di Firebase (${cleanEmail}) dan siap dibuka di HP maupun Laptop!`
+          : `✅ Akun "${convertedGoogleAccount.fullName}" (${convertedGoogleAccount.accountNumber}) berhasil disambungkan ke email Google ${cleanEmail}!`,
+      };
+    } finally {
+      isLinkingAccountToGoogleRef.current = false;
     }
-
-    playAtmSound('success');
-    addNotification(
-      'Akun Berhasil Disambungkan ke Google 🔗',
-      `Rekening "${targetAcc.fullName}" (No. Rek: ${targetAcc.accountNumber}) kini telah tersambung dengan email Google ${cleanEmail}. Saat Sign in with Google nanti, Anda dapat memilih akun ini dan memasukkan PIN Kartunya.`,
-      'success'
-    );
-
-    return {
-      success: true,
-      email: cleanEmail,
-      message: `✅ Akun "${targetAcc.fullName}" (${targetAcc.accountNumber}) berhasil disambungkan ke email Google ${cleanEmail}!`,
-    };
   };
 
   // Deteksi SELURUH kartu/akun yang terhubung ke email Google yang sedang login (Reguler, Akun OA yang disambungkan, maupun Guest yang disambungkan)
@@ -8240,6 +8566,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) return { success: false, message: 'Akun tidak ditemukan!' };
 
     const cleanEmail = email.trim() ? normalizeEmailKey(email.trim()) : '';
+    const wasGuest = Boolean(target.isGuestAccount);
     const nextAccounts = accounts.map((a) =>
       a.id === accountId
         ? {
@@ -8247,16 +8574,32 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             email: cleanEmail,
             googleEmail: cleanEmail || undefined,
             isGuestAccount: cleanEmail ? false : a.isGuestAccount,
+            isOfficialAdminAccount:
+              cleanEmail && wasGuest ? false : Boolean(a.isOfficialAdminAccount),
           }
         : a
     );
+    accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
-    flushMasterStateToCloud({ accounts: nextAccounts });
+    saveGuestAccountsToLocalStorage(
+      nextAccounts.filter((a) => Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email)))
+    );
+    void flushMasterStateToCloud({ accounts: nextAccounts });
+    if (cleanEmail) {
+      void syncCloudUserProfile(
+        { email: cleanEmail },
+        {
+          lastAccountId: accountId,
+          hasCompletedOnboarding: true,
+          authMode: 'google',
+        }
+      );
+    }
     playAtmSound('success');
     return {
       success: true,
       message: cleanEmail
-        ? `🔗 Akun "${target.fullName}" (${target.accountNumber}) berhasil disambungkan ke email Google: ${cleanEmail}! Saat Sign in with Google memakai email tersebut, pengguna dapat memilih akun ini dan memasukkan PIN Kartunya.`
+        ? `🔗 Akun "${target.fullName}" (${target.accountNumber}) berhasil diubah menjadi Akun Google di Firebase pada email: ${cleanEmail}! Saat Sign in with Google memakai email tersebut di HP maupun Laptop, pengguna dapat memilih akun ini dan memasukkan PIN Kartunya.`
         : `Tautan email Google pada akun "${target.fullName}" telah dilepas (kini tampil tombol "Sign in with Google" di bagian atas).`,
     };
   };
@@ -10030,7 +10373,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       banReason: '',
     }));
     setAccounts(cleanInitialAccounts);
-    setCurrentAccountIdState('acc-1');
+    setCurrentAccountIdState('acc-admin');
     setUserRoleState('customer');
     setTransactions(INITIAL_TRANSACTIONS);
     setLoans(INITIAL_LOANS);
@@ -10051,7 +10394,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setBudgetCategories(DEFAULT_BUDGET_CATEGORIES);
     setManualExpenses([]);
     setBudgetTxCategoryMap({});
-    setDeletedAccountIds([]);
+    setDeletedAccountIds([...PURGED_BOT_ACCOUNT_IDS]);
     setBudgetAlertHistory([]);
     setGiftEvents(DEFAULT_ADMIN_GIFT_EVENTS);
     setDeletedGiftEventIds([]);

@@ -27,7 +27,7 @@ import { PinPromptModal } from './PinPromptModal';
 export const NusantaraChat: React.FC = () => {
   const { currentAccount, accounts, chats, sendChatMessage, transferMoney } = useBank();
 
-  const [activeRecipientAccount, setActiveRecipientAccount] = useState<string>('5566778899'); // Farhan (Teman Saya)
+  const [activeRecipientAccount, setActiveRecipientAccount] = useState<string>('9999999999');
   const [messageText, setMessageText] = useState<string>('');
   const [searchContact, setSearchContact] = useState<string>('');
   const [showNewChatModal, setShowNewChatModal] = useState<boolean>(false);
@@ -53,13 +53,13 @@ export const NusantaraChat: React.FC = () => {
     ) || {
       id: 'custom',
       accountNumber: activeRecipientAccount,
-      fullName: 'Farhan Pratama (Teman Saya)',
-      phone: '081234567899',
+      fullName: `Rekening Tujuan (${activeRecipientAccount})`,
+      phone: activeRecipientAccount,
       balance: 0,
-      cardTier: 'gold' as const,
-      cardNumber: '5392 7741 2290 8110',
-      cvv: '512',
-      expiryDate: '10/31',
+      cardTier: 'regular' as const,
+      cardNumber: '5392 •••• •••• ••••',
+      cvv: '•••',
+      expiryDate: '12/31',
       cardStatus: 'active' as const,
       dailyWithdrawnToday: 0,
       lastWithdrawalDate: '',

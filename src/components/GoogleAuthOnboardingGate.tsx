@@ -1082,7 +1082,9 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[10px] font-mono font-bold text-amber-300">
                         Akun #{idx + 1}{' '}
-                        {acc.isOfficialAdminAccount ? '• AKUN OA TERHUBUNG GOOGLE' : '• REKENING CLOUD'}
+                        {acc.isOfficialAdminAccount
+                          ? '• AKUN OA TERHUBUNG GOOGLE'
+                          : '• AKUN GOOGLE CLOUD'}
                       </span>
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${itemTierCfg.badgeColor}`}>
                         {itemTierCfg.name}
