@@ -400,46 +400,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right Action Bar */}
         <div className="flex items-center gap-2 shrink-0">
-          {activeDevRole && activeDevStyle && (
-            <div className="hidden sm:flex items-center gap-1.5 shrink-0">
-              <span
-                className={`px-2 py-1 rounded-lg border text-[10px] font-black tracking-wide whitespace-nowrap shrink-0 ${activeDevStyle.pillClass}`}
-                title={activeDevRole.description || activeDevRole.name}
-              >
-                {activeDevRole.name}
-              </span>
-              {activeDevRole.canQuickOpenAdmin && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (onQuickAdminAccess) {
-                      onQuickAdminAccess(activeDevRole);
-                    } else {
-                      onSecretAdminTrigger();
-                    }
-                  }}
-                  className={`px-2.5 py-1.5 rounded-xl font-black text-[11px] flex items-center gap-1 cursor-pointer shadow-md transition-transform active:scale-95 whitespace-nowrap shrink-0 ${
-                    activeView === 'admin'
-                      ? 'ring-2 ring-white ' + activeDevStyle.quickBtnClass
-                      : activeDevStyle.quickBtnClass
-                  }`}
-                  title={
-                    activeDevRole.bypassAdminPin
-                      ? 'Buka Panel Admin Instan (Bebas PIN)'
-                      : 'Buka Panel Admin (Wajib PIN Admin)'
-                  }
-                >
-                  {activeDevRole.bypassAdminPin ? (
-                    <Zap className="w-3.5 h-3.5 shrink-0" />
-                  ) : (
-                    <Lock className="w-3.5 h-3.5 shrink-0" />
-                  )}
-                  <span>{activeDevRole.bypassAdminPin ? 'Panel Admin' : 'Admin (PIN)'}</span>
-                </button>
-              )}
-            </div>
-          )}
-
           {/* Tombol Atas Sync / "Sign in with Google" untuk Akun OA & Akun Guest yang Belum Tersambung Email Google */}
           {isCurrentAccountUnlinkedToGoogle ? (
             <button
@@ -913,6 +873,42 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <span>Keluar Akun</span>
                     </button>
                   </div>
+
+                  {/* Badge Role & Tombol Pintas Panel Admin di Dalam Menu Profil */}
+                  {activeDevRole && activeDevStyle && (
+                    <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <span
+                        className={`px-2 py-1 rounded-lg border text-[10px] font-black tracking-wide truncate ${activeDevStyle.pillClass}`}
+                        title={activeDevRole.description || activeDevRole.name}
+                      >
+                        👑 {activeDevRole.name}
+                      </span>
+                      {activeDevRole.canQuickOpenAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowUserDropdown(false);
+                            if (onQuickAdminAccess) {
+                              onQuickAdminAccess(activeDevRole);
+                            } else {
+                              onSecretAdminTrigger();
+                            }
+                          }}
+                          className={`px-2.5 py-1.5 rounded-xl font-black text-[10px] flex items-center gap-1 cursor-pointer shadow-md transition-transform active:scale-95 whitespace-nowrap shrink-0 ${activeDevStyle.quickBtnClass}`}
+                        >
+                          {activeDevRole.bypassAdminPin ? (
+                            <Zap className="w-3.5 h-3.5 shrink-0" />
+                          ) : (
+                            <Lock className="w-3.5 h-3.5 shrink-0" />
+                          )}
+                          <span>
+                            {activeDevRole.bypassAdminPin ? '⚡ Panel Admin' : '🔐 Admin (PIN)'}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {isCurrentAccountUnlinkedToGoogle && (
                     <button
                       type="button"
@@ -1108,28 +1104,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           <History className="w-4 h-4 text-emerald-400" />
           <span>Update</span>
         </button>
-        {activeDevRole && activeDevRole.canQuickOpenAdmin && (
-          <button
-            type="button"
-            onClick={() => {
-              if (onQuickAdminAccess) {
-                onQuickAdminAccess(activeDevRole);
-              } else {
-                onSecretAdminTrigger();
-              }
-            }}
-            className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${
-              activeView === 'admin' ? 'text-amber-300 font-black' : 'text-amber-400 font-bold'
-            }`}
-          >
-            {activeDevRole.bypassAdminPin ? (
-              <Zap className="w-4 h-4 text-amber-400" />
-            ) : (
-              <Lock className="w-4 h-4 text-amber-400" />
-            )}
-            <span>Admin</span>
-          </button>
-        )}
       </div>
 
       {googleLinkFeedback && (
