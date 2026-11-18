@@ -1,8 +1,11 @@
 /**
- * Official Blue Checkmark Verification Badge Icon (Centang Biru Bank Nusantara)
- * Diberikan dan diverifikasi oleh Admin di Panel Admin.
+ * Official Blue Checkmark Verification Badge Icon (Centang Biru Bank Nusantara),
+ * Permanent 16-Digit User ID Above Name Banner (Format 4x4 + Tombol Salin ID),
+ * and Official Admin Account (Akun OA) Badge.
  */
-import React from 'react';
+import React, { useState } from 'react';
+import { Copy, CheckCircle2, Fingerprint, ShieldCheck } from 'lucide-react';
+import { ensureAccountUserId16, formatUserId16 } from '../utils/bankUtils';
 
 interface VerifiedBadgeProps {
   size?: 'xs' | 'sm' | 'md' | 'lg';
@@ -62,5 +65,202 @@ export const VerifiedBadge: React.FC<VerifiedBadgeProps> = ({
         </span>
       )}
     </span>
+  );
+};
+
+interface OaAccountBadgeProps {
+  size?: 'xs' | 'sm' | 'md';
+  className?: string;
+}
+
+export const OaAccountBadge: React.FC<OaAccountBadgeProps> = ({
+  size = 'xs',
+  className = '',
+}) => {
+  const sizeClass =
+    size === 'xs'
+      ? 'text-[9px] px-1.5 py-0.5'
+      : size === 'sm'
+      ? 'text-[10px] px-2 py-0.5'
+      : 'text-xs px-2.5 py-1';
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-amber-500/25 via-yellow-500/20 to-emerald-500/25 border border-amber-400/50 text-amber-200 font-black uppercase tracking-wider shrink-0 shadow-sm ${sizeClass} ${className}`}
+      title="Akun OA Resmi Buatan Panel Admin (Dapat Login via Login Dengan Akun OA)"
+    >
+      <ShieldCheck className="w-3 h-3 text-amber-300 shrink-0" />
+      <span>AKUN OA</span>
+    </span>
+  );
+};
+
+interface UserId16AboveNameBannerProps {
+  account?: {
+    id?: string;
+    accountNumber?: string;
+    nik?: string;
+    userId16?: string;
+    isOfficialAdminAccount?: boolean;
+  } | null;
+  userId16?: string;
+  size?: 'xs' | 'sm' | 'md';
+  variant?: 'default' | 'card' | 'navbar' | 'light';
+  showCopyButton?: boolean;
+  showPermanentTag?: boolean;
+  className?: string;
+}
+
+export const UserId16AboveNameBanner: React.FC<UserId16AboveNameBannerProps> = ({
+  account,
+  userId16,
+  size = 'sm',
+  variant = 'default',
+  showCopyButton = true,
+  showPermanentTag = false,
+  className = '',
+}) => {
+  const [copied, setCopied] = useState(false);
+
+  const resolvedId16 = userId16
+    ? userId16.replace(/\D/g, '').padEnd(16, '0').slice(0, 16)
+    : account
+    ? ensureAccountUserId16(account)
+    : '0000000000000000';
+
+  const formatted4x4 = formatUserId16(resolvedId16);
+
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      navigator.clipboard.writeText(resolvedId16);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // ignore clipboard errors
+    }
+  };
+
+  if (variant === 'card') {
+    return (
+      <div
+        className={`inline-flex flex-wrap items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/35 border border-white/20 backdrop-blur-sm max-w-full ${className}`}
+        title="ID 16 Digit Permanen Pengguna (Tidak Dapat Diubah oleh User)"
+      >
+        <Fingerprint className="w-3 h-3 text-cyan-300 shrink-0" />
+        <span className="text-[9px] uppercase tracking-wider text-white/75 font-bold shrink-0">
+          ID:
+        </span>
+        <span className="font-mono text-[10px] sm:text-[11px] font-black text-amber-200 tracking-wider select-all">
+          {formatted4x4}
+        </span>
+        {showCopyButton && (
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-white/15 hover:bg-white/25 text-[9px] font-bold text-white transition cursor-pointer shrink-0"
+            title="Salin 16 Digit ID User"
+          >
+            {copied ? (
+              <>
+                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-300" />
+                <span className="text-emerald-200">Tersalin</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-2.5 h-2.5 text-cyan-200" />
+                <span>Salin ID</span>
+              </>
+            )}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (variant === 'navbar') {
+    return (
+      <div
+        className={`inline-flex items-center gap-1.5 text-[10px] font-mono leading-none ${className}`}
+        title="ID 16 Digit Permanen Pengguna"
+      >
+        <span className="text-cyan-400 font-bold uppercase tracking-wider">ID:</span>
+        <span className="text-amber-300 font-black tracking-wide">{formatted4x4}</span>
+        {showCopyButton && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={handleCopy}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') handleCopy(e as any);
+            }}
+            className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-[9px] text-cyan-200 font-sans font-bold cursor-pointer transition"
+            title="Salin ID 16 Digit"
+          >
+            {copied ? (
+              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+            ) : (
+              <Copy className="w-2.5 h-2.5 text-cyan-300" />
+            )}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`inline-flex flex-wrap items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/80 border border-cyan-500/35 shadow-sm max-w-full ${className}`}
+      title="ID 16 Digit Permanen Pengguna (Tidak Dapat Diubah oleh Nasabah)"
+    >
+      <Fingerprint
+        className={`${
+          size === 'xs' ? 'w-3 h-3' : size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4'
+        } text-cyan-400 shrink-0`}
+      />
+      <span
+        className={`${
+          size === 'xs' ? 'text-[9px]' : 'text-[10px]'
+        } font-extrabold uppercase tracking-wider text-cyan-300 shrink-0`}
+      >
+        ID USER 16 DIGIT:
+      </span>
+      <span
+        className={`font-mono ${
+          size === 'xs'
+            ? 'text-[10px]'
+            : size === 'sm'
+            ? 'text-[11px] sm:text-xs'
+            : 'text-xs sm:text-sm'
+        } font-black text-amber-300 tracking-wider select-all`}
+      >
+        {formatted4x4}
+      </span>
+      {showPermanentTag && (
+        <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-bold uppercase tracking-wider">
+          Permanen
+        </span>
+      )}
+      {showCopyButton && (
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-[10px] font-bold text-cyan-200 transition cursor-pointer shrink-0"
+          title="Salin ID 16 Digit"
+        >
+          {copied ? (
+            <>
+              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+              <span className="text-emerald-300">Tersalin!</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3 h-3 text-cyan-300" />
+              <span>Salin ID</span>
+            </>
+          )}
+        </button>
+      )}
+    </div>
   );
 };

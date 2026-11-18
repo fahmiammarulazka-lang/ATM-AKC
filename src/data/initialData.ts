@@ -19,6 +19,7 @@ import {
 export const INITIAL_ACCOUNTS: BankAccount[] = [
   {
     id: 'acc-1',
+    userId16: '1029384756920003',
     accountNumber: '1029384756', // Kartu 1: Akun Utama "Saya"
     fullName: 'Raden Satrio (Saya)',
     nik: '3171041508920003',
@@ -45,6 +46,7 @@ export const INITIAL_ACCOUNTS: BankAccount[] = [
   },
   {
     id: 'acc-friend',
+    userId16: '5566778899930002',
     accountNumber: '5566778899', // Kartu 2: Akun "Teman Saya"
     fullName: 'Farhan Pratama (Teman Saya)',
     nik: '3271021406930002',
@@ -67,6 +69,7 @@ export const INITIAL_ACCOUNTS: BankAccount[] = [
   },
   {
     id: 'acc-3',
+    userId16: '8849201934880004',
     accountNumber: '8849201934', // Kartu 3
     fullName: 'Budi Prasetyo Utomo',
     nik: '3374011204880004',
@@ -90,6 +93,7 @@ export const INITIAL_ACCOUNTS: BankAccount[] = [
   },
   {
     id: 'acc-4',
+    userId16: '7741902835940007',
     accountNumber: '7741902835', // Kartu 4 (Tambahan Kartu Baru ke-4)
     fullName: 'Putri Maharani Ningrum (Platinum)',
     nik: '3174082209940007',
@@ -116,6 +120,7 @@ export const INITIAL_ACCOUNTS: BankAccount[] = [
   },
   {
     id: 'acc-admin',
+    userId16: '9999999999999999',
     accountNumber: '9999999999', // Kartu 5: KARTU ADMIN (SEMUANYA TIDAK TERBATAS / INFINITY ∞)
     fullName: 'Kartu Admin Utama (∞ Unlimited)',
     nik: '9999999999999999',
@@ -141,9 +146,12 @@ export const INITIAL_ACCOUNTS: BankAccount[] = [
     isVerified: true,
     verifiedAt: '2020-01-01T00:00:00Z',
     verifiedLabel: 'Otoritas Pusat Admin (∞ Verified)',
+    isOfficialAdminAccount: true,
+    oaAdminPin: '159357',
   },
   {
     id: 'acc-2',
+    userId16: '2910384756950001',
     accountNumber: '2910384756',
     fullName: 'Siti Nurhaliza Putri',
     nik: '3275094205950001',
@@ -164,6 +172,7 @@ export const INITIAL_ACCOUNTS: BankAccount[] = [
   },
   {
     id: 'acc-pending-1',
+    userId16: '9102847163990005',
     accountNumber: '9102847163',
     fullName: 'Ahmad Maulana Fauzi',
     nik: '3578021908990005',

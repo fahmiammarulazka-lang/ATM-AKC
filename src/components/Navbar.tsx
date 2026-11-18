@@ -32,8 +32,8 @@ import {
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
-import { VerifiedBadge } from './VerifiedBadge';
-import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
+import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
+import { formatRupiah, isUnlimitedNumber, ensureAccountUserId16, formatUserId16 } from '../utils/bankUtils';
 import { computeMonthlyBudgetReport, getCurrentMonthKey } from '../utils/budgetUtils';
 import { useSecretAdminSequence } from '../utils/useSecretAdminSequence';
 import { DevRoleConfig, NotificationCategory10Key } from '../types/bank';
@@ -777,6 +777,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {currentAccount ? currentAccount.fullName.charAt(0) : 'U'}
               </div>
               <div className="text-left hidden sm:block">
+                {currentAccount && (
+                  <div className="mb-0.5">
+                    <UserId16AboveNameBanner
+                      account={currentAccount}
+                      variant="navbar"
+                      showCopyButton={true}
+                    />
+                  </div>
+                )}
                 <div className="flex items-center gap-1">
                   <span className="font-bold text-white block truncate max-w-[105px]">
                     {currentAccount ? currentAccount.fullName.split(' ')[0] : 'Pilih Akun'}
@@ -784,6 +793,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {currentAccount?.isVerified && (
                     <VerifiedBadge size="xs" label={currentAccount.verifiedLabel} />
                   )}
+                  {currentAccount?.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
                 </div>
                 <span className="text-[10px] font-mono text-amber-300 -mt-0.5 block">
                   {currentAccount ? currentAccount.accountNumber : ''}
@@ -795,28 +805,45 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Switch Account / Card Dropdown */}
             {showUserDropdown && (
               <div className="absolute right-0 mt-2 w-84 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2.5 z-50 text-xs space-y-2">
-                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <span className="text-[10px] font-bold text-white block truncate">
-                      {currentAccount ? currentAccount.fullName : googleUser?.name || 'Nasabah Bank Nusantara'}
-                    </span>
-                    <span className="text-[9px] font-mono text-emerald-400 block truncate">
-                      {googleUser?.email
-                        ? `${googleUser.email} · ${googleUser.authMode === 'email_direct' ? 'Email Cloud' : 'Google Cloud'}`
-                        : 'Cloud Firestore Real-Time'}
-                    </span>
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
+                  {currentAccount && (
+                    <UserId16AboveNameBanner
+                      account={currentAccount}
+                      size="xs"
+                      showCopyButton={true}
+                      showPermanentTag={true}
+                    />
+                  )}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[11px] font-bold text-white flex items-center gap-1 flex-wrap">
+                        <span className="truncate">
+                          {currentAccount ? currentAccount.fullName : googleUser?.name || 'Nasabah Bank Nusantara'}
+                        </span>
+                        {currentAccount?.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
+                      </span>
+                      <span className="text-[9px] font-mono text-emerald-400 block truncate">
+                        {googleUser?.email
+                          ? `${googleUser.email} · ${
+                              googleUser.authMode === 'oa_account'
+                                ? 'Akun OA Resmi'
+                                : 'Google Cloud'
+                            }`
+                          : 'Cloud Firestore Real-Time'}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowUserDropdown(false);
+                        logoutGoogle();
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-300 text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                      title="Keluar Sesi Akun"
+                    >
+                      <LogOut className="w-3 h-3" />
+                      <span>Keluar Akun</span>
+                    </button>
                   </div>
-                  <button
-                    onClick={() => {
-                      setShowUserDropdown(false);
-                      logoutGoogle();
-                    }}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-300 text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
-                    title="Keluar Sesi Akun"
-                  >
-                    <LogOut className="w-3 h-3" />
-                    <span>Keluar Akun</span>
-                  </button>
                 </div>
 
                 <div className="px-2 py-1 text-[11px] font-semibold text-slate-300 border-b border-slate-800 flex items-center justify-between">
@@ -855,6 +882,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                         }`}
                       >
                         <div className="min-w-0 pr-2">
+                          <span className="text-[9px] font-mono text-cyan-300 block mb-0.5">
+                            ID: {formatUserId16(ensureAccountUserId16(acc))}
+                          </span>
                           <div className="flex items-center gap-1.5">
                             <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-black/30 text-amber-300 shrink-0">
                               Kartu #{idx + 1}
@@ -863,6 +893,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                             {acc.isVerified && (
                               <VerifiedBadge size="xs" label={acc.verifiedLabel} />
                             )}
+                            {acc.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
                           </div>
                           <span className="text-[10px] font-mono opacity-80 block mt-0.5">
                             {acc.accountNumber} • {isAdminCard ? 'KARTU ADMIN (∞)' : acc.cardTier.toUpperCase()}

@@ -25,22 +25,127 @@ export interface CardTierConfig {
 
 export type CardStatus = 'active' | 'frozen' | 'pending' | 'rejected' | 'banned';
 
+export type BanThemeVariant = 'emergency_red' | 'warning_amber' | 'frozen_blue' | 'pitch_dark';
+
+export type BanIconVariant = 'shield' | 'lock' | 'warning' | 'gavel';
+
+export type BanReasonSourceMode = 'none' | 'system_30' | 'preset_20' | 'custom';
+
+export type BanSoundEffectMode = 'siren' | 'alert' | 'warning' | 'mute' | 'silent';
+
+export type BanDurationUnit =
+  | 'minutes'
+  | 'hours'
+  | 'days'
+  | 'weeks'
+  | 'months'
+  | 'specific_date';
+
+export interface BanScreenCustomizationConfig {
+  durationType: 'custom' | 'permanent';
+  durationValue?: number;
+  durationUnit?: BanDurationUnit;
+  durationMinutes?: number;
+  durationLabel: string;
+  specificEndDate?: string;
+  scheduledStartAt?: string;
+  bannedAt?: string;
+  expiresAt?: string;
+  reasonMode: BanReasonSourceMode;
+  systemReasonId?: string;
+  selectedSystemReasonId?: string;
+  presetReasonId?: string;
+  selectedPresetReasonId?: string;
+  reasonText?: string;
+  reason?: string;
+  showReasonBox: boolean; // Jika false atau reasonMode === 'none', kotak alasan disembunyikan penuh
+  showSubtitle: boolean;
+  subtitleText?: string;
+  showWhatsAppButton: boolean;
+  showEmailButton: boolean;
+  showInAppAppealButton: boolean;
+  showRecommendedLabel: boolean;
+  showCountdown: boolean;
+  showCaseId: boolean;
+  caseId?: string;
+  showBannedAtTime: boolean;
+  showStatusBadge: boolean;
+  statusBadgeText?: string;
+  showAppealStatusBox: boolean;
+  themeVariant: BanThemeVariant;
+  theme?: BanThemeVariant;
+  iconVariant: BanIconVariant;
+  icon?: BanIconVariant;
+  soundEffect: BanSoundEffectMode;
+  showFooterNote?: boolean;
+  footerNote?: string;
+  maxAppeals: number; // 1, 3, atau 0 (tanpa batas)
+  allowResubmitAfterReject: boolean;
+  requireAppealCategoryAndPromise: boolean;
+  overrideWhatsappNumber?: string;
+  overrideWhatsAppNumber?: string;
+  overrideEmailAddress?: string;
+  messageTemplate?: string;
+  appealMessageTemplate?: string;
+  internalAdminNote?: string;
+  adminInternalNote?: string;
+}
+
+export interface BanConfigPreset {
+  id: string;
+  name: string;
+  description?: string;
+  config: BanScreenCustomizationConfig;
+  createdAt: string;
+}
+
+export interface BanAuditLogEntry {
+  id: string;
+  timestamp: string;
+  action:
+    | 'ban'
+    | 'edit_ban'
+    | 'update_ban'
+    | 'unban'
+    | 'auto_unban'
+    | 'pin_5x_ban'
+    | 'appeal_submitted'
+    | 'appeal_reviewed'
+    | 'reset_pin_attempts'
+    | 'scheduled_ban';
+  accountId?: string;
+  targetAccountId?: string;
+  accountName?: string;
+  targetAccountName?: string;
+  accountNumber?: string;
+  targetAccountNumber?: string;
+  targetEmail?: string;
+  summary?: string;
+  reasonSummary?: string;
+  durationLabel?: string;
+  reason?: string;
+  caseId?: string;
+}
+
 export interface CardBanInfo {
   isBanned: boolean;
-  reason?: string; // Opsional di Panel Admin
-  durationType: 'custom' | 'permanent'; // Custom durasi atau Permanen
+  reason?: string; // Opsional di Panel Admin (kosong = sembunyikan kotak alasan)
+  durationType: 'custom' | 'permanent'; // Custom durasi (Trial) atau Permanen
   durationMinutes?: number; // Jika custom
-  durationLabel: string; // Contoh: "30 Menit", "24 Jam", atau "Permanen"
+  durationLabel: string; // Contoh: "30 Menit", "1 Hari (24 Jam)", atau "Permanen"
   bannedAt: string;
   expiresAt?: string; // ISO string jika custom
   bannedUntil?: string; // Alias expiresAt
-  // Jika durasi custom, nasabah masih bisa mengajukan tinjauan alasan ke Admin.
-  // Pada layar Banned Fullscreen, tersedia pula tombol Tinjau di Sini + WA + Email.
+  scheduledStartAt?: string; // Jika dijadwalkan mulai pada waktu tertentu
   appealStatus?: 'none' | 'pending' | 'rejected' | 'approved';
   appealNote?: string;
+  appealCategory?: string;
+  appealPromiseAccepted?: boolean;
+  appealCount?: number;
   appealRequestedAt?: string;
   appealAdminNote?: string;
   appealSource?: 'in_app' | 'whatsapp' | 'email';
+  customConfig?: BanScreenCustomizationConfig;
 }
 
 export type AccountCloudStatus = 'active' | 'banned';
@@ -50,6 +155,11 @@ export type CloudSyncStatus = 'syncing' | 'synced' | 'offline' | 'error';
 export interface BanSupportConfig {
   whatsappNumber: string; // Nomor WA Admin (misal: 6281234567890)
   emailAddress: string; // Email Admin untuk tinjauan banding
+  defaultTemplateConfig?: BanScreenCustomizationConfig;
+  defaultTemplate?: BanScreenCustomizationConfig;
+  presets?: BanConfigPreset[];
+  savedPresets?: BanConfigPreset[];
+  auditLogs?: BanAuditLogEntry[];
   updatedAt?: string;
 }
 
@@ -62,19 +172,26 @@ export interface CloudUserRecord {
   status: AccountCloudStatus;
   banReason?: string;
   bannedAt?: string;
+  banExpiresAt?: string;
+  banDurationLabel?: string;
+  banCustomConfig?: BanScreenCustomizationConfig;
+  failedPinAttempts?: number;
+  lastFailedPinAt?: string;
   banAppealStatus?: 'none' | 'pending' | 'rejected' | 'approved';
   banAppealMessage?: string;
   banAppealSubmittedAt?: string;
   banAppealAdminNote?: string;
   appealStatus?: 'none' | 'pending' | 'rejected' | 'approved';
   appealNote?: string;
+  appealCategory?: string;
+  appealCount?: number;
   appealAdminNote?: string;
   appealRequestedAt?: string;
   appealSource?: 'in_app' | 'whatsapp' | 'email';
   currentAccountId?: string;
   lastAccountId?: string;
   hasCompletedOnboarding?: boolean;
-  authMode?: 'email_direct' | 'google';
+  authMode?: 'email_direct' | 'google' | 'oa_account';
   emailKey?: string;
   emailVerified?: boolean;
   notificationCategoryPermissions?: Record<NotificationCategory10Key, boolean>;
@@ -85,6 +202,7 @@ export interface CloudUserRecord {
 
 export interface BankAccount {
   id: string;
+  userId16?: string; // 16 digit permanent user ID displayed above user's name (format 4x4)
   accountNumber: string; // 10 digit unique random number
   fullName: string;
   nik: string; // 16 digit ID
@@ -103,6 +221,9 @@ export interface BankAccount {
   cardStatus: CardStatus;
   rejectionReason?: string;
   banInfo?: CardBanInfo;
+  scheduledBanConfig?: BanScreenCustomizationConfig;
+  failedPinAttempts?: number;
+  lastFailedPinAt?: string;
   dailyWithdrawnToday: number;
   lastWithdrawalDate: string;
   initialDeposit: number;
@@ -156,6 +277,9 @@ export interface BankAccount {
   devRoleId?: string | null;
   hasAccessedAdminPanel?: boolean;
   adminAccessTimestamp?: string;
+  // Akun OA Resmi buatan Panel Admin (Bisa login lewat tombol "Login Dengan Akun OA" di Lobi Awal)
+  isOfficialAdminAccount?: boolean;
+  oaAdminPin?: string; // Default '159357' atau PIN Admin khusus per Akun OA
 }
 
 export type GoldFormType = 'batangan' | 'perhiasan';
@@ -233,10 +357,11 @@ export interface GoogleUserSession {
   name: string;
   picture?: string;
   firebaseUid?: string;
-  authMode?: 'email_direct' | 'google';
+  authMode?: 'email_direct' | 'google' | 'oa_account';
   emailKey?: string;
   loggedInAt: string;
   hasCompletedOnboarding: boolean;
+  isPinVerified?: boolean;
 }
 
 export interface WebsiteSystemPopupNotification {
@@ -1226,4 +1351,39 @@ export interface AccountDeletionRequest {
   adminNote?: string;
 }
 
-
+export interface AdminFullCustomAccountInput {
+  fullName: string;
+  userId16?: string;
+  accountNumber?: string;
+  cardNumber?: string;
+  cvv?: string;
+  expiryDate?: string;
+  pin?: string;
+  oaAdminPin?: string;
+  nik?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  cardTier: CardTier;
+  balance: number;
+  isUnlimitedBalance?: boolean;
+  goldGrams?: number;
+  spinCoins?: number;
+  rewardPoints?: number;
+  pulsaBalance?: number;
+  plnKwhBalance?: number;
+  jobLevel?: number;
+  levelVouchers?: number;
+  clickPower?: number;
+  salaryMultiplier?: number;
+  cashbackPercent?: number;
+  vipShieldActive?: boolean;
+  allowInternational?: boolean;
+  customSpendingLimit?: number;
+  isVerified?: boolean;
+  verifiedLabel?: string;
+  devRoleId?: string | null;
+  grantAllSultanBusinesses?: boolean;
+  sultanBusinessUnitsEach?: number;
+  isOfficialAdminAccount?: boolean;
+}

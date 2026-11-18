@@ -187,6 +187,82 @@ export function generateExpiryDate(yearsToAdd = 5): string {
 }
 
 /**
+ * Generates an automatic 16-digit numeric User ID (ID Permanen di atas nama user)
+ */
+export function generateRandomUserId16(existingIds: string[] = []): string {
+  const cleanExisting = new Set(existingIds.map((id) => (id || '').replace(/\D/g, '')));
+  let candidate = '';
+  let attempts = 0;
+  do {
+    const firstDigit = Math.floor(Math.random() * 9) + 1;
+    let rest = '';
+    for (let i = 0; i < 15; i++) {
+      rest += Math.floor(Math.random() * 10).toString();
+    }
+    candidate = `${firstDigit}${rest}`;
+    attempts++;
+  } while (cleanExisting.has(candidate) && attempts < 100);
+  return candidate;
+}
+
+/**
+ * Ensures any account has a deterministic, valid 16-digit numeric userId16
+ */
+export function ensureAccountUserId16(acc: {
+  id?: string;
+  accountNumber?: string;
+  nik?: string;
+  userId16?: string;
+}): string {
+  const existing = (acc.userId16 || '').replace(/\D/g, '');
+  if (existing.length === 16) {
+    return existing;
+  }
+  if (acc.accountNumber === '9999999999' || acc.id === 'acc-admin') {
+    return '9999999999999999';
+  }
+  const acctDigits = (acc.accountNumber || '').replace(/\D/g, '').padEnd(10, '8').slice(0, 10);
+  const nikDigits = (acc.nik || '').replace(/\D/g, '');
+  if (nikDigits.length >= 6) {
+    return `${acctDigits}${nikDigits.slice(-6)}`;
+  }
+  let hash = 0;
+  const seed = `${acc.id || ''}-${acc.accountNumber || ''}`;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 1000000;
+  }
+  const suffix = String(Math.abs(hash)).padStart(6, '4').slice(0, 6);
+  return `${acctDigits}${suffix}`;
+}
+
+/**
+ * Formats 16-digit User ID into 4x4 groups: XXXX XXXX XXXX XXXX
+ */
+export function formatUserId16(id16?: string): string {
+  const digits = (id16 || '').replace(/\D/g, '');
+  const normalized = digits.length === 16 ? digits : digits.padEnd(16, '0').slice(0, 16);
+  return normalized.replace(/(\d{4})(?=\d)/g, '$1 ');
+}
+
+/**
+ * Generates a random strong 6-digit PIN
+ */
+export function generateRandomPin6(): string {
+  let pin = '';
+  for (let attempt = 0; attempt < 50; attempt++) {
+    let candidate = '';
+    for (let i = 0; i < 6; i++) {
+      candidate += Math.floor(Math.random() * 10).toString();
+    }
+    if (validateStrongPin(candidate).valid) {
+      pin = candidate;
+      break;
+    }
+  }
+  return pin || '482917';
+}
+
+/**
  * Formats currency to Rupiah: Rp 2.000.000
  */
 export function formatRupiah(amount: number): string {

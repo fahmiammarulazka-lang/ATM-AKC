@@ -42,7 +42,7 @@ import { PinPromptModal } from './PinPromptModal';
 import { AdminPinModal } from './AdminPinModal';
 import { DigitalBankingFeatures } from './DigitalBankingFeatures';
 import { JobVacancyView } from './JobVacancyView';
-import { VerifiedBadge } from './VerifiedBadge';
+import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
 import { TabEmasView } from './TabEmasView';
 import { TransferWorkspace } from './TransferWorkspace';
 import {
@@ -278,13 +278,24 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Permanent 16-Digit User ID right above user's name */}
+          <div className="pt-1">
+            <UserId16AboveNameBanner
+              account={currentAccount}
+              size="sm"
+              showCopyButton={true}
+              showPermanentTag={true}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
             <h1 className="text-xl sm:text-2xl font-bold text-white tracking-wide">
               Selamat Datang, {currentAccount.fullName}
             </h1>
             {currentAccount.isVerified && (
               <VerifiedBadge size="md" label={currentAccount.verifiedLabel} />
             )}
+            {currentAccount.isOfficialAdminAccount && <OaAccountBadge size="sm" />}
           </div>
           <p className="text-xs text-slate-300">
             No. Rekening:{' '}
@@ -589,6 +600,53 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
           {/* Quick Actions & Specifications (Takes 7 cols) */}
           <div className="lg:col-span-7 space-y-6">
+            {/* Profil & Identitas Resmi Nasabah (ID 16 Digit Permanen di Atas Nama) */}
+            <div className="bg-slate-900/80 border border-cyan-500/30 rounded-3xl p-5 shadow-xl space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <h3 className="font-bold text-white text-sm flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                  <span>Profil & Identitas Nasabah (ID 16 Digit Permanen)</span>
+                </h3>
+                <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-slate-800 text-cyan-300 border border-cyan-500/30">
+                  🔒 ID 16 Digit Tidak Dapat Diubah oleh User
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
+                <UserId16AboveNameBanner
+                  account={currentAccount}
+                  size="md"
+                  showCopyButton={true}
+                  showPermanentTag={true}
+                />
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-base sm:text-lg font-black text-white">
+                    {currentAccount.fullName}
+                  </span>
+                  {currentAccount.isVerified && (
+                    <VerifiedBadge size="sm" label={currentAccount.verifiedLabel} />
+                  )}
+                  {currentAccount.isOfficialAdminAccount && <OaAccountBadge size="sm" />}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Nomor Rekening</span>
+                    <span className="font-mono font-bold text-amber-300">{currentAccount.accountNumber}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">NIK Identitas</span>
+                    <span className="font-mono text-slate-200">{currentAccount.nik}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Email & Telepon</span>
+                    <span className="text-slate-200 truncate block">
+                      {currentAccount.phone} • {currentAccount.email || '-'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Card Tier Specifications (Section 1) */}
             <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">

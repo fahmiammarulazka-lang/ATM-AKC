@@ -77,7 +77,7 @@ import {
   SULTAN_TRADING_ASSETS,
   MINTOL_ADMIN_FEATURES_CATALOG,
 } from '../data/empireAndMintolCatalog';
-import { VerifiedBadge } from './VerifiedBadge';
+import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
 import { AdminQuickAccountControlPanel } from './AdminQuickAccountControlPanel';
 import { AdminGoldTransferPanel } from './AdminGoldTransferPanel';
 import { AdminGiftEventPanel } from './AdminGiftEventPanel';
@@ -85,6 +85,7 @@ import { AdminDevRolesPanel } from './AdminDevRolesPanel';
 import { AdminUniversalGachaPanel } from './AdminUniversalGachaPanel';
 import { AdminJobCoinBonusCard } from './AdminJobCoinBonusCard';
 import { AccountDeletion10StepModal } from './AccountDeletion10StepModal';
+import { AdminBanStudioView } from './AdminBanStudioView';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -917,7 +918,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           }`}
         >
           <Ban className="w-4 h-4" />
-          <span>Banned Kartu ({bannedCards.length})</span>
+          <span>🚫 Studio Banned &amp; Live Preview ({bannedCards.length})</span>
           {pendingBanAppeals.length > 0 && (
             <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
               {pendingBanAppeals.length} Tinjauan
@@ -5831,9 +5832,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         </div>
       )}
 
-      {/* ================= ADMIN TAB: BANNED KARTU NASABAH (CUSTOM / PERMANEN & ALASAN OPSIONAL) ================= */}
+      {/* ================= ADMIN TAB: STUDIO PENGATURAN & LIVE PREVIEW BANNED REAL-TIME (50 FITUR) ================= */}
       {activeAdminTab === 'ban_cards' && (
         <div className="space-y-6 text-xs">
+          <AdminBanStudioView />
           {banFeedback && (
             <div className="p-4 rounded-2xl bg-emerald-950/90 border border-emerald-400 text-emerald-200 font-bold flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -6278,9 +6280,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 {accounts.map((acc) => (
                   <tr key={acc.id} className="hover:bg-slate-800/40">
                     <td className="py-2.5 font-bold text-white">
-                      <div className="flex items-center gap-1.5">
+                      <div className="mb-1">
+                        <UserId16AboveNameBanner account={acc} size="xs" showCopyButton={true} />
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span>{acc.fullName}</span>
                         {acc.isVerified && <VerifiedBadge size="xs" label={acc.verifiedLabel} />}
+                        {(acc.isOfficialAdminAccount || acc.id === 'acc-admin') && (
+                          <OaAccountBadge size="xs" />
+                        )}
                       </div>
                     </td>
                     <td className="py-2.5 font-mono text-amber-300">{acc.accountNumber}</td>

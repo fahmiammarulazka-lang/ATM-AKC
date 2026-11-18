@@ -207,8 +207,11 @@ function BankAppContent() {
     return <BanLockScreen />;
   }
 
-  // 3. Show Mandatory Google Sign-In -> Card Registration / Old Card Login Onboarding Gate at the start
-  if ((!googleUser || !googleUser.hasCompletedOnboarding) && !adminViewDuringOnboarding) {
+  const isCustomerGateOpen =
+    !googleUser || !googleUser.hasCompletedOnboarding || googleUser.isPinVerified === false;
+
+  // 3. Show Mandatory Google/Email Sign-In -> Auto Detect New Card Creation OR Existing Account PIN Gate
+  if (isCustomerGateOpen && !adminViewDuringOnboarding) {
     return (
       <>
         {quotaExceeded && (
@@ -242,7 +245,7 @@ function BankAppContent() {
     );
   }
 
-  if (adminViewDuringOnboarding && (!googleUser || !googleUser.hasCompletedOnboarding)) {
+  if (adminViewDuringOnboarding && isCustomerGateOpen) {
     return (
       <div className="min-h-screen bg-[#070c18] text-slate-100 flex flex-col font-sans">
         <WebsiteSystemNotificationModal />

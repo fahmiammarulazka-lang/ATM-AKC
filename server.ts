@@ -875,6 +875,63 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
     }
   });
 
+  // ==================== GOOGLE MAPS PLATFORM REVERSE GEOCODING PROXY ====================
+  app.get('/api/maps/reverse-geocode', async (req, res) => {
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      res.status(400).json({ success: false, message: 'Invalid coordinates' });
+      return;
+    }
+
+    const mapsKey =
+      process.env.VITE_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
+    if (!mapsKey) {
+      res.json({ success: false, reason: 'no_key' });
+      return;
+    }
+
+    try {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${encodeURIComponent(
+        `${lat},${lng}`
+      )}&language=id&key=${encodeURIComponent(
+        mapsKey
+      )}&solution_id=gmp_mcp_codeassist_v1_aistudio`;
+      const response = await fetch(url);
+      if (response.status === 429) {
+        res.status(429).json({
+          success: false,
+          quotaExceeded: true,
+          error: { status: 'RESOURCE_EXHAUSTED' },
+        });
+        return;
+      }
+      const data = (await response.json()) as {
+        status?: string;
+        results?: Array<{ formatted_address?: string; place_id?: string }>;
+      };
+      if (data.status === 'OVER_QUERY_LIMIT' || data.status === 'RESOURCE_EXHAUSTED') {
+        res.status(429).json({
+          success: false,
+          quotaExceeded: true,
+          error: { status: 'RESOURCE_EXHAUSTED' },
+        });
+        return;
+      }
+      if (data.status === 'OK' && Array.isArray(data.results) && data.results.length > 0) {
+        res.json({
+          success: true,
+          formattedAddress: data.results[0].formatted_address || '',
+          placeId: data.results[0].place_id || '',
+        });
+        return;
+      }
+      res.json({ success: false, status: data.status || 'ZERO_RESULTS' });
+    } catch (err) {
+      res.json({ success: false, error: String(err) });
+    }
+  });
+
   // ==================== VITE MIDDLEWARE / STATIC ASSETS ====================
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

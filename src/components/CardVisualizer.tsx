@@ -31,7 +31,7 @@ import { CARD_TIER_CONFIGS, formatRupiah, formatBanRemainingTime } from '../util
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
 import { AdminPinModal } from './AdminPinModal';
-import { VerifiedBadge } from './VerifiedBadge';
+import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
 
 interface CardVisualizerProps {
   account: BankAccount;
@@ -323,21 +323,29 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({ account, showIns
               </div>
 
               <div className="flex items-end justify-between pt-1 text-[11px] sm:text-xs">
-                <div>
+                <div className="min-w-0">
+                  <div className="mb-1">
+                    <UserId16AboveNameBanner
+                      account={account}
+                      variant="card"
+                      showCopyButton={true}
+                    />
+                  </div>
                   <div className="text-[9px] uppercase tracking-wider text-white/60">
                     Nama Pemilik
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="font-semibold tracking-wide uppercase truncate max-w-[175px]">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="font-semibold tracking-wide uppercase truncate max-w-[165px]">
                       {account.fullName}
                     </div>
                     {account.isVerified && (
                       <VerifiedBadge size="sm" label={account.verifiedLabel} />
                     )}
+                    {account.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
                   </div>
                 </div>
 
-                <div className="text-right">
+                <div className="text-right shrink-0">
                   <div className="text-[9px] uppercase tracking-wider text-white/60">
                     Masa Berlaku
                   </div>
@@ -575,33 +583,45 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({ account, showIns
         )}
       </div>
 
-      {/* Account Number Box */}
-      <div className="w-full mt-4 p-3.5 bg-slate-900/90 rounded-2xl border border-slate-800 text-xs flex items-center justify-between shadow-lg">
-        <div>
-          <div className="flex items-center gap-1.5 text-slate-400 text-[11px]">
-            <span>Nomor Rekening (Sistem Otomatis)</span>
-            <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.2 rounded font-mono">10 Digit Unik</span>
-          </div>
-          <div className="font-mono text-base font-bold text-amber-300 tracking-wider mt-0.5 flex items-center gap-2">
-            <span>{account.accountNumber}</span>
-            <button
-              onClick={handleCopyAcc}
-              title="Salin nomor rekening"
-              className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors cursor-pointer"
-            >
-              {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-          </div>
+      {/* Account Number & Permanent 16-Digit User ID Box */}
+      <div className="w-full mt-4 p-3.5 bg-slate-900/90 rounded-2xl border border-slate-800 text-xs space-y-2.5 shadow-lg">
+        <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
+          <UserId16AboveNameBanner
+            account={account}
+            size="xs"
+            showCopyButton={true}
+            showPermanentTag={true}
+          />
+          {account.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
         </div>
 
-        <button
-          onClick={() => setShowAdminCodeForRegen(true)}
-          title="Ganti nomor rekening menggunakan Kode Admin"
-          className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-900/40 hover:bg-blue-800/60 text-blue-300 hover:text-blue-100 border border-blue-700/50 rounded-xl text-[11px] font-medium transition-all cursor-pointer"
-        >
-          <RotateCw className="w-3 h-3 text-blue-400" />
-          <span>Ganti No. Rek (Kode Admin)</span>
-        </button>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-1.5 text-slate-400 text-[11px]">
+              <span>Nomor Rekening (Sistem Otomatis)</span>
+              <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.2 rounded font-mono">10 Digit Unik</span>
+            </div>
+            <div className="font-mono text-base font-bold text-amber-300 tracking-wider mt-0.5 flex items-center gap-2">
+              <span>{account.accountNumber}</span>
+              <button
+                onClick={handleCopyAcc}
+                title="Salin nomor rekening"
+                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowAdminCodeForRegen(true)}
+            title="Ganti nomor rekening menggunakan Kode Admin"
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-900/40 hover:bg-blue-800/60 text-blue-300 hover:text-blue-100 border border-blue-700/50 rounded-xl text-[11px] font-medium transition-all cursor-pointer"
+          >
+            <RotateCw className="w-3 h-3 text-blue-400" />
+            <span>Ganti No. Rek (Kode Admin)</span>
+          </button>
+        </div>
       </div>
 
       {/* =========================================================================

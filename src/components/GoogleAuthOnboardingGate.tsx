@@ -1,712 +1,959 @@
 /**
- * Bank Nusantara — Gerbang Masuk Portal Nasabah & Pendaftaran / Login Kartu
- * Alur 2 Tahap Wajib Google Sign-In:
- * 1. Layar Awal: Tombol "Sign in with Google" (Firebase Auth Popup) dengan domain resmi atm-akc.vercel.app.
- * 2. Setelah Login Google berhasil: Tampil pilihan "Buat Kartu Baru" atau "Login ke Kartu Lain".
+ * Full-Screen Cloud Login & Card Onboarding Gate (100% Firestore Cloud Synced)
+ * - Lobi Awal:
+ *   1) "Sign in with Google" (Otomatis menerbitkan Kartu Reguler untuk akun baru)
+ *   2) "Login Dengan Akun OA" (Wajib isi: No. Rekening, ID 16 Digit, PIN Kartu & PIN Admin — khusus Akun OA buatan Panel Admin, bebas proteksi 5x salah PIN, langsung masuk Dashboard)
+ * - Form pendaftaran Email manual ("Alamat Email (Bebas Semua Email)", "Nama Tampilan", "Masuk / Daftar Sekarang") telah dihapus sesuai instruksi.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  CreditCard,
+  Landmark,
   ShieldCheck,
-  UserCheck,
-  KeyRound,
-  LogIn,
+  CreditCard,
+  Lock,
+  Sparkles,
   CheckCircle2,
   AlertCircle,
-  Lock,
+  User,
+  Phone,
+  MapPin,
+  Wallet,
+  KeyRound,
   LogOut,
-  Cloud,
-  Globe,
-  Mail,
+  Eye,
+  EyeOff,
+  Loader2,
+  AlertTriangle,
+  Fingerprint,
+  Building2,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
-import { CardTier, BankAccount } from '../types/bank';
-import { CARD_TIER_CONFIGS, formatRupiah } from '../utils/bankUtils';
-import { PinPromptModal } from './PinPromptModal';
-import { VerifiedBadge } from './VerifiedBadge';
-import { AllowNotificationFooterButton } from './GlobalChatAndNotificationLayer';
-import { GoogleMapsAddressPicker } from './GoogleMapsAddressPicker';
-import { FIREBASE_CLOUD_CONFIG } from '../config/firebaseCloudConfig';
+import { CARD_TIER_CONFIGS, formatRupiah, validateStrongPin, formatUserId16 } from '../utils/bankUtils';
+import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
 
 export const GoogleAuthOnboardingGate: React.FC = () => {
   const {
     googleUser,
-    loginOrRegisterWithEmail,
+    isCloudBootReady,
     loginWithGooglePopup,
+    loginWithOaAccount,
     logoutGoogle,
-    accounts,
     registerCard,
-    loginToCardWithPin,
-    cloudSyncStatus,
+    linkedUserAccount,
+    verifyInitialCardPin,
+    requestPinReset,
+    pinResetRequests,
   } = useBank();
 
-  const [directEmail, setDirectEmail] = useState<string>('');
-  const [directFullName, setDirectFullName] = useState<string>('');
-  const [emailAuthLoading, setEmailAuthLoading] = useState<boolean>(false);
-  const [emailAuthError, setEmailAuthError] = useState<string>('');
+  // Lobby Mode: 'options' | 'oa_login'
+  const [lobbyMode, setLobbyMode] = useState<'options' | 'oa_login'>('options');
 
-  const [authLoading, setAuthLoading] = useState<boolean>(false);
-  const [authError, setAuthError] = useState<{ message: string; code?: string } | null>(null);
+  // State Login Dengan Akun OA (Wajib 4 Kolom: No. Rek, ID 16 Digit, PIN Kartu, PIN Admin)
+  const [oaAccountNumber, setOaAccountNumber] = useState('');
+  const [oaUserId16, setOaUserId16] = useState('');
+  const [oaCardPin, setOaCardPin] = useState('');
+  const [oaAdminPin, setOaAdminPin] = useState('');
+  const [showOaCardPin, setShowOaCardPin] = useState(false);
+  const [showOaAdminPin, setShowOaAdminPin] = useState(false);
+  const [isOaSubmitting, setIsOaSubmitting] = useState(false);
 
-  // Stage 2 Mode ('register' = Buat Kartu Baru, 'login_old' = Login ke Kartu Lain pakai PIN Kartu / PIN Admin)
-  const [onboardingTab, setOnboardingTab] = useState<'register' | 'login_old'>('register');
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [authError, setAuthError] = useState<{ code?: string; message: string } | null>(null);
 
-  // Registration Form State
-  const [fullName, setFullName] = useState<string>('');
-  const [nik, setNik] = useState<string>('3171042010980001');
-  const [phone, setPhone] = useState<string>('081298765432');
-  const [email, setEmail] = useState<string>('nasabah@banknusantara.id');
-  const [address, setAddress] = useState<string>('Jl. Jend. Sudirman Kav. 21, Jakarta Pusat');
-  const [selectedTier, setSelectedTier] = useState<CardTier>('regular');
+  // Stage 2A: Existing Card Detected -> Verify 6-Digit PIN (5x wrong = 1 day ban)
+  const [existingPinInput, setExistingPinInput] = useState('');
+  const [showExistingPin, setShowExistingPin] = useState(false);
+  const [pinVerifyError, setPinVerifyError] = useState<string | null>(null);
+  const [remainingPinTries, setRemainingPinTries] = useState<number>(5);
+  const [forgotPinReason, setForgotPinReason] = useState('');
+  const [showForgotPinBox, setShowForgotPinBox] = useState(false);
+  const [forgotPinStatusMsg, setForgotPinStatusMsg] = useState<string | null>(null);
+
+  // Stage 2B: New Google User -> Create Card (Otomatis Kartu Reguler)
+  const [fullName, setFullName] = useState('');
+  const [nik, setNik] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [showNewPin, setShowNewPin] = useState(false);
   const [initialDeposit, setInitialDeposit] = useState<number>(500_000);
-  const [newPin, setNewPin] = useState<string>('');
-  const [confirmPin, setConfirmPin] = useState<string>('');
-  const [regError, setRegError] = useState<string>('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const addressInputRef = useRef<HTMLInputElement | null>(null);
+  const [mapsAutocompleteReady, setMapsAutocompleteReady] = useState(false);
 
-  // Prefill nama & email dari akun Cloud yang login
   useEffect(() => {
     if (googleUser) {
-      if (!fullName && googleUser.name) setFullName(googleUser.name);
-      if (googleUser.email) setEmail(googleUser.email);
+      if (!fullName) setFullName(googleUser.name);
+      if (!nik) {
+        const rand12 = Array.from({ length: 12 }, () => Math.floor(Math.random() * 10)).join('');
+        setNik(`3171${rand12}`);
+      }
+      if (!phone) {
+        const rand8 = Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('');
+        setPhone(`0812${rand8}`);
+      }
+      if (!address) {
+        setAddress('Jl. Jend. Sudirman Kav. 1, Jakarta Pusat');
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [googleUser?.email, googleUser?.name]);
+  }, [googleUser]);
 
-  // Login to Another Card State
-  const [selectedOldCard, setSelectedOldCard] = useState<BankAccount | null>(null);
-  const [oldCardSearch, setOldCardSearch] = useState<string>('');
+  // Integrasi Google Maps Places Autocomplete untuk kolom alamat saat buat kartu baru di HP & Laptop
+  useEffect(() => {
+    if (!googleUser || linkedUserAccount) return;
+    let autocompleteInstance: any = null;
+    let listenerHandle: any = null;
 
-  const handleDirectEmailSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setEmailAuthError('');
-    setAuthError(null);
-    setEmailAuthLoading(true);
-    try {
-      const res = await loginOrRegisterWithEmail({
-        email: directEmail,
-        displayName: directFullName,
-      });
-      if (!res.success) {
-        setEmailAuthError(res.message);
+    const initPlaces = () => {
+      const g = (window as any).google;
+      if (g?.maps?.places && addressInputRef.current) {
+        try {
+          autocompleteInstance = new g.maps.places.Autocomplete(addressInputRef.current, {
+            fields: ['formatted_address', 'name', 'geometry'],
+          });
+          setMapsAutocompleteReady(true);
+          listenerHandle = autocompleteInstance.addListener('place_changed', () => {
+            const place = autocompleteInstance.getPlace();
+            const chosen = place?.formatted_address || place?.name;
+            if (chosen) {
+              setAddress(chosen);
+            }
+          });
+        } catch {
+          // Fallback manual input tetap berjalan lancar jika script Maps belum siap
+        }
       }
-    } finally {
-      setEmailAuthLoading(false);
-    }
-  };
+    };
 
-  const handleGoogleSignInClick = async () => {
+    initPlaces();
+    const timer = window.setTimeout(initPlaces, 1200);
+    return () => {
+      window.clearTimeout(timer);
+      if (listenerHandle && typeof listenerHandle.remove === 'function') {
+        listenerHandle.remove();
+      }
+    };
+  }, [googleUser, linkedUserAccount]);
+
+  useEffect(() => {
+    if (linkedUserAccount) {
+      const used = linkedUserAccount.failedPinAttempts || 0;
+      setRemainingPinTries(Math.max(0, 5 - used));
+    }
+  }, [linkedUserAccount]);
+
+  const handleGooglePopupSignIn = async () => {
     setAuthError(null);
-    setEmailAuthError('');
-    setAuthLoading(true);
+    setIsSigningIn(true);
     try {
       const res = await loginWithGooglePopup();
-      if (!res.success) {
-        setAuthError({ message: res.message, code: res.errorCode });
+      if (!res.success && res.errorCode !== 'auth/popup-closed-by-user') {
+        setAuthError({ code: res.errorCode, message: res.message });
       }
     } finally {
-      setAuthLoading(false);
+      setIsSigningIn(false);
     }
   };
 
-  // Handle New Card Registration
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleOaLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setRegError('');
+    setAuthError(null);
+    setIsOaSubmitting(true);
+    try {
+      const res = await loginWithOaAccount({
+        accountNumber: oaAccountNumber,
+        userId16: oaUserId16,
+        cardPin: oaCardPin,
+        adminPin: oaAdminPin,
+      });
+      if (!res.success) {
+        setAuthError({ message: res.message });
+      }
+    } finally {
+      setIsOaSubmitting(false);
+    }
+  };
 
-    const finalName = fullName.trim();
-    if (finalName.length < 3) {
-      setRegError('Nama lengkap sesuai identitas minimal 3 karakter.');
+  const handleVerifyExistingCardPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPinVerifyError(null);
+    const res = verifyInitialCardPin(existingPinInput);
+    if (!res.success) {
+      setPinVerifyError(res.message);
+      if (typeof res.remainingAttempts === 'number') {
+        setRemainingPinTries(res.remainingAttempts);
+      }
+      setExistingPinInput('');
+    }
+  };
+
+  const handleForgotPinSubmit = () => {
+    if (!linkedUserAccount) return;
+    const res = requestPinReset(
+      linkedUserAccount.id,
+      forgotPinReason.trim() || 'Lupa PIN Kartu saat login akun di layar verifikasi awal'
+    );
+    setForgotPinStatusMsg(res.message);
+  };
+
+  const handleCreateCardSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    if (!fullName.trim()) {
+      setErrorMsg('Nama Lengkap sesuai identitas wajib diisi.');
       return;
     }
     if (!/^\d{16}$/.test(nik.trim())) {
-      setRegError('Nomor Induk Kependudukan (NIK KTP) harus terdiri dari tepat 16 digit angka.');
+      setErrorMsg('NIK harus terdiri dari tepat 16 digit angka.');
       return;
     }
-    if (phone.trim().length < 10) {
-      setRegError('Nomor HP aktif minimal 10 digit angka.');
+    if (phone.trim().length < 9) {
+      setErrorMsg('Nomor HP tidak valid.');
       return;
     }
-    if (!/^\d{6}$/.test(newPin)) {
-      setRegError('PIN Kartu Baru wajib terdiri dari tepat 6 digit angka.');
+    if (!address.trim()) {
+      setErrorMsg('Alamat tempat tinggal wajib diisi.');
       return;
     }
-    if (newPin !== confirmPin) {
-      setRegError('Konfirmasi 6 digit PIN Kartu tidak sama!');
+    const pinValidation = validateStrongPin(pin.trim());
+    if (!pinValidation.valid) {
+      setErrorMsg(pinValidation.reason || 'PIN harus terdiri dari tepat 6 digit angka yang kuat.');
+      return;
+    }
+    if (pin.trim() !== confirmPin.trim()) {
+      setErrorMsg('Konfirmasi PIN tidak cocok dengan PIN yang Anda masukkan.');
+      return;
+    }
+    if (initialDeposit < 50_000) {
+      setErrorMsg('Setoran awal minimal Rp 50.000.');
       return;
     }
 
+    // Masuk lewat Google otomatis menerbitkan Kartu Reguler ('regular')
     const res = registerCard({
-      fullName: finalName,
+      fullName: fullName.trim(),
       nik: nik.trim(),
       phone: phone.trim(),
-      email: email.trim() || googleUser?.email || 'nasabah@banknusantara.id',
-      address: address.trim() || 'Jakarta, Indonesia',
-      pin: newPin,
-      cardTier: selectedTier,
-      initialDeposit: selectedTier === 'admin' ? 999_999_999_999_999 : initialDeposit,
+      email: googleUser?.email || 'nasabah@gmail.com',
+      address: address.trim(),
+      pin: pin.trim(),
+      cardTier: 'regular',
+      initialDeposit,
     });
 
     if (!res.success) {
-      setRegError(res.message);
+      setErrorMsg(res.message);
     }
   };
 
-  // ============================================================================
-  // STAGE 1: LAYAR AWAL — DAFTAR/MASUK BEBAS SEMUA EMAIL + SIGN IN WITH GOOGLE (OPSIONAL)
-  // ============================================================================
+  // Tampilkan layar pemuatan Cloud sebelum membuka lobi agar status sinkron
+  if (!isCloudBootReady) {
+    return (
+      <div className="min-h-screen bg-[#040814] text-slate-100 flex flex-col items-center justify-center p-6">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-indigo-700 flex items-center justify-center shadow-xl shadow-cyan-500/20 mb-4 animate-pulse">
+          <Landmark className="w-8 h-8 text-white" />
+        </div>
+        <div className="flex items-center gap-2.5 text-sm font-bold text-cyan-300">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span>Menghubungkan ke Cloud Database Bank Nusantara...</span>
+        </div>
+        <p className="text-xs text-slate-400 mt-1">
+          Memeriksa sesi keamanan dan status rekening real-time
+        </p>
+      </div>
+    );
+  }
+
+  // STAGE 1: LOBI AWAL (HANYA TOMBOL "SIGN IN WITH GOOGLE" & "LOGIN DENGAN AKUN OA")
   if (!googleUser) {
     return (
-      <div className="min-h-screen bg-[#070c18] text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
-        <div className="max-w-md w-full bg-[#090B10] border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6 relative z-10">
-          {/* Bank Logo & Header */}
-          <div className="text-center space-y-2">
-            <div className="w-12 h-12 mx-auto rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-amber-500/20">
-              <CreditCard className="w-6 h-6 text-slate-950" />
+      <div className="min-h-screen bg-[#040814] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden">
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="w-full max-w-lg bg-slate-900/90 backdrop-blur-2xl border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10">
+          {/* Brand Logo */}
+          <div className="flex flex-col items-center text-center mb-6">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-400 via-blue-600 to-indigo-700 flex items-center justify-center shadow-xl shadow-cyan-500/25 border border-white/20 mb-3">
+              <Landmark className="w-8 h-8 text-white" />
             </div>
-            <div className="text-[11px] font-mono uppercase tracking-widest text-amber-400">
-              PT Bank Nusantara (Persero) Tbk
-            </div>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-[11px] font-bold tracking-wider uppercase mb-2">
+              <ShieldCheck className="w-3.5 h-3.5" /> Portal Perbankan Cloud Real-Time
+            </span>
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-              Bank Nusantara
+              Bank Nusantara Digital
             </h1>
-            <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
-              Daftar atau masuk dengan <strong className="text-white">email apa saja</strong> tanpa verifikasi Firebase — langsung aktif dan sinkron real-time antara HP dan laptop.
+            <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-md">
+              Pilih metode masuk resmi di bawah ini: masuk cepat dengan akun Google Anda atau masuk menggunakan kredensial <span className="text-amber-300 font-semibold">Akun OA Resmi</span> buatan Panel Admin.
             </p>
           </div>
 
-          {/* Primary Free Email Registration & Login Form */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between text-xs text-slate-400 border-b border-slate-800/80 pb-2.5">
-              <span className="font-semibold text-slate-200 flex items-center gap-1.5">
-                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Autentikasi Cloud Real-Time</span>
-              </span>
-              <span
-                className={`font-mono text-[11px] font-semibold ${
-                  cloudSyncStatus === 'synced' ? 'text-emerald-400' : 'text-amber-300'
-                }`}
+          {/* Tab / Mode Switcher Sejajar */}
+          <div className="grid grid-cols-2 gap-2.5 p-1.5 rounded-2xl bg-slate-950/90 border border-slate-800 mb-5">
+            <button
+              type="button"
+              onClick={() => {
+                setLobbyMode('options');
+                setAuthError(null);
+              }}
+              className={`py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition cursor-pointer ${
+                lobbyMode === 'options'
+                  ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-600/25'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>Sign in with Google</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLobbyMode('oa_login');
+                setAuthError(null);
+              }}
+              className={`py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition cursor-pointer ${
+                lobbyMode === 'oa_login'
+                  ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-emerald-500 text-slate-950 shadow-lg shadow-amber-500/25'
+                  : 'text-amber-300/80 hover:text-amber-200'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>Login Dengan Akun OA</span>
+            </button>
+          </div>
+
+          {lobbyMode === 'options' ? (
+            <div className="space-y-4">
+              {/* Tombol Utama 1: Sign in with Google */}
+              <button
+                type="button"
+                onClick={handleGooglePopupSignIn}
+                disabled={isSigningIn}
+                className="w-full py-4 px-5 rounded-2xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm flex items-center justify-center gap-3 shadow-xl transition cursor-pointer disabled:opacity-60"
               >
-                {cloudSyncStatus === 'synced' ? 'Cloud Online' : 'Menghubungkan...'}
-              </span>
-            </div>
-
-            {(emailAuthError || authError) && (
-              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-xs space-y-1.5">
-                <div className="flex items-start gap-2 font-semibold">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <span>{emailAuthError || authError?.message}</span>
-                </div>
-                {authError?.code === 'auth/unauthorized-domain' && (
-                  <p className="text-[11px] text-amber-200 pl-6 leading-relaxed">
-                    Pastikan domain <code className="bg-slate-950 px-1.5 py-0.5 rounded text-amber-300">atm-akc.vercel.app</code> sudah ditambahkan pada <strong>Firebase Console → Authentication → Settings → Authorized domains</strong>.
-                  </p>
+                {isSigningIn ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+                    <span>Membuka Jendela Login Google...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                      />
+                    </svg>
+                    <span>Sign in with Google</span>
+                  </>
                 )}
-              </div>
-            )}
+              </button>
 
-            <form onSubmit={handleDirectEmailSubmit} className="space-y-3">
-              <div>
-                <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                  Alamat Email (Bebas Semua Email)
-                </label>
-                <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="email"
-                    required
-                    value={directEmail}
-                    onChange={(e) => setDirectEmail(e.target.value)}
-                    placeholder="contoh: namaanda@gmail.com"
-                    autoComplete="email"
-                    className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-[#11151E] border border-slate-700/80 focus:border-amber-400 text-sm text-white placeholder-slate-500 outline-none transition-colors"
-                  />
+              {/* Tombol Utama 2: Login Dengan Akun OA */}
+              <button
+                type="button"
+                onClick={() => {
+                  setLobbyMode('oa_login');
+                  setAuthError(null);
+                }}
+                className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2.5 shadow-xl shadow-amber-500/20 transition cursor-pointer"
+              >
+                <ShieldCheck className="w-5 h-5 text-slate-950" />
+                <span>Login Dengan Akun OA (Buatan Panel Admin)</span>
+              </button>
+
+              {/* Informasi Fitur Login */}
+              <div className="bg-slate-950/70 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+                <div className="flex items-start gap-2.5 text-xs text-slate-300">
+                  <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong className="text-white">Sign in with Google:</strong> Pendaftaran kartu baru otomatis mendapatkan <strong className="text-cyan-300">Kartu Reguler (Biasa)</strong> dan tersinkronisasi di Cloud.
+                  </span>
+                </div>
+                <div className="flex items-start gap-2.5 text-xs text-slate-300">
+                  <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong className="text-amber-300">Login Dengan Akun OA:</strong> Khusus untuk akun yang dibuat atau diaktifkan di Panel Admin menggunakan <strong>No. Rekening, ID 16 Digit, PIN Kartu & PIN Admin</strong>.
+                  </span>
                 </div>
               </div>
+            </div>
+          ) : (
+            /* FORM LOGIN DENGAN AKUN OA (WAJIB 4 KOLOM) */
+            <form onSubmit={handleOaLoginSubmit} className="space-y-4">
+              <div className="bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-emerald-500/15 border border-amber-500/40 rounded-2xl p-3.5">
+                <div className="flex items-center gap-2 mb-1">
+                  <OaAccountBadge size="sm" />
+                  <span className="text-xs font-extrabold text-amber-200">
+                    Otorisasi Khusus Akun OA Panel Admin
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Masukkan keempat kredensial Akun OA Anda. Hanya akun yang dibuat atau diaktifkan sebagai <strong>Akun OA</strong> di Panel Admin yang dapat login di sini (bebas blokir salah PIN 5x & langsung masuk ke Dashboard).
+                </p>
+              </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-slate-300 block mb-1">
-                  Nama Tampilan <span className="text-slate-500 font-normal">(opsional untuk akun baru)</span>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+                  1. Nomor Rekening (10 Digit) *
                 </label>
                 <input
                   type="text"
-                  value={directFullName}
-                  onChange={(e) => setDirectFullName(e.target.value)}
-                  placeholder="Nama Lengkap Anda"
-                  autoComplete="name"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#11151E] border border-slate-700/80 focus:border-amber-400 text-sm text-white placeholder-slate-500 outline-none transition-colors"
+                  inputMode="numeric"
+                  value={oaAccountNumber}
+                  onChange={(e) => setOaAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 16))}
+                  placeholder="Contoh: 9999999999"
+                  required
+                  className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono font-bold text-white focus:border-amber-400 focus:outline-none tracking-wider"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Fingerprint className="w-3.5 h-3.5 text-amber-400" />
+                    2. ID User 16 Digit (Di Atas Nama User) *
+                  </span>
+                  <span className="text-[10px] font-mono text-amber-300">
+                    {oaUserId16.replace(/\D/g, '').length}/16 Digit
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={
+                    oaUserId16
+                      .replace(/\D/g, '')
+                      .slice(0, 16)
+                      .replace(/(\d{4})(?=\d)/g, '$1 ')
+                  }
+                  onChange={(e) =>
+                    setOaUserId16(e.target.value.replace(/\D/g, '').slice(0, 16))
+                  }
+                  placeholder="XXXX XXXX XXXX XXXX (16 Digit)"
+                  required
+                  className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono font-bold text-amber-300 focus:border-amber-400 focus:outline-none tracking-widest"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
+                    3. PIN Kartu (6 Digit) *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showOaCardPin ? 'text' : 'password'}
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={oaCardPin}
+                      onChange={(e) => setOaCardPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="6 Digit PIN Kartu"
+                      required
+                      className="w-full pl-3.5 pr-9 py-3 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono font-bold text-white focus:border-emerald-400 focus:outline-none tracking-widest"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowOaCardPin((p) => !p)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      {showOaCardPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-rose-400" />
+                    4. PIN Admin OA *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showOaAdminPin ? 'text' : 'password'}
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={oaAdminPin}
+                      onChange={(e) => setOaAdminPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      placeholder="PIN Admin"
+                      required
+                      className="w-full pl-3.5 pr-9 py-3 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono font-bold text-rose-200 focus:border-rose-400 focus:outline-none tracking-widest"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowOaAdminPin((p) => !p)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      {showOaAdminPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <button
                 type="submit"
-                disabled={emailAuthLoading || authLoading}
-                className="w-full py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.99] disabled:opacity-60 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/15 transition-all cursor-pointer"
+                disabled={isOaSubmitting}
+                className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-xl shadow-amber-500/20 transition cursor-pointer disabled:opacity-60"
               >
-                <LogIn className="w-4 h-4" />
-                <span>
-                  {emailAuthLoading ? 'Menghubungkan ke Cloud...' : 'Masuk / Daftar Sekarang'}
-                </span>
+                {isOaSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Memverifikasi Kredensial Akun OA...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-5 h-5" />
+                    <span>Masuk Sekarang dengan Akun OA</span>
+                  </>
+                )}
               </button>
 
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Langsung aktif otomatis tanpa link atau verifikasi email Firebase. Login dengan email yang sama di HP &amp; laptop untuk sinkronisasi instan.
-              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setLobbyMode('options');
+                  setAuthError(null);
+                }}
+                className="w-full py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-300 text-xs font-bold transition cursor-pointer"
+              >
+                ← Kembali ke Pilihan Login Utama
+              </button>
             </form>
+          )}
 
-            {/* Divider */}
-            <div className="relative flex items-center py-1">
-              <div className="flex-grow border-t border-slate-800" />
-              <span className="shrink mx-3 text-[11px] text-slate-500">
-                atau masuk dengan Google (opsional)
-              </span>
-              <div className="flex-grow border-t border-slate-800" />
+          {authError && (
+            <div className="mt-4 p-3.5 rounded-2xl bg-rose-950/80 border border-rose-500/40 text-xs text-rose-200 space-y-1.5">
+              <div className="flex items-start gap-2 font-bold text-rose-300">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{authError.message}</span>
+              </div>
+              {authError.code === 'auth/unauthorized-domain' && (
+                <p className="text-[11px] text-amber-200 leading-relaxed">
+                  Tip: Pastikan domain aplikasi sudah terdaftar pada Authorized Domains di Firebase Console.
+                </p>
+              )}
             </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
-            {/* Optional Sign in with Google Button */}
+  // STAGE 2A: AKUN SUDAH PUNYA KARTU DI CLOUD -> WAJIB VERIFIKASI PIN 6 DIGIT (SALAH 5X = BANNED 1 HARI)
+  if (linkedUserAccount) {
+    const tierCfg = CARD_TIER_CONFIGS[linkedUserAccount.cardTier] || CARD_TIER_CONFIGS.regular;
+    const latestResetReq = pinResetRequests.find(
+      (r) => r.accountId === linkedUserAccount.id
+    );
+
+    return (
+      <div className="min-h-screen bg-[#040814] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden">
+        <div className="absolute -top-40 -left-40 w-96 h-96 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="w-full max-w-md bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10">
+          <div className="flex items-center justify-between gap-3 pb-4 mb-5 border-b border-slate-800">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {googleUser.picture ? (
+                <img
+                  src={googleUser.picture}
+                  alt={googleUser.name}
+                  className="w-10 h-10 rounded-full border border-cyan-400/50 shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center text-white font-black text-sm shrink-0">
+                  {googleUser.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-xs font-extrabold text-white truncate">{googleUser.name}</p>
+                <p className="text-[11px] text-cyan-300 truncate">{googleUser.email}</p>
+              </div>
+            </div>
             <button
               type="button"
-              disabled={authLoading || emailAuthLoading}
-              onClick={handleGoogleSignInClick}
-              className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-slate-100 active:scale-[0.99] disabled:opacity-60 text-slate-900 font-bold text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer"
+              onClick={logoutGoogle}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0"
             >
-              {/* Official Google G Emblem SVG */}
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="#4285F4"
-                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17Z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24Z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14Z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96Z"
-                />
-              </svg>
-              <span>{authLoading ? 'Menghubungkan ke Google...' : 'Sign in with Google'}</span>
+              <LogOut className="w-3.5 h-3.5" /> Ganti Akun
             </button>
+          </div>
 
-            <div className="text-[11px] font-mono text-slate-500 flex items-center justify-between gap-2 pt-0.5">
-              <span className="flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span>Authorized Domain</span>
+          {/* Ringkasan Kartu yang Terdeteksi di Cloud + ID 16 Digit di Atas Nama */}
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-800/90 to-slate-950 border border-cyan-500/30 mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-cyan-300 flex items-center gap-1">
+                <CreditCard className="w-3.5 h-3.5" /> Kartu Terhubung di Cloud
               </span>
-              <span className="text-amber-300 font-semibold truncate">
-                {FIREBASE_CLOUD_CONFIG.authorizedDomains[0]}
+              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${tierCfg.badgeColor}`}>
+                {tierCfg.name}
               </span>
+            </div>
+
+            {/* ID 16 Digit Permanen di atas nama user */}
+            <div className="mb-1.5">
+              <UserId16AboveNameBanner account={linkedUserAccount} size="xs" />
+            </div>
+
+            <p className="text-base font-black text-white flex items-center gap-1.5 flex-wrap">
+              <span>{linkedUserAccount.fullName}</span>
+              {linkedUserAccount.isVerified && (
+                <VerifiedBadge size="sm" label={linkedUserAccount.verifiedLabel} />
+              )}
+              {linkedUserAccount.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
+            </p>
+            <p className="text-xs font-mono text-slate-400 mt-0.5">
+              No. Rek: <span className="text-cyan-300 font-bold">{linkedUserAccount.accountNumber}</span> • Kartu:{' '}
+              {linkedUserAccount.cardNumber}
+            </p>
+          </div>
+
+          <div className="text-center mb-4">
+            <h2 className="text-lg font-black text-white flex items-center justify-center gap-2">
+              <Lock className="w-5 h-5 text-amber-400" />
+              Masukkan PIN Kartu (6 Digit)
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Demi keamanan rekening Anda, masukkan 6 digit PIN Kartu ATM.
+            </p>
+            <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-[11px] font-bold text-amber-300">
+              <span>Sisa Kesempatan PIN: {remainingPinTries} / 5</span>
+              <span className="text-rose-400">• (Salah 5x = Banned 1 Hari)</span>
             </div>
           </div>
 
-          <div className="flex flex-col gap-2.5 text-[11px] text-slate-500 pt-3 border-t border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                <span>100% Cloud Firestore Real-Time</span>
-              </span>
-              <span>Tanpa Cache Lokal</span>
+          <form onSubmit={handleVerifyExistingCardPin} className="space-y-4">
+            <div className="relative">
+              <KeyRound className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type={showExistingPin ? 'text' : 'password'}
+                inputMode="numeric"
+                maxLength={6}
+                value={existingPinInput}
+                onChange={(e) => setExistingPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="••••••"
+                required
+                className="w-full pl-10 pr-12 py-3.5 rounded-xl bg-slate-950 border border-slate-700 text-center text-lg font-mono tracking-[0.5em] text-white focus:border-cyan-400 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => setShowExistingPin((prev) => !prev)}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+              >
+                {showExistingPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800/60">
-              <AllowNotificationFooterButton />
-            </div>
+            {pinVerifyError && (
+              <div className="p-3 rounded-xl bg-rose-950/90 border border-rose-500/50 flex items-start gap-2 text-xs text-rose-200">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span>{pinVerifyError}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={existingPinInput.length !== 6}
+              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-black text-sm shadow-xl shadow-cyan-500/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-5 h-5" />
+              <span>Buka Rekening Saya Sekarang</span>
+            </button>
+          </form>
+
+          {/* Opsi Lupa PIN Kartu */}
+          <div className="mt-4 pt-4 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={() => setShowForgotPinBox((p) => !p)}
+              className="w-full text-center text-xs font-bold text-amber-300 hover:text-amber-200 cursor-pointer"
+            >
+              Lupa PIN Kartu 6 Digit Anda? Ajukan Bantuan ke Admin
+            </button>
+
+            {showForgotPinBox && (
+              <div className="mt-3 p-3.5 rounded-2xl bg-slate-950/90 border border-amber-500/30 space-y-2.5">
+                {latestResetReq?.status === 'approved' && latestResetReq.revealedPin ? (
+                  <div className="p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-xs text-emerald-200">
+                    ✅ Permohonan disetujui Admin! PIN Kartu Anda adalah:{' '}
+                    <span className="font-mono font-black text-sm text-emerald-300">
+                      {latestResetReq.revealedPin}
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      value={forgotPinReason}
+                      onChange={(e) => setForgotPinReason(e.target.value)}
+                      placeholder="Catatan singkat untuk Admin (opsional)..."
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleForgotPinSubmit}
+                      className="w-full py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-xs font-bold cursor-pointer"
+                    >
+                      Kirim Permohonan Lihat PIN ke Admin
+                    </button>
+                  </>
+                )}
+                {forgotPinStatusMsg && (
+                  <p className="text-[11px] text-cyan-300">{forgotPinStatusMsg}</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
   }
 
-  // ============================================================================
-  // STAGE 2: SETELAH LOGIN EMAIL / GOOGLE -> BUAT KARTU BARU ATAU LOGIN KE KARTU LAIN (PIN KARTU / PIN ADMIN)
-  // ============================================================================
-  const filteredOldCards = accounts.filter(
-    (a) =>
-      a.fullName.toLowerCase().includes(oldCardSearch.toLowerCase()) ||
-      a.accountNumber.includes(oldCardSearch) ||
-      a.cardNumber.includes(oldCardSearch)
-  );
+  // STAGE 2B: PENGGUNA GOOGLE BARU -> BUAT KARTU BARU (OTOMATIS KARTU REGULER)
+  const regularCfg = CARD_TIER_CONFIGS.regular;
 
   return (
-    <div className="min-h-screen bg-[#070c18] text-slate-100 flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden">
-      <div className="max-w-3xl w-full bg-slate-900/95 border border-slate-800 rounded-3xl p-5 sm:p-8 shadow-2xl space-y-6 relative z-10 my-6">
-        {/* Top Portal Bar showing Signed-In User */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-950 border border-slate-800">
+    <div className="min-h-screen bg-[#040814] text-slate-100 py-8 px-4 flex items-center justify-center relative overflow-hidden">
+      <div className="absolute -top-40 -left-40 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="w-full max-w-2xl bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 rounded-3xl p-5 sm:p-8 shadow-2xl relative z-10">
+        {/* Top bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-5 mb-6 border-b border-slate-800">
           <div className="flex items-center gap-3">
             {googleUser.picture ? (
               <img
                 src={googleUser.picture}
                 alt={googleUser.name}
+                className="w-11 h-11 rounded-full border-2 border-cyan-400"
                 referrerPolicy="no-referrer"
-                className="w-10 h-10 rounded-xl border border-amber-400/50 object-cover shrink-0"
               />
             ) : (
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-600 text-slate-950 font-black text-sm flex items-center justify-center shrink-0">
+              <div className="w-11 h-11 rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center text-white font-black text-lg">
                 {googleUser.name.charAt(0).toUpperCase()}
               </div>
             )}
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs flex-wrap">
-                <span className="font-bold text-white truncate">{googleUser.name}</span>
-                <span aria-hidden="true" className="text-slate-600">·</span>
-                <span className="text-[11px] font-mono text-emerald-400 truncate">
-                  {googleUser.email}
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-extrabold text-white">{googleUser.name}</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+                  Google Terhubung
                 </span>
               </div>
-              <span className="text-[11px] text-slate-400 block">
-                {googleUser.authMode === 'email_direct'
-                  ? 'Akun Email Cloud terhubung Real-Time (Aktif Otomatis). Pilih buat kartu baru atau login ke kartu Anda.'
-                  : 'Akun Google terhubung ke Cloud Firestore Real-Time. Pilih buat kartu baru atau login ke kartu Anda.'}
-              </span>
+              <p className="text-xs text-cyan-300">{googleUser.email}</p>
             </div>
           </div>
 
           <button
             type="button"
             onClick={logoutGoogle}
-            className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-rose-950/70 text-slate-300 hover:text-rose-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto whitespace-nowrap shrink-0"
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
           >
-            <LogOut className="w-3.5 h-3.5 text-rose-400" />
-            <span>{googleUser.authMode === 'email_direct' ? 'Ganti Email / Akun' : 'Ganti Akun'}</span>
+            <LogOut className="w-3.5 h-3.5" /> Ganti Akun
           </button>
         </div>
 
-        {/* Step Title & Mode Switcher */}
-        <div className="space-y-3">
-          <div className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold">
-            Pilih Akses Rekening Anda
+        <form onSubmit={handleCreateCardSubmit} className="space-y-4">
+          <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-2xl p-3.5 text-xs text-cyan-200 flex items-start gap-2.5">
+            <Sparkles className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-white">Pendaftaran Kartu Baru (Otomatis Kartu Reguler)</p>
+              <p className="text-slate-300 mt-0.5">
+                Setiap pendaftaran baru melalui Sign in with Google otomatis mendapatkan{' '}
+                <strong className="text-cyan-300">1. Kartu Reguler (Biasa)</strong> beserta{' '}
+                <strong className="text-amber-300">ID 16 Digit Permanen</strong> di atas nama Anda.
+              </p>
+            </div>
           </div>
-          <h2 className="text-xl sm:text-2xl font-black text-white">
-            {onboardingTab === 'register'
-              ? 'Buat Kartu ATM Baru Anda'
-              : 'Login ke Kartu Lain (Pakai PIN Kartu 6 Digit)'}
-          </h2>
-          <p className="text-xs text-slate-300 leading-relaxed">
-            {onboardingTab === 'register'
-              ? 'Isi identitas lengkap di bawah ini untuk membuat kartu ATM Bank Nusantara baru dan tentukan PIN 6 digit Anda. Jika sudah memiliki kartu, pilih tab "Login ke Kartu Lain".'
-              : 'Pilih kartu tujuan di bawah ini lalu masukkan 6 digit PIN Kartu tersebut. Jika lupa PIN kartu, tersedia tombol "Lupa PIN Kartu?" di layar PIN.'}
-          </p>
 
-          {/* Two Mode Buttons */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-            <button
-              type="button"
-              onClick={() => setOnboardingTab('register')}
-              className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
-                onboardingTab === 'register'
-                  ? 'bg-gradient-to-r from-amber-500 to-yellow-600 text-slate-950 border-amber-300 font-black shadow-lg shadow-amber-500/20'
-                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <UserCheck className="w-5 h-5 shrink-0" />
-              <div>
-                <span className="text-xs sm:text-sm block font-bold">1. Buat Kartu Baru</span>
-                <span className="text-[10px] opacity-80 block">
-                  Buka rekening &amp; buat PIN 6 digit baru
-                </span>
+          {/* Info Jenis Kartu Otomatis Reguler */}
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-900/60 via-indigo-950/70 to-slate-950 border border-blue-500/40 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-600/30 border border-blue-400/40 flex items-center justify-center text-blue-300 shrink-0">
+                <CreditCard className="w-5 h-5" />
               </div>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setOnboardingTab('login_old')}
-              className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
-                onboardingTab === 'login_old'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-400 font-black shadow-lg shadow-blue-600/25'
-                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <KeyRound className="w-5 h-5 shrink-0 text-amber-400" />
               <div>
-                <span className="text-xs sm:text-sm block font-bold">
-                  2. Login ke Kartu Lain
-                </span>
-                <span className="text-[10px] opacity-80 block">
-                  Masukkan 6 digit PIN Kartu Anda
-                </span>
+                <p className="text-xs font-black text-white">{regularCfg.nameIndo}</p>
+                <p className="text-[11px] text-blue-200">
+                  Limit Tarik Harian: {formatRupiah(regularCfg.dailyWithdrawalLimit)} • Biaya Bulanan:{' '}
+                  {formatRupiah(regularCfg.monthlyFee)}
+                </p>
               </div>
-            </button>
+            </div>
+            <span className="px-2.5 py-1 rounded-full bg-blue-600 text-white text-[10px] font-black uppercase tracking-wider shrink-0">
+              Otomatis Reguler
+            </span>
           </div>
-        </div>
 
-        {/* =====================================================================
-            TAB A: BUAT KARTU BARU
-           ===================================================================== */}
-        {onboardingTab === 'register' && (
-          <form onSubmit={handleRegisterSubmit} className="space-y-4 text-xs border-t border-slate-800 pt-5">
-            {regError && (
-              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span>{regError}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              <div>
-                <label className="text-slate-300 font-semibold block mb-1">
-                  Nama Lengkap Sesuai KTP:
-                </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Nama Lengkap Sesuai KTP *
+              </label>
+              <div className="relative">
+                <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="Nama Lengkap Anda"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white font-semibold"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-300 font-semibold block mb-1">
-                  Nomor Identitas NIK KTP (16 Digit):
-                </label>
-                <input
-                  type="text"
                   required
-                  maxLength={16}
-                  value={nik}
-                  onChange={(e) => setNik(e.target.value.replace(/\D/g, ''))}
-                  placeholder="3171042010980001"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-300 font-semibold block mb-1">
-                  Nomor HP Aktif (WhatsApp / SMS OTP):
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
-                  placeholder="081298765432"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-300 font-semibold block mb-1">
-                  Alamat Email Notifikasi Rekening:
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="nasabah@banknusantara.id"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white font-mono"
+                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white focus:border-cyan-400 focus:outline-none"
                 />
               </div>
             </div>
 
-            {/* Ambil Alamat Langsung dari Google Maps */}
-            <GoogleMapsAddressPicker
-              value={address}
-              onChange={(newAddr) => setAddress(newAddr)}
-              required={true}
-              label="Alamat Tempat Tinggal:"
-              placeholder="Pilih titik di peta di atas atau klik Ambil Lokasi GPS Saya Otomatis..."
-            />
-
-            {/* Pilih Jenis Kartu */}
             <div>
-              <label className="text-slate-300 font-semibold block mb-1.5">
-                Pilih Jenis Kartu ATM Bank Nusantara (5 Pilihan Kartu):
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                NIK (16 Digit Angka) *
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                {Object.values(CARD_TIER_CONFIGS).map((cfg, idx) => {
-                  const isSelected = selectedTier === cfg.tier;
-                  const isAdminTier = cfg.tier === 'admin';
-                  return (
-                    <div
-                      key={cfg.tier}
-                      onClick={() => setSelectedTier(cfg.tier)}
-                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex flex-col justify-between ${
-                        isSelected
-                          ? 'border-amber-400 bg-amber-500/15 ring-1 ring-amber-400'
-                          : isAdminTier
-                          ? 'border-fuchsia-500/50 bg-purple-950/30 hover:border-fuchsia-400'
-                          : 'border-slate-800 bg-slate-950 hover:border-slate-700'
-                      }`}
-                    >
-                      <div>
-                        <span className="text-[10px] font-mono text-amber-300 block">
-                          Kartu #{idx + 1}
-                        </span>
-                        <span className="font-bold text-white text-xs block mt-0.5">
-                          {cfg.name}
-                        </span>
-                      </div>
-                      <span className="text-[10px] font-mono text-slate-400 mt-1 block">
-                        Limit: {isAdminTier ? '∞ Unlimited' : formatRupiah(cfg.dailyWithdrawalLimit)}
-                      </span>
-                    </div>
-                  );
-                })}
+              <input
+                type="text"
+                maxLength={16}
+                value={nik}
+                onChange={(e) => setNik(e.target.value.replace(/\D/g, '').slice(0, 16))}
+                required
+                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono text-white focus:border-cyan-400 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Nomor WhatsApp / HP Aktif *
+              </label>
+              <div className="relative">
+                <Phone className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
+                  required
+                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white focus:border-cyan-400 focus:outline-none"
+                />
               </div>
             </div>
 
-            {/* Setoran Awal & Buat PIN 6 Digit */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-              <div>
-                <label className="text-slate-300 font-semibold block mb-1">
-                  Setoran Awal (Rp):
-                </label>
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Setoran Awal (Min. Rp 50.000) *
+              </label>
+              <div className="relative">
+                <Wallet className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="number"
                   min={50000}
                   step={50000}
-                  disabled={selectedTier === 'admin'}
-                  value={selectedTier === 'admin' ? 999999999 : initialDeposit}
-                  onChange={(e) => setInitialDeposit(parseInt(e.target.value, 10) || 50000)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-amber-300 font-mono font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-300 font-semibold block mb-1">
-                  Buat PIN Kartu Baru (6 Digit):
-                </label>
-                <input
-                  type="password"
+                  value={initialDeposit}
+                  onChange={(e) => setInitialDeposit(Number(e.target.value))}
                   required
-                  maxLength={6}
-                  value={newPin}
-                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
-                  placeholder="•••••• (6 Angka)"
-                  className="w-full bg-slate-950 border border-amber-500/50 rounded-xl p-3 text-white font-mono text-center tracking-widest text-sm"
+                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white focus:border-cyan-400 focus:outline-none"
                 />
               </div>
-
-              <div>
-                <label className="text-slate-300 font-semibold block mb-1">
-                  Ulangi PIN Kartu Baru (6 Digit):
-                </label>
-                <input
-                  type="password"
-                  required
-                  maxLength={6}
-                  value={confirmPin}
-                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
-                  placeholder="•••••• (6 Angka)"
-                  className="w-full bg-slate-950 border border-amber-500/50 rounded-xl p-3 text-white font-mono text-center tracking-widest text-sm"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 font-black text-sm shadow-xl shadow-amber-500/20 cursor-pointer flex items-center justify-center gap-2 transition-all"
-            >
-              <CheckCircle2 className="w-5 h-5" />
-              <span>Buat Kartu Baru Sekarang</span>
-            </button>
-          </form>
-        )}
-
-        {/* =====================================================================
-            TAB B: LOGIN KE KARTU LAIN (PAKAI 6 DIGIT PIN KARTU)
-           ===================================================================== */}
-        {onboardingTab === 'login_old' && (
-          <div className="space-y-4 text-xs border-t border-slate-800 pt-5">
-            <div className="p-3.5 rounded-2xl bg-blue-950/50 border border-blue-500/40 text-blue-200 flex items-start gap-2.5">
-              <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-white block">
-                  Verifikasi Login Kartu: PIN Kartu 6 Digit
-                </strong>
-                <p className="text-[11px] text-slate-300 mt-0.5">
-                  Pilih kartu mana saja di bawah ini, lalu masukkan <strong>6 digit PIN Kartu</strong> tersebut untuk langsung masuk. Jika lupa PIN kartu, klik tombol <strong>&quot;Lupa PIN Kartu?&quot;</strong> di modal PIN.
-                </p>
-              </div>
-            </div>
-
-            <input
-              type="text"
-              value={oldCardSearch}
-              onChange={(e) => setOldCardSearch(e.target.value)}
-              placeholder="Cari nama pemilik kartu atau 10 digit nomor rekening..."
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white text-xs"
-            />
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-72 overflow-y-auto pr-1">
-              {filteredOldCards.map((acc, idx) => {
-                const isAdminCard = acc.cardTier === 'admin';
-                return (
-                  <div
-                    key={acc.id}
-                    onClick={() => setSelectedOldCard(acc)}
-                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-2 ${
-                      isAdminCard
-                        ? 'bg-purple-950/40 border-fuchsia-500/50 hover:border-fuchsia-400'
-                        : 'bg-slate-950 border-slate-800 hover:border-blue-500/60'
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-mono text-amber-300">
-                          Kartu #{idx + 1}
-                        </span>
-                        <span className="font-bold text-white truncate">{acc.fullName}</span>
-                        {acc.isVerified && <VerifiedBadge size="xs" />}
-                      </div>
-                      <span className="font-mono text-[11px] text-amber-300 block mt-0.5">
-                        No. Rek: {acc.accountNumber}
-                      </span>
-                      <span className="text-[10px] text-slate-400 block">
-                        Jenis: {CARD_TIER_CONFIGS[acc.cardTier]?.nameIndo} · Koin: {(acc.spinCoins || 0).toLocaleString('id-ID')}
-                      </span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedOldCard(acc);
-                      }}
-                      className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] shrink-0 cursor-pointer flex items-center gap-1"
-                    >
-                      <LogIn className="w-3.5 h-3.5" />
-                      <span>Login PIN</span>
-                    </button>
-                  </div>
-                );
-              })}
             </div>
           </div>
-        )}
 
-        {/* Footer Shortcut to Izinkan Notifikasi */}
-        <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400">
-          <span>Aktifkan notifikasi latar belakang agar pembaruan transaksi &amp; keamanan masuk real-time:</span>
-          <AllowNotificationFooterButton />
-        </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-bold text-slate-300">
+                Alamat Domisili Lengkap (Terintegrasi Google Maps) *
+              </label>
+              {mapsAutocompleteReady && (
+                <span className="text-[10px] text-emerald-400 font-semibold">
+                  📍 Google Maps Autocomplete Aktif
+                </span>
+              )}
+            </div>
+            <div className="relative">
+              <MapPin className="w-4 h-4 text-emerald-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                ref={addressInputRef}
+                type="text"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Ketik alamat atau pilih dari saran Google Maps..."
+                required
+                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white focus:border-cyan-400 focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Buat PIN Kartu (6 Digit Kuat) *
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type={showNewPin ? 'text' : 'password'}
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Contoh: 482917"
+                  required
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono tracking-widest text-white focus:border-cyan-400 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPin((p) => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                >
+                  {showNewPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1">
+                Ulangi Konfirmasi PIN (6 Digit) *
+              </label>
+              <div className="relative">
+                <KeyRound className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type={showNewPin ? 'text' : 'password'}
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={confirmPin}
+                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Ketik ulang 6 digit PIN"
+                  required
+                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono tracking-widest text-white focus:border-cyan-400 focus:outline-none"
+                />
+              </div>
+            </div>
+          </div>
+
+          {errorMsg && (
+            <div className="p-3 rounded-xl bg-rose-950/90 border border-rose-500/50 flex items-center gap-2 text-xs text-rose-200">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-black text-sm shadow-xl shadow-cyan-500/20 flex items-center justify-center gap-2 transition cursor-pointer"
+          >
+            <CheckCircle2 className="w-5 h-5" />
+            <span>Buat Kartu Reguler & Simpan ke Cloud</span>
+          </button>
+        </form>
       </div>
-
-      {/* Modal PIN Kartu saat mau login ke Kartu Lain */}
-      {selectedOldCard && (
-        <PinPromptModal
-          isOpen={true}
-          title={`Login ke Kartu: ${selectedOldCard.fullName}`}
-          description={`Masukkan 6 digit PIN Kartu milik "${selectedOldCard.fullName}" (No. Rek: ${selectedOldCard.accountNumber}) untuk masuk ke kartu ini. Jika lupa PIN, klik "Lupa PIN Kartu?" di bawah.`}
-          targetAccountId={selectedOldCard.id}
-          targetAccountName={selectedOldCard.fullName}
-          cardNumberSnippet={selectedOldCard.cardNumber}
-          expectedPin={selectedOldCard.pin}
-          acceptAdminPin={true}
-          onSuccess={(enteredPin) => {
-            loginToCardWithPin(
-              selectedOldCard.id,
-              enteredPin || selectedOldCard.pin
-            );
-            setSelectedOldCard(null);
-          }}
-          onCancel={() => setSelectedOldCard(null)}
-        />
-      )}
     </div>
   );
 };
