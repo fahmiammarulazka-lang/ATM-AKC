@@ -14,19 +14,29 @@ import {
 } from 'firebase/firestore';
 import { FIREBASE_CLOUD_CONFIG } from './config/firebaseCloudConfig';
 
-const firebaseInitOptions = {
+// ==========================================
+// KONFIGURASI FIREBASE PROJECT: azkaakc
+// App ID: 1:1070517785090:web:158d14b8bf1975b5138d1b
+// ==========================================
+export const firebaseConfig = {
   apiKey: FIREBASE_CLOUD_CONFIG.apiKey,
   authDomain: FIREBASE_CLOUD_CONFIG.authDomain,
   projectId: FIREBASE_CLOUD_CONFIG.projectId,
   storageBucket: FIREBASE_CLOUD_CONFIG.storageBucket,
   messagingSenderId: FIREBASE_CLOUD_CONFIG.messagingSenderId,
   appId: FIREBASE_CLOUD_CONFIG.appId,
-  ...(FIREBASE_CLOUD_CONFIG.measurementId ? { measurementId: FIREBASE_CLOUD_CONFIG.measurementId } : {}),
 };
 
-export const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseInitOptions);
+// Inisialisasi Firebase
+export const firebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-export const db = getFirestore(firebaseApp, FIREBASE_CLOUD_CONFIG.firestoreDatabaseId);
+// Gunakan Cloud Firestore database default pada project azkaakc
+export const db =
+  !FIREBASE_CLOUD_CONFIG.firestoreDatabaseId ||
+  FIREBASE_CLOUD_CONFIG.firestoreDatabaseId === '(default)'
+    ? getFirestore(firebaseApp)
+    : getFirestore(firebaseApp, FIREBASE_CLOUD_CONFIG.firestoreDatabaseId);
+
 export const auth = getAuth(firebaseApp);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -131,7 +141,7 @@ export async function signInWithGooglePopup(): Promise<{
       return {
         success: false,
         errorCode: code,
-        message: `Domain "${host}" belum terdaftar di Firebase Console Authorized Domains. Pastikan "${host}" dan "atm-akc.vercel.app" sudah ditambahkan di Firebase Console → Authentication → Settings → Authorized domains.`,
+        message: `Domain "${host}" belum terdaftar di Firebase Console Authorized Domains (Project: azkaakc). Pastikan "${host}" sudah ditambahkan di Firebase Console → Authentication → Settings → Authorized domains.`,
       };
     }
     if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {

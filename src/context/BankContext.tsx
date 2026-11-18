@@ -114,8 +114,6 @@ import { rollGachaOutcome } from '../utils/gachaUtils';
 import {
   clearDeviceSnapshotStorage,
   wipeLegacyBrowserStorage,
-  loadGuestAccountsFromLocalStorage,
-  saveGuestAccountsToLocalStorage,
   type BankPersistableSnapshot,
 } from '../services/deviceStorage';
 import {
@@ -1538,8 +1536,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
   };
 
-  const [accounts, setAccounts] = useState<BankAccount[]>(() => {
-    const base: BankAccount[] = INITIAL_ACCOUNTS.filter(
+  const [accounts, setAccounts] = useState<BankAccount[]>(() =>
+    INITIAL_ACCOUNTS.filter(
       (a) =>
         !PURGED_BOT_ACCOUNT_IDS.includes(a.id) &&
         !PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
@@ -1547,42 +1545,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...a,
       status: a.cardStatus === 'banned' || a.banInfo?.isBanned ? ('banned' as const) : ('active' as const),
       banReason: a.banInfo?.reason || a.banReason || '',
-    }));
-    const localGuests = loadGuestAccountsFromLocalStorage<BankAccount>();
-    for (const g of localGuests) {
-      if (
-        g &&
-        g.id &&
-        !PURGED_BOT_ACCOUNT_IDS.includes(g.id) &&
-        !PURGED_BOT_ACCOUNT_NUMBERS.includes(g.accountNumber) &&
-        !base.some((b) => b.id === g.id)
-      ) {
-        const hasGoogle = isRealGoogleLinkedEmail(g.googleEmail || g.email);
-        base.unshift({
-          ...g,
-          userId16: ensureAccountUserId16(g),
-          isOfficialAdminAccount: Boolean(g.isOfficialAdminAccount),
-          oaAdminPin: g.oaAdminPin || '159357',
-          status: g.status === 'banned' || g.cardStatus === 'banned' ? ('banned' as const) : ('active' as const),
-          banReason: g.banReason || '',
-          isGuestAccount: !hasGoogle,
-          googleEmail: hasGoogle ? normalizeEmailKey(g.googleEmail || g.email || '') : g.googleEmail,
-          email: hasGoogle ? normalizeEmailKey(g.email || g.googleEmail || '') : g.email,
-        });
-      }
-    }
-    return base;
-  });
-
-  // Simpan akun Guest murni yang belum tersambung Google ke LocalStorage perangkat secara otomatis
-  useEffect(() => {
-    const pureGuests = accounts.filter(
-      (a) =>
-        Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email)) &&
-        !PURGED_BOT_ACCOUNT_IDS.includes(a.id)
-    );
-    saveGuestAccountsToLocalStorage(pureGuests);
-  }, [accounts]);
+    }))
+  );
 
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(null);
   const [websitePopups, setWebsitePopups] = useState<WebsiteSystemPopupNotification[]>([]);
@@ -1795,46 +1759,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       }
 
-      // Pertahankan akun Guest lokal di LocalStorage yang BELUM disambungkan ke Google
-      // Jika akun Guest di LocalStorage ternyata sudah ada di Cloud sebagai Akun Google, otomatis bersihkan dari LocalStorage Guest
-      const rawLocalGuests = loadGuestAccountsFromLocalStorage<BankAccount>().filter(
-        (g) =>
-          g &&
-          g.id &&
-          !mergedDelAccountIds.includes(g.id) &&
-          !PURGED_BOT_ACCOUNT_IDS.includes(g.id) &&
-          !PURGED_BOT_ACCOUNT_NUMBERS.includes(g.accountNumber)
-      );
-      const remainingPureGuests: BankAccount[] = [];
-      for (const g of rawLocalGuests) {
-        const cloudVersion = cleanAccounts.find((c) => c.id === g.id);
-        if (cloudVersion && isRealGoogleLinkedEmail(cloudVersion.googleEmail || cloudVersion.email)) {
-          // Sudah berubah menjadi Akun Google di Cloud Firebase -> jangan masukkan lagi sebagai Guest lokal
-          continue;
-        }
-        const gHasGoogle = isRealGoogleLinkedEmail(g.googleEmail || g.email);
-        const normalizedGuest: BankAccount = {
-          ...g,
-          userId16: ensureAccountUserId16(g),
-          isOfficialAdminAccount: Boolean(g.isOfficialAdminAccount),
-          oaAdminPin: g.oaAdminPin || '159357',
-          status:
-            g.status === 'banned' || g.cardStatus === 'banned' || g.banInfo?.isBanned
-              ? ('banned' as const)
-              : ('active' as const),
-          banReason: g.banReason || g.banInfo?.reason || '',
-          isGuestAccount: !gHasGoogle,
-          email: gHasGoogle ? normalizeEmailKey(g.googleEmail || g.email || '') : g.email || '',
-          googleEmail: gHasGoogle ? normalizeEmailKey(g.googleEmail || g.email || '') : g.googleEmail,
-        };
-        if (!gHasGoogle) {
-          remainingPureGuests.push(normalizedGuest);
-        }
-        if (!cleanAccounts.some((c) => c.id === g.id)) {
-          cleanAccounts.unshift(normalizedGuest);
-        }
-      }
-      saveGuestAccountsToLocalStorage(remainingPureGuests);
       accountsRef.current = cleanAccounts;
       setAccounts(cleanAccounts);
     }
@@ -2075,13 +1999,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     });
 
-    const pureLocalGuests = normalizedAccountsList.filter((a) =>
-      Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email))
-    );
-    saveGuestAccountsToLocalStorage(pureLocalGuests);
-    const cloudSyncedAccounts = normalizedAccountsList.filter(
-      (a) => !Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email))
-    );
+    // 100% Tanpa localStorage: Seluruh akun (Google, Akun OA, maupun Akun Guest) langsung disimpan ke Firebase Cloud Firestore
+    const cloudSyncedAccounts = normalizedAccountsList;
 
     const mergedDeletedAccountIds = Array.from(
       new Set([
@@ -3116,10 +3035,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const nextAccounts = [newGuestAcc, ...accounts];
+    accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
-    saveGuestAccountsToLocalStorage(
-      nextAccounts.filter((a) => Boolean(a.isGuestAccount && !a.googleEmail))
-    );
+    void flushMasterStateToCloud({ accounts: nextAccounts });
     setCurrentAccountIdState(newGuestAcc.id);
     setActiveCloudEmail('');
     setGoogleUser({
@@ -3134,7 +3052,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       account: newGuestAcc,
-      message: `Kartu Reguler Guest "${cleanName}" berhasil dibuat di LocalStorage! Anda dapat menyambungkannya ke Google kapan saja lewat tombol "Sign in with Google" di bagian atas.`,
+      message: `Kartu Reguler Guest "${cleanName}" berhasil dibuat dan langsung tersimpan real-time di Firebase Cloud Firestore (Project: azkaakc)! Anda dapat menyambungkannya ke Google kapan saja lewat tombol "Sign in with Google" di bagian atas.`,
     };
   };
 
@@ -3281,13 +3199,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ...Array.from(combinedMap.values()).filter((a) => a.id !== convertedGoogleAccount.id),
       ];
 
-      // 4. Hapus dari LocalStorage Guest (karena sekarang sudah resmi menjadi Akun Google di Cloud Firebase)
-      const remainingLocalGuests = nextAccounts.filter((a) =>
-        Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email))
-      );
-      saveGuestAccountsToLocalStorage(remainingLocalGuests);
-
-      // 5. Perbarui state aplikasi & tulis langsung ke Firebase Cloud Firestore (tunggu hingga selesai 100%)
+      // 4. Perbarui state aplikasi & tulis langsung ke Firebase Cloud Firestore (tunggu hingga selesai 100%)
       accountsRef.current = nextAccounts;
       setAccounts(nextAccounts);
 
@@ -8581,9 +8493,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
     accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
-    saveGuestAccountsToLocalStorage(
-      nextAccounts.filter((a) => Boolean(a.isGuestAccount && !isRealGoogleLinkedEmail(a.googleEmail || a.email)))
-    );
     void flushMasterStateToCloud({ accounts: nextAccounts });
     if (cleanEmail) {
       void syncCloudUserProfile(

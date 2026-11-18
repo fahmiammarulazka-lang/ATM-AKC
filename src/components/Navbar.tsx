@@ -892,7 +892,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <span className="text-[9px] font-mono text-emerald-400 block truncate">
                         {isCurrentAccountUnlinkedToGoogle
                           ? currentAccount?.isGuestAccount || googleUser?.authMode === 'guest'
-                            ? 'Akun Guest (LocalStorage) · Belum Tersambung Google'
+                            ? 'Akun Guest Cloud (Firebase) · Belum Tersambung Google'
                             : 'Akun OA Resmi · Belum Tersambung Email Google'
                           : `${currentAccount?.email || googleUser?.email || ''} · ${
                               currentAccount?.isOfficialAdminAccount

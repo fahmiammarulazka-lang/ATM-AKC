@@ -1,14 +1,10 @@
 /**
- * Bank Nusantara Layer 3 Persistence: Penyimpanan HP / Device Storage
- * Menggabungkan IndexedDB berkapasitas besar (tahan hingga ratusan MB di HP Android/iOS)
- * dengan Persistent Storage API agar data nasabah & koin Spin tidak pernah hilang.
+ * Bank Nusantara Cloud-Only Storage Cleanup Utility
+ * Seluruh penggunaan localStorage dan IndexedDB lokal untuk menyimpan data utama telah DIHAPUS 100%.
+ * Semua data aplikasi (termasuk Akun Google, Akun OA, Akun Guest, Transaksi, Aset, dan Pengaturan)
+ * kini langsung disimpan dan disinkronkan secara real-time di Firebase Cloud Firestore (Project: azkaakc)
+ * menggunakan onSnapshot lintas perangkat (Laptop & HP).
  */
-
-const IDB_NAME = 'bank_nusantara_device_db';
-const IDB_VERSION = 1;
-const IDB_STORE = 'bank_vault';
-const FULL_SNAPSHOT_KEY = 'full_snapshot_v1';
-export const DEVICE_FULL_SNAPSHOT_LS_KEY = 'bank_nusantara_full_snapshot_ls_v1';
 
 export interface BankPersistableSnapshot {
   version: number;
@@ -57,12 +53,9 @@ export interface BankPersistableSnapshot {
   adminUnlocked: boolean;
 }
 
-export const GUEST_LOCAL_STORAGE_KEY = 'bank_nusantara_guest_accounts_v1';
-
 /**
- * Membersihkan seluruh sisa key localStorage & sessionStorage lama agar tidak ada
- * cache lokal tertinggal yang mengakali status banned atau memunculkan data lama,
- * KECUALI penyimpanan khusus Akun Guest (bank_nusantara_guest_accounts_v1).
+ * Menghapus bersih seluruh sisa key localStorage & sessionStorage lama dari perangkat
+ * agar aplikasi 100% hanya menggunakan data real-time dari Firebase Cloud Firestore.
  */
 export function wipeLegacyBrowserStorage(): void {
   if (typeof window === 'undefined') return;
@@ -70,189 +63,50 @@ export function wipeLegacyBrowserStorage(): void {
     const keysToRemove: string[] = [];
     for (let i = 0; i < window.localStorage.length; i++) {
       const k = window.localStorage.key(i);
-      if (k && k.startsWith('bank_nusantara_') && k !== GUEST_LOCAL_STORAGE_KEY) {
+      if (k && k.startsWith('bank_nusantara_')) {
         keysToRemove.push(k);
       }
     }
     keysToRemove.forEach((k) => window.localStorage.removeItem(k));
-  } catch { /* empty */ }
+  } catch {
+    // ignore
+  }
   try {
     const sKeysToRemove: string[] = [];
     for (let i = 0; i < window.sessionStorage.length; i++) {
       const k = window.sessionStorage.key(i);
-      if (k && k.startsWith('bank_nusantara_') && k !== GUEST_LOCAL_STORAGE_KEY) {
+      if (k && k.startsWith('bank_nusantara_')) {
         sKeysToRemove.push(k);
       }
     }
     sKeysToRemove.forEach((k) => window.sessionStorage.removeItem(k));
-  } catch { /* empty */ }
+  } catch {
+    // ignore
+  }
 }
 
+/**
+ * No-op: Akun Guest tidak lagi menggunakan localStorage, melainkan langsung tersimpan di Firebase Firestore.
+ */
 export function loadGuestAccountsFromLocalStorage<T>(): T[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = window.localStorage.getItem(GUEST_LOCAL_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
-  } catch {
-    return [];
-  }
+  wipeLegacyBrowserStorage();
+  return [];
 }
 
-export function saveGuestAccountsToLocalStorage<T>(guestAccounts: T[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(GUEST_LOCAL_STORAGE_KEY, JSON.stringify(guestAccounts));
-  } catch {
-    // ignore quota error
-  }
-}
-
-let dbPromise: Promise<IDBDatabase | null> | null = null;
-let persistenceRequested = false;
-
-export async function requestPersistentDeviceStorage(): Promise<boolean> {
-  if (persistenceRequested || typeof navigator === 'undefined') return false;
-  persistenceRequested = true;
-  try {
-    if (navigator.storage && typeof navigator.storage.persist === 'function') {
-      return await navigator.storage.persist();
-    }
-  } catch {
-    // ignore if unsupported in sandboxed iframe
-  }
-  return false;
-}
-
-function openDeviceDB(): Promise<IDBDatabase | null> {
-  if (typeof window === 'undefined' || !('indexedDB' in window)) {
-    return Promise.resolve(null);
-  }
-  if (dbPromise) return dbPromise;
-
-  dbPromise = new Promise((resolve) => {
-    try {
-      const req = window.indexedDB.open(IDB_NAME, IDB_VERSION);
-      req.onupgradeneeded = () => {
-        const database = req.result;
-        if (!database.objectStoreNames.contains(IDB_STORE)) {
-          database.createObjectStore(IDB_STORE);
-        }
-      };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => resolve(null);
-      req.onblocked = () => resolve(null);
-    } catch {
-      resolve(null);
-    }
-  });
-
-  return dbPromise;
-}
-
-async function idbGet<T>(key: string): Promise<T | null> {
-  const database = await openDeviceDB();
-  if (!database) return null;
-  return new Promise((resolve) => {
-    try {
-      const tx = database.transaction(IDB_STORE, 'readonly');
-      const store = tx.objectStore(IDB_STORE);
-      const req = store.get(key);
-      req.onsuccess = () => resolve((req.result as T) ?? null);
-      req.onerror = () => resolve(null);
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
-async function idbSet(key: string, value: unknown): Promise<boolean> {
-  const database = await openDeviceDB();
-  if (!database) return false;
-  return new Promise((resolve) => {
-    try {
-      const tx = database.transaction(IDB_STORE, 'readwrite');
-      const store = tx.objectStore(IDB_STORE);
-      store.put(value, key);
-      tx.oncomplete = () => resolve(true);
-      tx.onerror = () => resolve(false);
-    } catch {
-      resolve(false);
-    }
-  });
-}
-
-export async function saveSnapshotToDeviceStorage(
-  snapshot: BankPersistableSnapshot,
-  scopeEmail?: string
-): Promise<void> {
-  void requestPersistentDeviceStorage();
-
-  // Remove old duplicate full-snapshot key from localStorage so localStorage quota is never exhausted for accounts/coins
-  try {
-    if (localStorage.getItem(DEVICE_FULL_SNAPSHOT_LS_KEY) !== null) {
-      localStorage.removeItem(DEVICE_FULL_SNAPSHOT_LS_KEY);
-    }
-  } catch {
-    // ignore
-  }
-
-  // IndexedDB (High-capacity HP/Browser storage)
-  await idbSet(FULL_SNAPSHOT_KEY, snapshot);
-  if (scopeEmail) {
-    await idbSet(`scope:${scopeEmail.trim().toLowerCase()}`, snapshot);
-  }
-}
-
-export async function loadSnapshotFromDeviceStorage(
-  scopeEmail?: string
-): Promise<BankPersistableSnapshot | null> {
-  if (scopeEmail) {
-    const scoped = await idbGet<BankPersistableSnapshot>(`scope:${scopeEmail.trim().toLowerCase()}`);
-    if (scoped && typeof scoped.updatedAtMs === 'number') {
-      return scoped;
-    }
-  }
-
-  const fromIdb = await idbGet<BankPersistableSnapshot>(FULL_SNAPSHOT_KEY);
-  if (fromIdb && typeof fromIdb.updatedAtMs === 'number') {
-    return fromIdb;
-  }
-
-  try {
-    const raw = localStorage.getItem(DEVICE_FULL_SNAPSHOT_LS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as BankPersistableSnapshot;
-      localStorage.removeItem(DEVICE_FULL_SNAPSHOT_LS_KEY);
-      if (parsed && typeof parsed.updatedAtMs === 'number') {
-        return parsed;
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  return null;
+/**
+ * No-op: Akun Guest tidak lagi disimpan ke localStorage, melainkan langsung tersimpan di Firebase Firestore.
+ */
+export function saveGuestAccountsToLocalStorage<T>(_guestAccounts: T[]): void {
+  wipeLegacyBrowserStorage();
 }
 
 export async function clearDeviceSnapshotStorage(): Promise<void> {
-  const database = await openDeviceDB();
-  if (database) {
-    await new Promise<void>((resolve) => {
-      try {
-        const tx = database.transaction(IDB_STORE, 'readwrite');
-        tx.objectStore(IDB_STORE).clear();
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => resolve();
-      } catch {
-        resolve();
-      }
-    });
-  }
-  try {
-    localStorage.removeItem(DEVICE_FULL_SNAPSHOT_LS_KEY);
-  } catch {
-    // ignore
+  wipeLegacyBrowserStorage();
+  if (typeof window !== 'undefined' && 'indexedDB' in window) {
+    try {
+      window.indexedDB.deleteDatabase('bank_nusantara_device_db');
+    } catch {
+      // ignore
+    }
   }
 }

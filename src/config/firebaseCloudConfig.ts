@@ -1,14 +1,9 @@
 /**
- * KONFIGURASI CLOUD FIREBASE KHUSUS (BANK NUSANTARA)
+ * KONFIGURASI CLOUD FIREBASE KHUSUS (BANK NUSANTARA — PROJECT: azkaakc)
  * ---------------------------------------------------------------------------
- * File konfigurasi khusus agar Anda dapat dengan mudah mengganti API Key,
- * Auth Domain, Project ID, dan Firestore Database ID di satu tempat.
- *
- * Catatan Authorized Domains Firebase Auth:
- * Pastikan domain production "atm-akc.vercel.app" (beserta domain preview Anda)
- * sudah terdaftar di Firebase Console -> Authentication -> Settings -> Authorized domains.
+ * Terhubung langsung ke Firebase Firestore project "azkaakc"
+ * App ID: 1:1070517785090:web:158d14b8bf1975b5138d1b
  */
-import defaultAppletConfig from '../../firebase-applet-config.json';
 
 export interface FirebaseCloudConfig {
   apiKey: string;
@@ -24,16 +19,17 @@ export interface FirebaseCloudConfig {
 }
 
 export const FIREBASE_CLOUD_CONFIG: FirebaseCloudConfig = {
-  // Anda dapat mengisi / mengganti konfigurasi Firebase Anda sendiri di bawah ini:
-  apiKey: defaultAppletConfig.apiKey,
-  authDomain: defaultAppletConfig.authDomain,
-  projectId: defaultAppletConfig.projectId,
-  firestoreDatabaseId: defaultAppletConfig.firestoreDatabaseId,
-  storageBucket: defaultAppletConfig.storageBucket,
-  messagingSenderId: defaultAppletConfig.messagingSenderId,
-  appId: defaultAppletConfig.appId,
-  measurementId: defaultAppletConfig.measurementId || '',
+  apiKey: 'AIzaSyAD1MYxchkSYAEExsQ6RoBOrQ1DOU8U16g',
+  authDomain: 'azkaakc.firebaseapp.com',
+  projectId: 'azkaakc',
+  firestoreDatabaseId: '(default)',
+  storageBucket: 'azkaakc.firebasestorage.app',
+  messagingSenderId: '1070517785090',
+  appId: '1:1070517785090:web:158d14b8bf1975b5138d1b',
+  measurementId: '',
   authorizedDomains: [
+    'azkaakc.firebaseapp.com',
+    'azkaakc.web.app',
     'atm-akc.vercel.app',
     'localhost',
     '127.0.0.1',

@@ -461,7 +461,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               Bank Nusantara Digital
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              Gerbang Masuk Resmi: Google Cloud • Akun OA Panel Admin • Guest LocalStorage
+              Gerbang Masuk Resmi: Google Cloud • Akun OA Panel Admin • Guest Cloud (Firebase Real-Time)
             </p>
           </div>
 
@@ -605,7 +605,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <span className="text-xs font-extrabold text-emerald-300 flex items-center gap-1.5">
                     <HardDrive className="w-4 h-4" />
-                    <span>Login Lewat Guest (LocalStorage Perangkat Ini)</span>
+                    <span>Login Lewat Guest (Tersinkron Real-Time di Firebase Firestore)</span>
                   </span>
                   {guestLocalAccounts.length > 0 && (
                     <button
@@ -620,12 +620,12 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                     >
                       {guestSubMode === 'choose_existing'
                         ? '+ Buat Guest Baru (1-Klik)'
-                        : `Pilih Guest Lama (${guestLocalAccounts.length})`}
+                        : `Pilih Guest Tersimpan (${guestLocalAccounts.length})`}
                     </button>
                   )}
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Akun Guest disimpan di <strong>LocalStorage</strong> perangkat ini (otomatis mendapatkan <strong>Kartu Reguler</strong> &amp; <strong>ID 16 Digit</strong>). Kapan saja Anda ingin menyambungkannya ke akun Google, klik tombol <strong>"Sign in with Google"</strong> di bagian atas Navbar (sama seperti Akun OA).
+                  Akun Guest langsung disimpan secara real-time di <strong>Firebase Cloud Firestore (azkaakc)</strong> tanpa localStorage (otomatis mendapatkan <strong>Kartu Reguler</strong> &amp; <strong>ID 16 Digit</strong>). Kapan saja Anda ingin menyambungkannya ke akun Google, klik tombol <strong>"Sign in with Google"</strong> di bagian atas Navbar.
                 </p>
               </div>
 
@@ -737,7 +737,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-black text-white flex items-center gap-1.5">
                         <Zap className="w-4 h-4 text-amber-400" />
-                        <span>1-Klik Kartu Reguler Guest Baru (LocalStorage)</span>
+                        <span>1-Klik Kartu Reguler Guest Baru (Cloud Firestore)</span>
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-black uppercase">
                         Otomatis Reguler
@@ -950,7 +950,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               <span>2. Login Dengan Akun OA (Buatan Panel Admin)</span>
             </button>
 
-            {/* Tombol Utama 3: Login Lewat Guest (LocalStorage) */}
+            {/* Tombol Utama 3: Login Lewat Guest (Cloud Firestore) */}
             <button
               type="button"
               onClick={() => {
@@ -962,7 +962,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
             >
               <HardDrive className="w-5 h-5 text-slate-950" />
               <span>
-                3. Login Lewat Guest (LocalStorage
+                3. Login Lewat Guest (Firebase Cloud
                 {guestLocalAccounts.length > 0 ? ` · ${guestLocalAccounts.length} Tersimpan` : ' · 1-Klik'}
                 )
               </span>
@@ -985,7 +985,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               <div className="flex items-start gap-2.5 text-xs text-slate-300">
                 <HardDrive className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong className="text-emerald-300">Login Lewat Guest:</strong> Tersimpan di <strong>LocalStorage</strong> perangkat ini (1-Klik Kartu Reguler) dan bisa disambungkan ke akun Google lewat tombol <strong>"Sign in with Google"</strong> di bagian atas Navbar.
+                  <strong className="text-emerald-300">Login Lewat Guest:</strong> Langsung tersimpan secara real-time di <strong>Firebase Cloud Firestore (azkaakc)</strong> dan bisa disambungkan ke akun Google lewat tombol <strong>"Sign in with Google"</strong> di bagian atas Navbar.
                 </span>
               </div>
             </div>
