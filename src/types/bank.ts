@@ -191,6 +191,7 @@ export interface CloudUserRecord {
   currentAccountId?: string;
   lastAccountId?: string;
   hasCompletedOnboarding?: boolean;
+  savedAccounts?: BankAccount[];
   authMode?: 'email_direct' | 'google' | 'oa_account' | 'guest';
   emailKey?: string;
   emailVerified?: boolean;

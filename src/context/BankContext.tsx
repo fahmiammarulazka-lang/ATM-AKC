@@ -1662,10 +1662,103 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const isApplyingFirestoreRef = useRef<boolean>(false);
   const lastFirestoreWriteMsRef = useRef<number>(0);
   const isLinkingAccountToGoogleRef = useRef<boolean>(false);
+  const latestServerAccountsRef = useRef<BankAccount[]>([]);
+
+  const normalizeAndSanitizeAccount = (a: BankAccount): BankAccount => {
+    const hasGoogle = isRealGoogleLinkedEmail(a.googleEmail || a.email);
+    const normEmail = hasGoogle
+      ? normalizeEmailKey(a.googleEmail || a.email || '')
+      : normalizeEmailKey(a.email || '');
+    return {
+      ...a,
+      userId16: ensureAccountUserId16(a),
+      email: normEmail || a.email || '',
+      googleEmail: hasGoogle ? normEmail : a.googleEmail,
+      // Jika sudah tersambung ke email Google di Firebase, otomatis statusnya BUKAN lagi Akun Guest
+      isGuestAccount: hasGoogle ? false : Boolean(a.isGuestAccount),
+      isOfficialAdminAccount: Boolean(a.isOfficialAdminAccount || a.id === 'acc-admin'),
+      oaAdminPin: a.oaAdminPin || '159357',
+      status:
+        a.status === 'banned' || a.cardStatus === 'banned' || a.banInfo?.isBanned
+          ? ('banned' as const)
+          : ('active' as const),
+      banReason: a.banReason || a.banInfo?.reason || '',
+    };
+  };
+
+  // Gabungkan daftar akun dari berbagai vault (master_state, users/{uid}.savedAccounts, users_by_email/{emailKey}.savedAccounts, dan state lokal)
+  // agar perangkat yang baru membuka halaman login tidak pernah bisa menimpa atau menghapus kartu yang dibuat di perangkat lain (HP <-> Laptop)
+  const unionMergeAccountsList = (
+    primaryList: BankAccount[],
+    fallbackLists: (BankAccount[] | undefined)[],
+    deletedIds: string[]
+  ): BankAccount[] => {
+    const delSet = new Set<string>([
+      ...PURGED_BOT_ACCOUNT_IDS,
+      ...deletedIds,
+    ]);
+    const map = new Map<string, BankAccount>();
+
+    for (const list of fallbackLists) {
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        if (
+          !item ||
+          !item.id ||
+          delSet.has(item.id) ||
+          PURGED_BOT_ACCOUNT_NUMBERS.includes(item.accountNumber)
+        ) {
+          continue;
+        }
+        map.set(item.id, normalizeAndSanitizeAccount(item));
+      }
+    }
+
+    for (const item of primaryList) {
+      if (
+        !item ||
+        !item.id ||
+        delSet.has(item.id) ||
+        PURGED_BOT_ACCOUNT_NUMBERS.includes(item.accountNumber)
+      ) {
+        continue;
+      }
+      map.set(item.id, normalizeAndSanitizeAccount(item));
+    }
+
+    // Pastikan Kartu Admin Utama ('acc-admin') selalu tersedia kecuali sengaja dihapus
+    if (!map.has('acc-admin') && !delSet.has('acc-admin')) {
+      const defaultAdmin = INITIAL_ACCOUNTS.find((a) => a.id === 'acc-admin');
+      if (defaultAdmin) {
+        map.set('acc-admin', {
+          ...defaultAdmin,
+          status: 'active',
+          banReason: '',
+        });
+      }
+    }
+
+    // Urutkan agar akun terbaru / non-admin berada di atas sesuai urutan primaryList lalu fallback
+    const result: BankAccount[] = [];
+    const visited = new Set<string>();
+    for (const item of primaryList) {
+      if (item && item.id && map.has(item.id) && !visited.has(item.id)) {
+        visited.add(item.id);
+        result.push(map.get(item.id)!);
+      }
+    }
+    for (const [id, acc] of map.entries()) {
+      if (!visited.has(id)) {
+        visited.add(id);
+        result.push(acc);
+      }
+    }
+    return result;
+  };
 
   const applyMasterCloudData = (
     data: Record<string, any>,
-    options?: { forceInitial?: boolean }
+    options?: { forceInitial?: boolean; extraVaultAccounts?: (BankAccount[] | undefined)[] }
   ) => {
     if (!data || typeof data !== 'object') return;
     if (!options?.forceInitial && data.writerSessionId === clientSessionId) {
@@ -1716,49 +1809,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
       );
 
-      const cleanAccounts: BankAccount[] = incomingAccounts
-        .filter(
-          (a) =>
-            a &&
-            a.id &&
-            !mergedDelAccountIds.includes(a.id) &&
-            !PURGED_BOT_ACCOUNT_IDS.includes(a.id) &&
-            !PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
-        )
-        .map((a) => {
-          const hasGoogle = isRealGoogleLinkedEmail(a.googleEmail || a.email);
-          const normEmail = hasGoogle
-            ? normalizeEmailKey(a.googleEmail || a.email || '')
-            : a.email || '';
-          return {
-            ...a,
-            userId16: ensureAccountUserId16(a),
-            email: normEmail,
-            googleEmail: hasGoogle ? normEmail : a.googleEmail,
-            // Jika sudah tersambung ke email Google di Firebase, otomatis statusnya BUKAN lagi Akun Guest
-            isGuestAccount: hasGoogle ? false : Boolean(a.isGuestAccount),
-            isOfficialAdminAccount: Boolean(a.isOfficialAdminAccount || a.id === 'acc-admin'),
-            oaAdminPin: a.oaAdminPin || '159357',
-            status:
-              a.status === 'banned' || a.cardStatus === 'banned' || a.banInfo?.isBanned
-                ? ('banned' as const)
-                : ('active' as const),
-            banReason: a.banReason || a.banInfo?.reason || '',
-          };
-        });
+      // Union-merge incoming server accounts dengan latestServerAccountsRef, extraVaultAccounts (dari users/{uid} & users_by_email), dan accountsRef
+      const cleanAccounts = unionMergeAccountsList(
+        incomingAccounts,
+        [
+          ...(options?.extraVaultAccounts || []),
+          latestServerAccountsRef.current,
+          accountsRef.current,
+        ],
+        mergedDelAccountIds
+      );
 
-      // Pastikan Kartu Admin Utama ('acc-admin') selalu tersedia
-      if (!cleanAccounts.some((c) => c.id === 'acc-admin') && !mergedDelAccountIds.includes('acc-admin')) {
-        const defaultAdmin = INITIAL_ACCOUNTS.find((a) => a.id === 'acc-admin');
-        if (defaultAdmin) {
-          cleanAccounts.push({
-            ...defaultAdmin,
-            status: 'active',
-            banReason: '',
-          });
-        }
-      }
-
+      latestServerAccountsRef.current = cleanAccounts;
       accountsRef.current = cleanAccounts;
       setAccounts(cleanAccounts);
     }
@@ -1980,34 +2042,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     lastSyncEpochRef.current = nowMs;
     setCloudSyncStatus('syncing');
 
-    const rawAccountsList = (overrides?.accounts ?? accounts).filter(
-      (a) =>
-        a &&
-        a.id &&
-        !PURGED_BOT_ACCOUNT_IDS.includes(a.id) &&
-        !PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
-    );
-    const normalizedAccountsList = rawAccountsList.map((a) => {
-      const hasGoogle = isRealGoogleLinkedEmail(a.googleEmail || a.email);
-      const normEmail = hasGoogle ? normalizeEmailKey(a.googleEmail || a.email || '') : a.email || '';
-      return {
-        ...a,
-        email: normEmail,
-        googleEmail: hasGoogle ? normEmail : a.googleEmail,
-        // Setiap akun yang sudah memiliki email Google otomatis berstatus Akun Google (bukan Guest) di Firebase
-        isGuestAccount: hasGoogle ? false : Boolean(a.isGuestAccount),
-      };
-    });
-
-    // 100% Tanpa localStorage: Seluruh akun (Google, Akun OA, maupun Akun Guest) langsung disimpan ke Firebase Cloud Firestore
-    const cloudSyncedAccounts = normalizedAccountsList;
-
     const mergedDeletedAccountIds = Array.from(
       new Set([
         ...PURGED_BOT_ACCOUNT_IDS,
+        ...deletedAccountIdsRef.current,
         ...(overrides?.deletedAccountIds ?? deletedAccountIds),
       ])
     );
+
+    // 100% Tanpa localStorage & Proteksi Anti-Timpa:
+    // Selalu union-merge akun lokal/overrides dengan latestServerAccountsRef agar perangkat lain tidak pernah menimpa kartu yang baru dibuat di HP/Laptop
+    const cloudSyncedAccounts = unionMergeAccountsList(
+      overrides?.accounts ?? accountsRef.current,
+      [latestServerAccountsRef.current, accounts],
+      mergedDeletedAccountIds
+    );
+    latestServerAccountsRef.current = cloudSyncedAccounts;
 
     const isNotBotAccountId = (accId?: string) =>
       !accId || !PURGED_BOT_ACCOUNT_IDS.includes(accId);
@@ -2083,6 +2133,41 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       updatedAt: new Date(nowMs).toISOString(),
     }) as Record<string, unknown>;
 
+    // Dual-Vault Sync: jika ada akun yang di-override atau sedang aktif pada email pengguna, simpan juga salinan savedAccounts ke users/{uid} & users_by_email/{emailKey}
+    const activeEmailForVault = normalizeEmailKey(
+      googleUser?.email || activeCloudEmailRef.current || firebaseUser?.email || ''
+    );
+    if (activeEmailForVault && activeEmailForVault.includes('@')) {
+      const userOwnedAccounts = cloudSyncedAccounts.filter((a) => {
+        const gEm = a.googleEmail ? normalizeEmailKey(a.googleEmail) : '';
+        const aEm = a.email ? normalizeEmailKey(a.email) : '';
+        return (
+          (firebaseUser?.uid && a.firebaseUid === firebaseUser.uid) ||
+          gEm === activeEmailForVault ||
+          aEm === activeEmailForVault
+        );
+      });
+      if (userOwnedAccounts.length > 0) {
+        const eKey = emailToFirestoreDocId(activeEmailForVault);
+        const vaultPayload = sanitizeForFirestore({
+          savedAccounts: userOwnedAccounts,
+          hasCompletedOnboarding: true,
+          updatedAt: new Date(nowMs).toISOString(),
+          updatedAtMs: nowMs,
+        }) as Record<string, unknown>;
+        if (firebaseUser?.uid) {
+          void setDoc(doc(db, 'users', firebaseUser.uid), vaultPayload, { merge: true }).catch(
+            () => {}
+          );
+        }
+        void setDoc(
+          doc(db, 'users_by_email', eKey),
+          { ...vaultPayload, email: activeEmailForVault, emailKey: eKey },
+          { merge: true }
+        ).catch(() => {});
+      }
+    }
+
     return setDoc(doc(db, 'bank_state_v1', 'master_state'), payload, { merge: true })
       .then(() => {
         setCloudSyncStatus('synced');
@@ -2102,6 +2187,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     contextEmail?: string
   ) => {
     setCloudUserStatus(uData);
+
+    // Dual-Vault Recovery: Jika dokumen profil email/UID memiliki savedAccounts, gabungkan langsung ke daftar accounts agar tidak pernah hilang
+    if (Array.isArray(uData.savedAccounts) && uData.savedAccounts.length > 0) {
+      const mergedFromUserVault = unionMergeAccountsList(
+        accountsRef.current,
+        [uData.savedAccounts, latestServerAccountsRef.current],
+        deletedAccountIdsRef.current
+      );
+      latestServerAccountsRef.current = mergedFromUserVault;
+      accountsRef.current = mergedFromUserVault;
+      setAccounts(mergedFromUserVault);
+    }
 
     if (uData.notificationCategoryPermissions && typeof uData.notificationCategoryPermissions === 'object') {
       const normalizedPerms = sanitizeNotificationCategoryPermissions(
@@ -2127,8 +2224,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const cleanTargetEmail = normalizeEmailKey(contextEmail || uData.email || '');
-    setAccounts((prev) =>
-      prev.map((acc) => {
+    setAccounts((prev) => {
+      const baseList =
+        Array.isArray(uData.savedAccounts) && uData.savedAccounts.length > 0
+          ? unionMergeAccountsList(prev, [uData.savedAccounts], deletedAccountIdsRef.current)
+          : prev;
+      return baseList.map((acc) => {
         const accGoogle = acc.googleEmail ? normalizeEmailKey(acc.googleEmail) : '';
         const accEmail = acc.email ? normalizeEmailKey(acc.email) : '';
         const isLinked =
@@ -2189,16 +2290,43 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ...acc,
           failedPinAttempts: nextFailedAttempts,
         };
-      })
-    );
+      });
+    });
   };
 
   const syncCloudUserProfile = async (
     target: { uid?: string; email?: string; fallbackEmail?: string },
-    fields: Record<string, unknown>
+    fields: Record<string, unknown>,
+    sourceAccounts?: BankAccount[]
   ) => {
+    const emailSet = new Set<string>();
+    if (target.email && target.email.includes('@')) {
+      emailSet.add(normalizeEmailKey(target.email));
+    }
+    if (target.fallbackEmail && target.fallbackEmail.includes('@')) {
+      emailSet.add(normalizeEmailKey(target.fallbackEmail));
+    }
+
+    const pool = sourceAccounts ?? accountsRef.current;
+    const matchingSavedAccounts = pool.filter((a) => {
+      if (
+        !a ||
+        !a.id ||
+        deletedAccountIdsRef.current.includes(a.id) ||
+        PURGED_BOT_ACCOUNT_IDS.includes(a.id) ||
+        PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
+      ) {
+        return false;
+      }
+      if (target.uid && a.firebaseUid === target.uid) return true;
+      const gEm = a.googleEmail ? normalizeEmailKey(a.googleEmail) : '';
+      const aEm = a.email ? normalizeEmailKey(a.email) : '';
+      return (gEm && emailSet.has(gEm)) || (aEm && emailSet.has(aEm));
+    });
+
     const payload = sanitizeForFirestore({
       ...fields,
+      ...(matchingSavedAccounts.length > 0 ? { savedAccounts: matchingSavedAccounts } : {}),
       updatedAt: new Date().toISOString(),
       updatedAtMs: Date.now(),
     }) as Record<string, unknown>;
@@ -2207,13 +2335,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       tasks.push(
         setDoc(doc(db, 'users', target.uid), payload, { merge: true }).catch(() => {})
       );
-    }
-    const emailSet = new Set<string>();
-    if (target.email && target.email.includes('@')) {
-      emailSet.add(normalizeEmailKey(target.email));
-    }
-    if (target.fallbackEmail && target.fallbackEmail.includes('@')) {
-      emailSet.add(normalizeEmailKey(target.fallbackEmail));
     }
     emailSet.forEach((em) => {
       const eKey = emailToFirestoreDocId(em);
@@ -2256,6 +2377,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Wajib cek master_state dari server cloud sebelum membuka halaman utama
       let cloudAccountsLoaded: BankAccount[] = [];
+      let masterDataSnapshot: Record<string, any> | null = null;
       try {
         let masterSnap;
         try {
@@ -2265,14 +2387,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         if (masterSnap && masterSnap.exists() && active) {
           const masterData = masterSnap.data();
+          masterDataSnapshot = masterData;
           applyMasterCloudData(masterData, { forceInitial: true });
-          if (Array.isArray(masterData.accounts)) {
-            cloudAccountsLoaded = (masterData.accounts as BankAccount[]).filter(
-              (a) =>
-                !PURGED_BOT_ACCOUNT_IDS.includes(a.id) &&
-                !PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
-            );
-          }
+          cloudAccountsLoaded = accountsRef.current;
           setCloudSyncStatus('synced');
           setLastCloudSyncAt(new Date().toISOString());
         }
@@ -2298,14 +2415,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const uidData = userSnap && userSnap.exists() ? (userSnap.data() as CloudUserRecord) : null;
           const emailData = emailSnap && emailSnap.exists() ? (emailSnap.data() as CloudUserRecord) : null;
 
+          // Gabungkan savedAccounts dari dokumen profil users/{uid} dan users_by_email/{emailKey} dengan master_state
+          const uidSaved = Array.isArray(uidData?.savedAccounts) ? uidData!.savedAccounts : [];
+          const emailSaved = Array.isArray(emailData?.savedAccounts) ? emailData!.savedAccounts : [];
+          if (uidSaved.length > 0 || emailSaved.length > 0) {
+            const mergedVaultAccounts = unionMergeAccountsList(
+              cloudAccountsLoaded,
+              [emailSaved, uidSaved, latestServerAccountsRef.current, accountsRef.current],
+              deletedAccountIdsRef.current
+            );
+            const hadMissingInMaster = mergedVaultAccounts.length > cloudAccountsLoaded.length;
+            cloudAccountsLoaded = mergedVaultAccounts;
+            latestServerAccountsRef.current = mergedVaultAccounts;
+            accountsRef.current = mergedVaultAccounts;
+            setAccounts(mergedVaultAccounts);
+            if (hadMissingInMaster && masterDataSnapshot) {
+              void flushMasterStateToCloud({ accounts: mergedVaultAccounts });
+            }
+          }
+
+          const allMatchedForEmail = cloudAccountsLoaded.filter(
+            (a) =>
+              a.firebaseUid === fbUser.uid ||
+              (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+              (a.email && normalizeEmailKey(a.email) === cleanEmail)
+          );
+
           if (uidData || emailData) {
             const mergedBanned = uidData?.status === 'banned' || emailData?.status === 'banned';
             const mergedReason =
               emailData?.banReason || uidData?.banReason || '';
             const mergedLastAccountId =
-              emailData?.lastAccountId || uidData?.lastAccountId || '';
+              emailData?.lastAccountId || uidData?.lastAccountId || allMatchedForEmail[0]?.id || '';
             const mergedOnboarded = Boolean(
-              emailData?.hasCompletedOnboarding || uidData?.hasCompletedOnboarding
+              allMatchedForEmail.length > 0 ||
+                emailData?.hasCompletedOnboarding ||
+                uidData?.hasCompletedOnboarding
             );
             initialUserData = {
               ...(uidData || emailData)!,
@@ -2317,8 +2462,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               banReason: mergedReason,
               lastAccountId: mergedLastAccountId,
               hasCompletedOnboarding: mergedOnboarded,
+              ...(allMatchedForEmail.length > 0 ? { savedAccounts: allMatchedForEmail } : {}),
               authMode: 'google',
             };
+            if (allMatchedForEmail.length > 0) {
+              await Promise.all([
+                setDoc(userRef, sanitizeForFirestore(initialUserData) as Record<string, unknown>, {
+                  merge: true,
+                }).catch(() => {}),
+                setDoc(emailRef, sanitizeForFirestore(initialUserData) as Record<string, unknown>, {
+                  merge: true,
+                }).catch(() => {}),
+              ]);
+            }
           } else {
             const nowIso = new Date().toISOString();
             const newCloudUser: CloudUserRecord = {
@@ -2329,6 +2485,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               photoURL: fbUser.photoURL || undefined,
               status: 'active',
               banReason: '',
+              lastAccountId: allMatchedForEmail[0]?.id || '',
+              hasCompletedOnboarding: allMatchedForEmail.length > 0,
+              ...(allMatchedForEmail.length > 0 ? { savedAccounts: allMatchedForEmail } : {}),
               authMode: 'google',
               emailVerified: true,
               createdAt: nowIso,
@@ -2362,30 +2521,39 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Cocokkan rekening milik User ini di Cloud (untuk multi-device & refresh tanpa localStorage)
         const matchedAccountId = initialUserData?.lastAccountId;
         const matchedAccount =
-          cloudAccountsLoaded.find((a) => a.id === matchedAccountId) ||
+          cloudAccountsLoaded.find(
+            (a) =>
+              a.id === matchedAccountId &&
+              (a.firebaseUid === fbUser.uid ||
+                (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+                (a.email && normalizeEmailKey(a.email) === cleanEmail))
+          ) ||
           cloudAccountsLoaded.find(
             (a) =>
               a.firebaseUid === fbUser.uid ||
               (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
               (a.email && normalizeEmailKey(a.email) === cleanEmail)
           ) ||
+          cloudAccountsLoaded.find((a) => a.id === matchedAccountId && a.id !== 'acc-admin') ||
           null;
 
         if (matchedAccount) {
           setCurrentAccountIdState(matchedAccount.id);
         }
 
-        setGoogleUser({
+        setGoogleUser((prev) => ({
           email: cleanEmail,
           name: cleanName,
           picture: fbUser.photoURL || undefined,
           firebaseUid: fbUser.uid,
           authMode: 'google',
           emailKey: emailDocId,
-          loggedInAt: new Date().toISOString(),
+          loggedInAt: prev?.loggedInAt || new Date().toISOString(),
           hasCompletedOnboarding: Boolean(matchedAccount),
-          isPinVerified: false,
-        });
+          // Pertahankan isPinVerified jika user sudah verifikasi di sesi tab ini untuk email yang sama
+          isPinVerified:
+            prev && normalizeEmailKey(prev.email) === cleanEmail ? Boolean(prev.isPinVerified) : false,
+        }));
 
         // Listener Real-Time KHUSUS memantau status ban & akun pada users/{uid}
         userDocUnsub = onSnapshot(
@@ -2506,6 +2674,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   // Automatic Real-Time Cloud Sync Coordinator (Debounced Firestore Write - Zero localStorage)
+  // KUNCI ANTI-TIMPA: Jangan pernah auto-flush master_state di latar belakang dari perangkat yang masih berada di halaman login / belum verifikasi PIN!
   useEffect(() => {
     if (
       !hasFirestoreHydratedRef.current ||
@@ -2515,6 +2684,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     ) {
       return;
     }
+
+    const isAtUnverifiedLoginLobby =
+      !adminUnlocked &&
+      (!googleUser ||
+        !googleUser.hasCompletedOnboarding ||
+        ((googleUser.authMode === 'google' || googleUser.authMode === 'email_direct') &&
+          !googleUser.isPinVerified));
+    if (isAtUnverifiedLoginLobby) {
+      return;
+    }
+
     const t = window.setTimeout(() => {
       flushMasterStateToCloud();
     }, 350);
@@ -2625,41 +2805,66 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setCloudSyncStatus('syncing');
 
-    // Segarkan master_state terbaru dari Cloud Server agar sinkron penuh di perangkat baru
+    // Segarkan master_state & users_by_email terbaru dari Cloud Server secara paralel agar sinkron penuh di perangkat baru
     let latestAccounts: BankAccount[] = accountsRef.current;
-    try {
-      const masterSnap = await getDocFromServer(doc(db, 'bank_state_v1', 'master_state')).catch(
-        () => getDoc(doc(db, 'bank_state_v1', 'master_state'))
-      );
-      if (masterSnap && masterSnap.exists()) {
-        const masterData = masterSnap.data();
-        applyMasterCloudData(masterData, { forceInitial: true });
-        if (Array.isArray(masterData.accounts)) {
-          latestAccounts = masterData.accounts as BankAccount[];
-        }
-      }
-    } catch (err) {
-      handleFirestoreError(err, OperationType.GET, 'bank_state_v1/master_state', {
-        suppressThrow: true,
-      });
-    }
-
-    let isNewUser = false;
     let userRecord: CloudUserRecord | null = null;
     try {
-      const emailSnap = await getDocFromServer(emailRef).catch(() => getDoc(emailRef));
-      if (emailSnap && emailSnap.exists()) {
-        const existing = emailSnap.data() as CloudUserRecord;
+      const [masterSnap, emailSnap] = await Promise.all([
+        getDocFromServer(doc(db, 'bank_state_v1', 'master_state')).catch(() =>
+          getDoc(doc(db, 'bank_state_v1', 'master_state'))
+        ),
+        getDocFromServer(emailRef).catch(() => getDoc(emailRef)),
+      ]);
+
+      const existingEmailData =
+        emailSnap && emailSnap.exists() ? (emailSnap.data() as CloudUserRecord) : null;
+      const emailSavedAccounts = Array.isArray(existingEmailData?.savedAccounts)
+        ? existingEmailData!.savedAccounts
+        : [];
+
+      if (masterSnap && masterSnap.exists()) {
+        const masterData = masterSnap.data();
+        applyMasterCloudData(masterData, {
+          forceInitial: true,
+          extraVaultAccounts: [emailSavedAccounts],
+        });
+        latestAccounts = accountsRef.current;
+      } else if (emailSavedAccounts.length > 0) {
+        const merged = unionMergeAccountsList(
+          accountsRef.current,
+          [emailSavedAccounts, latestServerAccountsRef.current],
+          deletedAccountIdsRef.current
+        );
+        latestServerAccountsRef.current = merged;
+        accountsRef.current = merged;
+        setAccounts(merged);
+        latestAccounts = merged;
+      }
+
+      const matchedForThisEmail = latestAccounts.filter(
+        (a) =>
+          (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+          (a.email && normalizeEmailKey(a.email) === cleanEmail)
+      );
+
+      if (existingEmailData) {
         const resolvedName =
-          providedName && (!existing.displayName || existing.displayName === 'Nasabah Bank Nusantara')
+          providedName &&
+          (!existingEmailData.displayName ||
+            existingEmailData.displayName === 'Nasabah Bank Nusantara')
             ? providedName
-            : existing.displayName || providedName || defaultNameFromEmail;
+            : existingEmailData.displayName || providedName || defaultNameFromEmail;
         userRecord = {
-          ...existing,
+          ...existingEmailData,
           email: cleanEmail,
           emailKey: emailDocId,
           displayName: resolvedName,
           emailVerified: true,
+          lastAccountId:
+            existingEmailData.lastAccountId || matchedForThisEmail[0]?.id || '',
+          hasCompletedOnboarding:
+            matchedForThisEmail.length > 0 || Boolean(existingEmailData.hasCompletedOnboarding),
+          ...(matchedForThisEmail.length > 0 ? { savedAccounts: matchedForThisEmail } : {}),
           updatedAt: nowIso,
           updatedAtMs: Date.now(),
         };
@@ -2668,18 +2873,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           sanitizeForFirestore({
             displayName: resolvedName,
             emailVerified: true,
+            lastAccountId: userRecord.lastAccountId,
+            hasCompletedOnboarding: userRecord.hasCompletedOnboarding,
+            ...(matchedForThisEmail.length > 0 ? { savedAccounts: matchedForThisEmail } : {}),
             updatedAt: nowIso,
             updatedAtMs: Date.now(),
           }) as Record<string, unknown>,
           { merge: true }
         );
       } else {
-        isNewUser = true;
-        const matchedExistingCard = latestAccounts.find(
-          (a) =>
-            (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
-            (a.email && normalizeEmailKey(a.email) === cleanEmail)
-        );
+        const matchedExistingCard = matchedForThisEmail[0] || null;
         const newRecord: CloudUserRecord = {
           uid: `email:${emailDocId}`,
           email: cleanEmail,
@@ -2694,6 +2897,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           emailVerified: true,
           lastAccountId: matchedExistingCard?.id || '',
           hasCompletedOnboarding: Boolean(matchedExistingCard),
+          ...(matchedForThisEmail.length > 0 ? { savedAccounts: matchedForThisEmail } : {}),
           createdAt: nowIso,
           updatedAt: nowIso,
           updatedAtMs: Date.now(),
@@ -2716,7 +2920,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const finalRecord = userRecord!;
     const linkedCard =
-      latestAccounts.find((a) => a.id === finalRecord.lastAccountId) ||
+      latestAccounts.find(
+        (a) =>
+          a.id === finalRecord.lastAccountId &&
+          ((a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+            (a.email && normalizeEmailKey(a.email) === cleanEmail))
+      ) ||
       latestAccounts.find(
         (a) =>
           (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
@@ -2788,26 +2997,48 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         getDocFromServer(emailRef).catch(() => getDoc(emailRef)),
       ]);
 
-      if (masterSnap && masterSnap.exists()) {
-        const masterData = masterSnap.data();
-        applyMasterCloudData(masterData, { forceInitial: true });
-        if (Array.isArray(masterData.accounts)) {
-          latestAccounts = masterData.accounts as BankAccount[];
-        }
-      }
-
       const uidData = userSnap && userSnap.exists() ? (userSnap.data() as CloudUserRecord) : null;
       const emailData = emailSnap && emailSnap.exists() ? (emailSnap.data() as CloudUserRecord) : null;
+      const uidSaved = Array.isArray(uidData?.savedAccounts) ? uidData!.savedAccounts : [];
+      const emailSaved = Array.isArray(emailData?.savedAccounts) ? emailData!.savedAccounts : [];
+
+      let masterAccountsCount = 0;
+      if (masterSnap && masterSnap.exists()) {
+        const masterData = masterSnap.data();
+        masterAccountsCount = Array.isArray(masterData.accounts) ? masterData.accounts.length : 0;
+        applyMasterCloudData(masterData, {
+          forceInitial: true,
+          extraVaultAccounts: [emailSaved, uidSaved],
+        });
+        latestAccounts = accountsRef.current;
+      } else if (uidSaved.length > 0 || emailSaved.length > 0) {
+        const merged = unionMergeAccountsList(
+          accountsRef.current,
+          [emailSaved, uidSaved, latestServerAccountsRef.current],
+          deletedAccountIdsRef.current
+        );
+        latestServerAccountsRef.current = merged;
+        accountsRef.current = merged;
+        setAccounts(merged);
+        latestAccounts = merged;
+      }
+
+      // Jika ada akun dari savedAccounts profil email yang belum masuk ke master_state, langsung pulihkan ke master_state
+      if ((uidSaved.length > 0 || emailSaved.length > 0) && latestAccounts.length > masterAccountsCount) {
+        void flushMasterStateToCloud({ accounts: latestAccounts });
+      }
 
       preferredAccId = emailData?.lastAccountId || uidData?.lastAccountId;
+      const allMatchedCards = latestAccounts.filter(
+        (a) =>
+          a.firebaseUid === fbUser.uid ||
+          (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+          (a.email && normalizeEmailKey(a.email) === cleanEmail)
+      );
       const detectedCard =
-        latestAccounts.find((a) => a.id === preferredAccId) ||
-        latestAccounts.find(
-          (a) =>
-            a.firebaseUid === fbUser.uid ||
-            (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
-            (a.email && normalizeEmailKey(a.email) === cleanEmail)
-        ) ||
+        allMatchedCards.find((a) => a.id === preferredAccId) ||
+        allMatchedCards[0] ||
+        latestAccounts.find((a) => a.id === preferredAccId && a.id !== 'acc-admin') ||
         null;
 
       if (uidData || emailData) {
@@ -2823,6 +3054,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           banReason: emailData?.banReason ?? uidData?.banReason ?? '',
           lastAccountId: detectedCard?.id || preferredAccId || '',
           hasCompletedOnboarding: Boolean(detectedCard),
+          ...(allMatchedCards.length > 0 ? { savedAccounts: allMatchedCards } : {}),
           authMode: 'google',
           emailVerified: true,
           updatedAt: nowIso,
@@ -2851,6 +3083,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           banReason: detectedCard?.banReason || '',
           lastAccountId: detectedCard?.id || '',
           hasCompletedOnboarding: Boolean(detectedCard),
+          ...(allMatchedCards.length > 0 ? { savedAccounts: allMatchedCards } : {}),
           authMode: 'google',
           emailVerified: true,
           createdAt: nowIso,
@@ -2876,13 +3109,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setActiveCloudEmail(cleanEmail);
 
     const linkedCard =
-      latestAccounts.find((a) => a.id === preferredAccId) ||
+      latestAccounts.find(
+        (a) =>
+          a.id === preferredAccId &&
+          (a.firebaseUid === fbUser.uid ||
+            (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+            (a.email && normalizeEmailKey(a.email) === cleanEmail))
+      ) ||
       latestAccounts.find(
         (a) =>
           a.firebaseUid === fbUser.uid ||
           (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
           (a.email && normalizeEmailKey(a.email) === cleanEmail)
       ) ||
+      latestAccounts.find((a) => a.id === preferredAccId && a.id !== 'acc-admin') ||
       null;
 
     if (linkedCard) {
@@ -3200,6 +3440,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ];
 
       // 4. Perbarui state aplikasi & tulis langsung ke Firebase Cloud Firestore (tunggu hingga selesai 100%)
+      latestServerAccountsRef.current = nextAccounts;
       accountsRef.current = nextAccounts;
       setAccounts(nextAccounts);
 
@@ -3216,7 +3457,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             authMode: 'google',
             displayName: convertedGoogleAccount.fullName,
             photoURL: fbUser.photoURL || undefined,
-          }
+          },
+          nextAccounts
         ),
       ]);
 
@@ -3261,16 +3503,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   // Deteksi SELURUH kartu/akun yang terhubung ke email Google yang sedang login (Reguler, Akun OA yang disambungkan, maupun Guest yang disambungkan)
+  // Menggabungkan pembacaan dari state accounts utama + Dual-Vault cloudUserStatus.savedAccounts
   const linkedUserAccounts: BankAccount[] = (() => {
     if (!googleUser) return [];
     const cleanEmail = normalizeEmailKey(googleUser.email || activeCloudEmail || '');
     const uid = googleUser.firebaseUid || firebaseUser?.uid;
 
+    const combinedPool: BankAccount[] = [
+      ...accounts,
+      ...(Array.isArray(cloudUserStatus?.savedAccounts) ? cloudUserStatus!.savedAccounts : []),
+    ].filter(
+      (a) =>
+        a &&
+        a.id &&
+        !deletedAccountIds.includes(a.id) &&
+        !PURGED_BOT_ACCOUNT_IDS.includes(a.id) &&
+        !PURGED_BOT_ACCOUNT_NUMBERS.includes(a.accountNumber)
+    );
+
     const matched: BankAccount[] = [];
     const seenIds = new Set<string>();
 
     if (cleanEmail) {
-      for (const a of accounts) {
+      for (const a of combinedPool) {
         const gEmail = a.googleEmail ? normalizeEmailKey(a.googleEmail) : '';
         const aEmail = a.email ? normalizeEmailKey(a.email) : '';
         if ((gEmail === cleanEmail || aEmail === cleanEmail) && !seenIds.has(a.id)) {
@@ -3281,7 +3536,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (uid) {
-      for (const a of accounts) {
+      for (const a of combinedPool) {
         if (a.firebaseUid === uid && !seenIds.has(a.id)) {
           // Hanya masukkan jika email akun cocok atau kosong
           const gEmail = a.googleEmail ? normalizeEmailKey(a.googleEmail) : '';
@@ -3295,11 +3550,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (matched.length === 0 && cloudUserStatus?.lastAccountId) {
-      const byPreferred = accounts.find((a) => a.id === cloudUserStatus.lastAccountId);
-      if (byPreferred && !seenIds.has(byPreferred.id)) {
+      const byPreferred = combinedPool.find((a) => a.id === cloudUserStatus.lastAccountId);
+      if (byPreferred && !seenIds.has(byPreferred.id) && byPreferred.id !== 'acc-admin') {
         const gEmail = byPreferred.googleEmail ? normalizeEmailKey(byPreferred.googleEmail) : '';
         const aEmail = byPreferred.email ? normalizeEmailKey(byPreferred.email) : '';
-        if (!cleanEmail || gEmail === cleanEmail || aEmail === cleanEmail) {
+        if (!cleanEmail || !gEmail || gEmail === cleanEmail || aEmail === cleanEmail) {
           matched.push(byPreferred);
         }
       }
@@ -6335,8 +6590,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
    * Pendaftaran Kartu Baru -> Bikin Kartu Biasa (Reguler) secara default!
    */
   const registerCard = (data: RegisterCardInput) => {
-    const existingAccountsNumbers = accounts.map((a) => a.accountNumber);
-    const existingUserIds = accounts.map((a) => ensureAccountUserId16(a));
+    const existingAccountsNumbers = accountsRef.current.map((a) => a.accountNumber);
+    const existingUserIds = accountsRef.current.map((a) => ensureAccountUserId16(a));
     const tempAccountNum = generateRandomAccountNumber(existingAccountsNumbers);
     const newUserId16 = generateRandomUserId16(existingUserIds);
     const newCardNumber = generateRandomCardNumber();
@@ -6346,7 +6601,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       googleUser?.authMode === 'google' ? 'regular' : data.cardTier || 'regular';
     const expiry = generateExpiryDate(CARD_TIER_CONFIGS[finalTier].validityYears);
 
-    const linkedEmail = googleUser?.email || activeCloudEmail || data.email.trim();
+    const linkedEmail = normalizeEmailKey(
+      googleUser?.email || activeCloudEmail || firebaseUser?.email || data.email.trim()
+    );
+    const resolvedUid = firebaseUser?.uid || googleUser?.firebaseUid;
     const newAccount: BankAccount = {
       id: `acc-${Date.now()}`,
       userId16: newUserId16,
@@ -6354,7 +6612,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       fullName: data.fullName.trim(),
       nik: data.nik.trim(),
       phone: data.phone.trim(),
-      email: data.email.trim(),
+      email: linkedEmail,
       address: data.address.trim(),
       pin: data.pin.trim(),
       balance: 0,
@@ -6371,28 +6629,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       createdAt: new Date().toISOString(),
       rewardPoints: 100,
       allowInternational: false,
-      firebaseUid: firebaseUser?.uid,
+      firebaseUid: resolvedUid,
       googleEmail: linkedEmail,
+      isGuestAccount: false,
       hasCompletedTutorial: false,
       tutorialApprovedByAdmin: false,
       failedPinAttempts: 0,
     };
 
-    const nextAccounts = [newAccount, ...accounts];
+    const nextAccounts = unionMergeAccountsList(
+      [newAccount, ...accountsRef.current],
+      [latestServerAccountsRef.current, accounts],
+      deletedAccountIdsRef.current
+    );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
     setCurrentAccountIdState(newAccount.id);
     if (googleUser) {
       setGoogleUser({ ...googleUser, hasCompletedOnboarding: true, isPinVerified: true });
     }
     void syncCloudUserProfile(
-      { uid: firebaseUser?.uid, email: linkedEmail },
+      { uid: resolvedUid, email: linkedEmail },
       {
         lastAccountId: newAccount.id,
         hasCompletedOnboarding: true,
         failedPinAttempts: 0,
-      }
+      },
+      nextAccounts
     );
-    flushMasterStateToCloud({ accounts: nextAccounts });
+    void flushMasterStateToCloud({ accounts: nextAccounts });
 
     addNotification(
       'Permohonan Kartu Baru Menunggu Persetujuan Admin ⏳',
@@ -6445,7 +6711,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return acc;
     });
 
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
+    void syncCloudUserProfile(
+      {
+        uid: target.firebaseUid,
+        email: target.googleEmail || target.email,
+        fallbackEmail: target.email,
+      },
+      {
+        lastAccountId: target.id,
+        hasCompletedOnboarding: true,
+      },
+      nextAccounts
+    );
 
     const depositTx: Transaction = {
       id: `tx-init-${Date.now()}`,
