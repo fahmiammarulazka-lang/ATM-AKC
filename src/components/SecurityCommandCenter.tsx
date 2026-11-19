@@ -138,90 +138,97 @@ export const LiveSyncTelemetryHud: React.FC<LiveSyncTelemetryHudProps> = ({
   onOpenCommandCenter,
 }) => {
   const { syncTelemetry, forceSyncCloudNow } = useBank();
-  const [retrying, setRetrying] = useState(false);
+  const [isQuickSyncing, setIsQuickSyncing] = useState(false);
 
-  const handleRetry = async (e: React.MouseEvent) => {
+  const handleQuickSync = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (retrying) return;
-    setRetrying(true);
+    if (isQuickSyncing) return;
+    setIsQuickSyncing(true);
     try {
       await forceSyncCloudNow();
     } finally {
-      setRetrying(false);
+      window.setTimeout(() => setIsQuickSyncing(false), 300);
     }
   };
 
-  if (syncTelemetry.status === 'error') {
-    return (
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          type="button"
-          onClick={() => onOpenCommandCenter('telemetry')}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-rose-950/90 hover:bg-rose-900 border border-rose-500/60 text-rose-200 text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-          title={syncTelemetry.lastError || 'Gangguan sinkronisasi cloud — klik untuk detail'}
-        >
-          <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-          <span className="hidden sm:inline">Gangguan Sync</span>
-        </button>
-        <button
-          type="button"
-          onClick={handleRetry}
-          disabled={retrying}
-          className="px-2 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition-colors disabled:opacity-60"
-          title="Coba sinkronisasi ulang sekarang"
-        >
-          {retrying ? '...' : 'Retry'}
-        </button>
-      </div>
-    );
-  }
+  const isBusy = isQuickSyncing || syncTelemetry.status === 'syncing';
 
-  if (syncTelemetry.status === 'offline') {
-    return (
-      <button
-        type="button"
-        onClick={() => onOpenCommandCenter('telemetry')}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-950/80 hover:bg-amber-900/80 border border-amber-500/50 text-amber-200 text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        title="Mode Offline — pekerjaan aman di IndexedDB perangkat dan otomatis terunggah saat online"
-      >
-        <CloudOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-        <span className="hidden sm:inline">Mode Offline</span>
-      </button>
-    );
-  }
-
-  if (syncTelemetry.status === 'syncing') {
-    return (
-      <button
-        type="button"
-        onClick={() => onOpenCommandCenter('telemetry')}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-950/80 hover:bg-blue-900/80 border border-blue-500/50 text-blue-200 text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-        title={`Menyinkronkan ${Math.max(1, syncTelemetry.pendingWritesCount)} antrean perubahan ke Cloud...`}
-      >
-        <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse shrink-0" />
-        <RefreshCw className="w-3.5 h-3.5 text-blue-300 animate-spin shrink-0" />
-        <span className="hidden sm:inline font-mono tabular-nums">
-          Sinkron ({Math.max(1, syncTelemetry.pendingWritesCount)})
-        </span>
-      </button>
-    );
-  }
+  const statusMeta = (() => {
+    if (syncTelemetry.status === 'error') {
+      return {
+        wrapperBorder: 'border-rose-500/60 bg-rose-950/90',
+        statusText: 'text-rose-200 hover:bg-rose-900/80',
+        divider: 'border-rose-500/40',
+        syncBtn: 'text-rose-200 hover:bg-rose-800/80',
+        icon: <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />,
+        label: 'Gangguan Sync',
+        tooltip: syncTelemetry.lastError || 'Gangguan sinkronisasi cloud — klik untuk detail',
+      };
+    }
+    if (syncTelemetry.status === 'offline') {
+      return {
+        wrapperBorder: 'border-amber-500/50 bg-amber-950/80',
+        statusText: 'text-amber-200 hover:bg-amber-900/70',
+        divider: 'border-amber-500/35',
+        syncBtn: 'text-amber-200 hover:bg-amber-900/70',
+        icon: <CloudOff className="w-3.5 h-3.5 text-amber-400 shrink-0" />,
+        label: 'Mode Offline',
+        tooltip: 'Mode Offline — data aman di IndexedDB dan otomatis tersinkron saat online',
+      };
+    }
+    if (isBusy) {
+      return {
+        wrapperBorder: 'border-blue-500/50 bg-blue-950/80',
+        statusText: 'text-blue-200 hover:bg-blue-900/70',
+        divider: 'border-blue-500/35',
+        syncBtn: 'text-blue-200 hover:bg-blue-900/70',
+        icon: <RefreshCw className="w-3.5 h-3.5 text-blue-300 animate-spin shrink-0" />,
+        label: `Sinkron (${Math.max(1, syncTelemetry.pendingWritesCount)})`,
+        tooltip: `Menyinkronkan ${Math.max(1, syncTelemetry.pendingWritesCount)} perubahan ke Cloud...`,
+      };
+    }
+    return {
+      wrapperBorder: 'border-emerald-500/40 bg-slate-900',
+      statusText: 'text-emerald-300 hover:bg-slate-800',
+      divider: 'border-slate-700/90',
+      syncBtn: 'text-emerald-300 hover:bg-slate-800 hover:text-emerald-200',
+      icon: <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />,
+      label: 'Tersinkronisasi',
+      tooltip: `Tersinkronisasi (Cloud Verified) · Terakhir: ${formatDateTimeIndo(syncTelemetry.lastSyncedAt)} · Klik buka Pusat Keamanan & Sinkronisasi`,
+    };
+  })();
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpenCommandCenter('telemetry')}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors"
-      title={`Tersinkronisasi (Cloud Verified) · Terakhir: ${formatDateTimeIndo(syncTelemetry.lastSyncedAt)} · Klik buka Pusat Keamanan & Sinkronisasi`}
+    <div
+      className={`inline-flex items-center rounded-lg border overflow-hidden shrink-0 transition-colors ${statusMeta.wrapperBorder}`}
     >
-      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-      <span className="hidden sm:inline">Tersinkronisasi</span>
-      {syncTelemetry.lastSyncedAt && (
-        <span className="hidden xl:inline text-[10px] font-mono tabular-nums text-emerald-400/80">
-          · {formatTimeShort(syncTelemetry.lastSyncedAt)}
-        </span>
-      )}
-    </button>
+      {/* Badge Status Berlebar Terkunci (Anti-Jitter) — Klik buka Command Center */}
+      <button
+        type="button"
+        onClick={() => onOpenCommandCenter('telemetry')}
+        className={`h-8 px-2 sm:w-[144px] flex items-center justify-center gap-1.5 text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${statusMeta.statusText}`}
+        title={statusMeta.tooltip}
+      >
+        {statusMeta.icon}
+        <span className="hidden sm:inline truncate font-mono tabular-nums">{statusMeta.label}</span>
+      </button>
+
+      {/* Tombol 1-Klik Sync Cepat Instan langsung di samping HUD */}
+      <button
+        type="button"
+        onClick={handleQuickSync}
+        disabled={isBusy}
+        className={`h-8 w-8 border-l flex items-center justify-center shrink-0 cursor-pointer transition-colors disabled:opacity-60 ${statusMeta.divider} ${statusMeta.syncBtn}`}
+        title={
+          syncTelemetry.status === 'error'
+            ? 'Coba sinkronisasi ulang ke Cloud sekarang (1-Klik)'
+            : 'Sync Cepat ke Cloud sekarang (1-Klik)'
+        }
+        aria-label="Sinkronisasi Cepat ke Cloud"
+      >
+        <RefreshCw className={`w-3.5 h-3.5 ${isBusy ? 'animate-spin' : ''}`} />
+      </button>
+    </div>
   );
 };
 

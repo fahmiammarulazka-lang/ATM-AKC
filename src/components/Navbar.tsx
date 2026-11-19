@@ -2,7 +2,7 @@
  * Bank Nusantara Navigation Bar with Active Account Switcher (Uses Old Card PIN + Lupa PIN support),
  * Centang Biru Verification Badge, and Notification Center
  */
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   CreditCard,
   Building,
@@ -11,6 +11,7 @@ import {
   Bell,
   PlusCircle,
   ChevronDown,
+  ChevronLeft,
   MessageSquare,
   KeyRound,
   LogOut,
@@ -220,9 +221,56 @@ export const Navbar: React.FC<NavbarProps> = ({
     );
   };
 
+  const navScrollRef = useRef<HTMLElement | null>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateNavScrollArrows = useCallback(() => {
+    const el = navScrollRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(maxScroll - el.scrollLeft > 4);
+  }, []);
+
+  useEffect(() => {
+    const el = navScrollRef.current;
+    if (!el) return;
+    updateNavScrollArrows();
+    const onScroll = () => updateNavScrollArrows();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', updateNavScrollArrows);
+
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(() => updateNavScrollArrows());
+      observer.observe(el);
+    }
+
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', updateNavScrollArrows);
+      if (observer) observer.disconnect();
+    };
+  }, [updateNavScrollArrows, budgetAlertCount, currentAccount?.jobLevel, currentAccount?.spinCoins, currentUpdateVersion]);
+
+  const scrollNavBy = (delta: number) => {
+    const el = navScrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: delta, behavior: 'smooth' });
+  };
+
+  const handleSelectNavView = (view: AppNavView, e?: React.MouseEvent<HTMLButtonElement>) => {
+    setActiveView(view);
+    if (e?.currentTarget) {
+      e.currentTarget.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+    }
+  };
+
   return (
-    <header className="sticky top-0 z-40 w-full bg-slate-950/90 backdrop-blur-md border-b border-slate-800 shadow-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+    <header className="sticky top-0 z-40 w-full bg-slate-950/95 backdrop-blur-md shadow-md">
+      {/* BARIS 1: Identitas Bank Nusantara + Live Sync HUD (Lebar Terkunci) + Hubungkan Google + Saldo & Koin + Notifikasi + Profil */}
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-4">
         {/* Brand Logo (Stealth 4-stage trigger attached cleanly with zero visual cues) */}
         <div
           onClick={() => setActiveView('dashboard')}
@@ -247,177 +295,22 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Center Nav Views */}
-        <nav className="hidden md:flex flex-1 min-w-0 items-center gap-1 overflow-x-auto text-xs font-semibold py-1">
-          <button
-            onClick={() => setActiveView('dashboard')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'dashboard'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-300 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <Building className="w-4 h-4 text-amber-400" />
-            <span>Mobile Banking</span>
-          </button>
-
-          {/* Tab Transfer tepat di sebelah Mobile Banking */}
-          <button
-            onClick={() => setActiveView('transfer')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'transfer'
-                ? 'bg-emerald-600 text-white font-bold shadow-md'
-                : 'text-emerald-300 hover:text-white hover:bg-slate-900 border border-emerald-500/35'
-            }`}
-          >
-            <Send className="w-4 h-4 text-emerald-300" />
-            <span>Transfer</span>
-          </button>
-
-          {/* Tab Emas 24K tepat di sebelah Transfer & Mobile Banking */}
-          <button
-            onClick={() => setActiveView('emas')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'emas'
-                ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-md'
-                : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/40'
-            }`}
-          >
-            <Crown className="w-4 h-4" />
-            <span>Emas 24K</span>
-          </button>
-
-          {/* Tab Anggaran & Pelacak Pengeluaran Bulanan */}
-          <button
-            onClick={() => setActiveView('anggaran')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'anggaran'
-                ? 'bg-indigo-600 text-white font-bold shadow-md'
-                : 'text-indigo-300 hover:text-white hover:bg-slate-900 border border-indigo-500/35'
-            }`}
-          >
-            <PieChart className="w-4 h-4 text-indigo-300" />
-            <span>Anggaran</span>
-            {budgetAlertCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 font-mono text-[10px] font-black">
-                {budgetAlertCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveView('jobs')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'jobs'
-                ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-md'
-                : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/40'
-            }`}
-          >
-            <Briefcase className="w-4 h-4" />
-            <span>Lowongan Kerja</span>
-            <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold">
-              Lv.{currentAccount?.jobLevel || 1}
-            </span>
-          </button>
-
-          {/* Tombol Spin the Wheel tepat di sebelah tombol Lowongan Pekerjaan */}
-          <button
-            onClick={() => setActiveView('spin_wheel')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'spin_wheel'
-                ? 'bg-gradient-to-r from-fuchsia-500 via-amber-400 to-yellow-500 text-slate-950 font-black shadow-md'
-                : 'text-fuchsia-300 hover:text-white hover:bg-slate-900 border border-fuchsia-500/40'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 text-amber-400" />
-            <span>Spin the Wheel</span>
-            <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 font-mono text-[10px] font-bold">
-              {(currentAccount?.spinCoins ?? 0).toLocaleString('id-ID')}
-            </span>
-          </button>
-
-          {/* Tombol Fitur Baru Pengganti Kerajaan: Mining Kripto, Lelang Supercar & Cyber Vault tepat di sebelah Spin the Wheel */}
-          <button
-            onClick={() => setActiveView('empire')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'empire'
-                ? 'bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 text-slate-950 font-black shadow-md'
-                : 'text-cyan-300 hover:text-white hover:bg-slate-900 border border-cyan-400/40'
-            }`}
-          >
-            <Cpu className="w-4 h-4 text-cyan-400" />
-            <span>Mining &amp; Lelang VIP</span>
-          </button>
-
-          <button
-            onClick={() => setActiveView('chat')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'chat'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-300 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <MessageSquare className="w-4 h-4 text-cyan-400" />
-            <span>PayChat</span>
-          </button>
-
-          <button
-            onClick={() => setActiveView('atm')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'atm'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-300 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <Monitor className="w-4 h-4 text-emerald-400" />
-            <span>Mesin ATM</span>
-          </button>
-
-          <button
-            onClick={() => setActiveView('guide')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'guide'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-300 hover:text-white hover:bg-slate-900'
-            }`}
-          >
-            <BookOpen className="w-4 h-4 text-purple-400" />
-            <span>Panduan</span>
-          </button>
-
-          {/* Riwayat Update tepat di sebelah Panduan */}
-          <button
-            onClick={() => setActiveView('updates')}
-            className={`px-2.5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-              activeView === 'updates'
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-emerald-500/30'
-            }`}
-          >
-            <History className="w-4 h-4 text-emerald-400" />
-            <span>Update</span>
-            <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold">
-              {currentUpdateVersion}
-            </span>
-          </button>
-        </nav>
-
-        {/* Right Action Bar */}
+        {/* Right Action Bar (Lega di Baris 1 karena 11 Menu Navigasi sudah pindah ke Baris 2) */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Live Sync Telemetry HUD (4 Status Real-Time: Tersinkronisasi / Menyinkronkan / Offline / Gangguan + Retry) */}
+          {/* Live Sync Telemetry HUD (Lebar Terkunci + Tombol Sync Cepat 1-Klik) */}
           <LiveSyncTelemetryHud
             onOpenCommandCenter={(sec) => {
               if (onOpenSecurityCenter) onOpenSecurityCenter(sec || 'telemetry');
             }}
           />
 
-          {/* Tombol Cepat "Sign in with Google" untuk Akun OA & Akun Guest yang Belum Tersambung Email Google */}
+          {/* Tombol Cepat "Hubungkan Google" untuk Akun OA & Akun Guest yang Belum Tersambung Email Google */}
           {isCurrentAccountUnlinkedToGoogle && (
             <button
               type="button"
               onClick={handleLinkCurrentAccountToGoogle}
               disabled={isLinkingGoogle}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-900 border border-cyan-400/60 text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition disabled:opacity-60"
+              className="hidden sm:flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white hover:bg-slate-100 text-slate-900 border border-cyan-400/60 text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition disabled:opacity-60"
               title="Hubungkan Akun ini ke email Google Anda agar tersinkronisasi permanen di Cloud"
             >
               <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
@@ -442,9 +335,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Money & Coin Icon Indicator Bar */}
+          {/* Money & Coin Icon Indicator Bar — Rapi sejajar di Baris 1 */}
           {currentAccount && (
-            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700/80 whitespace-nowrap shrink-0 font-mono text-[11px] tabular-nums">
+            <div className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-slate-900 border border-slate-700/80 whitespace-nowrap shrink-0 font-mono text-[11px] tabular-nums">
               <span
                 className="flex items-center gap-1 text-emerald-300 font-bold pr-1.5 border-r border-slate-700"
                 title="Saldo Uang Rekening"
@@ -1036,70 +929,213 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Mobile Sub-Navigation Bar */}
-      <div className="md:hidden flex items-center gap-4 overflow-x-auto bg-slate-900 border-t border-slate-800 px-3 py-2 text-[11px] font-medium">
-        <button
-          onClick={() => setActiveView('dashboard')}
-          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'dashboard' ? 'text-amber-400 font-bold' : 'text-slate-400'}`}
-        >
-          <Building className="w-4 h-4" />
-          <span>M-Banking</span>
-        </button>
-        <button
-          onClick={() => setActiveView('jobs')}
-          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${
-            activeView === 'jobs' ? 'text-amber-400 font-bold' : 'text-amber-300/80'
-          }`}
-        >
-          <Briefcase className="w-4 h-4" />
-          <span>Lowongan</span>
-        </button>
-        <button
-          onClick={() => setActiveView('spin_wheel')}
-          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${
-            activeView === 'spin_wheel' ? 'text-fuchsia-400 font-bold' : 'text-fuchsia-300/80'
-          }`}
-        >
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>Spin Wheel</span>
-        </button>
-        <button
-          onClick={() => setActiveView('empire')}
-          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${
-            activeView === 'empire' ? 'text-cyan-400 font-bold' : 'text-cyan-300/80'
-          }`}
-        >
-          <Cpu className="w-4 h-4 text-cyan-400" />
-          <span>Mining VIP</span>
-        </button>
-        <button
-          onClick={() => setActiveView('chat')}
-          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'chat' ? 'text-cyan-400 font-bold' : 'text-slate-400'}`}
-        >
-          <MessageSquare className="w-4 h-4" />
-          <span>PayChat</span>
-        </button>
-        <button
-          onClick={() => setActiveView('atm')}
-          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'atm' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
-        >
-          <Monitor className="w-4 h-4" />
-          <span>Mesin ATM</span>
-        </button>
-        <button
-          onClick={() => setActiveView('guide')}
-          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'guide' ? 'text-purple-400 font-bold' : 'text-slate-400'}`}
-        >
-          <BookOpen className="w-4 h-4" />
-          <span>Panduan</span>
-        </button>
-        <button
-          onClick={() => setActiveView('updates')}
-          className={`flex flex-col items-center gap-0.5 shrink-0 whitespace-nowrap cursor-pointer ${activeView === 'updates' ? 'text-emerald-400 font-bold' : 'text-slate-400'}`}
-        >
-          <History className="w-4 h-4 text-emerald-400" />
-          <span>Update</span>
-        </button>
+      {/* BARIS 2: Navigasi 11 Menu Lengkap (Seragam di Desktop & HP) dengan Panah Gulir Otomatis */}
+      <div className="bg-[#060b16]/95 border-t border-slate-800/80 border-b border-slate-800">
+        <div className="max-w-7xl mx-auto px-2 sm:px-6 relative flex items-center">
+          {/* Panah Gulir Kiri Otomatis */}
+          {canScrollLeft && (
+            <div className="absolute left-1 sm:left-4 top-0 bottom-0 z-10 flex items-center pr-4 bg-gradient-to-r from-[#060b16] via-[#060b16]/90 to-transparent pointer-events-none">
+              <button
+                type="button"
+                onClick={() => scrollNavBy(-260)}
+                className="pointer-events-auto w-7 h-7 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white flex items-center justify-center shadow-md cursor-pointer transition-colors"
+                aria-label="Geser menu ke kiri"
+                title="Geser menu ke kiri"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          <nav
+            ref={navScrollRef}
+            aria-label="Navigasi Utama Bank Nusantara"
+            className="flex flex-1 min-w-0 items-center gap-1.5 overflow-x-auto py-2 text-xs font-semibold [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {/* 1. Mobile Banking */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('dashboard', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'dashboard'
+                  ? 'bg-blue-600 text-white font-bold shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Building className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>Mobile Banking</span>
+            </button>
+
+            {/* 2. Transfer */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('transfer', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'transfer'
+                  ? 'bg-emerald-600 text-white font-bold shadow-sm'
+                  : 'text-emerald-300 hover:text-white hover:bg-slate-900 border border-emerald-500/30'
+              }`}
+            >
+              <Send className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+              <span>Transfer</span>
+            </button>
+
+            {/* 3. Emas 24K */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('emas', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'emas'
+                  ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-sm'
+                  : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/35'
+              }`}
+            >
+              <Crown className="w-3.5 h-3.5 shrink-0" />
+              <span>Emas 24K</span>
+            </button>
+
+            {/* 4. Anggaran */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('anggaran', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'anggaran'
+                  ? 'bg-indigo-600 text-white font-bold shadow-sm'
+                  : 'text-indigo-300 hover:text-white hover:bg-slate-900 border border-indigo-500/30'
+              }`}
+            >
+              <PieChart className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+              <span>Anggaran</span>
+              {budgetAlertCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 font-mono tabular-nums text-[10px] font-black">
+                  {budgetAlertCount}
+                </span>
+              )}
+            </button>
+
+            {/* 5. Lowongan Kerja */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('jobs', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'jobs'
+                  ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-sm'
+                  : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/35'
+              }`}
+            >
+              <Briefcase className="w-3.5 h-3.5 shrink-0" />
+              <span>Lowongan Kerja</span>
+              <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono tabular-nums text-[10px] font-bold">
+                Lv.{currentAccount?.jobLevel || 1}
+              </span>
+            </button>
+
+            {/* 6. Spin the Wheel */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('spin_wheel', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'spin_wheel'
+                  ? 'bg-gradient-to-r from-fuchsia-500 via-amber-400 to-yellow-500 text-slate-950 font-black shadow-sm'
+                  : 'text-fuchsia-300 hover:text-white hover:bg-slate-900 border border-fuchsia-500/35'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>Spin the Wheel</span>
+              <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 font-mono tabular-nums text-[10px] font-bold">
+                {(currentAccount?.spinCoins ?? 0).toLocaleString('id-ID')}
+              </span>
+            </button>
+
+            {/* 7. Mining & Lelang VIP */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('empire', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'empire'
+                  ? 'bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 text-slate-950 font-black shadow-sm'
+                  : 'text-cyan-300 hover:text-white hover:bg-slate-900 border border-cyan-400/35'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>Mining &amp; Lelang VIP</span>
+            </button>
+
+            {/* 8. PayChat */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('chat', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'chat'
+                  ? 'bg-blue-600 text-white font-bold shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span>PayChat</span>
+            </button>
+
+            {/* 9. Mesin ATM */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('atm', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'atm'
+                  ? 'bg-blue-600 text-white font-bold shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Monitor className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Mesin ATM</span>
+            </button>
+
+            {/* 10. Panduan */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('guide', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'guide'
+                  ? 'bg-blue-600 text-white font-bold shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <span>Panduan</span>
+            </button>
+
+            {/* 11. Update */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('updates', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'updates'
+                  ? 'bg-emerald-600 text-white font-bold shadow-sm'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-emerald-500/30'
+              }`}
+            >
+              <History className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span>Update</span>
+              <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono tabular-nums text-[10px] font-bold">
+                {currentUpdateVersion}
+              </span>
+            </button>
+          </nav>
+
+          {/* Panah Gulir Kanan Otomatis */}
+          {canScrollRight && (
+            <div className="absolute right-1 sm:right-4 top-0 bottom-0 z-10 flex items-center pl-4 bg-gradient-to-l from-[#060b16] via-[#060b16]/90 to-transparent pointer-events-none">
+              <button
+                type="button"
+                onClick={() => scrollNavBy(260)}
+                className="pointer-events-auto w-7 h-7 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white flex items-center justify-center shadow-md cursor-pointer transition-colors"
+                aria-label="Geser menu ke kanan"
+                title="Geser menu ke kanan"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {googleLinkFeedback && (
