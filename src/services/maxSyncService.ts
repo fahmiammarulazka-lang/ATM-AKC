@@ -227,6 +227,60 @@ export async function readFastBootSnapshot(): Promise<FastBootCacheSnapshot | nu
 }
 
 // ============================================================================
+// ACTIVE BOOT SESSION ENVELOPE (INDEXEDDB — TAHAN REFRESH GOOGLE, OA & GUEST)
+// ============================================================================
+export interface FastBootSessionSnapshot {
+  authMode: 'google' | 'oa_account' | 'guest';
+  firebaseUid?: string;
+  email: string;
+  emailKey?: string;
+  name: string;
+  picture?: string;
+  activeAccountId: string;
+  isPinVerified: boolean;
+  hasCompletedOnboarding: boolean;
+  accountBackups: any[];
+  savedAtMs: number;
+}
+
+const ACTIVE_BOOT_SESSION_KEY = 'active_boot_session_v1';
+let memoryActiveBootSession: FastBootSessionSnapshot | null = null;
+
+export async function saveActiveBootSession(session: FastBootSessionSnapshot): Promise<void> {
+  memoryActiveBootSession = session;
+  try {
+    await idbPut(STORE_STAGING, ACTIVE_BOOT_SESSION_KEY, session);
+  } catch {
+    // abaikan jika IndexedDB dibatasi browser privat
+  }
+}
+
+export async function readActiveBootSession(): Promise<FastBootSessionSnapshot | null> {
+  if (memoryActiveBootSession) {
+    return memoryActiveBootSession;
+  }
+  try {
+    const stored = await idbGet<FastBootSessionSnapshot>(STORE_STAGING, ACTIVE_BOOT_SESSION_KEY);
+    if (stored && stored.activeAccountId && stored.authMode) {
+      memoryActiveBootSession = stored;
+      return stored;
+    }
+  } catch {
+    // fallback ke Cloud
+  }
+  return null;
+}
+
+export async function clearActiveBootSession(): Promise<void> {
+  memoryActiveBootSession = null;
+  try {
+    await idbDelete(STORE_STAGING, ACTIVE_BOOT_SESSION_KEY);
+  } catch {
+    // abaikan error cleanup
+  }
+}
+
+// ============================================================================
 // TELEMETRY STORE & 4-STATE LIVE EMITTER
 // ============================================================================
 type TelemetryListener = (state: SyncTelemetryState) => void;

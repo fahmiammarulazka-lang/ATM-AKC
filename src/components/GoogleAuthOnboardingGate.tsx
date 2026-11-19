@@ -46,6 +46,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   const {
     googleUser,
     isCloudBootReady,
+    cloudAccountVerificationState,
+    retryCloudAccountCheck,
     loginWithGooglePopup,
     loginWithOaAccount,
     logoutGoogle,
@@ -97,6 +99,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   const [guestInitialDeposit, setGuestInitialDeposit] = useState<number>(500_000);
 
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isRetryingCloudCheck, setIsRetryingCloudCheck] = useState(false);
+  const [allowManualCreateOnTimeout, setAllowManualCreateOnTimeout] = useState(false);
   const [authError, setAuthError] = useState<{ code?: string; message: string } | null>(null);
 
   // Stage 2A: Existing Card(s) Detected under Google Email -> Choose Account + Verify 6-Digit PIN
@@ -1260,7 +1264,120 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     );
   }
 
-  // STAGE 2B: PENGGUNA GOOGLE BARU -> BUAT KARTU BARU (OTOMATIS KARTU REGULER) + 3 TAB LOGIN TETAP DI ATAS
+  // STAGE 2A-GUARD: TAHAN FORM BUAT AKUN SAMPAI CLOUD BENAR-BENAR MENGONFIRMASI 0 KARTU!
+  if (
+    linkedUserAccounts.length === 0 &&
+    (cloudAccountVerificationState === 'verifying' ||
+      (cloudAccountVerificationState === 'network_timeout' && !allowManualCreateOnTimeout))
+  ) {
+    const isTimeoutState = cloudAccountVerificationState === 'network_timeout';
+    const handleRetryCloud = async () => {
+      setIsRetryingCloudCheck(true);
+      try {
+        await retryCloudAccountCheck();
+      } finally {
+        setIsRetryingCloudCheck(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-[#040814] text-slate-100 py-8 px-4 flex items-center justify-center relative overflow-hidden">
+        <div className="w-full max-w-lg bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10">
+          {renderPersistentThreeLoginTabs()}
+
+          <div className="flex items-center justify-between gap-3 pb-4 mb-5 border-b border-slate-800">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {googleUser.picture ? (
+                <img
+                  src={googleUser.picture}
+                  alt={googleUser.name}
+                  className="w-10 h-10 rounded-full border border-cyan-400/50 shrink-0"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center text-white font-black text-sm shrink-0">
+                  {googleUser.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-xs font-extrabold text-white truncate">{googleUser.name}</p>
+                <p className="text-[11px] text-cyan-300 truncate">{googleUser.email}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={logoutGoogle}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0"
+            >
+              <LogOut className="w-3.5 h-3.5" /> Ganti Email
+            </button>
+          </div>
+
+          <div className="rounded-2xl bg-[#0c1324] border border-slate-800 p-6 text-center space-y-4">
+            <div
+              className={`w-12 h-12 mx-auto rounded-2xl flex items-center justify-center border ${
+                isTimeoutState
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                  : 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
+              }`}
+            >
+              {isTimeoutState && !isRetryingCloudCheck ? (
+                <AlertTriangle className="w-6 h-6" />
+              ) : (
+                <Loader2 className="w-6 h-6 animate-spin" />
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-base font-black text-white">
+                {isTimeoutState && !isRetryingCloudCheck
+                  ? 'Koneksi Cloud Lambat — Rekening Belum Terkonfirmasi'
+                  : 'Memverifikasi Rekening Lama Anda di Cloud...'}
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                {isTimeoutState && !isRetryingCloudCheck
+                  ? 'Server Firebase (azkaakc) belum merespons penuh. Form pembuatan akun baru ditahan agar rekening lama Anda tidak tertimpa.'
+                  : 'Memeriksa Kartu Reguler dan Akun OA yang terhubung ke email Google Anda di Firebase secara real-time.'}
+              </p>
+            </div>
+
+            <div className="pt-1 space-y-2.5">
+              <button
+                type="button"
+                onClick={handleRetryCloud}
+                disabled={isRetryingCloudCheck}
+                className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                {isRetryingCloudCheck ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Memeriksa Ulang Data Cloud...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Muat Ulang Akun Cloud</span>
+                  </>
+                )}
+              </button>
+
+              {isTimeoutState && !isRetryingCloudCheck && (
+                <button
+                  type="button"
+                  onClick={() => setAllowManualCreateOnTimeout(true)}
+                  className="w-full py-2 rounded-xl bg-slate-800/70 hover:bg-slate-800 text-slate-400 hover:text-slate-200 text-[11px] font-semibold transition cursor-pointer"
+                >
+                  Saya nasabah baru &amp; belum punya kartu, lanjut buat kartu baru
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // STAGE 2B: PENGGUNA GOOGLE BARU (TERKONFIRMASI 0 KARTU OLEH CLOUD) -> BUAT KARTU BARU (OTOMATIS KARTU REGULER)
   const regularCfg = CARD_TIER_CONFIGS.regular;
 
   return (

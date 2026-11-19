@@ -37,6 +37,10 @@ import {
   forceSyncVaultNow,
   saveFastBootSnapshot,
   readFastBootSnapshot,
+  saveActiveBootSession,
+  readActiveBootSession,
+  clearActiveBootSession,
+  type FastBootSessionSnapshot,
   type SyncTelemetryState,
 } from '../services/maxSyncService';
 import {
@@ -274,6 +278,8 @@ interface BankContextType {
   googleUser: GoogleUserSession | null;
   firebaseUser: FirebaseUser | null;
   isCloudBootReady: boolean;
+  cloudAccountVerificationState: 'verifying' | 'confirmed_has_accounts' | 'confirmed_zero_accounts' | 'network_timeout';
+  retryCloudAccountCheck: () => Promise<boolean>;
   cloudSyncStatus: CloudSyncStatus;
   lastCloudSyncAt: string | null;
   cloudUserStatus: CloudUserRecord | null;
@@ -1547,6 +1553,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ).current;
 
   const [isCloudBootReady, setIsCloudBootReady] = useState<boolean>(false);
+  const [cloudAccountVerificationState, setCloudAccountVerificationState] = useState<
+    'verifying' | 'confirmed_has_accounts' | 'confirmed_zero_accounts' | 'network_timeout'
+  >('verifying');
   const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('syncing');
   const [lastCloudSyncAt, setLastCloudSyncAt] = useState<string | null>(null);
   const [syncTelemetry, setSyncTelemetry] = useState<SyncTelemetryState>(() =>
@@ -1560,6 +1569,53 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const activeCloudEmailRef = useRef<string | null>(null);
   activeCloudEmailRef.current = activeCloudEmail;
   const [cloudUserStatus, setCloudUserStatus] = useState<CloudUserRecord | null>(null);
+
+  // Helper Write-Through Instan ke IndexedDB (Zero localStorage) agar refresh mendadak tidak pernah kehilangan sesi / kartu baru
+  const persistActiveSessionToIdb = (params: {
+    authMode: 'google' | 'oa_account' | 'guest';
+    firebaseUid?: string;
+    email?: string;
+    emailKey?: string;
+    name: string;
+    picture?: string;
+    activeAccountId: string;
+    isPinVerified: boolean;
+    hasCompletedOnboarding: boolean;
+    accountsPool?: BankAccount[];
+  }) => {
+    const pool = params.accountsPool && params.accountsPool.length > 0 ? params.accountsPool : accountsRef.current;
+    const cleanEmail = params.email ? normalizeEmailKey(params.email) : '';
+    const relatedBackups = pool.filter(
+      (a) =>
+        a.id === params.activeAccountId ||
+        (params.firebaseUid && a.firebaseUid === params.firebaseUid) ||
+        (cleanEmail &&
+          ((a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+            (a.email && normalizeEmailKey(a.email) === cleanEmail)))
+    );
+    const snapshot: FastBootSessionSnapshot = {
+      authMode: params.authMode,
+      firebaseUid: params.firebaseUid,
+      email: cleanEmail,
+      emailKey: params.emailKey || (cleanEmail ? emailToFirestoreDocId(cleanEmail) : undefined),
+      name: params.name,
+      picture: params.picture,
+      activeAccountId: params.activeAccountId,
+      isPinVerified: params.isPinVerified,
+      hasCompletedOnboarding: params.hasCompletedOnboarding,
+      accountBackups: relatedBackups,
+      savedAtMs: Date.now(),
+    };
+    void saveActiveBootSession(snapshot);
+    if (pool.length > 0) {
+      void saveFastBootSnapshot({
+        accounts: pool,
+        deletedAccountIds: deletedAccountIdsRef.current,
+        currentAccountId: params.activeAccountId,
+        cachedAtMs: Date.now(),
+      });
+    }
+  };
 
   useEffect(() => {
     return subscribeSyncTelemetry((next) => {
@@ -2128,6 +2184,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       mergedDeletedAccountIds
     );
     latestServerAccountsRef.current = cloudSyncedAccounts;
+    // Write-through instan ke Fast-Boot IndexedDB setiap kali state akun berubah agar refresh tidak memakai cache basi
+    if (cloudSyncedAccounts.length > 0) {
+      void saveFastBootSnapshot({
+        accounts: cloudSyncedAccounts,
+        deletedAccountIds: mergedDeletedAccountIds,
+        cachedAtMs: Date.now(),
+      });
+    }
 
     const isNotBotAccountId = (accId?: string) =>
       !accId || !PURGED_BOT_ACCOUNT_IDS.includes(accId);
@@ -2485,7 +2549,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await Promise.all(tasks);
   };
 
-  // Fast-Boot Cloud Auth Check + IndexedDB Instant Hydration + Parallel RTDB Priority Loader (Hard Timeout 2.5s)
+  // Fast-Boot Cloud Auth Check + IndexedDB Active Session Instant Restoration + Anti-False-Create-Account Verification Gate
   useEffect(() => {
     let active = true;
     let userDocUnsub: (() => void) | null = null;
@@ -2505,7 +2569,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       lastError: null,
     });
 
-    // Hard timeout 2.5 detik: menjamin layar loading tidak pernah tertahan lama pada jaringan lambat
+    // Hard timeout 2.5 detik: menjamin layar skeleton cepat terbuka, sementara form Buat Akun tetap ditahan oleh cloudAccountVerificationState
     const hardTimeoutId = window.setTimeout(() => {
       if (!active || bootUnlocked) return;
       hasFirestoreHydratedRef.current = true;
@@ -2516,8 +2580,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unlockBootUI();
     }, 2500);
 
-    // Fase 0 (< 100ms): Baca cache Fast-Boot dari IndexedDB secara paralel dengan auth check
-    const fastCachePromise = readFastBootSnapshot();
+    // Fase 0 (< 50ms): Baca cache Fast-Boot & Active Session Envelope dari IndexedDB secara paralel
+    const fastCachePromise = Promise.all([readFastBootSnapshot(), readActiveBootSession()]);
 
     // Jalankan pengecekan konektivitas & redirect auth secara non-blocking di latar belakang
     void testConnection();
@@ -2564,23 +2628,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
 
-      // 1. Cek Fast-Boot Cache IndexedDB (< 50ms, tanpa jaringan)
-      const cachedBoot = await fastCachePromise;
+      // 1. Cek Fast-Boot Cache + Active Session Envelope di IndexedDB (< 50ms, tanpa jaringan)
+      const [cachedBoot, savedSession] = await fastCachePromise;
       if (!active) return;
 
-      let fastHydratedFromIdb = false;
       let workingAccounts: BankAccount[] = accountsRef.current;
+      const sessionBackups = Array.isArray(savedSession?.accountBackups)
+        ? (savedSession!.accountBackups as BankAccount[])
+        : [];
+      const cachedAccountsList = Array.isArray(cachedBoot?.accounts)
+        ? (cachedBoot!.accounts as BankAccount[])
+        : [];
 
-      if (cachedBoot && cachedBoot.accounts.length > 0 && !hasCloudAccountsArrived) {
-        const cachedDelIds = Array.isArray(cachedBoot.deletedAccountIds)
-          ? cachedBoot.deletedAccountIds
+      if ((cachedAccountsList.length > 0 || sessionBackups.length > 0) && !hasCloudAccountsArrived) {
+        const cachedDelIds = Array.isArray(cachedBoot?.deletedAccountIds)
+          ? cachedBoot!.deletedAccountIds
           : deletedAccountIdsRef.current;
         if (cachedDelIds.length > 0) {
           setDeletedAccountIds(cachedDelIds);
         }
         const mergedCached = unionMergeAccountsList(
-          cachedBoot.accounts as BankAccount[],
-          [latestServerAccountsRef.current, accountsRef.current],
+          sessionBackups.length > 0 ? sessionBackups : cachedAccountsList,
+          [cachedAccountsList, latestServerAccountsRef.current, accountsRef.current],
           cachedDelIds
         );
         if (mergedCached.length > 0) {
@@ -2588,9 +2657,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           latestServerAccountsRef.current = mergedCached;
           accountsRef.current = mergedCached;
           setAccounts(mergedCached);
-          fastHydratedFromIdb = true;
         }
-        if (cachedBoot.banSupportConfig && typeof cachedBoot.banSupportConfig === 'object') {
+        if (cachedBoot?.banSupportConfig && typeof cachedBoot.banSupportConfig === 'object') {
           setBanSupportConfig((prev) => ({
             ...prev,
             ...(cachedBoot.banSupportConfig as BanSupportConfig),
@@ -2623,32 +2691,38 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // MODE A: Sesi Anonymous Vault (signInAnonymously)
       // =========================================================================
       if (fbUser && fbUser.isAnonymous && active) {
-        // Non-blocking: daftarkan sesi perangkat di latar belakang
         void registerActiveDeviceSession(fbUser.uid, 'anonymous');
 
-        const applyGuestMatch = (accs: BankAccount[]) => {
+        const applyGuestMatch = (accs: BankAccount[]): BankAccount | null => {
+          const preferredId =
+            savedSession && (savedSession.authMode === 'guest' || savedSession.authMode === 'oa_account')
+              ? savedSession.activeAccountId
+              : undefined;
           const matchedGuest =
+            (preferredId ? accs.find((a) => a.id === preferredId) : null) ||
             accs.find((a) => a.firebaseUid === fbUser.uid && a.isGuestAccount) ||
             accs.find((a) => a.firebaseUid === fbUser.uid) ||
             null;
           if (matchedGuest && active) {
             setCurrentAccountIdState(matchedGuest.id);
             setActiveCloudEmail('');
+            setCloudAccountVerificationState('confirmed_has_accounts');
             setGoogleUser({
               email: '',
               name: matchedGuest.fullName,
               firebaseUid: fbUser.uid,
-              authMode: 'guest',
+              authMode: savedSession?.authMode === 'oa_account' ? 'oa_account' : 'guest',
               loggedInAt: new Date().toISOString(),
               hasCompletedOnboarding: true,
               isPinVerified: true,
             });
           }
+          return matchedGuest;
         };
 
-        // Jika cache IndexedDB tersedia -> BUKA INSTAN lalu sinkron latar belakang!
-        if (fastHydratedFromIdb) {
-          applyGuestMatch(workingAccounts);
+        // Jika akun Guest / OA ditemukan di IndexedDB -> LANGSUNG MASUK DASHBOARD lalu sinkron latar belakang!
+        const instantGuest = applyGuestMatch(workingAccounts);
+        if (instantGuest) {
           updateSyncTelemetry({
             fromCache: true,
             hasPendingWrites: true,
@@ -2657,12 +2731,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           unlockBootUI();
         }
 
-        // Baca paralel: lightweight RTDB accounts prefetch + Anonymous UID vault (maks 2.2 detik)
         const [earlyAccountsRes, anonVault] = await Promise.all([
-          getEarlyAccountsPrefetch(2200),
+          getEarlyAccountsPrefetch(2500),
           Promise.race([
             readVaultStateWithOfflineFallback<Record<string, any>>(fbUser.uid),
-            new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 2200)),
+            new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 2500)),
           ]),
         ]);
         if (!active) return;
@@ -2670,9 +2743,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         let cloudAccountsLoaded = workingAccounts;
         if (earlyAccountsRes?.accounts) {
           const delIds = toArraySafe<string>(earlyAccountsRes.deletedAccountIds);
-          const mergedDel = delIds.length > 0
-            ? Array.from(new Set([...deletedAccountIdsRef.current, ...delIds]))
-            : deletedAccountIdsRef.current;
+          const mergedDel =
+            delIds.length > 0
+              ? Array.from(new Set([...deletedAccountIdsRef.current, ...delIds]))
+              : deletedAccountIdsRef.current;
           if (delIds.length > 0) setDeletedAccountIds(mergedDel);
           const incomingAccs = toArraySafe<BankAccount>(earlyAccountsRes.accounts);
           if (incomingAccs.length > 0) {
@@ -2705,7 +2779,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
         }
 
-        applyGuestMatch(cloudAccountsLoaded);
+        const finalGuest = applyGuestMatch(cloudAccountsLoaded);
+        if (finalGuest) {
+          persistActiveSessionToIdb({
+            authMode: savedSession?.authMode === 'oa_account' ? 'oa_account' : 'guest',
+            firebaseUid: fbUser.uid,
+            email: '',
+            name: finalGuest.fullName,
+            activeAccountId: finalGuest.id,
+            isPinVerified: true,
+            hasCompletedOnboarding: true,
+            accountsPool: cloudAccountsLoaded,
+          });
+        }
         hasFirestoreHydratedRef.current = true;
         unlockBootUI();
         hydrateFullMasterInBackground();
@@ -2717,10 +2803,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // =========================================================================
       if (fbUser && !fbUser.isAnonymous && active) {
         const cleanEmail = normalizeEmailKey(fbUser.email || '') || 'nasabah@banknusantara.id';
-        const cleanName = fbUser.displayName?.trim() || cleanEmail.split('@')[0] || 'Nasabah Bank Nusantara';
+        const cleanName =
+          fbUser.displayName?.trim() || cleanEmail.split('@')[0] || 'Nasabah Bank Nusantara';
         const emailDocId = emailToFirestoreDocId(cleanEmail);
 
-        // Non-blocking: tulis sesi perangkat & audit log di latar belakang tanpa menahan UI
+        // Non-blocking: tulis sesi perangkat & audit log di latar belakang
         void registerActiveDeviceSession(fbUser.uid, 'google');
         void appendSecurityAuditLog(
           fbUser.uid,
@@ -2731,80 +2818,124 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Pasang listener real-time users/{uid} SEGERA agar sinyal Ban langsung mengunci layar
         attachGoogleRealtimeListener(fbUser.uid, cleanEmail);
 
-        const applyMatchedGoogleSession = (
+        const isSavedSessionForThisGoogle = Boolean(
+          savedSession &&
+            savedSession.authMode === 'google' &&
+            ((savedSession.firebaseUid && savedSession.firebaseUid === fbUser.uid) ||
+              (savedSession.email && normalizeEmailKey(savedSession.email) === cleanEmail))
+        );
+
+        const findBestGoogleAccount = (
           accs: BankAccount[],
           userDoc: CloudUserRecord | null
-        ) => {
-          if (!active) return;
+        ): BankAccount | null => {
+          // Prioritaskan kartu terakhir yang aktif di sesi perangkat ini (untuk multi-kartu Reguler + OA)
+          const sessionLastAccId = isSavedSessionForThisGoogle ? savedSession?.activeAccountId : undefined;
+          const cloudLastAccId = userDoc?.lastAccountId;
+
+          const isOwnedByUser = (a: BankAccount) =>
+            a.firebaseUid === fbUser.uid ||
+            (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+            (a.email && normalizeEmailKey(a.email) === cleanEmail);
+
+          if (sessionLastAccId) {
+            const bySession = accs.find((a) => a.id === sessionLastAccId && a.id !== 'acc-admin');
+            if (bySession && (isOwnedByUser(bySession) || isSavedSessionForThisGoogle)) {
+              return bySession;
+            }
+          }
+          if (cloudLastAccId) {
+            const byCloudPref = accs.find((a) => a.id === cloudLastAccId && isOwnedByUser(a));
+            if (byCloudPref) return byCloudPref;
+          }
+          const byOwner = accs.find((a) => isOwnedByUser(a));
+          if (byOwner) return byOwner;
+
+          if (cloudLastAccId) {
+            const byPrefFallback = accs.find((a) => a.id === cloudLastAccId && a.id !== 'acc-admin');
+            if (byPrefFallback) return byPrefFallback;
+          }
+          return null;
+        };
+
+        const applyMatchedGoogleSession = (
+          accs: BankAccount[],
+          userDoc: CloudUserRecord | null,
+          keepVerifiedFromIdb: boolean
+        ): BankAccount | null => {
+          if (!active) return null;
           if (userDoc) {
             setCloudUserStatus(userDoc);
           }
           setActiveCloudEmail(cleanEmail);
 
-          const matchedAccountId = userDoc?.lastAccountId;
-          const matchedAccount =
-            accs.find(
-              (a) =>
-                a.id === matchedAccountId &&
-                (a.firebaseUid === fbUser.uid ||
-                  (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
-                  (a.email && normalizeEmailKey(a.email) === cleanEmail))
-            ) ||
-            accs.find(
-              (a) =>
-                a.firebaseUid === fbUser.uid ||
-                (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
-                (a.email && normalizeEmailKey(a.email) === cleanEmail)
-            ) ||
-            accs.find((a) => a.id === matchedAccountId && a.id !== 'acc-admin') ||
-            null;
+          const matchedAccount = findBestGoogleAccount(accs, userDoc);
 
           if (matchedAccount) {
             setCurrentAccountIdState(matchedAccount.id);
+            setCloudAccountVerificationState('confirmed_has_accounts');
           }
 
-          setGoogleUser((prev) => ({
-            email: cleanEmail,
-            name: cleanName,
-            picture: fbUser.photoURL || undefined,
-            firebaseUid: fbUser.uid,
-            authMode: 'google',
-            emailKey: emailDocId,
-            loggedInAt: prev?.loggedInAt || new Date().toISOString(),
-            hasCompletedOnboarding: Boolean(matchedAccount || userDoc?.hasCompletedOnboarding),
-            isPinVerified:
-              prev && normalizeEmailKey(prev.email) === cleanEmail ? Boolean(prev.isPinVerified) : false,
-          }));
+          setGoogleUser((prev) => {
+            const alreadyVerified =
+              Boolean(prev && normalizeEmailKey(prev.email) === cleanEmail && prev.isPinVerified) ||
+              (keepVerifiedFromIdb && Boolean(isSavedSessionForThisGoogle && savedSession?.isPinVerified));
+            return {
+              email: cleanEmail,
+              name: matchedAccount?.fullName || cleanName,
+              picture: fbUser.photoURL || prev?.picture || savedSession?.picture,
+              firebaseUid: fbUser.uid,
+              authMode: 'google',
+              emailKey: emailDocId,
+              loggedInAt: prev?.loggedInAt || new Date().toISOString(),
+              hasCompletedOnboarding: Boolean(
+                matchedAccount ||
+                  userDoc?.hasCompletedOnboarding ||
+                  (keepVerifiedFromIdb && isSavedSessionForThisGoogle && savedSession?.hasCompletedOnboarding)
+              ),
+              isPinVerified: matchedAccount ? alreadyVerified : false,
+            };
+          });
+
+          return matchedAccount;
         };
 
-        // Jika cache IndexedDB tersedia -> BUKA INSTAN (< 150ms), lalu rekonsiliasi RTDB paralel di latar belakang
-        if (fastHydratedFromIdb) {
-          applyMatchedGoogleSession(workingAccounts, null);
+        // 2A. JALUR INSTAN (< 100ms): Hanya buka langsung ke Dashboard jika rekening milik user BENAR-BENAR ada di IndexedDB!
+        const instantMatched = applyMatchedGoogleSession(workingAccounts, null, true);
+        if (instantMatched) {
           updateSyncTelemetry({
             fromCache: true,
             hasPendingWrites: true,
             syncedDocCount: workingAccounts.length,
           });
           unlockBootUI();
+        } else {
+          // Belum ditemukan di cache lokal -> TAHAN form Buat Akun dengan status 'verifying' sampai Cloud menjawab!
+          setCloudAccountVerificationState('verifying');
         }
 
-        // Baca PARALEL data prioritas: lightweight RTDB accounts prefetch + users/{uid} + users_by_email/{emailKey}
+        // 2B. Baca PARALEL data prioritas dari Firebase RTDB (azkaakc): accounts + users/{uid} + users_by_email/{emailKey}
         let cloudAccountsLoaded = workingAccounts;
         let initialUserData: CloudUserRecord | null = null;
+        let cloudRespondedCleanly = false;
         try {
           const [earlyAccountsRes, uidData, emailData] = await Promise.all([
-            getEarlyAccountsPrefetch(2200),
+            getEarlyAccountsPrefetch(3800),
             readCloudDoc<CloudUserRecord>('users', fbUser.uid, {
-              timeoutMs: 2200,
+              timeoutMs: 3800,
               skipFirestoreFallback: true,
             }),
             readCloudDoc<CloudUserRecord>('users_by_email', emailDocId, {
-              timeoutMs: 2200,
+              timeoutMs: 3800,
               skipFirestoreFallback: true,
             }),
           ]);
 
           if (!active) return;
+
+          if (earlyAccountsRes !== null || uidData !== null || emailData !== null) {
+            cloudRespondedCleanly = true;
+          }
 
           if (earlyAccountsRes?.accounts) {
             const delIds = toArraySafe<string>(earlyAccountsRes.deletedAccountIds);
@@ -2818,7 +2949,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (incomingAccs.length > 0) {
               cloudAccountsLoaded = unionMergeAccountsList(
                 incomingAccs,
-                [latestServerAccountsRef.current, accountsRef.current],
+                [sessionBackups, latestServerAccountsRef.current, accountsRef.current],
                 mergedDel
               );
               hasCloudAccountsArrived = true;
@@ -2832,12 +2963,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const prevLen = cloudAccountsLoaded.length;
             const mergedVaultAccounts = unionMergeAccountsList(
               cloudAccountsLoaded,
-              [emailSaved, uidSaved, latestServerAccountsRef.current, accountsRef.current],
+              [emailSaved, uidSaved, sessionBackups, latestServerAccountsRef.current, accountsRef.current],
               deletedAccountIdsRef.current
             );
             cloudAccountsLoaded = mergedVaultAccounts;
             if (mergedVaultAccounts.length > prevLen && hasCloudAccountsArrived) {
-              // Non-blocking: sinkronkan akun yang hilang ke master_state di latar belakang
               void flushMasterStateToCloud({ accounts: mergedVaultAccounts });
             }
           }
@@ -2864,7 +2994,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const mergedBanned = uidData?.status === 'banned' || emailData?.status === 'banned';
             const mergedReason = emailData?.banReason || uidData?.banReason || '';
             const mergedLastAccountId =
-              emailData?.lastAccountId || uidData?.lastAccountId || allMatchedForEmail[0]?.id || '';
+              (isSavedSessionForThisGoogle ? savedSession?.activeAccountId : '') ||
+              emailData?.lastAccountId ||
+              uidData?.lastAccountId ||
+              allMatchedForEmail[0]?.id ||
+              '';
             const mergedOnboarded = Boolean(
               allMatchedForEmail.length > 0 ||
                 emailData?.hasCompletedOnboarding ||
@@ -2884,14 +3018,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               authMode: 'google',
             };
             if (allMatchedForEmail.length > 0) {
-              // Non-blocking: perbarui profil cloud di latar belakang tanpa menahan UI
               const cleanUserPayload = sanitizeForFirestore(initialUserData) as Record<string, unknown>;
               void Promise.all([
                 writeCloudDoc('users', fbUser.uid, cleanUserPayload, { merge: true }).catch(() => {}),
                 writeCloudDoc('users_by_email', emailDocId, cleanUserPayload, { merge: true }).catch(() => {}),
               ]);
             }
-          } else {
+          } else if (cloudRespondedCleanly) {
             const nowIso = new Date().toISOString();
             const newCloudUser: CloudUserRecord = {
               uid: fbUser.uid,
@@ -2911,7 +3044,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               updatedAtMs: Date.now(),
             };
             initialUserData = newCloudUser;
-            // Non-blocking: simpan profil awal di latar belakang
             const cleanNewUserPayload = sanitizeForFirestore(newCloudUser) as Record<string, unknown>;
             void Promise.all([
               writeCloudDoc('users', fbUser.uid, cleanNewUserPayload, { merge: true }).catch(() => {}),
@@ -2926,7 +3058,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (!active) return;
 
-        applyMatchedGoogleSession(cloudAccountsLoaded, initialUserData);
+        const finalMatched = applyMatchedGoogleSession(cloudAccountsLoaded, initialUserData, true);
+        if (finalMatched) {
+          setCloudAccountVerificationState('confirmed_has_accounts');
+          persistActiveSessionToIdb({
+            authMode: 'google',
+            firebaseUid: fbUser.uid,
+            email: cleanEmail,
+            emailKey: emailDocId,
+            name: finalMatched.fullName || cleanName,
+            picture: fbUser.photoURL || savedSession?.picture,
+            activeAccountId: finalMatched.id,
+            isPinVerified: Boolean(isSavedSessionForThisGoogle && savedSession?.isPinVerified),
+            hasCompletedOnboarding: true,
+            accountsPool: cloudAccountsLoaded,
+          });
+        } else if (cloudRespondedCleanly && (typeof navigator === 'undefined' || navigator.onLine)) {
+          // Hanya izinkan form Buat Kartu jika Cloud benar-benar merespons dan mengonfirmasi 0 kartu!
+          setCloudAccountVerificationState('confirmed_zero_accounts');
+        } else {
+          // Koneksi lambat/offline -> JANGAN lempar ke form Buat Akun, tampilkan tombol Muat Ulang Akun Cloud!
+          setCloudAccountVerificationState('network_timeout');
+        }
+
         hasFirestoreHydratedRef.current = true;
         unlockBootUI();
         hydrateFullMasterInBackground();
@@ -2934,14 +3088,49 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       // =========================================================================
-      // MODE C: Belum login (Tampilkan Gerbang Masuk secepat mungkin)
+      // MODE C: Tanpa Sesi Firebase Google (Cek Sesi Aktif OA Murni / Guest di IndexedDB)
       // =========================================================================
+      if (
+        active &&
+        savedSession &&
+        (savedSession.authMode === 'oa_account' || savedSession.authMode === 'guest') &&
+        savedSession.activeAccountId
+      ) {
+        const restoredAcc = workingAccounts.find((a) => a.id === savedSession.activeAccountId);
+        if (restoredAcc) {
+          const cleanRestoredEmail = savedSession.email ? normalizeEmailKey(savedSession.email) : '';
+          setCurrentAccountIdState(restoredAcc.id);
+          setActiveCloudEmail(cleanRestoredEmail || '');
+          setCloudAccountVerificationState('confirmed_has_accounts');
+          setGoogleUser({
+            email: cleanRestoredEmail,
+            name: restoredAcc.fullName || savedSession.name,
+            firebaseUid: restoredAcc.firebaseUid || savedSession.firebaseUid,
+            authMode: savedSession.authMode,
+            emailKey: cleanRestoredEmail ? emailToFirestoreDocId(cleanRestoredEmail) : undefined,
+            loggedInAt: new Date().toISOString(),
+            hasCompletedOnboarding: true,
+            isPinVerified: true,
+          });
+          updateSyncTelemetry({
+            fromCache: true,
+            hasPendingWrites: true,
+            syncedDocCount: workingAccounts.length,
+          });
+          hasFirestoreHydratedRef.current = true;
+          unlockBootUI();
+          hydrateFullMasterInBackground();
+          return;
+        }
+      }
+
+      // Belum ada sesi aktif -> Tampilkan Gerbang Masuk secepat mungkin
       if (active && !activeCloudEmailRef.current) {
         setGoogleUser(null);
         setCloudUserStatus(null);
       }
 
-      if (fastHydratedFromIdb) {
+      if (workingAccounts.length > 0 && cachedAccountsList.length > 0) {
         updateSyncTelemetry({
           fromCache: true,
           hasPendingWrites: true,
@@ -3523,6 +3712,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (linkedCard) {
       setCurrentAccountIdState(linkedCard.id);
+      setCloudAccountVerificationState('confirmed_has_accounts');
+    } else {
+      setCloudAccountVerificationState('confirmed_zero_accounts');
+    }
+
+    if (latestAccounts.length > 0) {
+      void saveFastBootSnapshot({
+        accounts: latestAccounts,
+        deletedAccountIds: deletedAccountIdsRef.current,
+        currentAccountId: linkedCard?.id,
+        cachedAtMs: Date.now(),
+      });
     }
 
     setGoogleUser({
@@ -3601,6 +3802,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logoutGoogle = () => {
+    // Bersihkan cache sesi aktif di IndexedDB saat Logout secara sadar (data Cloud tetap 100% aman)
+    void clearActiveBootSession();
+    setCloudAccountVerificationState('verifying');
     setActiveCloudEmail(null);
     setGoogleUser(null);
     setCloudUserStatus(null);
@@ -3673,6 +3877,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextAccounts = [newGuestAcc, ...accounts];
     accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
+    setCloudAccountVerificationState('confirmed_has_accounts');
+    // Simpan instan ke IndexedDB sebelum tulis Cloud selesai agar refresh mendadak aman
+    persistActiveSessionToIdb({
+      authMode: 'guest',
+      firebaseUid: auth.currentUser?.uid,
+      email: '',
+      name: newGuestAcc.fullName,
+      activeAccountId: newGuestAcc.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: nextAccounts,
+    });
     void flushMasterStateToCloud({ accounts: nextAccounts });
     setCurrentAccountIdState(newGuestAcc.id);
     setActiveCloudEmail('');
@@ -3696,6 +3912,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         latestServerAccountsRef.current = updatedList;
         setAccounts(updatedList);
         setGoogleUser((prev) => (prev ? { ...prev, firebaseUid: boundUid } : prev));
+        persistActiveSessionToIdb({
+          authMode: 'guest',
+          firebaseUid: boundUid,
+          email: '',
+          name: boundAcc.fullName,
+          activeAccountId: boundAcc.id,
+          isPinVerified: true,
+          hasCompletedOnboarding: true,
+          accountsPool: updatedList,
+        });
         void flushMasterStateToCloud({ accounts: updatedList });
         void writeVaultStateAtomic(boundUid, { accounts: [boundAcc], updatedAtMs: Date.now() }, 1);
       }
@@ -3731,6 +3957,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setCurrentAccountIdState(target.id);
     const linkedEmail = (target.googleEmail || target.email || '').trim();
     setActiveCloudEmail(linkedEmail || '');
+    setCloudAccountVerificationState('confirmed_has_accounts');
     setGoogleUser({
       email: linkedEmail,
       name: target.fullName,
@@ -3738,6 +3965,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       loggedInAt: new Date().toISOString(),
       hasCompletedOnboarding: true,
       isPinVerified: true,
+    });
+    persistActiveSessionToIdb({
+      authMode: 'guest',
+      firebaseUid: target.firebaseUid || auth.currentUser?.uid,
+      email: linkedEmail,
+      name: target.fullName,
+      activeAccountId: target.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: accountsRef.current,
     });
     playAtmSound('success');
     return {
@@ -3875,10 +4112,24 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         mergedDeletedIds
       );
 
-      // 4. Perbarui state aplikasi & tulis langsung ke Firebase Realtime Database azkaakc (tunggu hingga selesai 100%)
+      // 4. Perbarui state aplikasi + simpan instan ke IndexedDB agar refresh mendadak aman, lalu tulis ke Firebase RTDB azkaakc
       latestServerAccountsRef.current = nextAccounts;
       accountsRef.current = nextAccounts;
       setAccounts(nextAccounts);
+      setCloudAccountVerificationState('confirmed_has_accounts');
+
+      persistActiveSessionToIdb({
+        authMode: 'google',
+        firebaseUid: fbUser.uid,
+        email: cleanEmail,
+        emailKey: emailDocId,
+        name: convertedGoogleAccount.fullName,
+        picture: fbUser.photoURL || undefined,
+        activeAccountId: convertedGoogleAccount.id,
+        isPinVerified: true,
+        hasCompletedOnboarding: true,
+        accountsPool: nextAccounts,
+      });
 
       const [masterWriteOk] = await Promise.all([
         flushMasterStateToCloud({
@@ -4241,6 +4492,126 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return linkedUserAccounts[0] || null;
   })();
 
+  // Self-Healing Auto-Recovery: Jika data rekening lama tiba dari Cloud setelah gerbang terbuka,
+  // otomatis pulihkan & pindahkan langsung ke rekening lama tanpa pernah memaksa buat akun baru!
+  useEffect(() => {
+    if (!googleUser || linkedUserAccounts.length === 0 || !linkedUserAccount) return;
+    if (cloudAccountVerificationState !== 'confirmed_has_accounts') {
+      setCloudAccountVerificationState('confirmed_has_accounts');
+    }
+    if (!googleUser.hasCompletedOnboarding) {
+      setCurrentAccountIdState(linkedUserAccount.id);
+      setGoogleUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: linkedUserAccount.fullName || prev.name,
+              hasCompletedOnboarding: true,
+            }
+          : prev
+      );
+    }
+  }, [googleUser, linkedUserAccounts.length, linkedUserAccount, cloudAccountVerificationState]);
+
+  // Cek Ulang Rekening dari Cloud secara manual (dipanggil dari tombol "Muat Ulang Akun Cloud" saat koneksi lambat)
+  const retryCloudAccountCheck = async (): Promise<boolean> => {
+    const uid = auth.currentUser?.uid || firebaseUser?.uid || googleUser?.firebaseUid;
+    const rawEmail = auth.currentUser?.email || googleUser?.email || activeCloudEmail || '';
+    const cleanEmail = rawEmail ? normalizeEmailKey(rawEmail) : '';
+    const emailDocId = cleanEmail ? emailToFirestoreDocId(cleanEmail) : '';
+
+    setCloudAccountVerificationState('verifying');
+    updateSyncTelemetry({ hasPendingWrites: true, lastError: null });
+
+    try {
+      const [masterData, uidData, emailData] = await Promise.all([
+        readCloudDoc<Record<string, any>>('bank_state_v1', 'master_state', {
+          timeoutMs: 5000,
+          skipFirestoreFallback: true,
+        }),
+        uid
+          ? readCloudDoc<CloudUserRecord>('users', uid, {
+              timeoutMs: 5000,
+              skipFirestoreFallback: true,
+            })
+          : Promise.resolve(null),
+        emailDocId
+          ? readCloudDoc<CloudUserRecord>('users_by_email', emailDocId, {
+              timeoutMs: 5000,
+              skipFirestoreFallback: true,
+            })
+          : Promise.resolve(null),
+      ]);
+
+      const responded = masterData !== null || uidData !== null || emailData !== null;
+      if (masterData) {
+        applyMasterCloudData(masterData, { forceInitial: true });
+      }
+
+      const uidSaved = toArraySafe<BankAccount>(uidData?.savedAccounts);
+      const emailSaved = toArraySafe<BankAccount>(emailData?.savedAccounts);
+      const merged = unionMergeAccountsList(
+        accountsRef.current,
+        [emailSaved, uidSaved, latestServerAccountsRef.current],
+        deletedAccountIdsRef.current
+      );
+      if (merged.length > 0) {
+        latestServerAccountsRef.current = merged;
+        accountsRef.current = merged;
+        setAccounts(merged);
+        void saveFastBootSnapshot({
+          accounts: merged,
+          deletedAccountIds: deletedAccountIdsRef.current,
+          cachedAtMs: Date.now(),
+        });
+      }
+
+      if (uidData || emailData) {
+        setCloudUserStatus((uidData || emailData)!);
+      }
+
+      const matched = merged.find(
+        (a) =>
+          (uid && a.firebaseUid === uid) ||
+          (cleanEmail &&
+            ((a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+              (a.email && normalizeEmailKey(a.email) === cleanEmail)))
+      );
+
+      if (matched) {
+        setCurrentAccountIdState(matched.id);
+        setCloudAccountVerificationState('confirmed_has_accounts');
+        setGoogleUser((prev) =>
+          prev
+            ? {
+                ...prev,
+                name: matched.fullName || prev.name,
+                hasCompletedOnboarding: true,
+              }
+            : prev
+        );
+        updateSyncTelemetry({
+          fromCache: false,
+          hasPendingWrites: false,
+          lastSyncedAt: new Date().toISOString(),
+          syncedDocCount: merged.length,
+        });
+        return true;
+      }
+
+      if (responded && (typeof navigator === 'undefined' || navigator.onLine)) {
+        setCloudAccountVerificationState('confirmed_zero_accounts');
+        updateSyncTelemetry({ fromCache: false, hasPendingWrites: false });
+      } else {
+        setCloudAccountVerificationState('network_timeout');
+      }
+      return false;
+    } catch {
+      setCloudAccountVerificationState('network_timeout');
+      return false;
+    }
+  };
+
   const appendBanAuditLog = (
     entry: Omit<BanAuditLogEntry, 'id' | 'timestamp'>,
     baseConfig?: BanSupportConfig
@@ -4295,7 +4666,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           : acc
       );
       setAccounts(nextAccounts);
+      accountsRef.current = nextAccounts;
+      latestServerAccountsRef.current = nextAccounts;
       setCurrentAccountIdState(targetAcc.id);
+      setCloudAccountVerificationState('confirmed_has_accounts');
       setGoogleUser((prev) =>
         prev
           ? {
@@ -4306,6 +4680,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           : prev
       );
+      // Simpan sesi terverifikasi ke IndexedDB agar refresh langsung kembali ke Dashboard rekening ini
+      persistActiveSessionToIdb({
+        authMode: googleUser?.authMode === 'oa_account' ? 'oa_account' : googleUser?.authMode === 'guest' ? 'guest' : 'google',
+        firebaseUid: targetUid,
+        email: activeEmailSession,
+        name: targetAcc.fullName,
+        picture: googleUser?.picture,
+        activeAccountId: targetAcc.id,
+        isPinVerified: true,
+        hasCompletedOnboarding: true,
+        accountsPool: nextAccounts,
+      });
       flushMasterStateToCloud({ accounts: nextAccounts });
       void syncCloudUserProfile(
         { uid: targetUid, email: activeEmailSession, fallbackEmail: targetAcc.email },
@@ -5910,7 +6296,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setCurrentAccountId = (id: string) => {
     setCurrentAccountIdState(id);
-    const targetEmail = googleUser?.email || activeCloudEmail;
+    const targetEmail = googleUser?.email || activeCloudEmail || '';
+    const switchedAcc = accountsRef.current.find((a) => a.id === id);
+    if (googleUser && switchedAcc) {
+      persistActiveSessionToIdb({
+        authMode:
+          googleUser.authMode === 'oa_account'
+            ? 'oa_account'
+            : googleUser.authMode === 'guest'
+            ? 'guest'
+            : 'google',
+        firebaseUid: firebaseUser?.uid || googleUser.firebaseUid,
+        email: targetEmail,
+        emailKey: googleUser.emailKey,
+        name: switchedAcc.fullName || googleUser.name,
+        picture: googleUser.picture,
+        activeAccountId: id,
+        isPinVerified: Boolean(googleUser.isPinVerified),
+        hasCompletedOnboarding: Boolean(googleUser.hasCompletedOnboarding),
+        accountsPool: accountsRef.current,
+      });
+    }
     void syncCloudUserProfile(
       { uid: firebaseUser?.uid, email: targetEmail || undefined },
       { lastAccountId: id }
@@ -7311,9 +7717,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
     setCurrentAccountIdState(newAccount.id);
+    setCloudAccountVerificationState('confirmed_has_accounts');
     if (googleUser) {
       setGoogleUser({ ...googleUser, hasCompletedOnboarding: true, isPinVerified: true });
     }
+    // Simpan instan ke IndexedDB + antre tulis Cloud otomatis agar refresh mendadak tidak mengulang form Buat Akun
+    persistActiveSessionToIdb({
+      authMode:
+        googleUser?.authMode === 'oa_account'
+          ? 'oa_account'
+          : googleUser?.authMode === 'guest'
+          ? 'guest'
+          : 'google',
+      firebaseUid: resolvedUid,
+      email: linkedEmail,
+      name: newAccount.fullName,
+      picture: googleUser?.picture,
+      activeAccountId: newAccount.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: nextAccounts,
+    });
     void syncCloudUserProfile(
       { uid: resolvedUid, email: linkedEmail },
       {
@@ -9377,7 +9801,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    // Berhasil verifikasi keempat kredensial OA -> Langsung masuk ke Dashboard tanpa diminta PIN ulang
+    // Berhasil verifikasi keempat kredensial OA -> Langsung masuk ke Dashboard + simpan sesi aktif di IndexedDB agar tahan refresh
     setCurrentAccountIdState(byAccountNum.id);
     const rawLinkedEmail = (byAccountNum.googleEmail || byAccountNum.email || '').trim().toLowerCase();
     const hasRealGoogleEmail =
@@ -9387,6 +9811,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       !rawLinkedEmail.startsWith('oa.');
     const sessionEmail = hasRealGoogleEmail ? rawLinkedEmail : '';
     setActiveCloudEmail(sessionEmail);
+    setCloudAccountVerificationState('confirmed_has_accounts');
     setGoogleUser({
       email: sessionEmail,
       name: byAccountNum.fullName,
@@ -9395,6 +9820,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       loggedInAt: new Date().toISOString(),
       hasCompletedOnboarding: true,
       isPinVerified: true,
+    });
+    persistActiveSessionToIdb({
+      authMode: 'oa_account',
+      firebaseUid: byAccountNum.firebaseUid,
+      email: sessionEmail,
+      name: byAccountNum.fullName,
+      activeAccountId: byAccountNum.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: latestAccounts,
     });
     playAtmSound('success');
     return {
@@ -17643,6 +18078,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         googleUser,
         firebaseUser,
         isCloudBootReady,
+        cloudAccountVerificationState,
+        retryCloudAccountCheck,
         cloudSyncStatus,
         lastCloudSyncAt,
         cloudUserStatus,
