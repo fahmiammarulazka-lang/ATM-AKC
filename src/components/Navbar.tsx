@@ -56,7 +56,6 @@ export type AppNavView =
   | 'anggaran'
   | 'jobs'
   | 'spin_wheel'
-  | 'empire'
   | 'atm'
   | 'admin'
   | 'guide'
@@ -1096,21 +1095,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </button>
 
-            {/* 7. Mining & Lelang VIP */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('empire', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'empire'
-                  ? 'bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 text-slate-950 font-black shadow-sm'
-                  : 'text-cyan-300 hover:text-white hover:bg-slate-900 border border-cyan-400/35'
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <span>Mining &amp; Lelang VIP</span>
-            </button>
-
-            {/* 8. PayChat */}
+            {/* 7. PayChat */}
             <button
               type="button"
               onClick={(e) => handleSelectNavView('chat', e)}

@@ -244,7 +244,7 @@ export const DebtIncurredPopupModal: React.FC<{
 // 3. HALAMAN UTAMA PUSAT TAB HUTANG (DEBT MANAGEMENT VIEW)
 // ============================================================================
 export const DebtManagementView: React.FC<{
-  onNavigateToView: (view: 'dashboard' | 'empire') => void;
+  onNavigateToView: (view: 'dashboard') => void;
 }> = ({ onNavigateToView }) => {
   const { currentAccount, sultanEmpireConfig, payAccountDebt } = useBank();
   const [customPayAmount, setCustomPayAmount] = useState<string>('');
@@ -335,21 +335,12 @@ export const DebtManagementView: React.FC<{
               : 'Rekening Anda Bebas Hutang'}
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-            Kelola seluruh tagihan hutang yang timbul dari kerugian operasional maupun pembelian kredit di{' '}
-            <strong>Tab Mining &amp; Lelang VIP</strong>. Bayar cicil bebas nominal atau lunasi penuh sebelum tenggat berakhir agar terhindar dari{' '}
+            Kelola seluruh tagihan hutang aktif rekening Anda. Bayar cicil bebas nominal atau lunasi penuh sebelum tenggat berakhir agar terhindar dari{' '}
             <strong className="text-rose-300">Auto-Ban {banHours === 24 ? '1 Hari (24 Jam)' : `${banHours} Jam`}</strong>.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => onNavigateToView('empire')}
-            className="px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs cursor-pointer flex items-center gap-1.5 transition-colors"
-          >
-            <Flame className="w-4 h-4" />
-            <span>Buka Mining &amp; Lelang</span>
-          </button>
           <button
             type="button"
             onClick={() => onNavigateToView('dashboard')}

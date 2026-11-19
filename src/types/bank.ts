@@ -1307,7 +1307,7 @@ export interface AdminGiftEventPackage {
   maxRedeemsPerUser?: number;
   targetCardTier?: CardTier | 'all';
   targetDevRoleOnly?: string;
-  celebrationEffect?: 'confetti' | 'gold_rain' | 'fireworks' | 'none';
+  celebrationEffect?: string;
   soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
   requireAdminVerifiedAccessForNotif?: boolean;
   adminAuditLogTag?: string;

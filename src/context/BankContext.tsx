@@ -1324,7 +1324,7 @@ interface BankContextType {
     maxRedeemsPerUser?: number;
     targetCardTier?: CardTier | 'all';
     targetDevRoleOnly?: string;
-    celebrationEffect?: 'confetti' | 'gold_rain' | 'fireworks' | 'none';
+    celebrationEffect?: string;
     soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
     requireAdminVerifiedAccessForNotif?: boolean;
     adminAuditLogTag?: string;
@@ -1373,6 +1373,7 @@ interface BankContextType {
       letterMessage?: string;
       title?: string;
       senderName?: string;
+      celebrationEffect?: string;
       retriggerPopup?: boolean;
     }
   ) => { success: boolean; message: string };
@@ -18098,7 +18099,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     maxRedeemsPerUser?: number;
     targetCardTier?: CardTier | 'all';
     targetDevRoleOnly?: string;
-    celebrationEffect?: 'confetti' | 'gold_rain' | 'fireworks' | 'none';
+    celebrationEffect?: string;
     soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
     requireAdminVerifiedAccessForNotif?: boolean;
     adminAuditLogTag?: string;
@@ -18201,7 +18202,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       maxRedeemsPerUser: input.maxRedeemsPerUser || 1,
       targetCardTier: input.targetCardTier || 'all',
       targetDevRoleOnly: input.targetDevRoleOnly || '',
-      celebrationEffect: input.celebrationEffect || 'confetti',
+      celebrationEffect: input.celebrationEffect || 'ulang_tahun_meriah',
       soundEffect: input.soundEffect || 'chime',
       requireAdminVerifiedAccessForNotif: input.requireAdminVerifiedAccessForNotif ?? true,
       adminAuditLogTag: input.adminAuditLogTag || 'GIFT-AUDIT-LOG',
@@ -18537,6 +18538,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       letterMessage?: string;
       title?: string;
       senderName?: string;
+      celebrationEffect?: string;
       retriggerPopup?: boolean;
     }
   ): { success: boolean; message: string } => {
@@ -18563,6 +18565,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         senderName: patch.senderName !== undefined ? patch.senderName : e.senderName,
         letterMessage: patch.letterMessage !== undefined ? patch.letterMessage : e.letterMessage,
         deliveryContentMode: patch.deliveryContentMode || e.deliveryContentMode || 'both',
+        celebrationEffect:
+          patch.celebrationEffect !== undefined
+            ? patch.celebrationEffect
+            : e.celebrationEffect || 'ulang_tahun_meriah',
         targetAccountId: nextTargetId,
         targetAccountIds: nextTargetIds,
         unlockedByManualSend: patch.retriggerPopup ? true : e.unlockedByManualSend,

@@ -40,6 +40,15 @@ import { AdminGiftEventPackage, AdminGiftRewardItem } from '../types/bank';
 import { GIFT_REWARD_CATALOG, formatTrialDurationLabel } from '../data/giftRewardsCatalog';
 import { getDevBadgeColorStyle } from '../data/devRolesCatalog';
 import { OfficialSignatureBlock, OfficialStampBadge } from './LetterSealRenderer';
+import {
+  getCelebrationEffectProfile,
+  triggerCanvasConfettiForCelebration,
+} from '../data/celebrationEffectsCatalog';
+import {
+  CelebrationClaimBurstOverlay,
+  PreClaimCardOrnamentStrip,
+  PreClaimCelebrationAmbientBackdrop,
+} from './CelebrationSpectacleOverlay';
 
 const isCurrencyRewardType = (type: AdminGiftRewardItem['type']): boolean =>
   type === 'cash_balance' ||
@@ -138,6 +147,10 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
     message: string;
   } | null>(null);
   const [cornerExpanded, setCornerExpanded] = useState<boolean>(false);
+  const [burstState, setBurstState] = useState<{
+    effectId: string;
+    nonce: number;
+  } | null>(null);
 
   // Friend Transfer States (when Gift Box is still sealed/unclaimed)
   const [selectedFriendAccountNo, setSelectedFriendAccountNo] = useState<string>('');
@@ -196,6 +209,14 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeGiftModal?.eventId, activeGiftModal?.isReplay]);
 
+  useEffect(() => {
+    if (!burstState) return;
+    const timer = window.setTimeout(() => {
+      setBurstState(null);
+    }, 4800);
+    return () => window.clearTimeout(timer);
+  }, [burstState]);
+
   if (!currentAccount || !googleUser?.hasCompletedOnboarding) {
     return null;
   }
@@ -234,17 +255,27 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
     ? isGiftEventOpenableNow(activeEvent, currentAccount.id)
     : false;
 
-  const fireGoldenConfetti = () => {
+  const fireCelebrationSpectacle = (effectId?: string | null) => {
+    const profile = getCelebrationEffectProfile(effectId);
+    if (profile.id === 'none') return;
     try {
-      confetti({
-        particleCount: 100,
-        spread: 90,
-        origin: { y: 0.52 },
-        colors: ['#fbbf24', '#f59e0b', '#fef08a', '#ffffff', '#34d399'],
-      });
+      triggerCanvasConfettiForCelebration(profile.id);
     } catch {
-      /* ignore confetti error */
+      try {
+        confetti({
+          particleCount: 100,
+          spread: 90,
+          origin: { y: 0.52 },
+          colors: profile.confettiColors,
+        });
+      } catch {
+        /* ignore confetti error */
+      }
     }
+    setBurstState({
+      effectId: profile.id,
+      nonce: Date.now(),
+    });
   };
 
   // Klik Amplop Surat (Hanya membuka & membaca surat, TIDAK mengklaim Kotak Hadiah)
@@ -254,6 +285,7 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
     setLetterStage('opening');
     setTimeout(() => {
       markGiftLetterOpened(activeEvent.id);
+      fireCelebrationSpectacle(activeEvent.celebrationEffect);
       setLetterStage('opened');
     }, 550);
   };
@@ -263,6 +295,7 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
     if (!activeEvent || !isActiveEventOpenable || giftStage === 'opening') return;
     if (isAlreadyClaimedByMe) {
       setGiftStage('opened');
+      fireCelebrationSpectacle(activeEvent.celebrationEffect);
       return;
     }
     // Matikan transfer seketika di level state data & UI
@@ -274,7 +307,7 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
         setGiftStage('sealed');
         return;
       }
-      fireGoldenConfetti();
+      fireCelebrationSpectacle(activeEvent.celebrationEffect);
       setClaimResult({
         alreadyClaimed: res.alreadyClaimed,
         message: res.message,
@@ -302,11 +335,12 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
       message: res.message,
     });
     if (res.success) {
-      fireGoldenConfetti();
+      fireCelebrationSpectacle(activeEvent.celebrationEffect);
     }
   };
 
-  const theme = THEME_STYLES[activeEvent?.themeColor || 'amber'];
+  const celebProfile = getCelebrationEffectProfile(activeEvent?.celebrationEffect);
+  const theme = THEME_STYLES[activeEvent?.themeColor || celebProfile.recommendedThemeColor || 'amber'];
   const savedGachaResults = activeEvent?.gachaResultsByAccount?.[currentAccount.id] || [];
   const activeAccountRole = currentAccount.devRoleId
     ? devRoles.find((r) => r.id === currentAccount.devRoleId) || null
@@ -320,6 +354,15 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
 
   return (
     <>
+      {/* FULL-SCREEN SPECTACULAR MULTI-LAYERED CELEBRATION BURST OVERLAY */}
+      {burstState && (
+        <CelebrationClaimBurstOverlay
+          effectId={burstState.effectId}
+          burstNonce={burstState.nonce}
+          onDismiss={() => setBurstState(null)}
+        />
+      )}
+
       {/* FULL-SCREEN BLURRED OVERLAY WITH INTERACTIVE ENVELOPE & GIFT BOX */}
       {activeGiftModal && activeEvent && (
         <div
@@ -328,8 +371,11 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
           aria-modal="true"
         >
           <div
-            className={`relative w-full max-w-5xl rounded-3xl border-2 ${theme.border} bg-gradient-to-br ${theme.boxBg} shadow-2xl ${theme.glow} p-5 sm:p-7 my-auto transition-all duration-500 ring-2 ring-amber-300/30`}
+            className={`relative w-full max-w-5xl rounded-3xl border-2 ${theme.border} bg-gradient-to-br ${theme.boxBg} shadow-2xl ${theme.glow} p-5 sm:p-7 my-auto transition-all duration-500 ring-2 ring-amber-300/30 overflow-hidden`}
           >
+            {/* PRE-CLAIM & ON-CLAIM THEMED AMBIENT BACKDROP ORNAMENTS */}
+            <PreClaimCelebrationAmbientBackdrop effectId={activeEvent.celebrationEffect} />
+
             {/* Corner Royal Filigree Accents */}
             <div className="pointer-events-none absolute top-2.5 left-2.5 w-7 h-7 border-t-2 border-l-2 border-amber-400/70 rounded-tl-xl" />
             <div className="pointer-events-none absolute top-2.5 right-2.5 w-7 h-7 border-t-2 border-r-2 border-amber-400/70 rounded-tr-xl" />
@@ -394,16 +440,42 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                     </span>
                   </span>
                 )}
+
+                {/* Active Celebration Theme Badge & Replay Trigger in Modal Header */}
+                {celebProfile.id !== 'none' && (
+                  <span
+                    className={`px-3 py-1 rounded-full bg-gradient-to-r ${celebProfile.bannerGradientClass} border ${celebProfile.cardBorderAccentClass} text-white font-black text-[10px] flex items-center gap-1.5 shadow`}
+                  >
+                    <span>{celebProfile.shortBadge}</span>
+                    <span className="opacity-90">
+                      {celebProfile.particleEmojis.slice(0, 3).join(' ')}
+                    </span>
+                  </span>
+                )}
               </div>
 
-              <button
-                type="button"
-                onClick={closeGiftEventModal}
-                className="p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer shrink-0"
-                title="Tutup & Simpan ke Popup Pojok"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2 shrink-0 relative z-10">
+                {celebProfile.id !== 'none' && (
+                  <button
+                    type="button"
+                    onClick={() => fireCelebrationSpectacle(activeEvent.celebrationEffect)}
+                    className="px-3 py-1.5 rounded-xl bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-300/60 text-amber-200 font-black text-[10.5px] transition cursor-pointer flex items-center gap-1"
+                    title="Putar Efek Perayaan Spektakuler"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>🎉 Putar Efek Perayaan</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={closeGiftEventModal}
+                  className="p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer shrink-0"
+                  title="Tutup & Simpan ke Popup Pojok"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Banner if this gift was transferred from a friend (tanpa daftar/jumlah hadiah) */}
@@ -523,9 +595,15 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                       {letterStage === 'sealed' && (
                         <div
                           onClick={handleOpenLetterOnly}
-                          className="group relative rounded-3xl p-6 bg-gradient-to-br from-[#241907] via-[#121829] to-[#1a1205] border-2 border-amber-400/70 hover:border-amber-300 shadow-xl hover:shadow-[0_0_40px_rgba(251,191,36,0.35)] transition-all duration-300 hover:scale-[1.035] hover:-translate-y-1.5 cursor-pointer select-none text-center space-y-4 overflow-hidden"
+                          className={`group relative rounded-3xl p-6 bg-gradient-to-br from-[#241907] via-[#121829] to-[#1a1205] border-2 ${celebProfile.cardBorderAccentClass} hover:border-amber-300 shadow-xl ${celebProfile.cardGlowClass} hover:shadow-[0_0_40px_rgba(251,191,36,0.35)] transition-all duration-300 hover:scale-[1.035] hover:-translate-y-1.5 cursor-pointer select-none text-center space-y-4 overflow-hidden`}
                         >
                           <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-amber-500/0 via-amber-400/10 to-amber-300/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+                          {/* Pre-Claim Celebration Ornament Strip on Sealed Envelope */}
+                          <PreClaimCardOrnamentStrip
+                            effectId={activeEvent.celebrationEffect}
+                            targetType="envelope"
+                          />
 
                           <div className="flex items-center justify-between gap-2 relative z-10">
                             <span className="px-2.5 py-1 rounded-full bg-amber-400/20 border border-amber-400/50 text-amber-200 font-black text-[10px] uppercase tracking-wider">
@@ -538,16 +616,40 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                             </span>
                           </div>
 
-                        {/* Interactive 3D Envelope Visual that scales on hover */}
+                        {/* Interactive 3D Envelope Visual that scales on hover + Pre-Claim Celebration Ornaments */}
                         <div className="relative mx-auto w-48 h-36 flex items-center justify-center my-2 transition-transform duration-300 group-hover:scale-110">
                           <div className="absolute inset-0 rounded-full bg-amber-400/25 blur-2xl group-hover:bg-amber-400/45 transition-all" />
+                          {celebProfile.id !== 'none' && (
+                            <>
+                              <span className="pointer-events-none absolute -top-2 -left-1 text-xl animate-bounce select-none z-20">
+                                {celebProfile.particleEmojis[0]}
+                              </span>
+                              <span className="pointer-events-none absolute -top-2 -right-1 text-xl animate-pulse select-none z-20">
+                                {celebProfile.particleEmojis[1] || celebProfile.primaryEmoji}
+                              </span>
+                              <span className="pointer-events-none absolute -bottom-1 left-2 text-base animate-pulse select-none z-20">
+                                {celebProfile.particleEmojis[2] || celebProfile.primaryEmoji}
+                              </span>
+                              <span className="pointer-events-none absolute -bottom-1 right-2 text-base animate-bounce select-none z-20">
+                                {celebProfile.particleEmojis[3] || celebProfile.primaryEmoji}
+                              </span>
+                            </>
+                          )}
                           <div className="relative w-44 h-30 rounded-2xl bg-gradient-to-br from-amber-900 via-[#241908] to-slate-950 border-2 border-amber-300 shadow-2xl flex items-center justify-center overflow-hidden">
                             {/* Envelope Flap Triangle */}
                             <div className="absolute inset-x-0 top-0 h-16 border-b-2 border-amber-300/60 bg-gradient-to-b from-amber-400/25 to-transparent transform origin-top transition-transform duration-300 group-hover:scale-y-90" />
-                            {/* Wax Seal Center */}
-                            <div className="relative z-10 w-16 h-16 rounded-full bg-gradient-to-br from-amber-300 via-yellow-500 to-amber-700 border-2 border-amber-100 shadow-xl flex flex-col items-center justify-center group-hover:rotate-6 transition-transform">
-                              <Mail className="w-6 h-6 text-slate-950" />
-                              <span className="text-[6.5px] font-black text-slate-950 tracking-widest uppercase mt-0.5">
+                            {/* Wax Seal Center Styled by Celebration Theme */}
+                            <div
+                              className={`relative z-10 w-16 h-16 rounded-full bg-gradient-to-br ${celebProfile.waxSealGradientClass} border-2 border-amber-100 shadow-xl flex flex-col items-center justify-center group-hover:rotate-6 transition-transform`}
+                            >
+                              {celebProfile.id !== 'none' ? (
+                                <span className="text-xl leading-none select-none">
+                                  {celebProfile.primaryEmoji}
+                                </span>
+                              ) : (
+                                <Mail className="w-6 h-6 text-slate-950" />
+                              )}
+                              <span className="text-[6px] font-black text-white drop-shadow tracking-widest uppercase mt-0.5">
                                 ROYAL SEAL
                               </span>
                             </div>
@@ -558,6 +660,11 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                           <h3 className="text-lg font-black text-white group-hover:text-amber-200 transition-colors">
                             Amplop Surat Kehormatan
                           </h3>
+                          {celebProfile.id !== 'none' && (
+                            <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-400/15 border border-amber-300/40 text-amber-200 font-bold text-[10px]">
+                              {celebProfile.shortBadge} • {celebProfile.description}
+                            </span>
+                          )}
                           <p className="text-xs text-slate-300 leading-relaxed">
                             Berisi surat resmi berstempel kerajaan dari{' '}
                             <strong className="text-amber-300">{activeEvent.senderName}</strong>. Bebas dibuka kapan saja tanpa membuka Kotak Hadiah!
@@ -573,7 +680,7 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                           className="w-full py-3 px-5 rounded-2xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 hover:from-amber-200 hover:to-yellow-300 text-slate-950 font-black text-xs shadow-lg flex items-center justify-center gap-2 cursor-pointer"
                         >
                           <MailOpen className="w-4 h-4" />
-                          <span>Buka Amplop Surat Sekarang</span>
+                          <span>Buka Amplop Surat &amp; Efek Perayaan</span>
                         </button>
                       </div>
                     )}
@@ -622,19 +729,32 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Top Royal Crest Ribbon */}
-                        <div className="relative z-10 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r from-amber-500/20 via-yellow-400/15 to-amber-500/20 border border-amber-400/40 rounded-2xl px-3.5 py-2">
-                          <div className="flex items-center gap-1.5 text-[10px] font-mono font-black text-amber-300 uppercase tracking-widest">
-                            <Crown className="w-3.5 h-3.5 text-amber-400" />
-                            <span>ROYAL DECREE &amp; SULTAN CERTIFICATE</span>
+                        {/* Top Royal Crest Ribbon with Celebration Badge & Replay Button */}
+                        <div
+                          className={`relative z-10 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r ${celebProfile.bannerGradientClass} border ${celebProfile.cardBorderAccentClass} rounded-2xl px-3.5 py-2`}
+                        >
+                          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono font-black text-white uppercase tracking-wider">
+                            <span>{celebProfile.primaryEmoji}</span>
+                            <span>{celebProfile.shortBadge} • ROYAL DECREE</span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setLetterStage('sealed')}
-                            className="text-[10px] font-bold text-amber-200 hover:text-white underline cursor-pointer"
-                          >
-                            Lipat Kembali Amplop
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {celebProfile.id !== 'none' && (
+                              <button
+                                type="button"
+                                onClick={() => fireCelebrationSpectacle(activeEvent.celebrationEffect)}
+                                className="px-2 py-0.5 rounded-md bg-slate-950/80 hover:bg-amber-400 hover:text-slate-950 text-amber-200 font-black text-[9.5px] cursor-pointer transition"
+                              >
+                                🎉 Putar Ulang Efek
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setLetterStage('sealed')}
+                              className="text-[10px] font-bold text-amber-100 hover:text-white underline cursor-pointer"
+                            >
+                              Lipat Kembali Amplop
+                            </button>
+                          </div>
                         </div>
 
                         {/* Letter Header */}
@@ -717,9 +837,15 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                       {giftStage === 'sealed' && !isTransferredOutByMe && (
                         <div
                           onClick={handleOpenAndClaimGiftBox}
-                          className="group relative rounded-3xl p-6 bg-gradient-to-br from-emerald-950/85 via-[#0f172a] to-amber-950/75 border-2 border-emerald-400/75 hover:border-amber-300 shadow-xl hover:shadow-[0_0_46px_rgba(251,191,36,0.45)] transition-all duration-300 hover:scale-[1.035] hover:-translate-y-1.5 cursor-pointer select-none text-center space-y-4 overflow-hidden"
+                          className={`group relative rounded-3xl p-6 bg-gradient-to-br from-emerald-950/85 via-[#0f172a] to-amber-950/75 border-2 ${celebProfile.cardBorderAccentClass} hover:border-amber-300 shadow-xl ${celebProfile.cardGlowClass} hover:shadow-[0_0_46px_rgba(251,191,36,0.45)] transition-all duration-300 hover:scale-[1.035] hover:-translate-y-1.5 cursor-pointer select-none text-center space-y-4 overflow-hidden`}
                         >
                           <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-amber-500/0 via-amber-400/15 to-emerald-300/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
+                          {/* Pre-Claim Celebration Ornament Strip on Sealed Gift Box */}
+                          <PreClaimCardOrnamentStrip
+                            effectId={activeEvent.celebrationEffect}
+                            targetType="gift_box"
+                          />
 
                           <div className="flex items-center justify-between gap-2 relative z-10">
                             <span className="px-2.5 py-1 rounded-full bg-emerald-400/20 border border-emerald-400/50 text-emerald-200 font-black text-[10px] uppercase tracking-wider">
@@ -732,25 +858,56 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                             </span>
                           </div>
 
-                          {/* Interactive 3D Gift Box Visual with Golden Glow & Wiggling Ribbon on hover */}
+                          {/* Interactive 3D Gift Box Visual with Celebration-Themed Ribbon & Ornaments */}
                           <div className="relative mx-auto w-48 h-36 flex items-center justify-center my-2 transition-transform duration-300 group-hover:scale-110">
                             <div className="absolute inset-0 rounded-full bg-amber-400/20 blur-2xl group-hover:bg-amber-400/55 transition-all duration-300" />
+                            {celebProfile.id !== 'none' && (
+                              <>
+                                <span className="pointer-events-none absolute -top-2 left-1 text-xl animate-bounce select-none z-20">
+                                  {celebProfile.primaryEmoji}
+                                </span>
+                                <span className="pointer-events-none absolute -top-2 right-1 text-xl animate-pulse select-none z-20">
+                                  {celebProfile.particleEmojis[1] || celebProfile.primaryEmoji}
+                                </span>
+                                <span className="pointer-events-none absolute -bottom-1 left-3 text-base animate-pulse select-none z-20">
+                                  {celebProfile.particleEmojis[2] || celebProfile.primaryEmoji}
+                                </span>
+                                <span className="pointer-events-none absolute -bottom-1 right-3 text-base animate-bounce select-none z-20">
+                                  {celebProfile.particleEmojis[3] || celebProfile.primaryEmoji}
+                                </span>
+                              </>
+                            )}
                             <div className="gift-box-hover-wiggle relative w-36 h-30 rounded-3xl bg-gradient-to-br from-amber-300 via-yellow-500 to-amber-700 border-2 border-amber-100 shadow-2xl flex flex-col items-center justify-center overflow-hidden transition-transform">
-                              {/* Ribbon Cross */}
-                              <div className="pointer-events-none absolute inset-y-0 w-5 bg-rose-600/90 border-x border-amber-100/60" />
-                              <div className="pointer-events-none absolute inset-x-0 h-5 bg-rose-600/90 border-y border-amber-100/60" />
-                              <div className="relative z-10 w-14 h-14 rounded-2xl bg-slate-950/90 border-2 border-amber-200 flex items-center justify-center shadow-lg">
-                                <Gift className="w-7 h-7 text-amber-300" />
+                              {/* Celebration-Themed Ribbon Cross */}
+                              <div
+                                className={`pointer-events-none absolute inset-y-0 w-5 ${celebProfile.ribbonColorClass} border-x`}
+                              />
+                              <div
+                                className={`pointer-events-none absolute inset-x-0 h-5 ${celebProfile.ribbonColorClass} border-y`}
+                              />
+                              <div className="relative z-10 w-14 h-14 rounded-2xl bg-slate-950/90 border-2 border-amber-200 flex flex-col items-center justify-center shadow-lg">
+                                {celebProfile.id !== 'none' ? (
+                                  <span className="text-2xl leading-none select-none">
+                                    {celebProfile.primaryEmoji}
+                                  </span>
+                                ) : (
+                                  <Gift className="w-7 h-7 text-amber-300" />
+                                )}
                               </div>
                             </div>
                           </div>
 
                           <div className="space-y-1.5 relative z-10">
                             <h3 className="text-lg font-black text-white group-hover:text-amber-200 transition-colors">
-                              Kotak Hadiah
+                              Kotak Hadiah {celebProfile.id !== 'none' ? `• ${celebProfile.name}` : ''}
                             </h3>
+                            {celebProfile.id !== 'none' && (
+                              <span className="inline-block px-2.5 py-0.5 rounded-full bg-emerald-400/15 border border-emerald-300/40 text-emerald-200 font-bold text-[10px]">
+                                {celebProfile.shortBadge} • {celebProfile.description}
+                              </span>
+                            )}
                             <p className="text-xs text-slate-300 leading-relaxed">
-                              Klik untuk membuka Kotak Hadiah dan langsung masuk ke rekening
+                              Klik untuk membuka Kotak Hadiah, menyalakan ledakan perayaan, dan langsung masuk ke rekening!
                             </p>
                           </div>
 
@@ -774,7 +931,7 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                             className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-400 via-teal-400 to-amber-400 hover:from-emerald-300 hover:to-amber-300 text-slate-950 font-black text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 cursor-pointer"
                           >
                             <Sparkles className="w-4 h-4" />
-                            <span>Buka Kotak Hadiah</span>
+                            <span>Buka Kotak Hadiah &amp; Rayakan Sekarang</span>
                           </button>
                         </div>
                       )}
@@ -814,6 +971,16 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                                 </h4>
                               </div>
                             </div>
+                            {celebProfile.id !== 'none' && (
+                              <button
+                                type="button"
+                                onClick={() => fireCelebrationSpectacle(activeEvent.celebrationEffect)}
+                                className="px-3 py-1.5 rounded-xl bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-300/60 text-amber-200 font-black text-[10.5px] cursor-pointer transition flex items-center gap-1"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>🎉 Putar Ulang Efek</span>
+                              </button>
+                            )}
                           </div>
 
                           {claimResult && (
@@ -1157,12 +1324,8 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                       </div>
 
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {isLetterOnly
-                            ? `✉️ Amplop Surat • ${isViewed ? 'Sudah Dibaca' : 'Belum Dibaca'}`
-                            : isGiftOnly
-                            ? `🎁 Kotak Hadiah`
-                            : `🎁 Kotak Hadiah • ${isViewed ? 'Surat Dibaca' : 'Surat Baru'}`}
+                        <span className="text-[10px] text-amber-200 font-bold truncate">
+                          {getCelebrationEffectProfile(ev.celebrationEffect).shortBadge}
                         </span>
                         <button
                           type="button"

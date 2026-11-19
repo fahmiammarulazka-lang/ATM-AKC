@@ -15,7 +15,6 @@ import { InformationGuide } from './components/InformationGuide';
 import { UpdateHistoryView } from './components/UpdateHistoryView';
 import { JobVacancyView } from './components/JobVacancyView';
 import { SpinTheWheelView } from './components/SpinTheWheelView';
-import { SultanEmpireView } from './components/SultanEmpireView';
 import {
   DebtManagementView,
   DebtWarningBanner,
@@ -122,7 +121,6 @@ function BankAppContent() {
         'anggaran',
         'jobs',
         'spin_wheel',
-        'empire',
         'atm',
         'guide',
         'chat',
@@ -496,7 +494,6 @@ function BankAppContent() {
         {activeView === 'anggaran' && <BudgetingWorkspace />}
         {activeView === 'jobs' && <JobVacancyView />}
         {activeView === 'spin_wheel' && <SpinTheWheelView />}
-        {activeView === 'empire' && <SultanEmpireView />}
         {activeView === 'chat' && <NusantaraChat />}
         {activeView === 'atm' && <AtmSimulator />}
         {activeView === 'admin' && (

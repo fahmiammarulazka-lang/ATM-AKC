@@ -42,6 +42,14 @@ import {
 import { buildDefaultGachaTiersForReward } from '../utils/gachaUtils';
 import { GachaTierBuilder } from './GachaTierBuilder';
 import { LetterSealStudioEditor } from './LetterSealRenderer';
+import {
+  CELEBRATION_CATEGORIES,
+  CELEBRATION_EFFECTS_CATALOG,
+  CelebrationCategoryKey,
+  getCelebrationEffectProfile,
+  triggerCanvasConfettiForCelebration,
+} from '../data/celebrationEffectsCatalog';
+import { CelebrationClaimBurstOverlay } from './CelebrationSpectacleOverlay';
 
 const isCurrencyRewardType = (type: GiftRewardType): boolean =>
   type === 'cash_balance' ||
@@ -116,7 +124,13 @@ export const AdminGiftEventPanel: React.FC = () => {
   const [maxRedeemsPerUser, setMaxRedeemsPerUser] = useState<number>(1);
   const [targetCardTier, setTargetCardTier] = useState<string>('all');
   const [targetDevRoleOnly, setTargetDevRoleOnly] = useState<string>('');
-  const [celebrationEffect, setCelebrationEffect] = useState<'confetti' | 'gold_rain' | 'fireworks' | 'none'>('confetti');
+  const [celebrationEffect, setCelebrationEffect] = useState<string>('ulang_tahun_meriah');
+  const [celebCategoryFilter, setCelebCategoryFilter] = useState<CelebrationCategoryKey>('all');
+  const [celebSearchQuery, setCelebSearchQuery] = useState<string>('');
+  const [previewBurstState, setPreviewBurstState] = useState<{
+    effectId: string;
+    nonce: number;
+  } | null>(null);
   const [soundEffect, setSoundEffect] = useState<'chime' | 'harp' | 'fanfare' | 'silent'>('chime');
   const [requireAdminVerifiedAccessForNotif, setRequireAdminVerifiedAccessForNotif] = useState<boolean>(true);
   const [adminAuditLogTag, setAdminAuditLogTag] = useState<string>('GIFT-AUDIT-LOG');
@@ -247,7 +261,7 @@ export const AdminGiftEventPanel: React.FC = () => {
     setMaxRedeemsPerUser(1);
     setTargetCardTier('all');
     setTargetDevRoleOnly('');
-    setCelebrationEffect('confetti');
+    setCelebrationEffect('ulang_tahun_meriah');
     setSoundEffect('chime');
     setRequireAdminVerifiedAccessForNotif(true);
     setAdminAuditLogTag('GIFT-AUDIT-LOG');
@@ -312,7 +326,7 @@ export const AdminGiftEventPanel: React.FC = () => {
     setMaxRedeemsPerUser(ev.maxRedeemsPerUser || 1);
     setTargetCardTier(ev.targetCardTier || 'all');
     setTargetDevRoleOnly(ev.targetDevRoleOnly || '');
-    setCelebrationEffect(ev.celebrationEffect || 'confetti');
+    setCelebrationEffect(getCelebrationEffectProfile(ev.celebrationEffect).id);
     setSoundEffect(ev.soundEffect || 'chime');
     setRequireAdminVerifiedAccessForNotif(ev.requireAdminVerifiedAccessForNotif ?? true);
     setAdminAuditLogTag(ev.adminAuditLogTag || 'GIFT-AUDIT-LOG');
@@ -436,8 +450,43 @@ export const AdminGiftEventPanel: React.FC = () => {
     }
   };
 
+  const activeCelebrationProfile = getCelebrationEffectProfile(celebrationEffect);
+
+  const filteredCelebrations = CELEBRATION_EFFECTS_CATALOG.filter((item) => {
+    if (celebCategoryFilter !== 'all' && item.category !== celebCategoryFilter) {
+      return false;
+    }
+    if (celebSearchQuery.trim()) {
+      const q = celebSearchQuery.toLowerCase();
+      return (
+        item.name.toLowerCase().includes(q) ||
+        item.description.toLowerCase().includes(q) ||
+        item.categoryLabel.toLowerCase().includes(q) ||
+        item.shortBadge.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  const handleTestCelebrationEffect = (effectId: string) => {
+    triggerCanvasConfettiForCelebration(effectId);
+    setPreviewBurstState({
+      effectId,
+      nonce: Date.now(),
+    });
+  };
+
   return (
     <div className="space-y-6 text-xs">
+      {/* FULL-SCREEN LIVE PREVIEW OVERLAY FOR 32+ CELEBRATION EFFECTS */}
+      {previewBurstState && (
+        <CelebrationClaimBurstOverlay
+          effectId={previewBurstState.effectId}
+          burstNonce={previewBurstState.nonce}
+          isPreviewMode
+          onDismiss={() => setPreviewBurstState(null)}
+        />
+      )}
       {/* Header & Date Simulation Banner */}
       <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-rose-950/80 border-2 border-amber-400/70 rounded-3xl p-6 shadow-2xl space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
@@ -1145,31 +1194,196 @@ export const AdminGiftEventPanel: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
-                    Efek Perayaan Visual
-                  </label>
-                  <select
-                    value={celebrationEffect}
-                    onChange={(e) => setCelebrationEffect(e.target.value as any)}
-                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-semibold text-xs"
+              {/* =========================================================================
+                  KATALOG EKSKLUSIF 32+ EFEK & PERAYAAN HADIAH & SURAT (WAJIB HANYA 1 PILIHAN)
+                 ========================================================================= */}
+              <div className="p-3.5 rounded-2xl bg-slate-900/95 border-2 border-amber-400/60 space-y-3 shadow-xl">
+                <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-800 pb-2.5">
+                  <div>
+                    <span className="px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 font-black text-[9.5px] uppercase tracking-wider inline-block mb-1">
+                      🎉 32+ EFEK &amp; DEKORASI PERAYAAN EKSKLUSIF (HANYA 1 PILIHAN AKTIF)
+                    </span>
+                    <h5 className="font-black text-white text-xs sm:text-sm">
+                      Pilih 1 Tema Perayaan untuk Hiasan Sebelum Diklaim &amp; Ledakan Efek Saat Diklaim
+                    </h5>
+                    <p className="text-[10.5px] text-slate-300 mt-0.5 leading-snug">
+                      Hanya <strong>1 efek perayaan</strong> yang bisa aktif per paket. Sebelum diklaim, amplop surat &amp; kotak hadiah sudah dihiasi ornamen tema; saat diklaim, layar nasabah memunculkan ledakan spektakuler sesuai perayaan!
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleTestCelebrationEffect(activeCelebrationProfile.id)}
+                    className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 hover:from-amber-200 hover:to-yellow-300 text-slate-950 font-black text-[11px] cursor-pointer flex items-center gap-1.5 shadow-lg shrink-0"
                   >
-                    <option value="confetti">Konfeti Warna-Warni</option>
-                    <option value="gold_rain">Hujan Emas Sulta</option>
-                    <option value="fireworks">Kembang Api Megah</option>
-                    <option value="none">Tanpa Efek</option>
-                  </select>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Tes Efek: {activeCelebrationProfile.primaryEmoji} {activeCelebrationProfile.name}</span>
+                  </button>
                 </div>
 
-                <div>
-                  <label className="text-[10px] font-bold text-slate-300 block mb-1">
-                    Efek Suara Perayaan
+                {/* Active Selected Single Celebration Summary Box */}
+                <div
+                  className={`p-3 rounded-xl bg-gradient-to-r ${activeCelebrationProfile.bannerGradientClass} border ${activeCelebrationProfile.cardBorderAccentClass} flex flex-wrap items-center justify-between gap-2`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-slate-950/70 border border-white/25 flex items-center justify-center text-xl shrink-0">
+                      {activeCelebrationProfile.primaryEmoji}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-950/85 text-amber-300 font-black text-[9.5px] uppercase tracking-wider">
+                          ✓ 1 EFEK TERPILIH
+                        </span>
+                        <span className="text-[10px] font-bold text-white/90">
+                          {activeCelebrationProfile.categoryLabel}
+                        </span>
+                      </div>
+                      <h6 className="font-black text-white text-xs sm:text-sm truncate">
+                        {activeCelebrationProfile.name}
+                      </h6>
+                      <p className="text-[10px] text-white/85 truncate">
+                        {activeCelebrationProfile.description}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 bg-slate-950/65 px-2.5 py-1 rounded-lg border border-white/15">
+                    {activeCelebrationProfile.particleEmojis.map((em, idx) => (
+                      <span key={idx} className="text-sm select-none">
+                        {em}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Category Filter Buttons & Search Input */}
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-1">
+                    {CELEBRATION_CATEGORIES.map((cat) => (
+                      <button
+                        key={cat.key}
+                        type="button"
+                        onClick={() => setCelebCategoryFilter(cat.key)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer border transition ${
+                          celebCategoryFilter === cat.key
+                            ? 'bg-amber-400 text-slate-950 border-amber-200 shadow'
+                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-600'
+                        }`}
+                      >
+                        {cat.emoji} {cat.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={celebSearchQuery}
+                      onChange={(e) => setCelebSearchQuery(e.target.value)}
+                      placeholder="Cari dari 32+ perayaan (contoh: Ulang Tahun, 17 Agustus, Idul Fitri, Christmas, Imlek, Tahun Baru, Sultan...)"
+                      className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-[11px]"
+                    />
+                  </div>
+                </div>
+
+                {/* Exclusive Single-Select Celebration Grid (Radio Cards) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                  {filteredCelebrations.map((item) => {
+                    const isSelected = activeCelebrationProfile.id === item.id;
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => {
+                          setCelebrationEffect(item.id);
+                          setThemeColor(item.recommendedThemeColor);
+                        }}
+                        role="radio"
+                        aria-checked={isSelected}
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setCelebrationEffect(item.id);
+                            setThemeColor(item.recommendedThemeColor);
+                          }
+                        }}
+                        className={`p-2.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                          isSelected
+                            ? 'bg-gradient-to-br from-amber-500/25 via-slate-900 to-slate-950 border-amber-400 shadow-lg ring-1 ring-amber-300/50'
+                            : 'bg-slate-950/90 border-slate-800 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-start gap-2 min-w-0">
+                            <div
+                              className={`w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0 border ${
+                                isSelected
+                                  ? 'bg-amber-400 text-slate-950 border-white font-black'
+                                  : 'bg-slate-900 border-slate-700'
+                              }`}
+                            >
+                              {item.primaryEmoji}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1">
+                                <span className="font-black text-white text-[11px] truncate">
+                                  {item.name}
+                                </span>
+                              </div>
+                              <span className="text-[9.5px] text-slate-400 block line-clamp-1">
+                                {item.description}
+                              </span>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase shrink-0 ${
+                              isSelected
+                                ? 'bg-amber-400 text-slate-950'
+                                : 'bg-slate-900 text-slate-400 border border-slate-800'
+                            }`}
+                          >
+                            {isSelected ? '● Dipilih' : 'Pilih'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800/80">
+                          <div className="flex items-center gap-1 text-xs">
+                            {item.particleEmojis.slice(0, 5).map((em, i) => (
+                              <span key={i} className="select-none">
+                                {em}
+                              </span>
+                            ))}
+                          </div>
+                          {item.id !== 'none' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCelebrationEffect(item.id);
+                                setThemeColor(item.recommendedThemeColor);
+                                handleTestCelebrationEffect(item.id);
+                              }}
+                              className="px-2 py-0.5 rounded-md bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-400/50 text-amber-200 font-black text-[9.5px] cursor-pointer transition"
+                            >
+                              ✨ Tes Efek
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Sound Effect Selector */}
+                <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-[10px] font-bold text-slate-300">
+                    Efek Suara Pendamping Perayaan:
                   </label>
                   <select
                     value={soundEffect}
                     onChange={(e) => setSoundEffect(e.target.value as any)}
-                    className="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-semibold text-xs"
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white font-semibold text-xs"
                   >
                     <option value="chime">Chime Emas Khas</option>
                     <option value="harp">Petikan Harpa Royal</option>
@@ -1797,6 +2011,20 @@ export const AdminGiftEventPanel: React.FC = () => {
                           🎲 Gacha
                         </span>
                       )}
+                      {(() => {
+                        const evCeleb = getCelebrationEffectProfile(ev.celebrationEffect);
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => handleTestCelebrationEffect(evCeleb.id)}
+                            title="Klik untuk memutar pratinjau efek perayaan paket ini"
+                            className="px-2.5 py-0.5 rounded-full bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-300/50 text-amber-200 font-black text-[10px] cursor-pointer transition flex items-center gap-1"
+                          >
+                            <span>{evCeleb.shortBadge}</span>
+                            <span className="underline">• Tes Efek</span>
+                          </button>
+                        );
+                      })()}
                     </div>
                     <h4 className="font-black text-white text-sm sm:text-base">{ev.title}</h4>
                     <span className="text-[11px] text-amber-200 font-semibold block">
@@ -1991,6 +2219,55 @@ export const AdminGiftEventPanel: React.FC = () => {
                             {m.label}
                           </button>
                         ))}
+                      </div>
+                    </div>
+
+                    {/* Quick Celebration Effect Switcher (32+ Celebrations, Single-Select, Live Sync to Cloud RTDB) */}
+                    <div className="p-3 rounded-xl bg-slate-950 border border-amber-400/40 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">
+                          {getCelebrationEffectProfile(ev.celebrationEffect).primaryEmoji}
+                        </span>
+                        <div>
+                          <span className="text-[11px] font-black text-amber-200 block">
+                            🎉 Ganti Cepat Efek &amp; Hiasan Perayaan (Wajib 1 Efek):
+                          </span>
+                          <span className="text-[10px] text-slate-400 block">
+                            Langsung mengubah hiasan sebelum diklaim &amp; ledakan efek saat diklaim secara real-time.
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={getCelebrationEffectProfile(ev.celebrationEffect).id}
+                          onChange={(e) => {
+                            const nextId = e.target.value;
+                            const res = adminUpdateGiftEventQuickSettings(ev.id, {
+                              celebrationEffect: nextId,
+                              retriggerPopup: false,
+                            });
+                            setFeedback(res.message);
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-400/50 text-white font-bold text-[11px]"
+                        >
+                          {CELEBRATION_EFFECTS_CATALOG.map((cel) => (
+                            <option key={cel.id} value={cel.id}>
+                              {cel.primaryEmoji} {cel.name} ({cel.categoryLabel})
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleTestCelebrationEffect(
+                              getCelebrationEffectProfile(ev.celebrationEffect).id
+                            )
+                          }
+                          className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[10.5px] cursor-pointer flex items-center gap-1"
+                        >
+                          <Sparkles className="w-3 h-3" />
+                          <span>Tes Efek</span>
+                        </button>
                       </div>
                     </div>
 
