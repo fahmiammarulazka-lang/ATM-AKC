@@ -54,9 +54,16 @@ import {
 import { CardTier, DevRoleConfig, LoanType, TransferBebasAssetMode } from '../types/bank';
 import { getDevBadgeColorStyle } from '../data/devRolesCatalog';
 import { SmartProtectionBanner } from './SecurityCommandCenter';
+import {
+  DashboardActiveEffectBannerAndAura,
+  CustomerDashboardEffectStudioView,
+  useActiveCustomerDashboardEffects,
+} from './DashboardEffectLayerAndStudio';
+import { getCelebrationEffectProfile } from '../data/celebrationEffectsCatalog';
 
 export type DashboardTab =
   | 'ringkasan'
+  | 'efek_dashboard'
   | 'pekerjaan'
   | 'layanan'
   | 'chat'
@@ -166,6 +173,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [schName, setSchName] = useState<string>('');
   const [schAmount, setSchAmount] = useState<string>('');
   const [schDay, setSchDay] = useState<number>(25);
+  const [selectedDashEffectId, setSelectedDashEffectId] = useState<string | null>(null);
+  const { eligiblePackages: activeDashboardEffectPackages, primaryPackage: primaryDashEffectPkg } =
+    useActiveCustomerDashboardEffects();
 
   if (!currentAccount) {
     return (
@@ -258,13 +268,40 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     return false;
   });
 
+  const activeDashboardEffectPkg =
+    (selectedDashEffectId
+      ? activeDashboardEffectPackages.find((p) => p.id === selectedDashEffectId)
+      : null) || primaryDashEffectPkg;
+  const activeDashboardEffectProfile =
+    activeDashboardEffectPkg && activeDashboardEffectPkg.decorateBalanceCard
+      ? getCelebrationEffectProfile(activeDashboardEffectPkg.celebrationEffect)
+      : null;
+
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
       {/* SMART PROTECTION BANNER (Sesi Sementara -> Hubungkan Google & Ringkasan Atomic Merge) */}
       <SmartProtectionBanner onOpenCommandCenter={onOpenSecurityCenter} />
 
+      {/* EFEK DASHBOARD 100.000X (AUTO-BLAST REAL-TIME + SPANDUK SAMBUTAN + AURA + PARTIKEL) */}
+      <DashboardActiveEffectBannerAndAura
+        selectedPackageIdOverride={selectedDashEffectId}
+        onSelectPackageId={(id) => setSelectedDashEffectId(id)}
+        onOpenStudioTab={() => setActiveTab('efek_dashboard')}
+      />
+
       {/* TOP USER WELCOME & QUICK STATS */}
-      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-5 sm:p-7 border border-blue-900/60 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+      <div
+        className={`relative bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-5 sm:p-7 border-2 ${
+          activeDashboardEffectProfile
+            ? `${activeDashboardEffectProfile.cardBorderAccentClass} ${activeDashboardEffectProfile.cardGlowClass}`
+            : 'border-blue-900/60'
+        } shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 overflow-hidden transition-all`}
+      >
+        {activeDashboardEffectProfile && (
+          <div
+            className={`pointer-events-none absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${activeDashboardEffectProfile.bannerGradientClass}`}
+          />
+        )}
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs uppercase font-mono tracking-widest text-amber-400">
@@ -354,8 +391,24 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           )}
         </div>
 
-        {/* Balance Card Highlight */}
-        <div className="bg-black/40 border border-white/10 rounded-2xl p-4 sm:p-5 backdrop-blur-md min-w-[260px] text-right">
+        {/* Balance Card Highlight (Decorated when Dashboard Effect is Active) */}
+        <div
+          className={`relative bg-black/50 border-2 ${
+            activeDashboardEffectProfile
+              ? `${activeDashboardEffectProfile.cardBorderAccentClass} ${activeDashboardEffectProfile.cardGlowClass}`
+              : 'border-white/10'
+          } rounded-2xl p-4 sm:p-5 backdrop-blur-md min-w-[260px] text-right overflow-hidden transition-all`}
+        >
+          {activeDashboardEffectProfile && (
+            <div className="flex items-center justify-end gap-1.5 mb-1">
+              <span
+                className={`px-2 py-0.5 rounded-full bg-gradient-to-r ${activeDashboardEffectProfile.bannerGradientClass} text-white font-black text-[9px] uppercase tracking-wider flex items-center gap-1 shadow`}
+              >
+                <span>{activeDashboardEffectProfile.primaryEmoji}</span>
+                <span>AURA {activeDashboardEffectProfile.name.toUpperCase()}</span>
+              </span>
+            </div>
+          )}
           <span className="text-xs text-slate-400 block mb-0.5">
             Total Saldo Rekening {currentAccount.cardTier === 'admin' && '• KARTU ADMIN (∞)'}
           </span>
@@ -472,6 +525,20 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('efek_dashboard')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            activeTab === 'efek_dashboard'
+              ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-cyan-400 text-slate-950 font-black shadow-lg shadow-amber-500/40'
+              : 'text-amber-300 hover:text-white hover:bg-amber-500/15 border border-amber-400/50'
+          }`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>
+            ✨ Efek Dashboard 100.000x ({activeDashboardEffectPackages.length})
+          </span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('pekerjaan')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'pekerjaan'
@@ -567,6 +634,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           <span>Jadwal Pembayaran</span>
         </button>
       </div>
+
+      {/* =========================================================================
+          TAB EFEK DASHBOARD 100.000X (STUDIO & TEATER 108 EFEK DI SISI NASABAH)
+         ========================================================================= */}
+      {activeTab === 'efek_dashboard' && (
+        <CustomerDashboardEffectStudioView
+          selectedPackageId={selectedDashEffectId}
+          onSelectPackageId={(id) => setSelectedDashEffectId(id)}
+        />
+      )}
 
       {/* =========================================================================
           TAB PEKERJAAN: LOWONGAN PEKERJAAN, SISTEM LEVEL & SUIT KOMPUTER MEDIUM

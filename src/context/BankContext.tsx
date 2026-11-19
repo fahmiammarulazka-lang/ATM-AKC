@@ -113,6 +113,8 @@ import {
   ManualExpenseRecord,
   AdminGiftEventPackage,
   AdminGiftRewardItem,
+  AdminDashboardEffectPackage,
+  DashboardEffectDurationType,
   ActiveAccountTrial,
   GachaTierRange,
   GachaClaimedItemResult,
@@ -1325,6 +1327,7 @@ interface BankContextType {
     targetCardTier?: CardTier | 'all';
     targetDevRoleOnly?: string;
     celebrationEffect?: string;
+    celebrationIntensity?: '1000x' | '10000x' | '100000x';
     soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
     requireAdminVerifiedAccessForNotif?: boolean;
     adminAuditLogTag?: string;
@@ -1374,10 +1377,61 @@ interface BankContextType {
       title?: string;
       senderName?: string;
       celebrationEffect?: string;
+      celebrationIntensity?: '1000x' | '10000x' | '100000x';
       retriggerPopup?: boolean;
     }
   ) => { success: boolean; message: string };
   adminSetGiftDateTestOverride: (override: { month: number; day: number } | null) => void;
+
+  // Sistem Studio Efek Dashboard 100.000x (108 Efek di 9 Kategori • Kirim ke Semua / 1 Akun / Banyak Akun)
+  dashboardEffectEvents: AdminDashboardEffectPackage[];
+  activeDashboardEffectModal: { packageId: string; nonce: number } | null;
+  triggerDashboardEffectStageModal: (packageId: string) => void;
+  closeDashboardEffectStageModal: () => void;
+  adminCreateOrUpdateDashboardEffect: (input: {
+    id?: string;
+    title: string;
+    senderName: string;
+    welcomeMessage: string;
+    celebrationEffect: string;
+    celebrationIntensity?: '1000x' | '10000x' | '100000x';
+    targetAccountId?: string;
+    targetAccountIds?: string[];
+    revokedAccountIds?: string[];
+    isActive: boolean;
+    autoBlastOnOpen: boolean;
+    showPersistentDashboardAura: boolean;
+    decorateBalanceCard: boolean;
+    durationType: DashboardEffectDurationType;
+    sendNow?: boolean;
+  }) => { success: boolean; message: string; pkg: AdminDashboardEffectPackage };
+  adminDeleteDashboardEffect: (packageId: string) => { success: boolean; message: string };
+  adminToggleDashboardEffectActive: (packageId: string) => { success: boolean; message: string };
+  adminTriggerDashboardEffectBlastNow: (packageId: string) => { success: boolean; message: string };
+  adminUpdateDashboardEffectQuickSettings: (
+    packageId: string,
+    patch: {
+      celebrationEffect?: string;
+      celebrationIntensity?: '1000x' | '10000x' | '100000x';
+      title?: string;
+      welcomeMessage?: string;
+      senderName?: string;
+      durationType?: DashboardEffectDurationType;
+      autoBlastNow?: boolean;
+    }
+  ) => { success: boolean; message: string };
+  adminDuplicateDashboardEffect: (
+    packageId: string,
+    options?: {
+      targetAccountId?: string;
+      targetAccountIds?: string[];
+      sendNow?: boolean;
+    }
+  ) => { success: boolean; message: string; pkg?: AdminDashboardEffectPackage };
+  adminToggleRevokeDashboardEffectRecipient: (
+    packageId: string,
+    accountId: string
+  ) => { success: boolean; message: string; isRevoked: boolean };
 
   // Sistem Bonus Coin Lowongan Pekerjaan (Pengali & Bonus Ekstra) & Gacha Universal Admin
   jobCoinBonusConfig: JobCoinBonusConfig;
@@ -1868,6 +1922,75 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [openingGiftBoxKeys, setOpeningGiftBoxKeys] = useState<string[]>([]);
   const openingGiftBoxKeysRef = useRef<Set<string>>(new Set());
   const [giftDateTestOverride, setGiftDateTestOverride] = useState<{ month: number; day: number } | null>(null);
+  const [dashboardEffectEvents, setDashboardEffectEvents] = useState<AdminDashboardEffectPackage[]>(() => [
+    {
+      id: 'dash-fx-default-sultan-100000x',
+      title: '👑 Panggung Kejayaan Sultan Triliuner 100.000x',
+      senderName: 'Dewan Direksi Bank Nusantara',
+      welcomeMessage:
+        'Selamat datang di Dashboard Utama Bank Nusantara! Nikmati Panggung Selebrasi 100.000x Ultra Max Overdrive lengkap dengan aura neon hologram, portal 3D, dan parade maskot eksklusif.',
+      celebrationEffect: 'sultan_mahkota_emas',
+      celebrationIntensity: '100000x',
+      targetAccountId: '__ALL__',
+      targetAccountIds: [],
+      revokedAccountIds: [],
+      isActive: true,
+      autoBlastOnOpen: false,
+      showPersistentDashboardAura: true,
+      decorateBalanceCard: true,
+      durationType: 'permanent',
+      triggerNonce: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastTriggeredAt: new Date().toISOString(),
+    },
+    {
+      id: 'dash-fx-default-cyberpunk-100000x',
+      title: '⚡ Cyberpunk 2099 Matrix Overdrive 100.000x',
+      senderName: 'Divisi Cyber & Inovasi Bank Nusantara',
+      welcomeMessage:
+        'Mode Cyberpunk Matrix Overdrive siap menggetarkan Dashboard Anda! Klik tombol Putar Panggung 100.000x kapan saja untuk menyalakan laser 3D & synthesizer fanfare.',
+      celebrationEffect: 'cyberpunk_neon_matrix',
+      celebrationIntensity: '100000x',
+      targetAccountId: '__ALL__',
+      targetAccountIds: [],
+      revokedAccountIds: [],
+      isActive: true,
+      autoBlastOnOpen: false,
+      showPersistentDashboardAura: true,
+      decorateBalanceCard: true,
+      durationType: 'permanent',
+      triggerNonce: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastTriggeredAt: new Date().toISOString(),
+    },
+    {
+      id: 'dash-fx-default-dirgahayu-100000x',
+      title: '🇮🇩 Dirgahayu Kemerdekaan RI & Garuda Emas 100.000x',
+      senderName: 'Presiden Direktur Bank Nusantara',
+      welcomeMessage:
+        'Semangat Merah Putih & Garuda Emas Nusantara menyertai setiap transaksi Anda di Bank Nusantara Digital!',
+      celebrationEffect: 'dirgahayu_ri_17_agustus',
+      celebrationIntensity: '100000x',
+      targetAccountId: '__ALL__',
+      targetAccountIds: [],
+      revokedAccountIds: [],
+      isActive: true,
+      autoBlastOnOpen: false,
+      showPersistentDashboardAura: true,
+      decorateBalanceCard: true,
+      durationType: 'permanent',
+      triggerNonce: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastTriggeredAt: new Date().toISOString(),
+    },
+  ]);
+  const [activeDashboardEffectModal, setActiveDashboardEffectModal] = useState<{
+    packageId: string;
+    nonce: number;
+  } | null>(null);
   const [jobCoinBonusConfig, setJobCoinBonusConfig] = useState<JobCoinBonusConfig>(DEFAULT_JOB_COIN_BONUS_CONFIG);
   const [devRoles, setDevRoles] = useState<DevRoleConfig[]>(DEFAULT_DEV_ROLES_10);
 
@@ -2150,6 +2273,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setGiftEvents(filteredGifts);
       }
     }
+    if (Array.isArray(data.dashboardEffectEvents)) {
+      setDashboardEffectEvents(data.dashboardEffectEvents as AdminDashboardEffectPackage[]);
+    }
 
     if (data.banSupportConfig && typeof data.banSupportConfig === 'object') {
       setBanSupportConfig((prev) => ({
@@ -2254,6 +2380,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     giftEvents?: AdminGiftEventPackage[];
     deletedGiftEventIds?: string[];
     giftEventsInitialized?: boolean;
+    dashboardEffectEvents?: AdminDashboardEffectPackage[];
     pockets?: PocketSaving[];
     depositos?: DepositoRecord[];
     banSupportConfig?: BanSupportConfig;
@@ -2340,6 +2467,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       giftEvents: overrides?.giftEvents ?? giftEvents,
       deletedGiftEventIds: overrides?.deletedGiftEventIds ?? deletedGiftEventIds,
       giftEventsInitialized: overrides?.giftEventsInitialized ?? true,
+      dashboardEffectEvents: overrides?.dashboardEffectEvents ?? dashboardEffectEvents,
       banSupportConfig: overrides?.banSupportConfig ?? banSupportConfig,
       pockets: (overrides?.pockets ?? pockets).filter((p) => isNotBotAccountId(p.accountId)),
       depositos: (overrides?.depositos ?? depositos).filter((d) => isNotBotAccountId(d.accountId)),
@@ -3425,6 +3553,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     giftEvents,
     deletedGiftEventIds,
     giftEventsInitialized,
+    dashboardEffectEvents,
     banSupportConfig,
     pockets,
     depositos,
@@ -18100,6 +18229,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     targetCardTier?: CardTier | 'all';
     targetDevRoleOnly?: string;
     celebrationEffect?: string;
+    celebrationIntensity?: '1000x' | '10000x' | '100000x';
     soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
     requireAdminVerifiedAccessForNotif?: boolean;
     adminAuditLogTag?: string;
@@ -18203,6 +18333,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       targetCardTier: input.targetCardTier || 'all',
       targetDevRoleOnly: input.targetDevRoleOnly || '',
       celebrationEffect: input.celebrationEffect || 'ulang_tahun_meriah',
+      celebrationIntensity:
+        input.celebrationIntensity || existing?.celebrationIntensity || '100000x',
       soundEffect: input.soundEffect || 'chime',
       requireAdminVerifiedAccessForNotif: input.requireAdminVerifiedAccessForNotif ?? true,
       adminAuditLogTag: input.adminAuditLogTag || 'GIFT-AUDIT-LOG',
@@ -18539,6 +18671,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       title?: string;
       senderName?: string;
       celebrationEffect?: string;
+      celebrationIntensity?: '1000x' | '10000x' | '100000x';
       retriggerPopup?: boolean;
     }
   ): { success: boolean; message: string } => {
@@ -18569,6 +18702,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           patch.celebrationEffect !== undefined
             ? patch.celebrationEffect
             : e.celebrationEffect || 'ulang_tahun_meriah',
+        celebrationIntensity:
+          patch.celebrationIntensity !== undefined
+            ? patch.celebrationIntensity
+            : e.celebrationIntensity || '100000x',
         targetAccountId: nextTargetId,
         targetAccountIds: nextTargetIds,
         unlockedByManualSend: patch.retriggerPopup ? true : e.unlockedByManualSend,
@@ -18586,6 +18723,322 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       message: `✅ Pengaturan paket "${target.title}" berhasil diperbarui secara real-time!`,
+    };
+  };
+
+  const computeDashboardEffectExpiresAt = (
+    durationType: DashboardEffectDurationType,
+    fromMs: number = Date.now()
+  ): string | undefined => {
+    const hoursMap: Record<DashboardEffectDurationType, number> = {
+      permanent: 0,
+      '1h': 1,
+      '6h': 6,
+      '24h': 24,
+      '72h': 72,
+      '168h': 168,
+    };
+    const hrs = hoursMap[durationType] || 0;
+    if (hrs <= 0) return undefined;
+    return new Date(fromMs + hrs * 3600 * 1000).toISOString();
+  };
+
+  const triggerDashboardEffectStageModal = (packageId: string) => {
+    setActiveDashboardEffectModal({
+      packageId,
+      nonce: Date.now(),
+    });
+  };
+
+  const closeDashboardEffectStageModal = () => {
+    setActiveDashboardEffectModal(null);
+  };
+
+  const adminCreateOrUpdateDashboardEffect = (input: {
+    id?: string;
+    title: string;
+    senderName: string;
+    welcomeMessage: string;
+    celebrationEffect: string;
+    celebrationIntensity?: '1000x' | '10000x' | '100000x';
+    targetAccountId?: string;
+    targetAccountIds?: string[];
+    revokedAccountIds?: string[];
+    isActive: boolean;
+    autoBlastOnOpen: boolean;
+    showPersistentDashboardAura: boolean;
+    decorateBalanceCard: boolean;
+    durationType: DashboardEffectDurationType;
+    sendNow?: boolean;
+  }): { success: boolean; message: string; pkg: AdminDashboardEffectPackage } => {
+    const existing = input.id ? dashboardEffectEvents.find((e) => e.id === input.id) : null;
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+
+    let resolvedTargetAccountId: string = '__ALL__';
+    let resolvedTargetAccountIds: string[] = [];
+
+    if (input.targetAccountId === '__ALL__') {
+      resolvedTargetAccountId = '__ALL__';
+      resolvedTargetAccountIds = [];
+    } else if (Array.isArray(input.targetAccountIds) && input.targetAccountIds.length > 0) {
+      resolvedTargetAccountIds = Array.from(new Set(input.targetAccountIds.filter(Boolean)));
+      resolvedTargetAccountId =
+        resolvedTargetAccountIds.length === 1 ? resolvedTargetAccountIds[0] : '__MULTI__';
+    } else if (input.targetAccountId && input.targetAccountId !== '__MULTI__') {
+      resolvedTargetAccountId = input.targetAccountId;
+      resolvedTargetAccountIds = [input.targetAccountId];
+    }
+
+    const shouldBlastNow = input.sendNow !== false;
+    const nextTriggerNonce = shouldBlastNow
+      ? nowMs
+      : existing?.triggerNonce || nowMs;
+
+    const savedPkg: AdminDashboardEffectPackage = {
+      id: existing ? existing.id : `dash-fx-${nowMs}-${Math.floor(Math.random() * 999)}`,
+      title: input.title.trim() || '✨ Efek Perayaan Dashboard Spesial 100.000x',
+      senderName: input.senderName.trim() || 'Admin Utama Bank Nusantara',
+      welcomeMessage:
+        input.welcomeMessage.trim() ||
+        'Selamat menikmati Panggung Selebrasi 100.000x Ultra Max Overdrive di halaman Dashboard Anda!',
+      celebrationEffect:
+        input.celebrationEffect && input.celebrationEffect !== 'none'
+          ? input.celebrationEffect
+          : 'sultan_mahkota_emas',
+      celebrationIntensity: input.celebrationIntensity || '100000x',
+      targetAccountId: resolvedTargetAccountId,
+      targetAccountIds: resolvedTargetAccountIds,
+      revokedAccountIds:
+        input.revokedAccountIds !== undefined
+          ? input.revokedAccountIds
+          : existing?.revokedAccountIds || [],
+      isActive: input.isActive,
+      autoBlastOnOpen: input.autoBlastOnOpen,
+      showPersistentDashboardAura: input.showPersistentDashboardAura,
+      decorateBalanceCard: input.decorateBalanceCard,
+      durationType: input.durationType || 'permanent',
+      expiresAt: computeDashboardEffectExpiresAt(input.durationType || 'permanent', nowMs),
+      triggerNonce: nextTriggerNonce,
+      createdAt: existing ? existing.createdAt : nowIso,
+      updatedAt: nowIso,
+      lastTriggeredAt: shouldBlastNow ? nowIso : existing?.lastTriggeredAt || nowIso,
+    };
+
+    const nextList = existing
+      ? dashboardEffectEvents.map((e) => (e.id === existing.id ? savedPkg : e))
+      : [savedPkg, ...dashboardEffectEvents];
+
+    setDashboardEffectEvents(nextList);
+    flushMasterStateToCloud({ dashboardEffectEvents: nextList });
+    playAtmSound('success');
+
+    const recipientLabel =
+      resolvedTargetAccountId === '__ALL__'
+        ? `Semua Nasabah (${accounts.length} akun)`
+        : `${resolvedTargetAccountIds.length} akun terpilih`;
+
+    return {
+      success: true,
+      pkg: savedPkg,
+      message: existing
+        ? `💥 Efek Dashboard "${savedPkg.title}" [${recipientLabel}] berhasil diperbarui & disinkronkan ke Cloud!`
+        : `💥 Efek Dashboard baru "${savedPkg.title}" [${recipientLabel}] berhasil dikirimkan & siap meledak 100.000x di layar nasabah!`,
+    };
+  };
+
+  const adminDeleteDashboardEffect = (packageId: string) => {
+    const nextList = dashboardEffectEvents.filter((e) => e.id !== packageId);
+    setDashboardEffectEvents(nextList);
+    flushMasterStateToCloud({ dashboardEffectEvents: nextList });
+    if (activeDashboardEffectModal?.packageId === packageId) {
+      setActiveDashboardEffectModal(null);
+    }
+    playAtmSound('beep');
+    return {
+      success: true,
+      message: 'Paket Efek Dashboard berhasil dihapus dari seluruh perangkat & Cloud!',
+    };
+  };
+
+  const adminToggleDashboardEffectActive = (packageId: string) => {
+    const nowIso = new Date().toISOString();
+    const nextList = dashboardEffectEvents.map((e) =>
+      e.id === packageId ? { ...e, isActive: !e.isActive, updatedAt: nowIso } : e
+    );
+    setDashboardEffectEvents(nextList);
+    flushMasterStateToCloud({ dashboardEffectEvents: nextList });
+    return {
+      success: true,
+      message: 'Status aktif Efek Dashboard berhasil diperbarui.',
+    };
+  };
+
+  const adminTriggerDashboardEffectBlastNow = (packageId: string) => {
+    const target = dashboardEffectEvents.find((e) => e.id === packageId);
+    if (!target) return { success: false, message: 'Paket Efek Dashboard tidak ditemukan.' };
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const nextList = dashboardEffectEvents.map((e) =>
+      e.id === packageId
+        ? {
+            ...e,
+            isActive: true,
+            autoBlastOnOpen: true,
+            triggerNonce: nowMs,
+            expiresAt: computeDashboardEffectExpiresAt(e.durationType, nowMs),
+            lastTriggeredAt: nowIso,
+            updatedAt: nowIso,
+          }
+        : e
+    );
+    setDashboardEffectEvents(nextList);
+    flushMasterStateToCloud({ dashboardEffectEvents: nextList });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `💥 Ledakan Panggung 100.000x "${target.title}" langsung ditembakkan secara Real-Time ke layar Dashboard penerima!`,
+    };
+  };
+
+  const adminUpdateDashboardEffectQuickSettings = (
+    packageId: string,
+    patch: {
+      celebrationEffect?: string;
+      celebrationIntensity?: '1000x' | '10000x' | '100000x';
+      title?: string;
+      welcomeMessage?: string;
+      senderName?: string;
+      durationType?: DashboardEffectDurationType;
+      autoBlastNow?: boolean;
+    }
+  ): { success: boolean; message: string } => {
+    const target = dashboardEffectEvents.find((e) => e.id === packageId);
+    if (!target) return { success: false, message: 'Paket Efek Dashboard tidak ditemukan.' };
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+
+    const nextList = dashboardEffectEvents.map((e) => {
+      if (e.id !== packageId) return e;
+      const nextDuration = patch.durationType || e.durationType;
+      return {
+        ...e,
+        title: patch.title !== undefined ? patch.title : e.title,
+        welcomeMessage: patch.welcomeMessage !== undefined ? patch.welcomeMessage : e.welcomeMessage,
+        senderName: patch.senderName !== undefined ? patch.senderName : e.senderName,
+        celebrationEffect:
+          patch.celebrationEffect && patch.celebrationEffect !== 'none'
+            ? patch.celebrationEffect
+            : e.celebrationEffect,
+        celebrationIntensity: patch.celebrationIntensity || e.celebrationIntensity || '100000x',
+        durationType: nextDuration,
+        expiresAt:
+          patch.durationType !== undefined
+            ? computeDashboardEffectExpiresAt(nextDuration, nowMs)
+            : e.expiresAt,
+        triggerNonce: patch.autoBlastNow ? nowMs : e.triggerNonce,
+        lastTriggeredAt: patch.autoBlastNow ? nowIso : e.lastTriggeredAt,
+        updatedAt: nowIso,
+      };
+    });
+
+    setDashboardEffectEvents(nextList);
+    flushMasterStateToCloud({ dashboardEffectEvents: nextList });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `✨ Efek Dashboard "${target.title}" berhasil diperbarui secara real-time!`,
+    };
+  };
+
+  const adminDuplicateDashboardEffect = (
+    packageId: string,
+    options?: {
+      targetAccountId?: string;
+      targetAccountIds?: string[];
+      sendNow?: boolean;
+    }
+  ): { success: boolean; message: string; pkg?: AdminDashboardEffectPackage } => {
+    const source = dashboardEffectEvents.find((e) => e.id === packageId);
+    if (!source) return { success: false, message: 'Paket sumber tidak ditemukan.' };
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+
+    let nextTargetId = options?.targetAccountId ?? source.targetAccountId ?? '__ALL__';
+    let nextTargetIds = options?.targetAccountIds ?? source.targetAccountIds ?? [];
+    if (nextTargetId === '__ALL__') {
+      nextTargetIds = [];
+    } else if (nextTargetIds.length > 0) {
+      nextTargetIds = Array.from(new Set(nextTargetIds));
+      nextTargetId = nextTargetIds.length === 1 ? nextTargetIds[0] : '__MULTI__';
+    } else if (nextTargetId && nextTargetId !== '__MULTI__') {
+      nextTargetIds = [nextTargetId];
+    }
+
+    const sendNow = options?.sendNow !== false;
+    const duplicated: AdminDashboardEffectPackage = {
+      ...source,
+      id: `dash-fx-dup-${nowMs}-${Math.floor(Math.random() * 999)}`,
+      title: `${source.title} (Salinan)`,
+      targetAccountId: nextTargetId,
+      targetAccountIds: nextTargetIds,
+      revokedAccountIds: [],
+      isActive: true,
+      triggerNonce: nowMs,
+      expiresAt: computeDashboardEffectExpiresAt(source.durationType, nowMs),
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      lastTriggeredAt: sendNow ? nowIso : source.lastTriggeredAt,
+    };
+
+    const nextList = [duplicated, ...dashboardEffectEvents];
+    setDashboardEffectEvents(nextList);
+    flushMasterStateToCloud({ dashboardEffectEvents: nextList });
+    playAtmSound('success');
+
+    return {
+      success: true,
+      pkg: duplicated,
+      message: `💥 Efek Dashboard "${source.title}" berhasil diduplikasi & langsung dikirimkan!`,
+    };
+  };
+
+  const adminToggleRevokeDashboardEffectRecipient = (
+    packageId: string,
+    accountId: string
+  ): { success: boolean; message: string; isRevoked: boolean } => {
+    const target = dashboardEffectEvents.find((e) => e.id === packageId);
+    if (!target) {
+      return { success: false, message: 'Paket Efek Dashboard tidak ditemukan.', isRevoked: false };
+    }
+    const accObj = accounts.find((a) => a.id === accountId);
+    const currentlyRevoked = (target.revokedAccountIds || []).includes(accountId);
+    const nowIso = new Date().toISOString();
+
+    const nextList = dashboardEffectEvents.map((e) => {
+      if (e.id !== packageId) return e;
+      const prevRevoked = e.revokedAccountIds || [];
+      const nextRevoked = currentlyRevoked
+        ? prevRevoked.filter((id) => id !== accountId)
+        : Array.from(new Set([...prevRevoked, accountId]));
+      return {
+        ...e,
+        revokedAccountIds: nextRevoked,
+        updatedAt: nowIso,
+      };
+    });
+
+    setDashboardEffectEvents(nextList);
+    flushMasterStateToCloud({ dashboardEffectEvents: nextList });
+    playAtmSound('beep');
+
+    const accLabel = accObj ? `${accObj.fullName} (${accObj.accountNumber})` : accountId;
+    return {
+      success: true,
+      isRevoked: !currentlyRevoked,
+      message: !currentlyRevoked
+        ? `🚫 Efek Dashboard "${target.title}" dicabut dari akun ${accLabel}.`
+        : `✅ Efek Dashboard "${target.title}" dipulihkan kembali untuk akun ${accLabel}!`,
     };
   };
 
@@ -19608,6 +20061,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminDuplicateGiftEvent,
         adminUpdateGiftEventQuickSettings,
         adminSetGiftDateTestOverride,
+        dashboardEffectEvents,
+        activeDashboardEffectModal,
+        triggerDashboardEffectStageModal,
+        closeDashboardEffectStageModal,
+        adminCreateOrUpdateDashboardEffect,
+        adminDeleteDashboardEffect,
+        adminToggleDashboardEffectActive,
+        adminTriggerDashboardEffectBlastNow,
+        adminUpdateDashboardEffectQuickSettings,
+        adminDuplicateDashboardEffect,
+        adminToggleRevokeDashboardEffectRecipient,
         jobCoinBonusConfig,
         adminUpdateJobCoinBonusConfig,
         adminExecuteUniversalGachaDrop,

@@ -45,7 +45,9 @@ import { LetterSealStudioEditor } from './LetterSealRenderer';
 import {
   CELEBRATION_CATEGORIES,
   CELEBRATION_EFFECTS_CATALOG,
+  CELEBRATION_INTENSITY_OPTIONS,
   CelebrationCategoryKey,
+  CelebrationIntensityLevel,
   getCelebrationEffectProfile,
   triggerCanvasConfettiForCelebration,
 } from '../data/celebrationEffectsCatalog';
@@ -125,10 +127,13 @@ export const AdminGiftEventPanel: React.FC = () => {
   const [targetCardTier, setTargetCardTier] = useState<string>('all');
   const [targetDevRoleOnly, setTargetDevRoleOnly] = useState<string>('');
   const [celebrationEffect, setCelebrationEffect] = useState<string>('ulang_tahun_meriah');
+  const [celebrationIntensity, setCelebrationIntensity] =
+    useState<CelebrationIntensityLevel>('100000x');
   const [celebCategoryFilter, setCelebCategoryFilter] = useState<CelebrationCategoryKey>('all');
   const [celebSearchQuery, setCelebSearchQuery] = useState<string>('');
   const [previewBurstState, setPreviewBurstState] = useState<{
     effectId: string;
+    intensity: CelebrationIntensityLevel;
     nonce: number;
   } | null>(null);
   const [soundEffect, setSoundEffect] = useState<'chime' | 'harp' | 'fanfare' | 'silent'>('chime');
@@ -262,6 +267,7 @@ export const AdminGiftEventPanel: React.FC = () => {
     setTargetCardTier('all');
     setTargetDevRoleOnly('');
     setCelebrationEffect('ulang_tahun_meriah');
+    setCelebrationIntensity('100000x');
     setSoundEffect('chime');
     setRequireAdminVerifiedAccessForNotif(true);
     setAdminAuditLogTag('GIFT-AUDIT-LOG');
@@ -327,6 +333,7 @@ export const AdminGiftEventPanel: React.FC = () => {
     setTargetCardTier(ev.targetCardTier || 'all');
     setTargetDevRoleOnly(ev.targetDevRoleOnly || '');
     setCelebrationEffect(getCelebrationEffectProfile(ev.celebrationEffect).id);
+    setCelebrationIntensity(ev.celebrationIntensity || '100000x');
     setSoundEffect(ev.soundEffect || 'chime');
     setRequireAdminVerifiedAccessForNotif(ev.requireAdminVerifiedAccessForNotif ?? true);
     setAdminAuditLogTag(ev.adminAuditLogTag || 'GIFT-AUDIT-LOG');
@@ -424,6 +431,7 @@ export const AdminGiftEventPanel: React.FC = () => {
       targetCardTier: targetCardTier as any,
       targetDevRoleOnly,
       celebrationEffect,
+      celebrationIntensity,
       soundEffect,
       requireAdminVerifiedAccessForNotif,
       adminAuditLogTag,
@@ -468,21 +476,26 @@ export const AdminGiftEventPanel: React.FC = () => {
     return true;
   });
 
-  const handleTestCelebrationEffect = (effectId: string) => {
-    triggerCanvasConfettiForCelebration(effectId);
+  const handleTestCelebrationEffect = (
+    effectId: string,
+    intensity: CelebrationIntensityLevel = celebrationIntensity
+  ) => {
+    triggerCanvasConfettiForCelebration(effectId, intensity);
     setPreviewBurstState({
       effectId,
+      intensity,
       nonce: Date.now(),
     });
   };
 
   return (
     <div className="space-y-6 text-xs">
-      {/* FULL-SCREEN LIVE PREVIEW OVERLAY FOR 32+ CELEBRATION EFFECTS */}
+      {/* FULL-SCREEN LIVE PREVIEW OVERLAY FOR 108 CELEBRATION EFFECTS (100,000X STAGE) */}
       {previewBurstState && (
         <CelebrationClaimBurstOverlay
           effectId={previewBurstState.effectId}
           burstNonce={previewBurstState.nonce}
+          intensityLevel={previewBurstState.intensity}
           isPreviewMode
           onDismiss={() => setPreviewBurstState(null)}
         />
@@ -1195,30 +1208,76 @@ export const AdminGiftEventPanel: React.FC = () => {
               </div>
 
               {/* =========================================================================
-                  KATALOG EKSKLUSIF 32+ EFEK & PERAYAAN HADIAH & SURAT (WAJIB HANYA 1 PILIHAN)
+                  KATALOG EKSKLUSIF 108 EFEK & PANGGUNG PERAYAAN 100.000X (WAJIB HANYA 1 PILIHAN)
                  ========================================================================= */}
               <div className="p-3.5 rounded-2xl bg-slate-900/95 border-2 border-amber-400/60 space-y-3 shadow-xl">
                 <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-800 pb-2.5">
                   <div>
                     <span className="px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 font-black text-[9.5px] uppercase tracking-wider inline-block mb-1">
-                      🎉 32+ EFEK &amp; DEKORASI PERAYAAN EKSKLUSIF (HANYA 1 PILIHAN AKTIF)
+                      💥 {CELEBRATION_EFFECTS_CATALOG.length} EFEK PANGGUNG SINEMATIK 100.000X (9 KATEGORI • 1 PILIHAN AKTIF)
                     </span>
                     <h5 className="font-black text-white text-xs sm:text-sm">
-                      Pilih 1 Tema Perayaan untuk Hiasan Sebelum Diklaim &amp; Ledakan Efek Saat Diklaim
+                      Pilih 1 Tema Perayaan untuk Hiasan Sebelum Diklaim &amp; Panggung 100.000x Saat Diklaim
                     </h5>
                     <p className="text-[10.5px] text-slate-300 mt-0.5 leading-snug">
-                      Hanya <strong>1 efek perayaan</strong> yang bisa aktif per paket. Sebelum diklaim, amplop surat &amp; kotak hadiah sudah dihiasi ornamen tema; saat diklaim, layar nasabah memunculkan ledakan spektakuler sesuai perayaan!
+                      Dilengkapi <strong>Hitung Mundur 3-2-1 Dramatis, Portal 3D, 14 Sinar Laser, Parade Maskot Raksasa, Trofi Hologram 3D, Synthesizer Musik Fanfare, &amp; Kombo Klik Interaktif</strong>!
                     </p>
                   </div>
 
                   <button
                     type="button"
-                    onClick={() => handleTestCelebrationEffect(activeCelebrationProfile.id)}
+                    onClick={() =>
+                      handleTestCelebrationEffect(
+                        activeCelebrationProfile.id,
+                        celebrationIntensity
+                      )
+                    }
                     className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 hover:from-amber-200 hover:to-yellow-300 text-slate-950 font-black text-[11px] cursor-pointer flex items-center gap-1.5 shadow-lg shrink-0"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Tes Efek: {activeCelebrationProfile.primaryEmoji} {activeCelebrationProfile.name}</span>
+                    <span>
+                      💥 Tes Panggung {celebrationIntensity.toUpperCase()}:{' '}
+                      {activeCelebrationProfile.primaryEmoji} {activeCelebrationProfile.name}
+                    </span>
                   </button>
+                </div>
+
+                {/* Intensity Multiplier Selector (1.000x / 10.000x / 100.000x Ultra Max Overdrive) */}
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-amber-400/40 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[10.5px] font-black text-amber-300">
+                      ⚡ Tingkat Intensitas Panggung Selebrasi (Multiplier):
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-200 font-mono font-black text-[9.5px]">
+                      Mode Aktif: {celebrationIntensity.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {CELEBRATION_INTENSITY_OPTIONS.map((opt) => {
+                      const isActiveInt = celebrationIntensity === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setCelebrationIntensity(opt.id)}
+                          className={`p-2 rounded-xl border text-left transition cursor-pointer ${
+                            isActiveInt
+                              ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 text-slate-950 border-white font-black shadow-lg'
+                              : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-400/50'
+                          }`}
+                        >
+                          <div className="text-[11px] font-black">{opt.label}</div>
+                          <div
+                            className={`text-[9px] leading-tight mt-0.5 ${
+                              isActiveInt ? 'text-slate-900 font-semibold' : 'text-slate-400'
+                            }`}
+                          >
+                            {opt.badgeText} • {opt.particleCount} Partikel &amp; {opt.laserBeamCount} Laser
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Active Selected Single Celebration Summary Box */}
@@ -1232,7 +1291,7 @@ export const AdminGiftEventPanel: React.FC = () => {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className="px-2 py-0.5 rounded-md bg-slate-950/85 text-amber-300 font-black text-[9.5px] uppercase tracking-wider">
-                          ✓ 1 EFEK TERPILIH
+                          ✓ 1 EFEK TERPILIH • {celebrationIntensity.toUpperCase()}
                         </span>
                         <span className="text-[10px] font-bold text-white/90">
                           {activeCelebrationProfile.categoryLabel}
@@ -1280,7 +1339,7 @@ export const AdminGiftEventPanel: React.FC = () => {
                       type="text"
                       value={celebSearchQuery}
                       onChange={(e) => setCelebSearchQuery(e.target.value)}
-                      placeholder="Cari dari 32+ perayaan (contoh: Ulang Tahun, 17 Agustus, Idul Fitri, Christmas, Imlek, Tahun Baru, Sultan...)"
+                      placeholder={`Cari dari ${CELEBRATION_EFFECTS_CATALOG.length} perayaan (contoh: Ulang Tahun, 17 Agustus, Idul Fitri, Cyberpunk, Anime, Galaksi, Sultan...)`}
                       className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-[11px]"
                     />
                   </div>
@@ -2013,15 +2072,17 @@ export const AdminGiftEventPanel: React.FC = () => {
                       )}
                       {(() => {
                         const evCeleb = getCelebrationEffectProfile(ev.celebrationEffect);
+                        const evInt = ev.celebrationIntensity || '100000x';
                         return (
                           <button
                             type="button"
-                            onClick={() => handleTestCelebrationEffect(evCeleb.id)}
-                            title="Klik untuk memutar pratinjau efek perayaan paket ini"
+                            onClick={() => handleTestCelebrationEffect(evCeleb.id, evInt)}
+                            title="Klik untuk memutar pratinjau panggung perayaan 100.000x paket ini"
                             className="px-2.5 py-0.5 rounded-full bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-300/50 text-amber-200 font-black text-[10px] cursor-pointer transition flex items-center gap-1"
                           >
                             <span>{evCeleb.shortBadge}</span>
-                            <span className="underline">• Tes Efek</span>
+                            <span className="opacity-90">({evInt.toUpperCase()})</span>
+                            <span className="underline">• Tes Panggung</span>
                           </button>
                         );
                       })()}
@@ -2222,7 +2283,7 @@ export const AdminGiftEventPanel: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Quick Celebration Effect Switcher (32+ Celebrations, Single-Select, Live Sync to Cloud RTDB) */}
+                    {/* Quick Celebration Effect Switcher (108 Celebrations + Intensity 100,000x, Live Sync to Cloud RTDB) */}
                     <div className="p-3 rounded-xl bg-slate-950 border border-amber-400/40 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <span className="text-lg">
@@ -2230,10 +2291,10 @@ export const AdminGiftEventPanel: React.FC = () => {
                         </span>
                         <div>
                           <span className="text-[11px] font-black text-amber-200 block">
-                            🎉 Ganti Cepat Efek &amp; Hiasan Perayaan (Wajib 1 Efek):
+                            💥 Ganti Cepat Efek ({CELEBRATION_EFFECTS_CATALOG.length} Tema) &amp; Intensitas Panggung 100.000x:
                           </span>
                           <span className="text-[10px] text-slate-400 block">
-                            Langsung mengubah hiasan sebelum diklaim &amp; ledakan efek saat diklaim secara real-time.
+                            Langsung mengubah hiasan sebelum diklaim &amp; panggung sinematik saat diklaim secara real-time.
                           </span>
                         </div>
                       </div>
@@ -2256,17 +2317,36 @@ export const AdminGiftEventPanel: React.FC = () => {
                             </option>
                           ))}
                         </select>
+                        <select
+                          value={ev.celebrationIntensity || '100000x'}
+                          onChange={(e) => {
+                            const nextInt = e.target.value as CelebrationIntensityLevel;
+                            const res = adminUpdateGiftEventQuickSettings(ev.id, {
+                              celebrationIntensity: nextInt,
+                              retriggerPopup: false,
+                            });
+                            setFeedback(res.message);
+                          }}
+                          className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-cyan-400/50 text-cyan-200 font-black text-[11px]"
+                        >
+                          {CELEBRATION_INTENSITY_OPTIONS.map((opt) => (
+                            <option key={opt.id} value={opt.id}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
                         <button
                           type="button"
                           onClick={() =>
                             handleTestCelebrationEffect(
-                              getCelebrationEffectProfile(ev.celebrationEffect).id
+                              getCelebrationEffectProfile(ev.celebrationEffect).id,
+                              ev.celebrationIntensity || '100000x'
                             )
                           }
                           className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[10.5px] cursor-pointer flex items-center gap-1"
                         >
                           <Sparkles className="w-3 h-3" />
-                          <span>Tes Efek</span>
+                          <span>Tes Panggung</span>
                         </button>
                       </div>
                     </div>

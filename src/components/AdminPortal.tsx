@@ -82,6 +82,7 @@ import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './Verifi
 import { AdminQuickAccountControlPanel } from './AdminQuickAccountControlPanel';
 import { AdminGoldTransferPanel } from './AdminGoldTransferPanel';
 import { AdminGiftEventPanel } from './AdminGiftEventPanel';
+import { AdminDashboardEffectsPanel } from './AdminDashboardEffectsPanel';
 import { AdminDevRolesPanel } from './AdminDevRolesPanel';
 import { AdminUniversalGachaPanel } from './AdminUniversalGachaPanel';
 import { AdminJobCoinBonusCard } from './AdminJobCoinBonusCard';
@@ -235,11 +236,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     sendBulkNotifications,
     sendTestNotificationNow,
     giftEvents,
+    dashboardEffectEvents,
   } = useBank();
 
   const [activeAdminTab, setActiveAdminTab] = useState<
     | 'super_tools'
     | 'gift_letters'
+    | 'dashboard_effects'
     | 'dev_roles'
     | 'universal_gacha'
     | 'spin_wheel_admin'
@@ -788,7 +791,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           }`}
         >
           <Gift className="w-4 h-4" />
-          <span>🎁 Hadiah &amp; Surat (100 Hadiah, Role &amp; Stempel) ({giftEvents.length})</span>
+          <span>🎁 Hadiah &amp; Surat (100 Hadiah &amp; 108 Efek 100.000x) ({giftEvents.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('dashboard_effects')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
+            activeAdminTab === 'dashboard_effects'
+              ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-cyan-400 text-slate-950 font-black shadow-lg shadow-amber-500/40'
+              : 'text-cyan-300 hover:text-white hover:bg-cyan-950/60 border-2 border-amber-400/70'
+          }`}
+        >
+          <Zap className="w-4 h-4" />
+          <span>💥 Studio Efek Dashboard 100.000x (108 Efek) ({dashboardEffectEvents.length})</span>
         </button>
 
         <button
@@ -1027,8 +1042,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         </button>
       </div>
 
-      {/* ================= ADMIN TAB: HADIAH & SURAT SPESIAL (58 HADIAH + ROLE + STAMP) ================= */}
+      {/* ================= ADMIN TAB: HADIAH & SURAT SPESIAL (100 HADIAH + 108 EFEK 100.000X) ================= */}
       {activeAdminTab === 'gift_letters' && <AdminGiftEventPanel />}
+
+      {/* ================= ADMIN TAB: STUDIO EFEK DASHBOARD 100.000X (108 EFEK • SEMUA/1/BANYAK AKUN) ================= */}
+      {activeAdminTab === 'dashboard_effects' && <AdminDashboardEffectsPanel />}
 
       {/* ================= ADMIN TAB: 10 ROLE DEV & STAFF ================= */}
       {activeAdminTab === 'dev_roles' && <AdminDevRolesPanel />}

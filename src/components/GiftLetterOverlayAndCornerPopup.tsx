@@ -48,6 +48,7 @@ import {
   CelebrationClaimBurstOverlay,
   PreClaimCardOrnamentStrip,
   PreClaimCelebrationAmbientBackdrop,
+  PreClaimMagicRingSealAura,
 } from './CelebrationSpectacleOverlay';
 
 const isCurrencyRewardType = (type: AdminGiftRewardItem['type']): boolean =>
@@ -213,7 +214,7 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
     if (!burstState) return;
     const timer = window.setTimeout(() => {
       setBurstState(null);
-    }, 4800);
+    }, 9500);
     return () => window.clearTimeout(timer);
   }, [burstState]);
 
@@ -258,13 +259,14 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
   const fireCelebrationSpectacle = (effectId?: string | null) => {
     const profile = getCelebrationEffectProfile(effectId);
     if (profile.id === 'none') return;
+    const intensity = activeEvent?.celebrationIntensity || '100000x';
     try {
-      triggerCanvasConfettiForCelebration(profile.id);
+      triggerCanvasConfettiForCelebration(profile.id, intensity);
     } catch {
       try {
         confetti({
-          particleCount: 100,
-          spread: 90,
+          particleCount: 160,
+          spread: 110,
           origin: { y: 0.52 },
           colors: profile.confettiColors,
         });
@@ -354,11 +356,13 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
 
   return (
     <>
-      {/* FULL-SCREEN SPECTACULAR MULTI-LAYERED CELEBRATION BURST OVERLAY */}
+      {/* FULL-SCREEN SPECTACULAR 100,000X MULTI-LAYERED CELEBRATION BURST OVERLAY */}
       {burstState && (
         <CelebrationClaimBurstOverlay
           effectId={burstState.effectId}
           burstNonce={burstState.nonce}
+          intensityLevel={activeEvent?.celebrationIntensity || '100000x'}
+          customHeadlineOverride={activeEvent?.title}
           onDismiss={() => setBurstState(null)}
         />
       )}
@@ -374,7 +378,10 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
             className={`relative w-full max-w-5xl rounded-3xl border-2 ${theme.border} bg-gradient-to-br ${theme.boxBg} shadow-2xl ${theme.glow} p-5 sm:p-7 my-auto transition-all duration-500 ring-2 ring-amber-300/30 overflow-hidden`}
           >
             {/* PRE-CLAIM & ON-CLAIM THEMED AMBIENT BACKDROP ORNAMENTS */}
-            <PreClaimCelebrationAmbientBackdrop effectId={activeEvent.celebrationEffect} />
+            <PreClaimCelebrationAmbientBackdrop
+              effectId={activeEvent.celebrationEffect}
+              intensityLevel={activeEvent.celebrationIntensity || '100000x'}
+            />
 
             {/* Corner Royal Filigree Accents */}
             <div className="pointer-events-none absolute top-2.5 left-2.5 w-7 h-7 border-t-2 border-l-2 border-amber-400/70 rounded-tl-xl" />
@@ -603,6 +610,7 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                           <PreClaimCardOrnamentStrip
                             effectId={activeEvent.celebrationEffect}
                             targetType="envelope"
+                            intensityLevel={activeEvent.celebrationIntensity || '100000x'}
                           />
 
                           <div className="flex items-center justify-between gap-2 relative z-10">
@@ -616,9 +624,10 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                             </span>
                           </div>
 
-                        {/* Interactive 3D Envelope Visual that scales on hover + Pre-Claim Celebration Ornaments */}
+                        {/* Interactive 3D Envelope Visual that scales on hover + Pre-Claim Celebration Ornaments & Magic Ring Seal */}
                         <div className="relative mx-auto w-48 h-36 flex items-center justify-center my-2 transition-transform duration-300 group-hover:scale-110">
                           <div className="absolute inset-0 rounded-full bg-amber-400/25 blur-2xl group-hover:bg-amber-400/45 transition-all" />
+                          <PreClaimMagicRingSealAura effectId={activeEvent.celebrationEffect} />
                           {celebProfile.id !== 'none' && (
                             <>
                               <span className="pointer-events-none absolute -top-2 -left-1 text-xl animate-bounce select-none z-20">
@@ -845,6 +854,7 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                           <PreClaimCardOrnamentStrip
                             effectId={activeEvent.celebrationEffect}
                             targetType="gift_box"
+                            intensityLevel={activeEvent.celebrationIntensity || '100000x'}
                           />
 
                           <div className="flex items-center justify-between gap-2 relative z-10">
@@ -858,9 +868,10 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                             </span>
                           </div>
 
-                          {/* Interactive 3D Gift Box Visual with Celebration-Themed Ribbon & Ornaments */}
+                          {/* Interactive 3D Gift Box Visual with Celebration-Themed Ribbon & Ornaments + Magic Ring Seal */}
                           <div className="relative mx-auto w-48 h-36 flex items-center justify-center my-2 transition-transform duration-300 group-hover:scale-110">
                             <div className="absolute inset-0 rounded-full bg-amber-400/20 blur-2xl group-hover:bg-amber-400/55 transition-all duration-300" />
+                            <PreClaimMagicRingSealAura effectId={activeEvent.celebrationEffect} />
                             {celebProfile.id !== 'none' && (
                               <>
                                 <span className="pointer-events-none absolute -top-2 left-1 text-xl animate-bounce select-none z-20">

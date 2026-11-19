@@ -1308,6 +1308,7 @@ export interface AdminGiftEventPackage {
   targetCardTier?: CardTier | 'all';
   targetDevRoleOnly?: string;
   celebrationEffect?: string;
+  celebrationIntensity?: '1000x' | '10000x' | '100000x';
   soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
   requireAdminVerifiedAccessForNotif?: boolean;
   adminAuditLogTag?: string;
@@ -1322,6 +1323,36 @@ export interface AdminGiftEventPackage {
   attachmentFileName?: string;
   autoExpireHours?: number;
   allowTransferableGift?: boolean;
+}
+
+export type DashboardEffectDurationType =
+  | 'permanent'
+  | '1h'
+  | '6h'
+  | '24h'
+  | '72h'
+  | '168h';
+
+export interface AdminDashboardEffectPackage {
+  id: string;
+  title: string;
+  senderName: string;
+  welcomeMessage: string;
+  celebrationEffect: string;
+  celebrationIntensity: '1000x' | '10000x' | '100000x';
+  targetAccountId: string; // '__ALL__' | '__MULTI__' | specific BankAccount.id
+  targetAccountIds?: string[];
+  revokedAccountIds?: string[];
+  durationType: DashboardEffectDurationType;
+  expiresAt?: string | null;
+  autoBlastOnOpen: boolean;
+  showPersistentDashboardAura: boolean;
+  decorateBalanceCard: boolean;
+  isActive: boolean;
+  triggerNonce: number;
+  createdAt: string;
+  updatedAt?: string;
+  lastTriggeredAt?: string;
 }
 
 export type SignatureTemplateId =
