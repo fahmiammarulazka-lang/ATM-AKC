@@ -16,11 +16,8 @@ import {
   indexedDBLocalPersistence,
   browserLocalPersistence,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signInAnonymously,
   linkWithPopup,
-  linkWithRedirect,
   signInWithCredential,
   reauthenticateWithPopup,
   signOut,
@@ -115,38 +112,39 @@ function initMultiTabFirestore(): Firestore {
 export const db: Firestore = initMultiTabFirestore();
 export const isIndexedDbPersistenceEnabled = (): boolean => indexedDbCacheActive;
 
-// Firebase Auth dengan Persistence Maksimal (IndexedDB -> Browser Local)
+// Firebase Auth dengan Persistent Session Permanen (browserLocalPersistence)
 export const auth: Auth = getAuth(firebaseApp);
 
-let authPersistenceMode: 'indexedDB' | 'localStorage' | 'memory' = 'indexedDB';
+let authPersistenceMode: 'localStorage' | 'indexedDB' | 'memory' = 'localStorage';
 export const getAuthPersistenceMode = () => authPersistenceMode;
 
-export const authPersistenceReady: Promise<void> = (async () => {
+export async function ensureBrowserLocalPersistence(): Promise<void> {
   if (typeof window === 'undefined') return;
   try {
-    await setPersistence(auth, indexedDBLocalPersistence);
-    authPersistenceMode = 'indexedDB';
+    await setPersistence(auth, browserLocalPersistence);
+    authPersistenceMode = 'localStorage';
   } catch {
     try {
-      await setPersistence(auth, browserLocalPersistence);
-      authPersistenceMode = 'localStorage';
+      await setPersistence(auth, indexedDBLocalPersistence);
+      authPersistenceMode = 'indexedDB';
     } catch {
       authPersistenceMode = 'memory';
     }
   }
-})();
+}
+
+export const authPersistenceReady: Promise<void> = ensureBrowserLocalPersistence();
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export {
   GoogleAuthProvider,
+  setPersistence,
+  browserLocalPersistence,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   signInAnonymously,
   linkWithPopup,
-  linkWithRedirect,
   signInWithCredential,
   reauthenticateWithPopup,
   signOut,
@@ -759,7 +757,8 @@ export async function signInWithGooglePopup(): Promise<{
   redirecting?: boolean;
   message: string;
 }> {
-  await authPersistenceReady;
+  // Wajib aktifkan browserLocalPersistence tepat sebelum login popup agar token sesi permanen di browser
+  await ensureBrowserLocalPersistence();
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return {
@@ -771,21 +770,12 @@ export async function signInWithGooglePopup(): Promise<{
     const code = (err as { code?: string })?.code || '';
     const host = typeof window !== 'undefined' ? window.location.hostname : 'domain ini';
     if (code === 'auth/popup-blocked') {
-      try {
-        await signInWithRedirect(auth, googleProvider);
-        return {
-          success: false,
-          errorCode: code,
-          redirecting: true,
-          message: 'Popup diblokir browser. Mengalihkan otomatis ke halaman login Google...',
-        };
-      } catch {
-        return {
-          success: false,
-          errorCode: code,
-          message: 'Browser memblokir popup login Google. Izinkan pop-up untuk situs ini lalu coba lagi.',
-        };
-      }
+      return {
+        success: false,
+        errorCode: code,
+        message:
+          'Popup login Google diblokir oleh browser Anda. Mohon izinkan pop-up pada bilah alamat browser untuk situs ini, lalu klik tombol Coba Lagi.',
+      };
     }
     if (code === 'auth/unauthorized-domain') {
       return {

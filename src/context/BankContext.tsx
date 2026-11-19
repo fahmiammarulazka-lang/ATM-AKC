@@ -40,9 +40,16 @@ import {
   saveActiveBootSession,
   readActiveBootSession,
   clearActiveBootSession,
+  readLastSeenUpdateId,
+  saveLastSeenUpdateId,
   type FastBootSessionSnapshot,
   type SyncTelemetryState,
 } from '../services/maxSyncService';
+import {
+  getActiveAppBuildInfo,
+  mergeAutoDetectedAppUpdates,
+  type ActiveAppBuildInfo,
+} from '../services/autoUpdateReleaseService';
 import {
   ensureAnonymousVaultSession,
   resolvePendingAuthRedirect,
@@ -58,6 +65,7 @@ import {
 } from '../services/timeMachineBackupService';
 import {
   BankAccount,
+  DebtHistoryEntry,
   Transaction,
   LoanApplication,
   ScheduledPayment,
@@ -277,7 +285,11 @@ interface BankContextType {
   // Cloud Auth, Real-Time Sync & Onboarding Flow (Wajib Google Sign-In)
   googleUser: GoogleUserSession | null;
   firebaseUser: FirebaseUser | null;
+  isAuthLoading: boolean;
   isCloudBootReady: boolean;
+  activeBuildInfo: ActiveAppBuildInfo;
+  hasUnreadAppUpdate: boolean;
+  markLatestAppUpdateSeen: () => void;
   cloudAccountVerificationState: 'verifying' | 'confirmed_has_accounts' | 'confirmed_zero_accounts' | 'network_timeout';
   retryCloudAccountCheck: () => Promise<boolean>;
   cloudSyncStatus: CloudSyncStatus;
@@ -999,39 +1011,92 @@ interface BankContextType {
   ) => { success: boolean; message: string };
   adminMassSpinCoinRain: (coins: number) => { success: boolean; message: string };
 
-  // Mining Kripto, Lelang Supercar & Cyber Vault (Sebelah Spin the Wheel - Pengganti Kerajaan) + Kontrol Admin
+  // Mining Kripto, Lelang Supercar & Cyber Vault (Sebelah Spin the Wheel - Pengganti Kerajaan) + Risiko Kerugian & Hutang + Kontrol Admin
   sultanEmpireConfig: SultanEmpireAdminConfig;
-  buySultanBusiness: (businessId: string, quantity?: number) => {
+  debtAlertModal: {
+    id: string;
+    sourceLabel: string;
+    debtAdded: number;
+    totalDebt: number;
+    dueAt: string;
+    message: string;
+    timestamp: string;
+  } | null;
+  dismissDebtAlertModal: () => void;
+  payAccountDebt: (
+    amount: number,
+    mode?: 'partial' | 'full'
+  ) => {
+    success: boolean;
+    message: string;
+    remainingDebt?: number;
+  };
+  adminManageAccountDebt: (
+    accountId: string,
+    action:
+      | 'add'
+      | 'reduce'
+      | 'set'
+      | 'forgive'
+      | 'extend_deadline'
+      | 'set_deadline_minutes'
+      | 'lift_debt_ban',
+    payload?: { amount?: number; note?: string; hours?: number; minutes?: number }
+  ) => { success: boolean; message: string };
+  buySultanBusiness: (
+    businessId: string,
+    quantity?: number,
+    options?: { useDebtCredit?: boolean }
+  ) => {
     success: boolean;
     message: string;
     newLevel?: number;
+    debtAdded?: number;
+    needsDebtOption?: boolean;
+    shortfallAmount?: number;
   };
   sellSultanBusinessAuction: (businessId: string, quantity?: number) => {
     success: boolean;
     message: string;
     cashReceived?: number;
     remainingLevel?: number;
+    incurredLoss?: number;
+    debtAdded?: number;
   };
-  claimAllSultanBusinessProfits: () => {
+  claimAllSultanBusinessProfits: (overclockMode?: 1 | 2 | 5) => {
     success: boolean;
     message: string;
     cashClaimed?: number;
     coinsClaimed?: number;
+    incurredLoss?: number;
+    debtAdded?: number;
   };
   tradeSultanAsset: (
     assetId: string,
     action: 'buy' | 'sell',
-    units: number
+    units: number,
+    options?: { useDebtCredit?: boolean }
   ) => {
     success: boolean;
     message: string;
+    incurredLoss?: number;
+    debtAdded?: number;
+    needsDebtOption?: boolean;
+    shortfallAmount?: number;
   };
-  openSultanMysteryVault: (vaultId: string) => {
+  openSultanMysteryVault: (
+    vaultId: string,
+    options?: { useDebtCredit?: boolean }
+  ) => {
     success: boolean;
     message: string;
     cashWon?: number;
     coinsWon?: number;
     vouchersWon?: number;
+    incurredLoss?: number;
+    debtAdded?: number;
+    needsDebtOption?: boolean;
+    shortfallAmount?: number;
   };
   adminUpdateSultanEmpireConfig: (
     partial: Partial<SultanEmpireAdminConfig>
@@ -1552,7 +1617,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   ).current;
 
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [isCloudBootReady, setIsCloudBootReady] = useState<boolean>(false);
+  const activeBuildInfo = useRef<ActiveAppBuildInfo>(getActiveAppBuildInfo()).current;
+  const hasSyncedAutoBuildRef = useRef<boolean>(false);
+  const [lastSeenUpdateId, setLastSeenUpdateId] = useState<string | null>(null);
+  const [debtAlertModal, setDebtAlertModal] = useState<{
+    id: string;
+    sourceLabel: string;
+    debtAdded: number;
+    totalDebt: number;
+    dueAt: string;
+    message: string;
+    timestamp: string;
+  } | null>(null);
+  const dismissDebtAlertModal = () => setDebtAlertModal(null);
   const [cloudAccountVerificationState, setCloudAccountVerificationState] = useState<
     'verifying' | 'confirmed_has_accounts' | 'confirmed_zero_accounts' | 'network_timeout'
   >('verifying');
@@ -1679,7 +1758,34 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ]);
 
   const [bugReports, setBugReports] = useState<BugReportRecord[]>([]);
-  const [appUpdates, setAppUpdates] = useState<AppUpdateRecord[]>(INITIAL_APP_UPDATES);
+  const [appUpdates, setAppUpdates] = useState<AppUpdateRecord[]>(() =>
+    mergeAutoDetectedAppUpdates([], INITIAL_APP_UPDATES).mergedUpdates
+  );
+
+  // Muat ID update terakhir yang sudah dibaca pengguna dari IndexedDB untuk penanda BARU di Navbar
+  useEffect(() => {
+    let mounted = true;
+    void readLastSeenUpdateId().then((storedId) => {
+      if (mounted && storedId) {
+        setLastSeenUpdateId(storedId);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const latestActiveUpdateId =
+    appUpdates.find((u) => u.isCurrent)?.id || appUpdates[0]?.id || '';
+  const hasUnreadAppUpdate = Boolean(
+    latestActiveUpdateId && lastSeenUpdateId !== latestActiveUpdateId
+  );
+
+  const markLatestAppUpdateSeen = () => {
+    if (!latestActiveUpdateId) return;
+    setLastSeenUpdateId(latestActiveUpdateId);
+    void saveLastSeenUpdateId(latestActiveUpdateId);
+  };
   const [spinWheelConfig, setSpinWheelConfig] = useState<SpinWheelAdminConfig>(INITIAL_SPIN_WHEEL_CONFIG);
   const [spinHistory, setSpinHistory] = useState<SpinHistoryRecord[]>([]);
   const [sultanEmpireConfig, setSultanEmpireConfig] = useState<SultanEmpireAdminConfig>(
@@ -2106,7 +2212,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     if (Array.isArray(data.budgetAlertHistory)) setBudgetAlertHistory(data.budgetAlertHistory as string[]);
     if (Array.isArray(data.appUpdates) && data.appUpdates.length > 0) {
-      setAppUpdates(data.appUpdates as AppUpdateRecord[]);
+      const mergedRes = mergeAutoDetectedAppUpdates(
+        data.appUpdates as AppUpdateRecord[],
+        INITIAL_APP_UPDATES
+      );
+      setAppUpdates(mergedRes.mergedUpdates);
+      if (mergedRes.didChange && !hasSyncedAutoBuildRef.current) {
+        hasSyncedAutoBuildRef.current = true;
+        window.setTimeout(() => {
+          flushMasterStateToCloud({ appUpdates: mergedRes.mergedUpdates });
+          syncUpdatesToServer(mergedRes.mergedUpdates);
+        }, 400);
+      }
+    } else if (!hasSyncedAutoBuildRef.current) {
+      const mergedRes = mergeAutoDetectedAppUpdates([], INITIAL_APP_UPDATES);
+      setAppUpdates(mergedRes.mergedUpdates);
+      hasSyncedAutoBuildRef.current = true;
+      window.setTimeout(() => {
+        flushMasterStateToCloud({ appUpdates: mergedRes.mergedUpdates });
+      }, 600);
     }
     if (Array.isArray(data.devRoles) && data.devRoles.length > 0) {
       setDevRoles(data.devRoles as DevRoleConfig[]);
@@ -2549,11 +2673,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await Promise.all(tasks);
   };
 
-  // Fast-Boot Cloud Auth Check + IndexedDB Active Session Instant Restoration + Anti-False-Create-Account Verification Gate
+  // Permanent Firebase Auth Initialization (isAuthLoading ketat berbasis onAuthStateChanged) + Fast-Boot IndexedDB
   useEffect(() => {
     let active = true;
     let userDocUnsub: (() => void) | null = null;
     let bootUnlocked = false;
+    let hasAuthResolved = false;
     let hasCloudAccountsArrived = false;
 
     const unlockBootUI = () => {
@@ -2563,15 +2688,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setIsCloudBootReady(true);
     };
 
+    const finishAuthCheck = () => {
+      if (!active) return;
+      hasAuthResolved = true;
+      setIsAuthLoading(false);
+      unlockBootUI();
+    };
+
     // Tandai status sinkronisasi halus di HUD Navbar saat boot berlangsung
     updateSyncTelemetry({
       hasPendingWrites: true,
       lastError: null,
     });
 
-    // Hard timeout 2.5 detik: menjamin layar skeleton cepat terbuka, sementara form Buat Akun tetap ditahan oleh cloudAccountVerificationState
+    // Timeout pengaman 2.5 detik HANYA mempercepat sinkronisasi data jika onAuthStateChanged SUDAH selesai;
+    // TIDAK PERNAH memotong isAuthLoading agar aplikasi tidak pernah mental ke halaman Login!
     const hardTimeoutId = window.setTimeout(() => {
-      if (!active || bootUnlocked) return;
+      if (!active || bootUnlocked || !hasAuthResolved) return;
       hasFirestoreHydratedRef.current = true;
       updateSyncTelemetry({
         fromCache: true,
@@ -2583,11 +2716,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Fase 0 (< 50ms): Baca cache Fast-Boot & Active Session Envelope dari IndexedDB secara paralel
     const fastCachePromise = Promise.all([readFastBootSnapshot(), readActiveBootSession()]);
 
-    // Jalankan pengecekan konektivitas & redirect auth secara non-blocking di latar belakang
+    // Jalankan pengecekan konektivitas secara non-blocking di latar belakang (popup-only, tanpa redirect)
     void testConnection();
     void resolvePendingAuthRedirect();
 
-    // Muat payload riwayat panjang (transactions, chats, notifications, giftEvents, dll.) di latar belakang
+    // Muat payload riwayat panjang (transactions, chats, notifications, giftEvents, appUpdates, dll.) di latar belakang
     const hydrateFullMasterInBackground = () => {
       void getEarlyFullMasterPrefetch(6000)
         .then((fullMaster) => {
@@ -2624,7 +2757,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // jangan timpa state accounts lokal dengan master_state lama sebelum proses merge & write selesai!
       if (isLinkingAccountToGoogleRef.current) {
         hasFirestoreHydratedRef.current = true;
-        unlockBootUI();
+        finishAuthCheck();
         return;
       }
 
@@ -2728,7 +2861,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             hasPendingWrites: true,
             syncedDocCount: workingAccounts.length,
           });
-          unlockBootUI();
+          finishAuthCheck();
         }
 
         const [earlyAccountsRes, anonVault] = await Promise.all([
@@ -2793,7 +2926,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
         }
         hasFirestoreHydratedRef.current = true;
-        unlockBootUI();
+        finishAuthCheck();
         hydrateFullMasterInBackground();
         return;
       }
@@ -2877,9 +3010,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
 
           setGoogleUser((prev) => {
-            const alreadyVerified =
-              Boolean(prev && normalizeEmailKey(prev.email) === cleanEmail && prev.isPinVerified) ||
-              (keepVerifiedFromIdb && Boolean(isSavedSessionForThisGoogle && savedSession?.isPinVerified));
+            // Sesi Google sudah terautentikasi via Firebase Auth -> langsung masuk Dashboard tanpa minta PIN ulang
+            const hasAccountReady = Boolean(
+              matchedAccount ||
+                userDoc?.hasCompletedOnboarding ||
+                (keepVerifiedFromIdb && isSavedSessionForThisGoogle && savedSession?.hasCompletedOnboarding)
+            );
             return {
               email: cleanEmail,
               name: matchedAccount?.fullName || cleanName,
@@ -2888,19 +3024,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               authMode: 'google',
               emailKey: emailDocId,
               loggedInAt: prev?.loggedInAt || new Date().toISOString(),
-              hasCompletedOnboarding: Boolean(
-                matchedAccount ||
-                  userDoc?.hasCompletedOnboarding ||
-                  (keepVerifiedFromIdb && isSavedSessionForThisGoogle && savedSession?.hasCompletedOnboarding)
-              ),
-              isPinVerified: matchedAccount ? alreadyVerified : false,
+              hasCompletedOnboarding: hasAccountReady,
+              isPinVerified: hasAccountReady,
             };
           });
 
           return matchedAccount;
         };
 
-        // 2A. JALUR INSTAN (< 100ms): Hanya buka langsung ke Dashboard jika rekening milik user BENAR-BENAR ada di IndexedDB!
+        // 2A. JALUR INSTAN (< 100ms): Jika rekening milik user sudah ada di IndexedDB -> LANGSUNG MASUK DASHBOARD!
         const instantMatched = applyMatchedGoogleSession(workingAccounts, null, true);
         if (instantMatched) {
           updateSyncTelemetry({
@@ -2908,9 +3040,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             hasPendingWrites: true,
             syncedDocCount: workingAccounts.length,
           });
-          unlockBootUI();
+          finishAuthCheck();
         } else {
-          // Belum ditemukan di cache lokal -> TAHAN form Buat Akun dengan status 'verifying' sampai Cloud menjawab!
+          // Belum ditemukan di cache lokal (mis. pasca-update/publish) -> TAHAN layar skeleton (isAuthLoading tetap true) sampai RTDB konfirmasi rekening!
           setCloudAccountVerificationState('verifying');
         }
 
@@ -3069,7 +3201,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             name: finalMatched.fullName || cleanName,
             picture: fbUser.photoURL || savedSession?.picture,
             activeAccountId: finalMatched.id,
-            isPinVerified: Boolean(isSavedSessionForThisGoogle && savedSession?.isPinVerified),
+            isPinVerified: true,
             hasCompletedOnboarding: true,
             accountsPool: cloudAccountsLoaded,
           });
@@ -3082,7 +3214,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         hasFirestoreHydratedRef.current = true;
-        unlockBootUI();
+        finishAuthCheck();
         hydrateFullMasterInBackground();
         return;
       }
@@ -3118,13 +3250,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             syncedDocCount: workingAccounts.length,
           });
           hasFirestoreHydratedRef.current = true;
-          unlockBootUI();
+          finishAuthCheck();
           hydrateFullMasterInBackground();
           return;
         }
       }
 
-      // Belum ada sesi aktif -> Tampilkan Gerbang Masuk secepat mungkin
+      // Belum ada sesi aktif (user === null) -> Selesaikan isAuthLoading dan tampilkan Halaman Login
       if (active && !activeCloudEmailRef.current) {
         setGoogleUser(null);
         setCloudUserStatus(null);
@@ -3136,7 +3268,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           hasPendingWrites: true,
           syncedDocCount: workingAccounts.length,
         });
-        unlockBootUI();
+        finishAuthCheck();
       } else {
         const earlyAccountsRes = await getEarlyAccountsPrefetch(2200);
         if (active && earlyAccountsRes?.accounts) {
@@ -3165,7 +3297,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         }
         hasFirestoreHydratedRef.current = true;
-        unlockBootUI();
+        finishAuthCheck();
       }
 
       hydrateFullMasterInBackground();
@@ -3728,21 +3860,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setGoogleUser({
       email: cleanEmail,
-      name: cleanName,
+      name: linkedCard?.fullName || cleanName,
       picture: fbUser.photoURL || undefined,
       firebaseUid: fbUser.uid,
       authMode: 'google',
       emailKey: emailDocId,
       loggedInAt: nowIso,
       hasCompletedOnboarding: Boolean(linkedCard),
-      isPinVerified: false,
+      isPinVerified: Boolean(linkedCard),
     });
+
+    if (linkedCard) {
+      persistActiveSessionToIdb({
+        authMode: 'google',
+        firebaseUid: fbUser.uid,
+        email: cleanEmail,
+        emailKey: emailDocId,
+        name: linkedCard.fullName || cleanName,
+        picture: fbUser.photoURL || undefined,
+        activeAccountId: linkedCard.id,
+        isPinVerified: true,
+        hasCompletedOnboarding: true,
+        accountsPool: latestAccounts,
+      });
+    }
 
     playAtmSound('success');
     return {
       success: true,
       message: linkedCard
-        ? `Akun ${cleanEmail} terdeteksi sudah memiliki kartu. Silakan masukkan 6 digit PIN Kartu Anda.`
+        ? `Selamat datang kembali, ${linkedCard.fullName}! Langsung masuk ke Dashboard.`
         : `Selamat datang ${cleanName}! Akun Anda belum memiliki kartu, silakan buat kartu baru.`,
     };
   };
@@ -8261,7 +8408,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         flushMasterStateToCloud({ accounts: activatedAccounts });
       }
 
-      // 2. Cek apakah ada Banned Trial / Sementara yang waktunya sudah habis
+      // 2. Cek apakah ada Banned Trial / Sementara (termasuk Auto-Ban Hutang 1 Hari) yang waktunya sudah habis
       const latestAccounts = readyScheduledList.length > 0 ? accountsRef.current : currentAccounts;
       const expiredList = latestAccounts.filter(
         (acc) =>
@@ -8271,19 +8418,46 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           now >= new Date(acc.banInfo.expiresAt).getTime()
       );
 
+      let workingListAfterUnban = latestAccounts;
+
       if (expiredList.length > 0) {
-        const nextAccounts: BankAccount[] = latestAccounts.map((acc) =>
-          expiredList.some((exp) => exp.id === acc.id)
+        const defaultTermHours = Math.max(1, sultanEmpireConfig.debtDefaultTermHours || 24);
+        const renewedDueIso = new Date(now + defaultTermHours * 3600 * 1000).toISOString();
+        const nowIsoStr = new Date(now).toISOString();
+
+        const nextAccounts: BankAccount[] = latestAccounts.map((acc) => {
+          if (!expiredList.some((exp) => exp.id === acc.id)) return acc;
+          const stillHasDebt = (acc.debtAmount || 0) > 0;
+          const extEntry: DebtHistoryEntry | null = stillHasDebt
             ? {
-                ...acc,
-                status: 'active' as const,
-                banReason: '',
-                cardStatus: 'active' as const,
-                banInfo: undefined,
-                failedPinAttempts: 0,
+                id: `debt-unban-${now}-${acc.id}`,
+                type: 'unban_extended',
+                amount: 0,
+                balanceAfterDebt: acc.debtAmount || 0,
+                sourceLabel: 'Masa Banned 1 Hari Selesai',
+                note: `Akun terbuka otomatis setelah banned 1 hari selesai. Sisa hutang ${formatRupiah(
+                  acc.debtAmount || 0
+                )} tetap tercatat dengan perpanjangan tenggat baru ${defaultTermHours} jam.`,
+                timestamp: nowIsoStr,
               }
-            : acc
-        );
+            : null;
+          return {
+            ...acc,
+            status: 'active' as const,
+            banReason: '',
+            cardStatus: 'active' as const,
+            banInfo: undefined,
+            failedPinAttempts: 0,
+            isDebtAutoBanned: false,
+            ...(stillHasDebt
+              ? {
+                  debtDueAt: renewedDueIso,
+                  debtHistory: [extEntry!, ...(acc.debtHistory || [])].slice(0, 80),
+                }
+              : {}),
+          };
+        });
+        workingListAfterUnban = nextAccounts;
         setAccounts(nextAccounts);
         expiredList.forEach((exp) => {
           void syncCloudUserProfile(
@@ -8300,6 +8474,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               failedPinAttempts: 0,
             }
           );
+          if (
+            cloudUserStatus &&
+            ((exp.firebaseUid && cloudUserStatus.uid === exp.firebaseUid) ||
+              (exp.googleEmail && normalizeEmailKey(exp.googleEmail) === normalizeEmailKey(cloudUserStatus.email || '')))
+          ) {
+            setCloudUserStatus((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    status: 'active',
+                    banReason: '',
+                    banExpiresAt: '',
+                    banDurationLabel: '',
+                  }
+                : prev
+            );
+          }
           appendBanAuditLog({
             action: 'auto_unban',
             targetAccountId: exp.id,
@@ -8307,20 +8498,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             targetAccountNumber: exp.accountNumber,
             targetEmail: exp.googleEmail || exp.email,
             durationLabel: exp.banInfo?.durationLabel || 'Sementara',
-            reasonSummary: 'Waktu Banned Trial selesai — Otomatis Unban Real-Time',
+            reasonSummary: exp.isDebtAutoBanned
+              ? 'Masa Banned Hutang 1 Hari selesai — Otomatis Unban & Perpanjang Tenggat Hutang 24 Jam'
+              : 'Waktu Banned Trial selesai — Otomatis Unban Real-Time',
             caseId: exp.banInfo?.customConfig?.caseId,
           });
         });
         flushMasterStateToCloud({ accounts: nextAccounts });
 
         const newPopups: WebsiteSystemPopupNotification[] = expiredList.map((unbannedAcc) => {
-          const prevDurationLabel = unbannedAcc.banInfo?.durationLabel || '1 Menit';
+          const prevDurationLabel = unbannedAcc.banInfo?.durationLabel || '1 Hari (24 Jam)';
+          const hasRemainingDebt = (unbannedAcc.debtAmount || 0) > 0;
           return {
             id: `sys-unban-auto-${Date.now()}-${unbannedAcc.id}`,
             type: 'unban',
             title: '🔓 KARTU ANDA TELAH TERBUKA KEMBALI!',
             subtitle: 'NOTIFIKASI RESMI DARI SISTEM WEBSITE BANK NUSANTARA',
-            message: `Pemberitahuan Sistem Website: Masa Banned kartu ATM Anda atas nama ${unbannedAcc.fullName} (No. Rekening: ${unbannedAcc.accountNumber}) dengan durasi "${prevDurationLabel}" telah habis. Saat ini kartu Anda adalah TERBUKA (AKTIF) dan sudah dapat digunakan kembali seperti semula!`,
+            message: hasRemainingDebt
+              ? `Masa Banned 1 Hari kartu Anda (${unbannedAcc.fullName}) telah selesai dan akun kembali AKTIF. Sisa hutang sebesar ${formatRupiah(
+                  unbannedAcc.debtAmount || 0
+                )} tetap tercatat dengan perpanjangan batas bayar baru ${defaultTermHours} jam. Segera lunasi di Tab Hutang agar tidak terkena banned lagi!`
+              : `Pemberitahuan Sistem Website: Masa Banned kartu ATM Anda atas nama ${unbannedAcc.fullName} (No. Rekening: ${unbannedAcc.accountNumber}) dengan durasi "${prevDurationLabel}" telah habis. Saat ini kartu Anda adalah TERBUKA (AKTIF) dan sudah dapat digunakan kembali seperti semula!`,
             accountId: unbannedAcc.id,
             accountName: unbannedAcc.fullName,
             accountNumber: unbannedAcc.accountNumber,
@@ -11860,6 +12058,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             dateText: mergedDate,
             highlights: mergedHighlights,
             changes: mergedHighlights,
+            editedByAdmin: true,
           };
         }
         if (input.isCurrent === true) {
@@ -13537,8 +13736,634 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  // ================= PUSAT MINING KRIPTO, BALAI LELANG SUPERCAR & CYBER VAULT (PENGGANTI KERAJAAN - BEBAS LEVEL!) =================
-  const buySultanBusiness = (businessId: string, quantity = 1) => {
+  // ================= SISTEM HUTANG & KERUGIAN (MINING/LELANG/BURSA/VAULT) + AUTO-BAN 1 HARI + KONTROL PANEL ADMIN =================
+  const getDebtPolicy = () => ({
+    lossRiskPercent: Math.min(80, Math.max(0, sultanEmpireConfig.lossRiskPercent ?? 25)),
+    lossSeverityPercent: Math.min(100, Math.max(5, sultanEmpireConfig.lossSeverityPercent ?? 35)),
+    debtDefaultTermHours: Math.max(1, sultanEmpireConfig.debtDefaultTermHours ?? 24),
+    debtBanDurationHours: Math.max(1, sultanEmpireConfig.debtBanDurationHours ?? 24),
+    debtLateFeeEnabled: Boolean(sultanEmpireConfig.debtLateFeeEnabled),
+    debtLateFeePercent: Math.min(50, Math.max(0, sultanEmpireConfig.debtLateFeePercent ?? 5)),
+  });
+
+  const applyAccountDebtIncrease = (params: {
+    account: BankAccount;
+    debtAdded: number;
+    entryType: DebtHistoryEntry['type'];
+    sourceLabel: string;
+    note: string;
+    customBalance?: number;
+    extraAccountPatch?: Partial<BankAccount>;
+    triggerPopup?: boolean;
+  }): { totalDebt: number; dueAt: string } => {
+    const policy = getDebtPolicy();
+    const nowIso = new Date().toISOString();
+    const prevDebt = Math.max(0, Math.round(params.account.debtAmount || 0));
+    const added = Math.max(0, Math.round(params.debtAdded));
+    const totalDebt = prevDebt + added;
+    const dueAt =
+      prevDebt > 0 && params.account.debtDueAt
+        ? params.account.debtDueAt
+        : new Date(Date.now() + policy.debtDefaultTermHours * 3600 * 1000).toISOString();
+
+    const newEntry: DebtHistoryEntry = {
+      id: `debt-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      type: params.entryType,
+      amount: added,
+      balanceAfterDebt: totalDebt,
+      sourceLabel: params.sourceLabel,
+      note: params.note,
+      timestamp: nowIso,
+    };
+
+    const nextAccounts = accountsRef.current.map((a) =>
+      a.id === params.account.id
+        ? {
+            ...a,
+            ...(params.extraAccountPatch || {}),
+            ...(typeof params.customBalance === 'number' ? { balance: params.customBalance } : {}),
+            debtAmount: totalDebt,
+            debtDueAt: dueAt,
+            debtCreatedAt: prevDebt > 0 && a.debtCreatedAt ? a.debtCreatedAt : nowIso,
+            debtHistory: [newEntry, ...(a.debtHistory || [])].slice(0, 80),
+          }
+        : a
+    );
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
+
+    if (params.triggerPopup !== false && params.account.id === currentAccount?.id && added > 0) {
+      setDebtAlertModal({
+        id: newEntry.id,
+        sourceLabel: params.sourceLabel,
+        debtAdded: added,
+        totalDebt,
+        dueAt,
+        message: params.note,
+        timestamp: nowIso,
+      });
+    }
+
+    return { totalDebt, dueAt };
+  };
+
+  // Pengawas Jatuh Tempo Hutang Real-Time (Auto-Ban 1 Hari / 24 Jam & Bunga Denda Opsional Admin)
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      const policy = getDebtPolicy();
+      const list = accountsRef.current;
+      if (!Array.isArray(list) || list.length === 0) return;
+
+      // 1. Cek bunga denda opsional (hanya jika Admin menyalakan debtLateFeeEnabled)
+      let workingList = list;
+      let mutated = false;
+      if (policy.debtLateFeeEnabled && policy.debtLateFeePercent > 0) {
+        workingList = workingList.map((acc) => {
+          const debt = Math.round(acc.debtAmount || 0);
+          if (debt <= 0 || !acc.debtDueAt || acc.cardStatus === 'banned' || acc.status === 'banned') {
+            return acc;
+          }
+          const msLeft = new Date(acc.debtDueAt).getTime() - now;
+          const lastPenMs = acc.lastDebtPenaltyAt ? new Date(acc.lastDebtPenaltyAt).getTime() : 0;
+          // Terapkan denda 1x saat sisa waktu < 6 jam dan belum kena denda dalam 12 jam terakhir
+          if (msLeft > 0 && msLeft <= 6 * 3600 * 1000 && now - lastPenMs >= 12 * 3600 * 1000) {
+            const fee = Math.max(1_000, Math.round((debt * policy.debtLateFeePercent) / 100));
+            const nextDebt = debt + fee;
+            const nowIso = new Date(now).toISOString();
+            mutated = true;
+            const feeEntry: DebtHistoryEntry = {
+              id: `debt-fee-${now}-${acc.id}`,
+              type: 'penalty_interest',
+              amount: fee,
+              balanceAfterDebt: nextDebt,
+              sourceLabel: `Bunga Denda Keterlambatan (${policy.debtLateFeePercent}%)`,
+              note: `Bunga denda otomatis ${policy.debtLateFeePercent}% (${formatRupiah(
+                fee
+              )}) karena mendekati batas waktu pembayaran hutang.`,
+              timestamp: nowIso,
+            };
+            return {
+              ...acc,
+              debtAmount: nextDebt,
+              lastDebtPenaltyAt: nowIso,
+              debtHistory: [feeEntry, ...(acc.debtHistory || [])].slice(0, 80),
+            };
+          }
+          return acc;
+        });
+      }
+
+      // 2. Cek akun yang melewati batas waktu kesepakatan pembayaran hutang -> AUTO-BAN 1 HARI (24 JAM)
+      const overdueDebtAccounts = workingList.filter(
+        (acc) =>
+          acc.id !== 'acc-admin' &&
+          !acc.vipShieldActive &&
+          acc.cardStatus !== 'banned' &&
+          acc.status !== 'banned' &&
+          (acc.debtAmount || 0) > 0 &&
+          acc.debtDueAt &&
+          now >= new Date(acc.debtDueAt).getTime()
+      );
+
+      if (overdueDebtAccounts.length > 0) {
+        const nowIso = new Date(now).toISOString();
+        const banMinutes = policy.debtBanDurationHours * 60;
+        const banExpiresIso = new Date(now + policy.debtBanDurationHours * 3600 * 1000).toISOString();
+        const durationLabel =
+          policy.debtBanDurationHours === 24
+            ? '1 Hari (24 Jam) — Jatuh Tempo Hutang'
+            : `${policy.debtBanDurationHours} Jam — Jatuh Tempo Hutang`;
+
+        const bannedNext = workingList.map((acc) => {
+          if (!overdueDebtAccounts.some((o) => o.id === acc.id)) return acc;
+          const debtVal = Math.round(acc.debtAmount || 0);
+          const banReason = `Gagal melunasi hutang sebesar ${formatRupiah(
+            debtVal
+          )} melewati batas waktu kesepakatan pembayaran. Akun dibanned otomatis selama ${durationLabel}.`;
+          const caseId = `BN-DEBT-${now.toString().slice(-6)}`;
+          const customCfg: BanScreenCustomizationConfig = {
+            ...DEFAULT_BAN_SCREEN_CONFIG,
+            ...(banSupportConfig.defaultTemplateConfig || {}),
+            reasonMode: 'custom',
+            reasonText: banReason,
+            showReasonBox: true,
+            durationLabel,
+            caseId,
+          };
+          const banEntry: DebtHistoryEntry = {
+            id: `debt-autoban-${now}-${acc.id}`,
+            type: 'auto_ban_1d',
+            amount: 0,
+            balanceAfterDebt: debtVal,
+            sourceLabel: 'Sanksi Auto-Ban 1 Hari',
+            note: banReason,
+            timestamp: nowIso,
+          };
+          return {
+            ...acc,
+            status: 'banned' as const,
+            cardStatus: 'banned' as const,
+            banReason,
+            isDebtAutoBanned: true,
+            debtBanCount: (acc.debtBanCount || 0) + 1,
+            debtHistory: [banEntry, ...(acc.debtHistory || [])].slice(0, 80),
+            banInfo: {
+              isBanned: true,
+              reason: banReason,
+              durationType: 'custom' as const,
+              durationMinutes: banMinutes,
+              durationLabel,
+              bannedAt: nowIso,
+              expiresAt: banExpiresIso,
+              appealStatus: 'none' as const,
+              appealCount: 0,
+              customConfig: customCfg,
+            },
+          };
+        });
+
+        setAccounts(bannedNext);
+        flushMasterStateToCloud({ accounts: bannedNext });
+
+        overdueDebtAccounts.forEach((acc) => {
+          const debtVal = Math.round(acc.debtAmount || 0);
+          const banReason = `Gagal melunasi hutang sebesar ${formatRupiah(
+            debtVal
+          )} melewati batas waktu kesepakatan pembayaran. Akun dibanned otomatis selama ${durationLabel}.`;
+          void syncCloudUserProfile(
+            {
+              uid: acc.firebaseUid,
+              email: acc.googleEmail || acc.email,
+              fallbackEmail: acc.email,
+            },
+            {
+              status: 'banned',
+              banReason,
+              bannedAt: nowIso,
+              banExpiresAt: banExpiresIso,
+              banDurationLabel: durationLabel,
+              appealStatus: 'none',
+            }
+          );
+          if (currentAccount && acc.id === currentAccount.id) {
+            setCloudUserStatus((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    status: 'banned',
+                    banReason,
+                    bannedAt: nowIso,
+                    banExpiresAt: banExpiresIso,
+                    banDurationLabel: durationLabel,
+                  }
+                : prev
+            );
+            playAtmSound('alert');
+          }
+        });
+        return;
+      }
+
+      if (mutated) {
+        setAccounts(workingList);
+        flushMasterStateToCloud({ accounts: workingList });
+      }
+    }, 3000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sultanEmpireConfig, currentAccount?.id]);
+
+  // Pembayaran Hutang Nasabah (Cicil Bebas Nominal atau Lunasi Penuh)
+  const payAccountDebt = (amount: number, mode: 'partial' | 'full' = 'partial') => {
+    if (!currentAccount) {
+      return { success: false, message: 'Silakan pilih rekening aktif terlebih dahulu.' };
+    }
+    const currentDebt = Math.max(0, Math.round(currentAccount.debtAmount || 0));
+    if (currentDebt <= 0) {
+      return { success: false, message: 'Rekening Anda saat ini tidak memiliki hutang aktif.' };
+    }
+
+    const targetPay =
+      mode === 'full' ? currentDebt : Math.min(currentDebt, Math.max(0, Math.round(amount)));
+    if (targetPay <= 0) {
+      playAtmSound('alert');
+      return { success: false, message: 'Masukkan nominal pembayaran hutang yang valid (> Rp 0).' };
+    }
+
+    const isInf = isUnlimitedNumber(currentAccount.balance);
+    if (!isInf && currentAccount.balance < targetPay) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Saldo rekening (${formatRupiah(
+          currentAccount.balance
+        )}) tidak mencukupi untuk membayar ${formatRupiah(targetPay)}.`,
+      };
+    }
+
+    const remainingDebt = Math.max(0, currentDebt - targetPay);
+    const nextBalance = isInf ? currentAccount.balance : currentAccount.balance - targetPay;
+    const nowIso = new Date().toISOString();
+    const isFullPaid = remainingDebt === 0;
+
+    const historyEntry: DebtHistoryEntry = {
+      id: `debt-pay-${Date.now()}`,
+      type: isFullPaid ? 'payment_full' : 'payment_partial',
+      amount: -targetPay,
+      balanceAfterDebt: remainingDebt,
+      sourceLabel: isFullPaid ? 'Pelunasan Penuh Hutang' : 'Cicilan Pembayaran Hutang',
+      note: isFullPaid
+        ? `Hutang sebesar ${formatRupiah(targetPay)} telah dilunasi penuh dari saldo rekening. Status bebas hutang!`
+        : `Pembayaran cicilan hutang sebesar ${formatRupiah(targetPay)}. Sisa hutang: ${formatRupiah(
+            remainingDebt
+          )}.`,
+      timestamp: nowIso,
+    };
+
+    const nextAccounts = accountsRef.current.map((a) =>
+      a.id === currentAccount.id
+        ? {
+            ...a,
+            balance: nextBalance,
+            debtAmount: remainingDebt,
+            debtDueAt: isFullPaid ? undefined : a.debtDueAt,
+            debtCreatedAt: isFullPaid ? undefined : a.debtCreatedAt,
+            lastDebtPenaltyAt: isFullPaid ? undefined : a.lastDebtPenaltyAt,
+            isDebtAutoBanned: isFullPaid ? false : a.isDebtAutoBanned,
+            debtHistory: [historyEntry, ...(a.debtHistory || [])].slice(0, 80),
+          }
+        : a
+    );
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
+
+    const newTx: Transaction = {
+      id: `tx-debt-pay-${Date.now()}`,
+      accountId: currentAccount.id,
+      type: 'transfer_out',
+      title: isFullPaid ? 'Pelunasan Penuh Hutang Bank Nusantara' : 'Cicilan Pembayaran Hutang',
+      amount: targetPay,
+      timestamp: nowIso,
+      description: historyEntry.note,
+      recipientName: 'Pusat Pelunasan Hutang Bank Nusantara',
+      status: 'success',
+      referenceNo: `DBT-${Date.now().toString().slice(-6)}`,
+      category: 'lainnya',
+    };
+    setTransactions((prev) => [newTx, ...prev]);
+
+    if (isFullPaid) {
+      setDebtAlertModal(null);
+      try {
+        confetti({ particleCount: 70, spread: 70, origin: { y: 0.6 } });
+      } catch {
+        // ignore
+      }
+    }
+    playAtmSound('success');
+    return {
+      success: true,
+      remainingDebt,
+      message: isFullPaid
+        ? `🎉 LUNAS! Seluruh hutang ${formatRupiah(targetPay)} berhasil dilunasi. Akun Anda kini bebas dari risiko banned jatuh tempo!`
+        : `✅ Cicilan hutang ${formatRupiah(targetPay)} berhasil dibayar. Sisa hutang Anda: ${formatRupiah(
+            remainingDebt
+          )}.`,
+    };
+  };
+
+  // Pusat Kelola Hutang Lengkap di Panel Admin (PA): Tambah, Kurangi, Set, Lunasi, Ubah Tenggat, Cabut Ban Hutang
+  const adminManageAccountDebt = (
+    accountId: string,
+    action:
+      | 'add'
+      | 'reduce'
+      | 'set'
+      | 'forgive'
+      | 'extend_deadline'
+      | 'set_deadline_minutes'
+      | 'lift_debt_ban',
+    payload?: { amount?: number; note?: string; hours?: number; minutes?: number }
+  ): { success: boolean; message: string } => {
+    const target = accountsRef.current.find((a) => a.id === accountId);
+    if (!target) {
+      return { success: false, message: 'Rekening nasabah tidak ditemukan.' };
+    }
+    const policy = getDebtPolicy();
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const prevDebt = Math.max(0, Math.round(target.debtAmount || 0));
+    const cleanNote = (payload?.note || '').trim();
+
+    if (action === 'add') {
+      const addVal = Math.max(1_000, Math.round(payload?.amount || 0));
+      const nextDebt = prevDebt + addVal;
+      const customHours =
+        payload?.hours && payload.hours > 0 ? payload.hours : policy.debtDefaultTermHours;
+      const dueAt =
+        prevDebt > 0 && target.debtDueAt && !payload?.hours
+          ? target.debtDueAt
+          : new Date(now + customHours * 3600 * 1000).toISOString();
+      const entry: DebtHistoryEntry = {
+        id: `debt-adm-add-${now}`,
+        type: 'admin_add',
+        amount: addVal,
+        balanceAfterDebt: nextDebt,
+        sourceLabel: 'Penambahan Hutang oleh Panel Admin',
+        note:
+          cleanNote ||
+          `Admin menambahkan tagihan hutang sebesar ${formatRupiah(
+            addVal
+          )} dengan batas waktu bayar ${customHours} jam.`,
+        timestamp: nowIso,
+      };
+      const nextAccounts = accountsRef.current.map((a) =>
+        a.id === accountId
+          ? {
+              ...a,
+              debtAmount: nextDebt,
+              debtDueAt: dueAt,
+              debtCreatedAt: prevDebt > 0 && a.debtCreatedAt ? a.debtCreatedAt : nowIso,
+              debtHistory: [entry, ...(a.debtHistory || [])].slice(0, 80),
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `Berhasil menambahkan hutang +${formatRupiah(addVal)} ke akun ${
+          target.fullName
+        } (Total: ${formatRupiah(nextDebt)}).`,
+      };
+    }
+
+    if (action === 'reduce') {
+      const redVal = Math.max(1_000, Math.round(payload?.amount || 0));
+      const actualReduced = Math.min(prevDebt, redVal);
+      const nextDebt = Math.max(0, prevDebt - actualReduced);
+      const entry: DebtHistoryEntry = {
+        id: `debt-adm-red-${now}`,
+        type: 'admin_reduce',
+        amount: -actualReduced,
+        balanceAfterDebt: nextDebt,
+        sourceLabel: 'Pengurangan Hutang oleh Panel Admin',
+        note:
+          cleanNote ||
+          `Admin mengurangi hutang sebesar ${formatRupiah(actualReduced)}. Sisa hutang: ${formatRupiah(
+            nextDebt
+          )}.`,
+        timestamp: nowIso,
+      };
+      const nextAccounts = accountsRef.current.map((a) =>
+        a.id === accountId
+          ? {
+              ...a,
+              debtAmount: nextDebt,
+              debtDueAt: nextDebt === 0 ? undefined : a.debtDueAt,
+              debtCreatedAt: nextDebt === 0 ? undefined : a.debtCreatedAt,
+              debtHistory: [entry, ...(a.debtHistory || [])].slice(0, 80),
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `Hutang ${target.fullName} dikurangi -${formatRupiah(
+          actualReduced
+        )}. Sisa hutang: ${formatRupiah(nextDebt)}.`,
+      };
+    }
+
+    if (action === 'set') {
+      const targetDebt = Math.max(0, Math.round(payload?.amount || 0));
+      const diff = targetDebt - prevDebt;
+      const dueAt =
+        targetDebt === 0
+          ? undefined
+          : target.debtDueAt || new Date(now + policy.debtDefaultTermHours * 3600 * 1000).toISOString();
+      const entry: DebtHistoryEntry = {
+        id: `debt-adm-set-${now}`,
+        type: diff >= 0 ? 'admin_add' : 'admin_reduce',
+        amount: diff,
+        balanceAfterDebt: targetDebt,
+        sourceLabel: 'Penyesuaian Nominal Hutang oleh Admin',
+        note:
+          cleanNote ||
+          `Admin menetapkan total hutang menjadi ${formatRupiah(targetDebt)} (sebelumnya ${formatRupiah(
+            prevDebt
+          )}).`,
+        timestamp: nowIso,
+      };
+      const nextAccounts = accountsRef.current.map((a) =>
+        a.id === accountId
+          ? {
+              ...a,
+              debtAmount: targetDebt,
+              debtDueAt: dueAt,
+              debtCreatedAt: targetDebt === 0 ? undefined : a.debtCreatedAt || nowIso,
+              debtHistory: [entry, ...(a.debtHistory || [])].slice(0, 80),
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `Total hutang ${target.fullName} berhasil ditetapkan menjadi ${formatRupiah(
+          targetDebt
+        )}.`,
+      };
+    }
+
+    if (action === 'forgive') {
+      const entry: DebtHistoryEntry = {
+        id: `debt-adm-forgive-${now}`,
+        type: 'admin_forgive',
+        amount: -prevDebt,
+        balanceAfterDebt: 0,
+        sourceLabel: 'Penghapusan / Pelunasan Hutang oleh Admin',
+        note:
+          cleanNote ||
+          `Seluruh hutang sebesar ${formatRupiah(prevDebt)} telah dihapus/dilunasi resmi oleh Panel Admin.`,
+        timestamp: nowIso,
+      };
+      const nextAccounts = accountsRef.current.map((a) =>
+        a.id === accountId
+          ? {
+              ...a,
+              debtAmount: 0,
+              debtDueAt: undefined,
+              debtCreatedAt: undefined,
+              lastDebtPenaltyAt: undefined,
+              isDebtAutoBanned: false,
+              debtHistory: [entry, ...(a.debtHistory || [])].slice(0, 80),
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `Seluruh hutang ${target.fullName} (${formatRupiah(prevDebt)}) telah dilunasi/dihapus!`,
+      };
+    }
+
+    if (action === 'extend_deadline' || action === 'set_deadline_minutes') {
+      const baseMs =
+        action === 'extend_deadline' && target.debtDueAt
+          ? Math.max(now, new Date(target.debtDueAt).getTime())
+          : now;
+      const addMs =
+        action === 'set_deadline_minutes'
+          ? Math.max(1, payload?.minutes || 60) * 60 * 1000
+          : Math.max(1, payload?.hours || 24) * 3600 * 1000;
+      const newDueIso = new Date(baseMs + addMs).toISOString();
+      const labelTime =
+        action === 'set_deadline_minutes'
+          ? `${Math.max(1, payload?.minutes || 60)} menit dari sekarang`
+          : `+${Math.max(1, payload?.hours || 24)} jam`;
+      const entry: DebtHistoryEntry = {
+        id: `debt-adm-ext-${now}`,
+        type: 'deadline_extended',
+        amount: 0,
+        balanceAfterDebt: prevDebt,
+        sourceLabel: 'Perubahan Tenggat Bayar oleh Admin',
+        note:
+          cleanNote ||
+          `Admin mengatur batas waktu pembayaran hutang (${labelTime}) hingga ${new Date(
+            newDueIso
+          ).toLocaleString('id-ID')}.`,
+        timestamp: nowIso,
+      };
+      const nextAccounts = accountsRef.current.map((a) =>
+        a.id === accountId
+          ? {
+              ...a,
+              debtDueAt: newDueIso,
+              debtHistory: [entry, ...(a.debtHistory || [])].slice(0, 80),
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `Tenggat pembayaran hutang ${target.fullName} diperbarui (${labelTime}).`,
+      };
+    }
+
+    if (action === 'lift_debt_ban') {
+      const extendHours = Math.max(1, payload?.hours || policy.debtDefaultTermHours);
+      const nextDueIso =
+        prevDebt > 0 ? new Date(now + extendHours * 3600 * 1000).toISOString() : undefined;
+      const entry: DebtHistoryEntry = {
+        id: `debt-adm-unban-${now}`,
+        type: 'unban_extended',
+        amount: 0,
+        balanceAfterDebt: prevDebt,
+        sourceLabel: 'Pencabutan Banned Hutang oleh Admin',
+        note:
+          cleanNote ||
+          `Admin mencabut Banned Hutang 1 Hari lebih cepat.${
+            prevDebt > 0
+              ? ` Sisa hutang ${formatRupiah(prevDebt)} diberi tenggat baru ${extendHours} jam.`
+              : ''
+          }`,
+        timestamp: nowIso,
+      };
+      const nextAccounts = accountsRef.current.map((a) =>
+        a.id === accountId
+          ? {
+              ...a,
+              status: 'active' as const,
+              cardStatus: 'active' as const,
+              banReason: '',
+              banInfo: undefined,
+              isDebtAutoBanned: false,
+              debtDueAt: nextDueIso,
+              debtHistory: [entry, ...(a.debtHistory || [])].slice(0, 80),
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+      void syncCloudUserProfile(
+        {
+          uid: target.firebaseUid,
+          email: target.googleEmail || target.email,
+          fallbackEmail: target.email,
+        },
+        {
+          status: 'active',
+          banReason: '',
+          banExpiresAt: '',
+          banDurationLabel: '',
+        }
+      );
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `Banned hutang 1 hari pada akun ${target.fullName} berhasil dicabut!`,
+      };
+    }
+
+    return { success: false, message: 'Aksi manajemen hutang tidak dikenali.' };
+  };
+
+  // ================= PUSAT MINING KRIPTO, BALAI LELANG SUPERCAR & CYBER VAULT (TERMASUK RISIKO KERUGIAN & HUTANG) =================
+  const buySultanBusiness = (
+    businessId: string,
+    quantity = 1,
+    options?: { useDebtCredit?: boolean }
+  ) => {
     if (!currentAccount) {
       return { success: false, message: 'Silakan pilih akun terlebih dahulu.' };
     }
@@ -13560,18 +14385,72 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const isInf = isUnlimitedNumber(currentAccount.balance);
-    if (!isInf && currentAccount.balance < totalCost) {
+    const shortfall = isInf ? 0 : Math.max(0, totalCost - currentAccount.balance);
+
+    if (!isInf && shortfall > 0 && !options?.useDebtCredit) {
       playAtmSound('alert');
       return {
         success: false,
-        message: `Saldo tidak mencukupi untuk membeli ${cleanQty}x ${biz.name}. Dibutuhkan ${formatRupiah(
-          totalCost
-        )}.`,
+        needsDebtOption: true,
+        shortfallAmount: shortfall,
+        message: `Saldo kurang ${formatRupiah(shortfall)} untuk membeli ${cleanQty}x ${
+          biz.name
+        } (Total ${formatRupiah(totalCost)}). Anda dapat menggunakan opsi "Beli Pakai Hutang" dengan tenggat 24 jam!`,
       };
     }
 
     const nextLevel = currentOwned + cleanQty;
-    const nextBalance = isInf ? currentAccount.balance : currentAccount.balance - totalCost;
+    const paidCash = isInf ? totalCost : Math.min(currentAccount.balance, totalCost);
+    const nextBalance = isInf ? currentAccount.balance : Math.max(0, currentAccount.balance - paidCash);
+    const nextBizPatch = {
+      empireBusinesses: {
+        ...(currentAccount.empireBusinesses || {}),
+        [businessId]: nextLevel,
+      },
+    };
+
+    if (shortfall > 0 && options?.useDebtCredit) {
+      const { totalDebt } = applyAccountDebtIncrease({
+        account: currentAccount,
+        debtAdded: shortfall,
+        entryType: 'credit_purchase',
+        sourceLabel: `Beli Pakai Hutang: ${cleanQty}x ${biz.name}`,
+        note: `Pembelian kredit ${cleanQty}x ${biz.name} (Total ${formatRupiah(
+          totalCost
+        )}). Saldo terpakai ${formatRupiah(paidCash)}, sisa ${formatRupiah(
+          shortfall
+        )} masuk tagihan Hutang resmi (tenggat ${getDebtPolicy().debtDefaultTermHours} jam).`,
+        customBalance: nextBalance,
+        extraAccountPatch: nextBizPatch,
+      });
+
+      const newTx: Transaction = {
+        id: `tx-mining-credit-${Date.now()}`,
+        accountId: currentAccount.id,
+        type: 'transfer_out',
+        title: `Beli Pakai Hutang: ${cleanQty}x ${biz.name} (+Hutang ${formatRupiah(shortfall)})`,
+        amount: paidCash,
+        timestamp: new Date().toISOString(),
+        description: `Pembelian ${cleanQty}x ${biz.name} menggunakan saldo ${formatRupiah(
+          paidCash
+        )} + Hutang ${formatRupiah(shortfall)} (Total Hutang: ${formatRupiah(totalDebt)})`,
+        recipientName: 'Pusat Mining & Balai Lelang VIP (Kredit)',
+        status: 'success',
+        referenceNo: `CRD-${Date.now().toString().slice(-6)}`,
+        category: 'lainnya',
+      };
+      setTransactions((prev) => [newTx, ...prev]);
+      playAtmSound('alert');
+
+      return {
+        success: true,
+        newLevel: nextLevel,
+        debtAdded: shortfall,
+        message: `⚠️ Pembelian Kredit Berhasil! ${cleanQty}x ${biz.name} aktif (Lv.${nextLevel}). Kekurangan ${formatRupiah(
+          shortfall
+        )} tercatat sebagai HUTANG resmi — lunasi sebelum tenggat agar tidak dibanned 1 hari!`,
+      };
+    }
 
     setAccounts((prev) =>
       prev.map((a) =>
@@ -13579,10 +14458,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ? {
               ...a,
               balance: nextBalance,
-              empireBusinesses: {
-                ...(a.empireBusinesses || {}),
-                [businessId]: nextLevel,
-              },
+              ...nextBizPatch,
             }
           : a
       )
@@ -13631,13 +14507,93 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    const policy = getDebtPolicy();
     const unitBase = biz.basePrice || biz.baseCost || 2_500_000;
+    const remainingLevel = Math.max(0, currentOwned - cleanQty);
+    const isInf = isUnlimitedNumber(currentAccount.balance);
+
+    // Risiko Kerugian Balai Lelang (Sepi Penawar / Penawar Gagal Bayar / Denda Administrasi Lelang)
+    const isLossEvent = Math.random() * 100 < policy.lossRiskPercent;
+    if (isLossEvent) {
+      const penaltyCost = Math.max(
+        50_000,
+        Math.round(unitBase * cleanQty * (policy.lossSeverityPercent / 100))
+      );
+      const shortfall = isInf ? 0 : Math.max(0, penaltyCost - currentAccount.balance);
+      const nextBalance = isInf ? currentAccount.balance : Math.max(0, currentAccount.balance - penaltyCost);
+      const bizPatch = {
+        empireBusinesses: {
+          ...(currentAccount.empireBusinesses || {}),
+          [businessId]: remainingLevel,
+        },
+      };
+
+      if (shortfall > 0) {
+        applyAccountDebtIncrease({
+          account: currentAccount,
+          debtAdded: shortfall,
+          entryType: 'auction_loss',
+          sourceLabel: `Kerugian Lelang VIP: ${cleanQty}x ${biz.name}`,
+          note: `Lelang ${cleanQty}x ${biz.name} sepi penawar & terkena penalti rugi ${formatRupiah(
+            penaltyCost
+          )}. Saldo tidak cukup — selisih ${formatRupiah(shortfall)} otomatis tercatat sebagai HUTANG resmi!`,
+          customBalance: nextBalance,
+          extraAccountPatch: bizPatch,
+        });
+      } else {
+        setAccounts((prev) =>
+          prev.map((a) =>
+            a.id === currentAccount.id
+              ? {
+                  ...a,
+                  balance: nextBalance,
+                  ...bizPatch,
+                }
+              : a
+          )
+        );
+      }
+
+      const lossTx: Transaction = {
+        id: `tx-auction-loss-${Date.now()}`,
+        accountId: currentAccount.id,
+        type: 'transfer_out',
+        title: `Kerugian Balai Lelang VIP: ${cleanQty}x ${biz.name}`,
+        amount: Math.min(currentAccount.balance, penaltyCost),
+        timestamp: new Date().toISOString(),
+        description:
+          shortfall > 0
+            ? `Lelang merugi ${formatRupiah(penaltyCost)}; selisih ${formatRupiah(
+                shortfall
+              )} menjadi Hutang resmi.`
+            : `Lelang sepi penawar & terkena biaya penalti kerugian sebesar ${formatRupiah(penaltyCost)}.`,
+        recipientName: 'Balai Lelang Supercar VIP (Penalti Rugi)',
+        status: 'success',
+        referenceNo: `ALOS-${Date.now().toString().slice(-6)}`,
+        category: 'lainnya',
+      };
+      setTransactions((prev) => [lossTx, ...prev]);
+      playAtmSound('alert');
+
+      return {
+        success: false,
+        incurredLoss: penaltyCost,
+        debtAdded: shortfall,
+        remainingLevel,
+        message:
+          shortfall > 0
+            ? `📉 LELANG MERUGI! ${cleanQty}x ${biz.name} gagal capai harga dasar & terkena penalti rugi ${formatRupiah(
+                penaltyCost
+              )}. Saldo habis, sisa ${formatRupiah(shortfall)} masuk TAB HUTANG!`
+            : `📉 LELANG MERUGI! ${cleanQty}x ${biz.name} sepi penawar dan terkena penalti biaya lelang -${formatRupiah(
+                penaltyCost
+              )} dari saldo Anda.`,
+      };
+    }
+
     const resaleBonusMult = 1 + (biz.resaleProfitPercent || 50) / 100;
     const adminProfitMult = Math.max(1, sultanEmpireConfig.profitMultiplier || 1);
     const auctionProceeds = Math.round(unitBase * cleanQty * resaleBonusMult * adminProfitMult);
-
-    const remainingLevel = Math.max(0, currentOwned - cleanQty);
-    const isInf = isUnlimitedNumber(currentAccount.balance);
     const nextBalance = isInf ? currentAccount.balance : currentAccount.balance + auctionProceeds;
 
     setAccounts((prev) =>
@@ -13687,7 +14643,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  const claimAllSultanBusinessProfits = () => {
+  const claimAllSultanBusinessProfits = (overclockMode: 1 | 2 | 5 = 1) => {
     if (!currentAccount) {
       return { success: false, message: 'Silakan pilih akun terlebih dahulu.' };
     }
@@ -13713,13 +14669,81 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    const policy = getDebtPolicy();
     const profitMult = Math.max(1, sultanEmpireConfig.profitMultiplier || 1);
     const coinMult = Math.max(1, sultanEmpireConfig.bonusCoinMultiplier || 1);
-
     const finalCash = Math.round(baseCash * profitMult);
     const finalCoins = Math.round(baseCoins * coinMult);
-
     const isInf = isUnlimitedNumber(currentAccount.balance);
+
+    // Risiko Overheat Rig / Tagihan Listrik & Gagal Blok (sedikit lebih tinggi saat Overclock 5x)
+    const effectiveRisk = Math.min(
+      85,
+      policy.lossRiskPercent + (overclockMode === 5 ? 8 : overclockMode === 2 ? 3 : 0)
+    );
+    const isLossEvent = Math.random() * 100 < effectiveRisk;
+
+    if (isLossEvent) {
+      const lossAmount = Math.max(
+        50_000,
+        Math.round(finalCash * (policy.lossSeverityPercent / 100) * (overclockMode === 5 ? 1.25 : 1))
+      );
+      const shortfall = isInf ? 0 : Math.max(0, lossAmount - currentAccount.balance);
+      const nextBalance = isInf ? currentAccount.balance : Math.max(0, currentAccount.balance - lossAmount);
+
+      if (shortfall > 0) {
+        applyAccountDebtIncrease({
+          account: currentAccount,
+          debtAdded: shortfall,
+          entryType: 'mining_loss',
+          sourceLabel: `Kerugian Panen Mining (Overclock ${overclockMode}x)`,
+          note: `Rig Mining mengalami overheat & lonjakan tagihan listrik sebesar ${formatRupiah(
+            lossAmount
+          )}. Saldo tidak cukup — selisih ${formatRupiah(shortfall)} masuk HUTANG resmi!`,
+          customBalance: nextBalance,
+        });
+      } else {
+        setAccounts((prev) =>
+          prev.map((a) => (a.id === currentAccount.id ? { ...a, balance: nextBalance } : a))
+        );
+      }
+
+      const lossTx: Transaction = {
+        id: `tx-mining-loss-${Date.now()}`,
+        accountId: currentAccount.id,
+        type: 'transfer_out',
+        title: `Kerugian Operasional Mining (${totalUnits} Unit • Overclock ${overclockMode}x)`,
+        amount: Math.min(currentAccount.balance, lossAmount),
+        timestamp: new Date().toISOString(),
+        description:
+          shortfall > 0
+            ? `Rig overheat/tagihan listrik ${formatRupiah(lossAmount)}; selisih ${formatRupiah(
+                shortfall
+              )} menjadi Hutang resmi.`
+            : `Biaya perbaikan overheat & tagihan listrik rig mining sebesar ${formatRupiah(lossAmount)}.`,
+        recipientName: 'Pusat Listrik & Maintenance Mining',
+        status: 'success',
+        referenceNo: `MLOS-${Date.now().toString().slice(-6)}`,
+        category: 'lainnya',
+      };
+      setTransactions((prev) => [lossTx, ...prev]);
+      playAtmSound('alert');
+
+      return {
+        success: false,
+        incurredLoss: lossAmount,
+        debtAdded: shortfall,
+        message:
+          shortfall > 0
+            ? `🔥 RIG OVERHEAT & RUGI! Biaya listrik & perbaikan mencapai ${formatRupiah(
+                lossAmount
+              )}. Saldo tidak cukup, selisih ${formatRupiah(shortfall)} otomatis tercatat sebagai HUTANG!`
+            : `🔥 RIG OVERHEAT & RUGI! Panen blok gagal dan saldo terpotong biaya listrik/perbaikan -${formatRupiah(
+                lossAmount
+              )}.`,
+      };
+    }
+
     const nextBalance = isInf ? currentAccount.balance : currentAccount.balance + finalCash;
     const nextCoins = (currentAccount.spinCoins || 0) + finalCoins;
 
@@ -13769,7 +14793,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  const tradeSultanAsset = (assetId: string, action: 'buy' | 'sell', units: number) => {
+  const tradeSultanAsset = (
+    assetId: string,
+    action: 'buy' | 'sell',
+    units: number,
+    options?: { useDebtCredit?: boolean }
+  ) => {
     if (!currentAccount) {
       return { success: false, message: 'Silakan pilih akun terlebih dahulu.' };
     }
@@ -13777,6 +14806,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!asset) {
       return { success: false, message: 'Instrumen bursa tidak ditemukan.' };
     }
+    const policy = getDebtPolicy();
     const cleanUnits = Math.max(1, Math.floor(units));
     const mult = sultanEmpireConfig.marketPriceMultiplier?.[assetId] || 1;
     const baseP = sultanEmpireConfig.marketPrices?.[assetId] || asset.defaultPrice || asset.basePrice;
@@ -13786,26 +14816,61 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isInf = isUnlimitedNumber(currentAccount.balance);
 
     if (action === 'buy') {
-      if (!isInf && currentAccount.balance < totalValue) {
+      const shortfall = isInf ? 0 : Math.max(0, totalValue - currentAccount.balance);
+      if (!isInf && shortfall > 0 && !options?.useDebtCredit) {
         playAtmSound('alert');
         return {
           success: false,
-          message: `Saldo tidak cukup untuk membeli ${cleanUnits} ${asset.unitLabel} ${asset.name} (${formatRupiah(
-            totalValue
-          )}).`,
+          needsDebtOption: true,
+          shortfallAmount: shortfall,
+          message: `Saldo kurang ${formatRupiah(shortfall)} untuk membeli ${cleanUnits} ${
+            asset.unitLabel
+          } ${asset.name}. Gunakan opsi "Beli Pakai Hutang" jika ingin membeli secara kredit (tenggat 24 jam).`,
         };
       }
-      const nextBalance = isInf ? currentAccount.balance : currentAccount.balance - totalValue;
+
+      const paidCash = isInf ? totalValue : Math.min(currentAccount.balance, totalValue);
+      const nextBalance = isInf ? currentAccount.balance : Math.max(0, currentAccount.balance - paidCash);
+      const holdingPatch = {
+        empireTradingHoldings: {
+          ...(currentAccount.empireTradingHoldings || {}),
+          [assetId]: currentHolding + cleanUnits,
+        },
+      };
+
+      if (shortfall > 0 && options?.useDebtCredit) {
+        applyAccountDebtIncrease({
+          account: currentAccount,
+          debtAdded: shortfall,
+          entryType: 'credit_purchase',
+          sourceLabel: `Beli Margin Hutang Bursa: ${cleanUnits} ${asset.unitLabel} ${asset.name}`,
+          note: `Pembelian margin kredit ${cleanUnits} ${asset.unitLabel} ${
+            asset.name
+          } (Total ${formatRupiah(totalValue)}). Kekurangan ${formatRupiah(
+            shortfall
+          )} tercatat sebagai HUTANG resmi.`,
+          customBalance: nextBalance,
+          extraAccountPatch: holdingPatch,
+        });
+        playAtmSound('alert');
+        return {
+          success: true,
+          debtAdded: shortfall,
+          message: `⚠️ BUY MARGIN KREDIT! ${cleanUnits} ${asset.unitLabel} ${
+            asset.name
+          } masuk portofolio dengan HUTANG +${formatRupiah(shortfall)} (tenggat ${
+            policy.debtDefaultTermHours
+          } jam).`,
+        };
+      }
+
       setAccounts((prev) =>
         prev.map((a) =>
           a.id === currentAccount.id
             ? {
                 ...a,
                 balance: nextBalance,
-                empireTradingHoldings: {
-                  ...(a.empireTradingHoldings || {}),
-                  [assetId]: currentHolding + cleanUnits,
-                },
+                ...holdingPatch,
               }
             : a
         )
@@ -13825,6 +14890,65 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           message: `Portofolio ${asset.name} kamu hanya ${currentHolding} ${asset.unitLabel}.`,
         };
       }
+
+      // Risiko Koreksi Pasar Mendadak / Slippage Bursa saat Jual
+      const isMarketCrash = Math.random() * 100 < policy.lossRiskPercent;
+      const holdingPatch = {
+        empireTradingHoldings: {
+          ...(currentAccount.empireTradingHoldings || {}),
+          [assetId]: currentHolding - cleanUnits,
+        },
+      };
+
+      if (isMarketCrash) {
+        const lossDrop = Math.max(50_000, Math.round(totalValue * (policy.lossSeverityPercent / 100)));
+        const marginPenalty = Math.round(lossDrop * 0.45);
+        const shortfall = isInf ? 0 : Math.max(0, marginPenalty - currentAccount.balance);
+        const nextBalance = isInf
+          ? currentAccount.balance
+          : Math.max(0, currentAccount.balance - marginPenalty);
+
+        if (shortfall > 0) {
+          applyAccountDebtIncrease({
+            account: currentAccount,
+            debtAdded: shortfall,
+            entryType: 'trading_loss',
+            sourceLabel: `Crash Bursa Trading: ${asset.name}`,
+            note: `Harga ${asset.name} anjlok drastis saat eksekusi jual (margin call ${formatRupiah(
+              marginPenalty
+            )}). Saldo tidak cukup — selisih ${formatRupiah(shortfall)} masuk HUTANG resmi!`,
+            customBalance: nextBalance,
+            extraAccountPatch: holdingPatch,
+          });
+        } else {
+          setAccounts((prev) =>
+            prev.map((a) =>
+              a.id === currentAccount.id
+                ? {
+                    ...a,
+                    balance: nextBalance,
+                    ...holdingPatch,
+                  }
+                : a
+            )
+          );
+        }
+        playAtmSound('alert');
+        return {
+          success: false,
+          incurredLoss: marginPenalty,
+          debtAdded: shortfall,
+          message:
+            shortfall > 0
+              ? `📉 FLASH CRASH BURSA! Posisi ${asset.name} terkena margin call -${formatRupiah(
+                  marginPenalty
+                )}. Selisih ${formatRupiah(shortfall)} tercatat ke TAB HUTANG!`
+              : `📉 FLASH CRASH BURSA! Eksekusi jual ${asset.name} merugi & terkena biaya margin call -${formatRupiah(
+                  marginPenalty
+                )}.`,
+        };
+      }
+
       const nextBalance = isInf ? currentAccount.balance : currentAccount.balance + totalValue;
       setAccounts((prev) =>
         prev.map((a) =>
@@ -13833,10 +14957,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 ...a,
                 balance: nextBalance,
                 totalEmpireEarnings: (a.totalEmpireEarnings || 0) + totalValue,
-                empireTradingHoldings: {
-                  ...(a.empireTradingHoldings || {}),
-                  [assetId]: currentHolding - cleanUnits,
-                },
+                ...holdingPatch,
               }
             : a
         )
@@ -13851,7 +14972,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const openSultanMysteryVault = (vaultId: string) => {
+  const openSultanMysteryVault = (vaultId: string, options?: { useDebtCredit?: boolean }) => {
     if (!currentAccount) {
       return { success: false, message: 'Silakan pilih akun terlebih dahulu.' };
     }
@@ -13859,6 +14980,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!vault) {
       return { success: false, message: 'Cyber Container tidak ditemukan.' };
     }
+    const policy = getDebtPolicy();
     const discountMult = Math.max(
       0,
       1 - Math.min(99, Math.max(0, sultanEmpireConfig.businessDiscountPercent || 0)) / 100
@@ -13866,18 +14988,68 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const rawVaultPrice = vault.price || vault.cost || 1_500_000;
     const finalPrice = Math.round(rawVaultPrice * discountMult);
     const isInf = isUnlimitedNumber(currentAccount.balance);
+    const shortfall = isInf ? 0 : Math.max(0, finalPrice - currentAccount.balance);
 
-    if (!isInf && currentAccount.balance < finalPrice) {
+    if (!isInf && shortfall > 0 && !options?.useDebtCredit) {
       playAtmSound('alert');
       return {
         success: false,
-        message: `Saldo kurang untuk membuka ${vault.name}. Dibutuhkan ${formatRupiah(finalPrice)}.`,
+        needsDebtOption: true,
+        shortfallAmount: shortfall,
+        message: `Saldo kurang ${formatRupiah(shortfall)} untuk membuka ${
+          vault.name
+        }. Anda dapat memilih "Buka Pakai Hutang" (tenggat 24 jam).`,
+      };
+    }
+
+    const paidCash = isInf ? finalPrice : Math.min(currentAccount.balance, finalPrice);
+    const balanceAfterEntry = isInf
+      ? currentAccount.balance
+      : Math.max(0, currentAccount.balance - paidCash);
+
+    const isGuaranteedJackpot = Boolean(sultanEmpireConfig.vaultGuaranteedJackpot);
+    const isVaultLoss = !isGuaranteedJackpot && Math.random() * 100 < policy.lossRiskPercent;
+
+    if (isVaultLoss) {
+      const recoveryFee = Math.max(50_000, Math.round(finalPrice * (policy.lossSeverityPercent / 100)));
+      const totalExtraNeeded = shortfall + Math.max(0, recoveryFee - balanceAfterEntry);
+      const finalBal = isInf ? currentAccount.balance : Math.max(0, balanceAfterEntry - recoveryFee);
+
+      if (totalExtraNeeded > 0) {
+        applyAccountDebtIncrease({
+          account: currentAccount,
+          debtAdded: totalExtraNeeded,
+          entryType: 'vault_loss',
+          sourceLabel: `Kerugian Cyber Vault: ${vault.name}`,
+          note: `Peti ${vault.name} rusak & terkena biaya pemulihan keamanan ${formatRupiah(
+            recoveryFee
+          )}. Kekurangan ${formatRupiah(totalExtraNeeded)} tercatat sebagai HUTANG resmi!`,
+          customBalance: finalBal,
+        });
+      } else {
+        setAccounts((prev) =>
+          prev.map((a) => (a.id === currentAccount.id ? { ...a, balance: finalBal } : a))
+        );
+      }
+
+      playAtmSound('alert');
+      return {
+        success: false,
+        incurredLoss: finalPrice + recoveryFee,
+        debtAdded: totalExtraNeeded,
+        message:
+          totalExtraNeeded > 0
+            ? `💥 CYBER VAULT RUSAK! ${vault.name} kosong & terkena biaya pemulihan ${formatRupiah(
+                recoveryFee
+              )}. Kekurangan ${formatRupiah(totalExtraNeeded)} masuk TAB HUTANG!`
+            : `💥 CYBER VAULT RUSAK! ${vault.name} gagal dibuka dan terkena biaya pemulihan keamanan -${formatRupiah(
+                recoveryFee
+              )}.`,
       };
     }
 
     const profitMult = Math.max(1, sultanEmpireConfig.profitMultiplier || 1);
     const coinMult = Math.max(1, sultanEmpireConfig.bonusCoinMultiplier || 1);
-    const isGuaranteedJackpot = Boolean(sultanEmpireConfig.vaultGuaranteedJackpot);
 
     const randCash = Math.round(
       (isGuaranteedJackpot
@@ -13895,23 +15067,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       : vault.minLevelVouchers +
         Math.floor(Math.random() * (vault.maxLevelVouchers - vault.minLevelVouchers + 1));
 
-    const nextBalance = isInf
-      ? currentAccount.balance
-      : currentAccount.balance - finalPrice + randCash;
+    const nextBalance = isInf ? currentAccount.balance : balanceAfterEntry + randCash;
+    const vaultRewardPatch = {
+      spinCoins: (currentAccount.spinCoins || 0) + randCoins,
+      levelVouchers: (currentAccount.levelVouchers || 0) + randVouchers,
+      totalEmpireEarnings: (currentAccount.totalEmpireEarnings || 0) + randCash,
+    };
 
-    setAccounts((prev) =>
-      prev.map((a) =>
-        a.id === currentAccount.id
-          ? {
-              ...a,
-              balance: nextBalance,
-              spinCoins: (a.spinCoins || 0) + randCoins,
-              levelVouchers: (a.levelVouchers || 0) + randVouchers,
-              totalEmpireEarnings: (a.totalEmpireEarnings || 0) + randCash,
-            }
-          : a
-      )
-    );
+    if (shortfall > 0 && options?.useDebtCredit) {
+      applyAccountDebtIncrease({
+        account: currentAccount,
+        debtAdded: shortfall,
+        entryType: 'credit_purchase',
+        sourceLabel: `Buka Kredit Cyber Vault: ${vault.name}`,
+        note: `Membuka ${vault.name} dengan fasilitas kredit hutang ${formatRupiah(shortfall)}.`,
+        customBalance: nextBalance,
+        extraAccountPatch: vaultRewardPatch,
+      });
+    } else {
+      setAccounts((prev) =>
+        prev.map((a) =>
+          a.id === currentAccount.id
+            ? {
+                ...a,
+                balance: nextBalance,
+                ...vaultRewardPatch,
+              }
+            : a
+        )
+      );
+    }
 
     playAtmSound('cash');
     try {
@@ -13922,9 +15107,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return {
       success: true,
+      debtAdded: shortfall,
       message: `🎉 ${vault.name} Terbuka! Kamu mendapatkan Uang Tunai ${formatRupiah(
         randCash
-      )}, +${randCoins.toLocaleString('id-ID')} Koin Spin, dan +${randVouchers} Voucher Level!`,
+      )}, +${randCoins.toLocaleString('id-ID')} Koin Spin, dan +${randVouchers} Voucher Level!${
+        shortfall > 0 ? ` (Hutang kredit +${formatRupiah(shortfall)})` : ''
+      }`,
       cashWon: randCash,
       coinsWon: randCoins,
       vouchersWon: randVouchers,
@@ -18077,7 +19265,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setUserRole,
         googleUser,
         firebaseUser,
+        isAuthLoading,
         isCloudBootReady,
+        activeBuildInfo,
+        hasUnreadAppUpdate,
+        markLatestAppUpdateSeen,
         cloudAccountVerificationState,
         retryCloudAccountCheck,
         cloudSyncStatus,
@@ -18330,6 +19522,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminAdjustAccountSpinCoins,
         adminMassSpinCoinRain,
         sultanEmpireConfig,
+        debtAlertModal,
+        dismissDebtAlertModal,
+        payAccountDebt,
+        adminManageAccountDebt,
         buySultanBusiness,
         sellSultanBusinessAuction,
         claimAllSultanBusinessProfits,

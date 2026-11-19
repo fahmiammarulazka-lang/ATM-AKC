@@ -283,6 +283,38 @@ export interface BankAccount {
   oaAdminPin?: string; // Default '159357' atau PIN Admin khusus per Akun OA
   // Akun Guest (Tamu - Hanya tersimpan di LocalStorage sampai disambungkan ke Google lewat tombol Sync)
   isGuestAccount?: boolean;
+  // Sistem Hutang & Kerugian Mining/Lelang VIP (Auto-Ban 1 Hari saat Jatuh Tempo)
+  debtAmount?: number; // Total hutang aktif saat ini (Rp)
+  debtDueAt?: string; // Batas waktu kesepakatan bayar (ISO string, default +24 jam)
+  debtCreatedAt?: string; // Kapan siklus hutang aktif dimulai
+  debtHistory?: DebtHistoryEntry[]; // Riwayat lengkap hutang, kerugian, cicilan & aksi Admin
+  isDebtAutoBanned?: boolean; // true jika sedang dibanned otomatis karena gagal bayar hutang
+  debtBanCount?: number; // Total kali akun pernah terkena ban jatuh tempo hutang
+  lastDebtPenaltyAt?: string; // Timestamp terakhir bunga denda diterapkan (jika diaktifkan Admin)
+}
+
+export interface DebtHistoryEntry {
+  id: string;
+  type:
+    | 'mining_loss'
+    | 'auction_loss'
+    | 'trading_loss'
+    | 'vault_loss'
+    | 'credit_purchase'
+    | 'admin_add'
+    | 'payment_partial'
+    | 'payment_full'
+    | 'admin_reduce'
+    | 'admin_forgive'
+    | 'penalty_interest'
+    | 'deadline_extended'
+    | 'auto_ban_1d'
+    | 'unban_extended';
+  amount: number; // positif = tambah hutang, negatif = pengurangan/pelunasan, 0 = info waktu/ban
+  balanceAfterDebt: number; // sisa hutang setelah kejadian
+  sourceLabel: string;
+  note: string;
+  timestamp: string;
 }
 
 export type GoldFormType = 'batangan' | 'perhiasan';
@@ -455,6 +487,9 @@ export interface AppUpdateRecord {
   categoryBadge?: string;
   author?: string;
   createdAt: string;
+  buildId?: string; // ID Build otomatis saat kompilasi/publish (mis. BLD-20261119-1949)
+  isAutoDetected?: boolean; // true jika tercatat otomatis oleh detektor build/rilis
+  editedByAdmin?: boolean; // true jika telah diedit manual oleh Admin agar tidak ditimpa ulang
 }
 
 export interface JobVacancyItem {
@@ -569,6 +604,13 @@ export interface SultanEmpireAdminConfig {
   vaultGuaranteedJackpot: boolean; // Jaminan hadiah besar saat buka Cyber Vault
   customAnnouncement?: string;
   updatedAt?: string;
+  // Kontrol Risiko Kerugian & Kebijakan Hutang (Panel Admin)
+  lossRiskPercent?: number; // Default 25% (peluang kerugian 0 - 80%)
+  lossSeverityPercent?: number; // Default 35% (persentase kerugian terhadap nilai aktivitas)
+  debtDefaultTermHours?: number; // Default 24 jam batas waktu kesepakatan bayar hutang
+  debtBanDurationHours?: number; // Default 24 jam (1 Hari) durasi auto-ban jika lewat tenggat
+  debtLateFeeEnabled?: boolean; // Default false (pokok murni, opsi bunga denda di Panel Admin)
+  debtLateFeePercent?: number; // Default 5% bunga denda jika diaktifkan Admin
 }
 
 

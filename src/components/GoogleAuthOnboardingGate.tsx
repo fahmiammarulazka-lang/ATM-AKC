@@ -45,6 +45,7 @@ import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './Verifi
 export const GoogleAuthOnboardingGate: React.FC = () => {
   const {
     googleUser,
+    isAuthLoading,
     isCloudBootReady,
     cloudAccountVerificationState,
     retryCloudAccountCheck,
@@ -364,7 +365,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     }
   };
 
-  if (!isCloudBootReady) {
+  if (isAuthLoading || !isCloudBootReady) {
     return (
       <div className="min-h-screen bg-[#040814] text-slate-100 flex flex-col items-center justify-center p-6">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-indigo-700 flex items-center justify-center shadow-xl shadow-cyan-500/20 mb-4 animate-pulse">
@@ -865,11 +866,21 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
           )}
 
           {authError && (
-            <div className="mt-4 p-3.5 rounded-2xl bg-rose-950/80 border border-rose-500/40 text-xs text-rose-200 space-y-1.5">
+            <div className="mt-4 p-3.5 rounded-2xl bg-rose-950/80 border border-rose-500/40 text-xs text-rose-200 space-y-2.5">
               <div className="flex items-start gap-2 font-bold text-rose-300">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{authError.message}</span>
               </div>
+              {authError.code === 'auth/popup-blocked' && (
+                <button
+                  type="button"
+                  onClick={handleGooglePopupSignIn}
+                  disabled={isSigningIn}
+                  className="px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-400 text-slate-950 font-black text-xs cursor-pointer transition disabled:opacity-60"
+                >
+                  Coba Lagi Login Popup Google
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -996,11 +1007,26 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
           </div>
 
           {authError && (
-            <div className="mt-4 p-3.5 rounded-2xl bg-rose-950/80 border border-rose-500/40 text-xs text-rose-200 space-y-1.5">
+            <div className="mt-4 p-3.5 rounded-2xl bg-rose-950/80 border border-rose-500/40 text-xs text-rose-200 space-y-2.5">
               <div className="flex items-start gap-2 font-bold text-rose-300">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>{authError.message}</span>
               </div>
+              {authError.code === 'auth/popup-blocked' && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleGooglePopupSignIn}
+                    disabled={isSigningIn}
+                    className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-950 font-black text-xs cursor-pointer transition disabled:opacity-60"
+                  >
+                    Coba Lagi Login Popup Google
+                  </button>
+                  <span className="text-[11px] text-rose-200/80">
+                    Pastikan izin pop-up browser untuk halaman ini sudah aktif.
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>

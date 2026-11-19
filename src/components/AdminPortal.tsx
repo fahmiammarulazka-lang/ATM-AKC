@@ -51,6 +51,7 @@ import {
   Dices,
   MessageCircle,
   Mail,
+  ReceiptText,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -86,6 +87,7 @@ import { AdminUniversalGachaPanel } from './AdminUniversalGachaPanel';
 import { AdminJobCoinBonusCard } from './AdminJobCoinBonusCard';
 import { AccountDeletion10StepModal } from './AccountDeletion10StepModal';
 import { AdminBanStudioView } from './AdminBanStudioView';
+import { AdminDebtManagementTab } from './AdminDebtManagementTab';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -243,6 +245,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     | 'spin_wheel_admin'
     | 'gold_transfer_admin'
     | 'empire_admin'
+    | 'debt_admin'
     | 'mintol_admin'
     | 'app_updates'
     | 'global_chat'
@@ -850,6 +853,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         </button>
 
         <button
+          onClick={() => setActiveAdminTab('debt_admin')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'debt_admin'
+              ? 'bg-gradient-to-r from-rose-500 via-red-500 to-amber-500 text-white font-black shadow-lg shadow-rose-500/30'
+              : 'text-rose-300 hover:text-white hover:bg-rose-950/60 border border-rose-500/60'
+          }`}
+        >
+          <ReceiptText className="w-4 h-4" />
+          <span>
+            🧾 Kelola Hutang &amp; Risiko Rugi ({accounts.filter((a) => (a.debtAmount || 0) > 0).length})
+          </span>
+        </button>
+
+        <button
           onClick={() => setActiveAdminTab('mintol_admin')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
             activeAdminTab === 'mintol_admin'
@@ -1034,6 +1051,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
 
       {/* ================= ADMIN TAB: KONTROL EMAS 24K & TRANSFER BEBAS 5% ================= */}
       {activeAdminTab === 'gold_transfer_admin' && <AdminGoldTransferPanel />}
+
+      {/* ================= ADMIN TAB: KELOLA HUTANG NASABAH, RISIKO RUGI & AUTO-BAN 1 HARI ================= */}
+      {activeAdminTab === 'debt_admin' && <AdminDebtManagementTab />}
 
       {/* ================= ADMIN TAB: KONTROL SPIN THE WHEEL, DISKON KOIN (1-1 JUTA) & PROBABILITAS ================= */}
       {activeAdminTab === 'spin_wheel_admin' && (

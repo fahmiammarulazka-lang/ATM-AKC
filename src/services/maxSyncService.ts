@@ -664,3 +664,26 @@ export async function forceSyncVaultNow<T extends Record<string, unknown>>(
     message: `Sinkronisasi cloud terverifikasi pada ${new Date(nowIso).toLocaleTimeString('id-ID')}.`,
   };
 }
+
+// ============================================================================
+// LAST SEEN UPDATE TRACKER (IndexedDB — untuk titik penanda BARU di tab Update)
+// ============================================================================
+const LAST_SEEN_UPDATE_KEY = 'last_seen_app_update_id_v1';
+
+export async function readLastSeenUpdateId(): Promise<string | null> {
+  try {
+    const val = await idbGet<string>(STORE_META, LAST_SEEN_UPDATE_KEY);
+    return typeof val === 'string' && val.length > 0 ? val : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveLastSeenUpdateId(updateId: string): Promise<void> {
+  if (!updateId) return;
+  try {
+    await idbPut(STORE_META, LAST_SEEN_UPDATE_KEY, updateId);
+  } catch {
+    // non-fatal
+  }
+}

@@ -414,7 +414,13 @@ export const INITIAL_SULTAN_EMPIRE_CONFIG: SultanEmpireAdminConfig = {
   },
   vaultGuaranteedJackpot: false,
   customAnnouncement:
-    '💎 Selamat datang di Pusat Mining Kripto, Balai Lelang Supercar & Cyber Vault! Bebas diakses semua nasabah tanpa syarat level!',
+    '💎 Selamat datang di Pusat Mining Kripto, Balai Lelang Supercar & Cyber Vault! Waspadai risiko kerugian pasar (20–30%) dan kelola tagihan di Tab Hutang sebelum jatuh tempo 24 jam!',
+  lossRiskPercent: 25,
+  lossSeverityPercent: 35,
+  debtDefaultTermHours: 24,
+  debtBanDurationHours: 24,
+  debtLateFeeEnabled: false,
+  debtLateFeePercent: 5,
 };
 
 // ============================================================================

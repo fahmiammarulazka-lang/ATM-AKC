@@ -28,7 +28,7 @@ interface UpdateHistoryViewProps {
 export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({
   onNavigateToView,
 }) => {
-  const { appUpdates, featureConfigs } = useBank();
+  const { appUpdates, featureConfigs, activeBuildInfo } = useBank();
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Separate Current Update ("Update Sekarang") and Previous Updates ("Update Sebelumnya")
@@ -55,6 +55,9 @@ export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({
             </span>
             <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/40 font-mono font-bold text-[10px]">
               Total {appUpdates.length} Catatan Update
+            </span>
+            <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/40 font-mono font-bold text-[10px]">
+              Build Aktif: {activeBuildInfo.buildId} • {currentUpdate?.version || activeBuildInfo.catalogVersion}
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
@@ -94,6 +97,16 @@ export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({
               {currentUpdate.categoryBadge && (
                 <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-cyan-300 font-mono text-[11px] font-semibold">
                   {currentUpdate.categoryBadge}
+                </span>
+              )}
+              {currentUpdate.buildId && (
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-950/90 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-bold">
+                  ID Build: {currentUpdate.buildId}
+                </span>
+              )}
+              {currentUpdate.isAutoDetected && (
+                <span className="px-2 py-1 rounded-lg bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 font-mono text-[10px] font-bold">
+                  Auto-Sync Rilis
                 </span>
               )}
             </div>
@@ -222,6 +235,11 @@ export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({
                     {upd.categoryBadge && (
                       <span className="px-2.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-mono text-[10px] font-semibold">
                         {upd.categoryBadge}
+                      </span>
+                    )}
+                    {upd.buildId && (
+                      <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-[10px] font-semibold">
+                        Build: {upd.buildId}
                       </span>
                     )}
                   </div>

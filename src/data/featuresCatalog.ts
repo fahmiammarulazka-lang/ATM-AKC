@@ -3091,6 +3091,114 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v19-0',
+    version: 'v19.0',
+    title:
+      'Update Besar v19.0 — Risiko Kerugian & Sistem Hutang Mining/Lelang, Tab Kotak Hutang di Kiri Logo, Peringatan Jatuh Tempo + Auto-Ban 1 Hari & Pusat Kelola Hutang Panel Admin',
+    fullDate: 'Kamis, 19 November 2026 • Pukul 20:05 WIB',
+    dateText: 'Kamis, 19 November 2026 • Pukul 20:05 WIB',
+    description:
+      'Pembaruan besar v19.0 yang menghadirkan ekosistem risiko realistis dan manajemen hutang menyeluruh: (1) Risiko kerugian dinamis (default seimbang 25%) pada seluruh mode di Tab Mining & Lelang VIP — Panen Mining (overheat/listrik), Balai Lelang (sepi penawar/rugi), Bursa Trading (koreksi pasar), Cyber Vault (peti rusak), serta opsi Beli Pakai Hutang saat saldo rekening kurang; (2) Tombol Tab Kotak Hutang tepat di sebelah kiri Logo BANK NUSANTARA lengkap dengan badge nominal merah berkedip saat memiliki hutang aktif; (3) Pemberitahuan pop-up instan & banner hitung mundur real-time di atas layar dengan batas kesepakatan bawaan 24 jam — jika tidak dilunasi tepat waktu, akun otomatis terkena Banned 1 Hari (24 Jam) dan setelah masa ban selesai akun otomatis terbuka dengan perpanjangan waktu bayar baru 24 jam; (4) Halaman Pusat Tab Hutang untuk bayar cicil bebas nominal maupun Lunasi Penuh 1-klik; serta (5) Tab Kelola Hutang & Risiko Rugi lengkap di Panel Admin (tambah, kurangi, lunasi, ubah tenggat waktu, cabut ban hutang, atur peluang rugi, dan opsi aktifkan bunga denda).',
+    highlights: [
+      '📉 Risiko Kerugian Realistis Mining, Lelang, Bursa & Opsi Beli Pakai Hutang: Seluruh aktivitas di Tab Mining & Lelang kini memiliki peluang rugi (default 25%, bebas diatur Admin) serta mode pembelian kredit hutang saat saldo tidak mencukupi.',
+      '🧾 Tab Kotak Hutang di Sebelah Kiri Logo Bank Nusantara: Akses cepat berbentuk kotak ikon dengan badge nominal merah berkedip otomatis ketika akun memiliki tagihan hutang aktif.',
+      '🚨 Pop-Up Peringatan & Banner Hitung Mundur Real-Time: Setiap hutang baru memunculkan notifikasi pop-up instan + banner hitung mundur di atas layar menuju batas waktu kesepakatan 24 jam.',
+      '⛔ Auto-Ban 1 Hari (24 Jam) Jatuh Tempo & Pembukaan Otomatis: Gagal melunasi hutang sesuai kesepakatan otomatis memblokir akun selama 24 jam; akun terbuka otomatis saat 24 jam selesai (atau dicabut Admin) dengan perpanjangan tenggat baru 24 jam.',
+      '🛠️ Pusat Kelola Hutang Lengkap di Panel Admin (PA): Admin dapat menambah hutang, mengurangi/cicil, melunasi, mengubah tenggat waktu, mencabut ban hutang 1 hari, mengatur peluang kerugian, dan mengaktifkan bunga denda opsional.',
+    ],
+    changes: [
+      'Penambahan mekanisme kerugian dan mode Beli Pakai Hutang pada seluruh mode Tab Mining & Lelang VIP.',
+      'Penambahan tombol Tab Kotak Hutang di sebelah kiri logo Bank Nusantara + halaman Pusat Tab Hutang (cicil bebas & lunasi penuh).',
+      'Banner hitung mundur jatuh tempo real-time, pop-up peringatan hutang instan, dan mesin Auto-Ban 1 Hari (24 Jam) otomatis.',
+      'Tab Kelola Hutang & Risiko Kerugian lengkap di Panel Admin (tambah, kurangi, lunasi, ubah tenggat, cabut ban, atur risiko & bunga denda).',
+    ],
+    isCurrent: true,
+    categoryBadge: 'UPDATE SEKARANG (v19.0)',
+    author: 'Sistem Deteksi Rilis Otomatis & Core-Banking Bank Nusantara',
+    createdAt: '2026-11-19T13:05:00.000Z',
+    isAutoDetected: true,
+  },
+  {
+    id: 'upd-v18-0',
+    version: 'v18.0',
+    title:
+      'Update Besar v18.0 — Sesi Permanen Firebase Auth (Anti Mental ke Login saat Update/Refresh) & Deteksi Otomatis Riwayat Update Berbasis ID Build',
+    fullDate: 'Kamis, 19 November 2026 • Pukul 19:50 WIB',
+    dateText: 'Kamis, 19 November 2026 • Pukul 19:50 WIB',
+    description:
+      'Pembaruan fundamental v18.0 yang menuntaskan stabilitas autentikasi serta otomatisasi catatan rilis aplikasi: (1) Aktivasi penuh persistent session Firebase Authentication menggunakan browserLocalPersistence sebelum proses login, gerbang inisialisasi ketat isAuthLoading yang menunggu penuh callback onAuthStateChanged agar tidak pernah mental ke halaman Login saat aplikasi di-update, di-publish ulang, atau di-refresh, transisi langsung ke Dashboard tanpa minta PIN ulang untuk sesi terautentikasi, serta login & penautan Google 100% menggunakan signInWithPopup / linkWithPopup murni tanpa fallback redirect; (2) Mesin Deteksi Update Otomatis berbasis ID Build kompilasi yang otomatis mencatat setiap pembaruan/publikasi baru aplikasi ke tab Update, menggabungkannya dengan arsip Cloud RTDB tanpa pernah menghapus catatan Admin, menampilkan lencana Versi & ID Build aktif, serta penanda BARU halus pada tombol Update di Navbar.',
+    highlights: [
+      '🔐 Sesi Permanen Firebase Auth (browserLocalPersistence): Token autentikasi Google tersimpan permanen di browser sehingga aman terhadap refresh, update, maupun publish ulang aplikasi.',
+      '🛡️ Gerbang Ketat isAuthLoading & onAuthStateChanged: Halaman Login dilarang tampil selama pengecekan sesi berlangsung; begitu user terverifikasi, aplikasi langsung mengarah ke Dashboard utama.',
+      '🪟 100% Popup Murni (signInWithPopup & linkWithPopup): Menghapus seluruh jalur redirect yang berpotensi looping di preview maupun publish, lengkap dengan panduan izin popup & tombol Coba Lagi.',
+      '🤖 Deteksi & Pencatatan Update Otomatis Berbasis ID Build: Setiap kali aplikasi diperbarui atau di-publish ulang, catatan rilis baru otomatis muncul di tab Update dan tersinkron ke Cloud RTDB tanpa duplikasi.',
+      '✨ Lencana Build Aktif & Penanda BARU Halus: Menampilkan versi serta ID Build aktif di header tab Update, indikator BARU di Navbar saat rilis baru tersedia, dan seluruh catatan tetap bebas diedit di Panel Admin.',
+    ],
+    changes: [
+      'Aktivasi eksplisit setPersistence(auth, browserLocalPersistence) saat boot & tepat sebelum signInWithPopup/linkWithPopup.',
+      'State isAuthLoading ketat berbasis onAuthStateChanged + sinkronisasi otomatis ke Dashboard tanpa mental ke Login.',
+      'Penghapusan penuh fallback signInWithRedirect & linkWithRedirect untuk stabilitas penuh di preview dan publish.',
+      'Mesin Auto-Update Release Registry dengan injeksi ID Build otomatis, auto-merge Cloud RTDB ramah Admin, dan penanda BARU di Navbar.',
+    ],
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
+    author: 'Sistem Deteksi Rilis Otomatis & Core-Banking Bank Nusantara',
+    createdAt: '2026-11-19T12:50:00.000Z',
+    isAutoDetected: true,
+  },
+  {
+    id: 'upd-v17-0',
+    version: 'v17.0',
+    title:
+      'Update v17.0 — Tata Letak Navbar 2-Baris Sticky (11 Menu Lengkap Desktop & HP), Badge Live Sync Lebar Tetap & Tombol 1-Klik Sync Cepat',
+    fullDate: 'Kamis, 19 November 2026 • Pukul 19:15 WIB',
+    dateText: 'Kamis, 19 November 2026 • Pukul 19:15 WIB',
+    description:
+      'Pembaruan antarmuka navigasi v17.0 yang memisahkan Navbar menjadi 2 baris sticky super lega: Baris Atas khusus menampilkan identitas Bank Nusantara, Saldo Rupiah & Koin Spin sejajar rapi, badge Live Sync real-time berlebar tetap agar tombol lain tidak pernah bergeser atau tertutup, tombol ikon 1-Klik Sync Cepat instan, serta tombol Hubungkan Google & Profil Nasabah; sedangkan Baris Bawah menampilkan 11 menu navigasi lengkap (Mobile Banking, Transfer, Emas 24K, Anggaran, Lowongan Kerja, Spin the Wheel, Mining & Lelang VIP, PayChat, Mesin ATM, Panduan, dan Update) seragam di Desktop maupun HP lengkap dengan panah gulir kiri-kanan otomatis.',
+    highlights: [
+      '🧭 Navbar 2-Baris Sticky Super Lega: Memisahkan baris utilitas/saldo di atas dan 11 menu navigasi lengkap di baris bawah agar tidak pernah saling menumpuk.',
+      '📱 Seragam 11 Menu di Desktop & HP + Panah Gulir Otomatis: Menu Transfer, Emas 24K, dan Anggaran kini mudah diakses dari baris navigasi bawah dengan tombol geser kiri-kanan adaptif.',
+      '🔒 Badge Live Sync Lebar Tetap (Anti-Geser): Indikator sinkronisasi real-time terkunci lebarnya sehingga perubahan status Syncing/Synced tidak pernah menggoyang tata letak.',
+      '⚡ Tombol 1-Klik Sync Cepat di HUD Navbar: Sinkronkan seluruh data rekening ke Cloud secara instan langsung dari baris atas tanpa perlu membuka modal Command Center.',
+    ],
+    changes: [
+      'Pemisahan Navbar 2-baris sticky dengan garis pemisah halus dan highlight tab aktif.',
+      'Penyeragaman 11 tab navigasi di Desktop dan Mobile dengan deteksi scroll ResizeObserver otomatis.',
+      'Penguncian lebar tetap LiveSyncTelemetryHud serta penambahan tombol Refresh Sync 1-klik.',
+    ],
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
+    author: 'Otoritas Core-Banking & UI Engineering Bank Nusantara',
+    createdAt: '2026-11-19T12:15:00.000Z',
+    isAutoDetected: true,
+  },
+  {
+    id: 'upd-v16-0',
+    version: 'v16.0',
+    title:
+      'Update v16.0 — Optimasi Fast-Boot IndexedDB Ultra Cepat, Preconnect DNS Firebase Asia Southeast 1 & Proteksi Sesi Anti-Buat-Akun-Ulang',
+    fullDate: 'Kamis, 19 November 2026 • Pukul 18:40 WIB',
+    dateText: 'Kamis, 19 November 2026 • Pukul 18:40 WIB',
+    description:
+      'Pembaruan performa dan keandalan sesi v16.0 yang memangkas drastis waktu muat awal aplikasi melalui arsitektur Fast-Boot IndexedDB, preconnect DNS ke server Firebase Realtime Database Asia Southeast 1, pembacaan paralel akun & profil prioritas dengan pemuatan riwayat panjang di latar belakang, serta tampilan skeleton loading halus. Dilengkapi pula dengan perlindungan verifikasi rekening Cloud agar halaman refresh tidak pernah memunculkan formulir Buat Akun secara palsu, penyimpanan sesi aktif untuk Google/OA/Guest, serta pemulihan otomatis (Self-Healing Auto-Recovery) ketika data rekening tiba dari Cloud.',
+    highlights: [
+      '⚡ Fast-Boot IndexedDB & Preconnect DNS Asia Southeast 1: Aplikasi terbuka seketika dari cache lokal sementara sinkronisasi data penuh berjalan halus di latar belakang.',
+      '🛡️ Gerbang Anti-Buat-Akun-Ulang saat Refresh: Menahan formulir pembuatan kartu baru hingga Cloud benar-benar mengonfirmasi 0 rekening, dilengkapi tombol Muat Ulang Akun Cloud.',
+      '🔄 Persistensi Sesi Aktif Multi-Kartu, Akun OA & Guest: Langsung mengembalikan kartu terakhir yang aktif digunakan saat halaman di-refresh.',
+      '🚨 Pengecekan Ban Lock Real-Time Non-Blocking: Membuka UI cepat sambil tetap mengunci layar seketika apabila sinyal akun dibanned diterima dari Cloud.',
+    ],
+    changes: [
+      'Penambahan preconnect DNS Firebase Asia Southeast 1 dan prefetch awal RTDB saat boot.',
+      'Penyimpanan snapshot Fast-Boot & sesi aktif di IndexedDB pada setiap aksi buat/tautkan akun.',
+      'Mekanisme cloudAccountVerificationState dan pemulihan otomatis ke rekening lama saat data Cloud tiba.',
+    ],
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
+    author: 'Otoritas Core-Banking & Cloud Sync Bank Nusantara',
+    createdAt: '2026-11-19T11:40:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v15-0',
     version: 'v15.0',
     title:
@@ -3112,8 +3220,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       '⏱️ Mesin Real-Time Tanggal 1 (+5% per bulan) dengan jam hitung mundur, grafik tren, target tabungan, & FIFO batch tracking.',
       '🎛️ Tab Kontrol Admin Emas & Transfer Bebas lengkap dengan Simulasi Tanggal 1 (+1/+3/+6 Bulan) & suntik saldo Emas/Coin.',
     ],
-    isCurrent: true,
-    categoryBadge: 'UPDATE SEKARANG (v15.0)',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Otoritas Core-Banking & Admin Bank Nusantara',
     createdAt: '2026-11-13T13:40:00.000Z',
   },

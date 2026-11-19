@@ -18,6 +18,8 @@ import {
   Gauge,
   Box,
   Sliders,
+  AlertTriangle,
+  ReceiptText,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -54,6 +56,11 @@ export const SultanEmpireView: React.FC = () => {
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null
   );
+  const [pendingCreditAction, setPendingCreditAction] = useState<{
+    label: string;
+    shortfall: number;
+    execute: () => void;
+  } | null>(null);
   const [claimCooldownSec, setClaimCooldownSec] = useState<number>(0);
   const [hashrateTicker, setHashrateTicker] = useState<number>(842.5);
   const [categoryFilter, setCategoryFilter] = useState<string>('Semua');
@@ -121,7 +128,12 @@ export const SultanEmpireView: React.FC = () => {
     totalPortfolioValue += units * currentPrice;
   });
 
+  const lossRiskPercent = Math.min(100, Math.max(0, sultanEmpireConfig.lossRiskPercent ?? 25));
+  const debtTermHours = Math.max(1, sultanEmpireConfig.debtDefaultTermHours ?? 24);
+  const currentDebtAmount = Math.max(0, Math.round(currentAccount.debtAmount || 0));
+
   const handleClaimProfits = () => {
+    setPendingCreditAction(null);
     if (claimCooldownSec > 0) {
       setFeedback({
         type: 'error',
@@ -129,32 +141,69 @@ export const SultanEmpireView: React.FC = () => {
       });
       return;
     }
-    const res = claimAllSultanBusinessProfits();
+    const res = claimAllSultanBusinessProfits(overclockMode);
     setFeedback({ type: res.success ? 'success' : 'error', text: res.message });
-    if (res.success) {
+    if (res.success || (res.incurredLoss && res.incurredLoss > 0)) {
       setClaimCooldownSec(overclockMode === 5 ? 1 : overclockMode === 2 ? 2 : 4);
     }
   };
 
-  const handleBuyBusiness = (businessId: string) => {
-    const res = buySultanBusiness(businessId, buyQuantity);
+  const handleBuyBusiness = (businessId: string, useDebtCredit = false) => {
+    const res = buySultanBusiness(businessId, buyQuantity, { useDebtCredit });
     setFeedback({ type: res.success ? 'success' : 'error', text: res.message });
+    if (!res.success && res.needsDebtOption && res.shortfallAmount && !useDebtCredit) {
+      setPendingCreditAction({
+        label: `Beli Rig/Aset (${buyQuantity}x) Pakai Hutang`,
+        shortfall: res.shortfallAmount,
+        execute: () => {
+          setPendingCreditAction(null);
+          handleBuyBusiness(businessId, true);
+        },
+      });
+    } else {
+      setPendingCreditAction(null);
+    }
   };
 
   const handleSellAuction = (businessId: string, qty = 1) => {
+    setPendingCreditAction(null);
     const res = sellSultanBusinessAuction(businessId, qty);
     setFeedback({ type: res.success ? 'success' : 'error', text: res.message });
   };
 
-  const handleTrade = (assetId: string, action: 'buy' | 'sell') => {
+  const handleTrade = (assetId: string, action: 'buy' | 'sell', useDebtCredit = false) => {
     const qty = tradeQuantityMap[assetId] || 1;
-    const res = tradeSultanAsset(assetId, action, qty);
+    const res = tradeSultanAsset(assetId, action, qty, { useDebtCredit });
     setFeedback({ type: res.success ? 'success' : 'error', text: res.message });
+    if (action === 'buy' && !res.success && res.needsDebtOption && res.shortfallAmount && !useDebtCredit) {
+      setPendingCreditAction({
+        label: `Beli ${qty} Unit Bursa Pakai Hutang`,
+        shortfall: res.shortfallAmount,
+        execute: () => {
+          setPendingCreditAction(null);
+          handleTrade(assetId, 'buy', true);
+        },
+      });
+    } else {
+      setPendingCreditAction(null);
+    }
   };
 
-  const handleOpenVault = (vaultId: string) => {
-    const res = openSultanMysteryVault(vaultId);
+  const handleOpenVault = (vaultId: string, useDebtCredit = false) => {
+    const res = openSultanMysteryVault(vaultId, { useDebtCredit });
     setFeedback({ type: res.success ? 'success' : 'error', text: res.message });
+    if (!res.success && res.needsDebtOption && res.shortfallAmount && !useDebtCredit) {
+      setPendingCreditAction({
+        label: 'Buka Cyber Vault Pakai Hutang',
+        shortfall: res.shortfallAmount,
+        execute: () => {
+          setPendingCreditAction(null);
+          handleOpenVault(vaultId, true);
+        },
+      });
+    } else {
+      setPendingCreditAction(null);
+    }
   };
 
   const handleQuickOverclockBoost = (mode: 1 | 2 | 5) => {
@@ -269,52 +318,78 @@ export const SultanEmpireView: React.FC = () => {
               </div>
             </div>
 
-            {(discountPercent > 0 || profitMult > 1 || sultanEmpireConfig.vaultGuaranteedJackpot) && (
-              <div className="flex flex-wrap gap-1.5">
-                {discountPercent > 0 && (
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-extrabold">
-                    🏷️ Diskon Admin {discountPercent}% Aktif
-                  </span>
-                )}
-                {profitMult > 1 && (
-                  <span className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[10px] font-extrabold">
-                    🚀 Boost Profit Admin {profitMult}x Lipat
-                  </span>
-                )}
-                {sultanEmpireConfig.vaultGuaranteedJackpot && (
-                  <span className="px-2 py-0.5 rounded-md bg-fuchsia-500/20 border border-fuchsia-400/40 text-fuchsia-300 text-[10px] font-extrabold">
-                    🎰 Cyber Vault Guaranteed Max Jackpot!
-                  </span>
-                )}
-              </div>
-            )}
+            <div className="flex flex-wrap gap-1.5">
+              <span className="px-2 py-0.5 rounded-md bg-rose-500/15 border border-rose-500/40 text-rose-300 text-[10px] font-extrabold inline-flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Risiko Rugi Pasar: {lossRiskPercent}% • Tenggat Hutang: {debtTermHours} Jam
+              </span>
+              {currentDebtAmount > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-rose-600/30 border border-rose-400/60 text-rose-200 text-[10px] font-black inline-flex items-center gap-1 animate-pulse">
+                  <ReceiptText className="w-3 h-3" />
+                  Hutang Aktif: {formatRupiah(currentDebtAmount)}
+                </span>
+              )}
+              {discountPercent > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-extrabold">
+                  🏷️ Diskon Admin {discountPercent}% Aktif
+                </span>
+              )}
+              {profitMult > 1 && (
+                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-400/40 text-amber-300 text-[10px] font-extrabold">
+                  🚀 Boost Profit Admin {profitMult}x Lipat
+                </span>
+              )}
+              {sultanEmpireConfig.vaultGuaranteedJackpot && (
+                <span className="px-2 py-0.5 rounded-md bg-fuchsia-500/20 border border-fuchsia-400/40 text-fuchsia-300 text-[10px] font-extrabold">
+                  🎰 Cyber Vault Guaranteed Max Jackpot!
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* FEEDBACK BANNER */}
+      {/* FEEDBACK BANNER + OPSI BELI PAKAI HUTANG SAAT SALDO KURANG */}
       {feedback && (
         <div
-          className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
+          className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
             feedback.type === 'success'
               ? 'bg-emerald-950/90 border-emerald-500/50 text-emerald-200'
               : 'bg-rose-950/90 border-rose-500/50 text-rose-200'
           }`}
         >
-          <div className="flex items-center gap-2.5 text-sm font-bold">
+          <div className="flex items-start gap-2.5 text-sm font-bold">
             {feedback.type === 'success' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
             ) : (
-              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
             )}
             <span>{feedback.text}</span>
           </div>
-          <button
-            onClick={() => setFeedback(null)}
-            className="text-xs font-bold underline opacity-75 hover:opacity-100 cursor-pointer"
-          >
-            Tutup
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {pendingCreditAction && (
+              <button
+                type="button"
+                onClick={pendingCreditAction.execute}
+                className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/25 cursor-pointer transition"
+              >
+                <ReceiptText className="w-3.5 h-3.5" />
+                <span>
+                  Beli Pakai Hutang (+{formatRupiah(pendingCreditAction.shortfall)} • {debtTermHours} Jam)
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setFeedback(null);
+                setPendingCreditAction(null);
+              }}
+              className="text-xs font-bold underline opacity-75 hover:opacity-100 cursor-pointer"
+            >
+              Tutup
+            </button>
+          </div>
         </div>
       )}
 

@@ -1,7 +1,7 @@
 /**
  * Bank Nusantara — Aplikasi Perbankan & ATM Digital Terpadu
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BankProvider, useBank } from './context/BankContext';
 import { Navbar, AppNavView } from './components/Navbar';
 import { CustomerDashboard, DashboardTab } from './components/CustomerDashboard';
@@ -16,6 +16,11 @@ import { UpdateHistoryView } from './components/UpdateHistoryView';
 import { JobVacancyView } from './components/JobVacancyView';
 import { SpinTheWheelView } from './components/SpinTheWheelView';
 import { SultanEmpireView } from './components/SultanEmpireView';
+import {
+  DebtManagementView,
+  DebtWarningBanner,
+  DebtIncurredPopupModal,
+} from './components/DebtManagementView';
 import { CardRegistrationModal } from './components/CardRegistrationModal';
 import { NusantaraChat } from './components/NusantaraChat';
 import { AdminPinModal } from './components/AdminPinModal';
@@ -48,12 +53,16 @@ function BankAppContent() {
     setAdminUnlocked,
     resetAllData,
     googleUser,
+    firebaseUser,
+    isAuthLoading,
     enterBankPortal,
     completeGoogleOnboarding,
     isCloudBootReady,
     activeBanLockState,
+    markLatestAppUpdateSeen,
   } = useBank();
   const [activeView, setActiveView] = useState<AppNavView>('dashboard');
+  const prevAuthUidRef = useRef<string | null>(null);
   const [requestedDashboardTab, setRequestedDashboardTab] = useState<{
     tab: DashboardTab;
     nonce: number;
@@ -84,11 +93,30 @@ function BankAppContent() {
     return () => window.removeEventListener('gmp-quota-exceeded', handler);
   }, []);
 
+  // Sinkronkan tampilan aktif langsung ke Dashboard saat sesi Firebase Auth terdeteksi / dipulihkan
+  useEffect(() => {
+    const activeUid = firebaseUser?.uid || null;
+    if (activeUid && prevAuthUidRef.current !== activeUid) {
+      prevAuthUidRef.current = activeUid;
+      setActiveView('dashboard');
+    } else if (!activeUid) {
+      prevAuthUidRef.current = null;
+    }
+  }, [firebaseUser?.uid]);
+
+  // Tandai catatan update otomatis terbaru sudah dibaca saat pengguna membuka tab Update
+  useEffect(() => {
+    if (activeView === 'updates') {
+      markLatestAppUpdateSeen();
+    }
+  }, [activeView, markLatestAppUpdateSeen]);
+
   // Handle tap-to-navigate deep links from Push Banners, Notification Bell, URL query, & Service Worker
   useEffect(() => {
     const applyDeepLink = (targetView?: string, targetDashboardTab?: string) => {
       const validViews: AppNavView[] = [
         'dashboard',
+        'debt',
         'transfer',
         'emas',
         'anggaran',
@@ -190,8 +218,8 @@ function BankAppContent() {
     }
   };
 
-  // 1. Tampilan skeleton super singkat saat fase boot awal (< 2.5 detik maks)
-  if (!isCloudBootReady) {
+  // 1. Tampilan skeleton gelap sementara isAuthLoading masih true (cegah mental ke Login saat refresh/publish ulang)
+  if (isAuthLoading || !isCloudBootReady) {
     return (
       <div className="min-h-screen bg-[#070c18] text-slate-100 flex flex-col">
         {/* Skeleton Navbar */}
@@ -388,12 +416,13 @@ function BankAppContent() {
           </button>
         </div>
       )}
-      {/* Global Closable Website System Notification Modal & Lapor Bug Modal */}
+      {/* Global Closable Website System Notification Modal, Debt Popup & Lapor Bug Modal */}
       <WebsiteSystemNotificationModal />
       <GlobalChatAndNotificationLayer />
       <GiftLetterOverlayAndCornerPopup />
+      <DebtIncurredPopupModal onOpenDebtTab={() => setActiveView('debt')} />
 
-      {/* Top Navbar (Includes Transfer & Emas 24K between Mobile Banking & Lowongan Kerja on Desktop) */}
+      {/* Top Navbar (Includes Tab Kotak Hutang di kiri logo, Transfer & Emas 24K, serta indikator Update BARU) */}
       <Navbar
         activeView={activeView}
         setActiveView={(view) => {
@@ -408,6 +437,12 @@ function BankAppContent() {
         onOpenSecurityCenter={openSecurityCenter}
       />
 
+      {/* Banner Peringatan Hutang Aktif + Hitung Mundur Tenggat Real-Time */}
+      <DebtWarningBanner
+        onOpenDebtTab={() => setActiveView('debt')}
+        isAlreadyOnDebtTab={activeView === 'debt'}
+      />
+
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
         {activeView === 'dashboard' && (
@@ -416,6 +451,9 @@ function BankAppContent() {
             onQuickAdminAccess={handleQuickAdminAccess}
             onOpenSecurityCenter={openSecurityCenter}
           />
+        )}
+        {activeView === 'debt' && (
+          <DebtManagementView onNavigateToView={(v) => setActiveView(v)} />
         )}
         {activeView === 'transfer' && (
           <TransferWorkspace

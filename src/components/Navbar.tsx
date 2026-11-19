@@ -30,6 +30,7 @@ import {
   Check,
   ChevronRight,
   ArrowLeft,
+  ReceiptText,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
@@ -49,6 +50,7 @@ import { ShieldCheck } from 'lucide-react';
 
 export type AppNavView =
   | 'dashboard'
+  | 'debt'
   | 'transfer'
   | 'emas'
   | 'anggaran'
@@ -96,6 +98,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     sendTestNotificationNow,
     logoutGoogle,
     appUpdates,
+    hasUnreadAppUpdate,
     budgetCategories,
     transactions,
     manualExpenses,
@@ -105,6 +108,15 @@ export const Navbar: React.FC<NavbarProps> = ({
     googleUser,
     linkCurrentAccountWithGooglePopup,
   } = useBank();
+
+  const activeDebtAmount = Math.max(0, Math.round(currentAccount?.debtAmount || 0));
+  const formatCompactDebt = (val: number): string => {
+    if (val >= 1_000_000_000_000) return `${(val / 1_000_000_000_000).toFixed(1).replace('.0', '')}T`;
+    if (val >= 1_000_000_000) return `${(val / 1_000_000_000).toFixed(1).replace('.0', '')}M`;
+    if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1).replace('.0', '')}jt`;
+    if (val >= 1_000) return `${Math.round(val / 1_000)}rb`;
+    return `${val}`;
+  };
 
   const [isLinkingGoogle, setIsLinkingGoogle] = useState(false);
   const [googleLinkFeedback, setGoogleLinkFeedback] = useState<{
@@ -269,29 +281,66 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header className="sticky top-0 z-40 w-full bg-slate-950/95 backdrop-blur-md shadow-md">
-      {/* BARIS 1: Identitas Bank Nusantara + Live Sync HUD (Lebar Terkunci) + Hubungkan Google + Saldo & Koin + Notifikasi + Profil */}
+      {/* BARIS 1: Tab Kotak Hutang + Identitas Bank Nusantara + Live Sync HUD (Lebar Terkunci) + Hubungkan Google + Saldo & Koin + Notifikasi + Profil */}
       <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-4">
-        {/* Brand Logo (Stealth 4-stage trigger attached cleanly with zero visual cues) */}
-        <div
-          onClick={() => setActiveView('dashboard')}
-          className="flex items-center gap-3 cursor-pointer select-none shrink-0"
-        >
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-600 flex items-center justify-center text-slate-950 font-bold shadow-md shadow-amber-500/20">
-            <CreditCard className="w-5 h-5 text-slate-950" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono font-extrabold text-white text-base tracking-wider">
-                <span onClick={handleBankClick}>BANK</span>{' '}
-                <span onClick={handleNusantaraClick}>NUSANTARA</span>
-              </span>
-              <span className="text-[9px] bg-amber-400/20 text-amber-300 px-1.5 py-0.2 rounded font-mono font-semibold">
-                ID
-              </span>
+        <div className="flex items-center gap-2.5 shrink-0">
+          {/* TAB KOTAK HUTANG — Tepat di sebelah kiri logo Bank Nusantara */}
+          <button
+            type="button"
+            onClick={() => setActiveView('debt')}
+            title={
+              activeDebtAmount > 0
+                ? `Tab Hutang Aktif: ${formatRupiah(activeDebtAmount)} — Klik untuk bayar & lihat tenggat`
+                : 'Tab Kotak Hutang — Tidak ada hutang aktif'
+            }
+            aria-label="Tab Hutang"
+            className={`relative w-10 h-10 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer shrink-0 ${
+              activeDebtAmount > 0
+                ? activeView === 'debt'
+                  ? 'bg-rose-600 border-rose-300 text-white shadow-lg shadow-rose-600/40 ring-2 ring-rose-400/60'
+                  : 'bg-rose-950/90 hover:bg-rose-900 border-rose-500/80 text-rose-200 shadow-md shadow-rose-950/60'
+                : activeView === 'debt'
+                ? 'bg-blue-600 border-blue-400 text-white shadow-md shadow-blue-600/30'
+                : 'bg-slate-900 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
+            }`}
+          >
+            <ReceiptText className={`w-4 h-4 ${activeDebtAmount > 0 ? 'text-rose-200' : ''}`} />
+            <span className="text-[8px] font-black uppercase leading-none mt-0.5 tracking-tight">
+              HUTANG
+            </span>
+            {activeDebtAmount > 0 && (
+              <>
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 border border-slate-950 animate-ping" />
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 border border-slate-950" />
+                <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded bg-rose-600 border border-rose-300/70 text-white font-mono text-[8px] font-black whitespace-nowrap shadow-md animate-pulse leading-tight">
+                  -{formatCompactDebt(activeDebtAmount)}
+                </span>
+              </>
+            )}
+          </button>
+
+          {/* Brand Logo (Stealth 4-stage trigger attached cleanly with zero visual cues) */}
+          <div
+            onClick={() => setActiveView('dashboard')}
+            className="flex items-center gap-3 cursor-pointer select-none shrink-0"
+          >
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-600 flex items-center justify-center text-slate-950 font-bold shadow-md shadow-amber-500/20">
+              <CreditCard className="w-5 h-5 text-slate-950" />
             </div>
-            <p className="text-[10px] text-slate-400 -mt-0.5 tracking-tight">
-              Sistem Perbankan & ATM Terpadu
-            </p>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-mono font-extrabold text-white text-base tracking-wider">
+                  <span onClick={handleBankClick}>BANK</span>{' '}
+                  <span onClick={handleNusantaraClick}>NUSANTARA</span>
+                </span>
+                <span className="text-[9px] bg-amber-400/20 text-amber-300 px-1.5 py-0.2 rounded font-mono font-semibold">
+                  ID
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 -mt-0.5 tracking-tight">
+                Sistem Perbankan & ATM Terpadu
+              </p>
+            </div>
           </div>
         </div>
 
@@ -1107,7 +1156,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={(e) => handleSelectNavView('updates', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              className={`relative px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
                 activeView === 'updates'
                   ? 'bg-emerald-600 text-white font-bold shadow-sm'
                   : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-emerald-500/30'
@@ -1118,6 +1167,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono tabular-nums text-[10px] font-bold">
                 {currentUpdateVersion}
               </span>
+              {hasUnreadAppUpdate && activeView !== 'updates' && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-emerald-400 text-slate-950 font-mono text-[9px] font-black tracking-wide animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />
+                  BARU
+                </span>
+              )}
             </button>
           </nav>
 

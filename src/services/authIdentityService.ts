@@ -18,12 +18,10 @@ import {
   googleProvider,
   GoogleAuthProvider,
   authPersistenceReady,
+  ensureBrowserLocalPersistence,
   signInAnonymously,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   linkWithPopup,
-  linkWithRedirect,
   signInWithCredential,
   reauthenticateWithPopup,
   readUidVaultDoc,
@@ -375,6 +373,7 @@ export async function ensureAnonymousVaultSession(): Promise<{
   }
 
   try {
+    await ensureBrowserLocalPersistence();
     const cred = await signInAnonymously(auth);
     const anonUser = cred.user;
     const nowIso = new Date().toISOString();
@@ -435,27 +434,10 @@ export async function ensureAnonymousVaultSession(): Promise<{
 }
 
 // ============================================================================
-// REDIRECT RESULT RESOLVER (Auto-complete signInWithRedirect / linkWithRedirect)
+// POPUP-ONLY AUTH GUARD (Redirect dinonaktifkan agar tidak looping di Preview/Publish)
 // ============================================================================
 export async function resolvePendingAuthRedirect(): Promise<FirebaseUser | null> {
   await authPersistenceReady;
-  try {
-    const result = await getRedirectResult(auth);
-    if (result?.user) {
-      await registerActiveDeviceSession(
-        result.user.uid,
-        result.user.isAnonymous ? 'anonymous' : 'google'
-      );
-      await appendSecurityAuditLog(
-        result.user.uid,
-        'google_sign_in',
-        `Sesi Google berhasil diselesaikan melalui redirect aman (${result.user.email || result.user.uid}).`
-      );
-      return result.user;
-    }
-  } catch (err) {
-    console.warn('[Auth Redirect Recovery]', err);
-  }
   return null;
 }
 
@@ -510,10 +492,10 @@ export interface LinkBankingSnapshotInput {
 export async function linkCurrentSessionToGoogleZeroLoss(
   liveAnonymousPayload?: LinkBankingSnapshotInput
 ): Promise<AccountLinkResult> {
-  await authPersistenceReady;
+  await ensureBrowserLocalPersistence();
   const currentUser = auth.currentUser;
 
-  // Jika pengguna belum memiliki Firebase Auth session sama sekali, jalankan Google Sign-In biasa
+  // Jika pengguna belum memiliki Firebase Auth session sama sekali, jalankan Google Sign-In Popup Murni
   if (!currentUser) {
     try {
       const res = await signInWithPopup(auth, googleProvider);
@@ -534,12 +516,11 @@ export async function linkCurrentSessionToGoogleZeroLoss(
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code || '';
       if (code === 'auth/popup-blocked') {
-        await signInWithRedirect(auth, googleProvider);
         return {
           success: false,
-          redirecting: true,
           errorCode: code,
-          message: 'Popup diblokir browser. Mengalihkan ke halaman autentikasi Google...',
+          message:
+            'Popup login Google diblokir browser Anda. Mohon izinkan pop-up untuk situs ini lalu klik Coba Lagi.',
         };
       }
       return {
@@ -631,23 +612,14 @@ export async function linkCurrentSessionToGoogleZeroLoss(
   } catch (err: unknown) {
     const code = (err as { code?: string })?.code || '';
 
-    // Fallback otomatis ke linkWithRedirect jika popup diblokir browser seluler / in-app
+    // Popup murni tanpa linkWithRedirect agar tidak pernah looping di Preview/Publish
     if (code === 'auth/popup-blocked') {
-      try {
-        await linkWithRedirect(currentUser, googleProvider);
-        return {
-          success: false,
-          redirecting: true,
-          errorCode: code,
-          message: 'Popup diblokir browser. Mengalihkan otomatis untuk menautkan akun Google...',
-        };
-      } catch {
-        return {
-          success: false,
-          errorCode: code,
-          message: 'Browser memblokir popup penautan Google. Izinkan pop-up lalu coba lagi.',
-        };
-      }
+      return {
+        success: false,
+        errorCode: code,
+        message:
+          'Browser memblokir popup penautan akun Google. Mohon izinkan pop-up pada browser lalu klik Hubungkan Google lagi.',
+      };
     }
 
     // ========================================================================
