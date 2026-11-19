@@ -1,8 +1,295 @@
 rules_version = '2';
+
+// ============================================================================
+// BANK NUSANTARA DIGITAL — ENTERPRISE ZERO-TRUST FIRESTORE SECURITY RULES
+// ============================================================================
+// Prinsip Defense-in-Depth:
+// 1. Default Deny mutlak untuk seluruh path yang tidak didefinisikan eksplisit
+// 2. Isolasi Tenant Berbasis UID (request.auth != null && request.auth.uid == userId)
+// 3. Validasi Skema, Tipe Data & Panjang String Maksimal (Anti-DoS / Payload Poisoning)
+// 4. Field Immutability: ownerUid & createdAt terkunci permanen setelah dibuat
+// 5. Immutable Append-Only Security Audit Logs (larangan update & delete)
+// 6. Server-Side Anti-Spam Rate Limiting (>= 500ms antar pembaruan menggunakan request.time)
+// ============================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // 1. GLOBAL SAFETY NET: DEFAULT DENY
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // ------------------------------------------------------------------------
+    // GLOBAL HARDENED PRIMITIVES
+    // ------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isVerifiedAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && (
+          request.auth.token.email == 'fahmiammarulazka@gmail.com'
+          || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Anti-Spam Rate Limiting Server-Side: minimal jeda 500ms dari updatedAt sebelumnya
+    function passesRateLimit() {
+      return !('updatedAt' in existing())
+        || !(existing().updatedAt is timestamp)
+        || request.time >= existing().updatedAt + duration.value(500, 'ms');
+    }
+
+    // Kunci Immutability untuk ownerUid dan createdAt
+    function preservesImmutableCore(userId) {
+      return incoming().ownerUid == userId
+        && incoming().ownerUid == existing().ownerUid
+        && (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt)
+        && (!('createdAtMs' in existing()) || incoming().createdAtMs == existing().createdAtMs);
+    }
+
+    // ------------------------------------------------------------------------
+    // VALIDATION BLUEPRINTS (STANDALONE HELPERS)
+    // ------------------------------------------------------------------------
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid'])
+        && data.keys().hasOnly([
+          'uid', 'ownerUid', 'email', 'emailKey', 'displayName', 'photoURL',
+          'status', 'banReason', 'bannedAt', 'banExpiresAt', 'banDurationLabel',
+          'appealStatus', 'appealNote', 'appealCategory', 'appealCount',
+          'appealAdminNote', 'appealRequestedAt', 'banCustomConfig',
+          'lastAccountId', 'currentAccountId', 'hasCompletedOnboarding',
+          'isAnonymousVault', 'authMode', 'emailVerified', 'failedPinAttempts',
+          'linkedFromAnonymousAt', 'lastDeviceId', 'syncVersion',
+          'savedAccounts', 'notificationCategoryPermissions',
+          'createdAt', 'updatedAt', 'updatedAtMs', 'updatedAtServer'
+        ])
+        && data.uid is string && data.uid == userId && data.uid.size() <= 128
+        && (!('ownerUid' in data) || (data.ownerUid is string && data.ownerUid == userId && data.ownerUid.size() <= 128))
+        && (!('email' in data) || (data.email is string && data.email.size() <= 254))
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 160))
+        && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
+        && (!('status' in data) || (data.status is string && data.status in ['active', 'banned']))
+        && (!('banReason' in data) || (data.banReason is string && data.banReason.size() <= 1000))
+        && (!('lastDeviceId' in data) || (data.lastDeviceId is string && data.lastDeviceId.size() <= 128))
+        && (!('syncVersion' in data) || (data.syncVersion is int && data.syncVersion >= 1))
+        && (!('hasCompletedOnboarding' in data) || data.hasCompletedOnboarding is bool)
+        && (!('isAnonymousVault' in data) || data.isAnonymousVault is bool);
+    }
+
+    function isValidVaultState(data, userId) {
+      return data.keys().hasAll(['ownerUid', 'syncVersion', 'lastDeviceId', 'payload'])
+        && data.keys().hasOnly([
+          'ownerUid', 'createdAt', 'updatedAt', 'updatedAtServer',
+          'createdAtMs', 'updatedAtMs', 'createdAtIso', 'updatedAtIso',
+          'syncVersion', 'lastDeviceId', 'payload'
+        ])
+        && data.ownerUid is string && data.ownerUid == userId && data.ownerUid.size() <= 128
+        && data.syncVersion is int && data.syncVersion >= 1 && data.syncVersion <= 10000000
+        && data.lastDeviceId is string && data.lastDeviceId.size() >= 4 && data.lastDeviceId.size() <= 128
+        && data.payload is map
+        && (!('createdAtIso' in data) || (data.createdAtIso is string && data.createdAtIso.size() <= 64))
+        && (!('updatedAtIso' in data) || (data.updatedAtIso is string && data.updatedAtIso.size() <= 64))
+        && (!('createdAtMs' in data) || data.createdAtMs is number)
+        && (!('updatedAtMs' in data) || data.updatedAtMs is number);
+    }
+
+    function isValidSnapshot(data, userId) {
+      return data.keys().hasAll(['id', 'ownerUid', 'label', 'triggerReason', 'sha256', 'payload'])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'label', 'triggerReason', 'createdAtMs', 'createdAtIso',
+          'deviceId', 'sha256', 'accountCount', 'transactionCount', 'pocketCount',
+          'totalBalance', 'totalGoldGrams', 'payload', 'updatedAtServer'
+        ])
+        && data.id is string && isValidId(data.id)
+        && data.ownerUid is string && data.ownerUid == userId && data.ownerUid.size() <= 128
+        && data.label is string && data.label.size() >= 1 && data.label.size() <= 160
+        && data.triggerReason is string
+        && data.triggerReason in ['manual', 'pre_restore', 'pre_import', 'pre_reset', 'pre_merge']
+        && data.sha256 is string && data.sha256.size() == 64 && data.sha256.matches('^[a-f0-9]{64}$')
+        && data.payload is map
+        && (!('deviceId' in data) || (data.deviceId is string && data.deviceId.size() <= 128))
+        && (!('accountCount' in data) || (data.accountCount is int && data.accountCount >= 0 && data.accountCount <= 500))
+        && (!('transactionCount' in data) || (data.transactionCount is int && data.transactionCount >= 0 && data.transactionCount <= 5000));
+    }
+
+    function isValidSecurityLog(data, userId) {
+      return data.keys().hasAll(['id', 'ownerUid', 'eventType', 'summary', 'status', 'deviceId', 'createdAtMs'])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'eventType', 'summary', 'status', 'deviceId',
+          'deviceLabel', 'platform', 'userAgent', 'createdAtMs', 'createdAtIso',
+          'details', 'updatedAtServer'
+        ])
+        && data.id is string && isValidId(data.id)
+        && data.ownerUid is string && data.ownerUid == userId && data.ownerUid.size() <= 128
+        && data.eventType is string && data.eventType.size() >= 2 && data.eventType.size() <= 64
+        && data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 500
+        && data.status is string && data.status in ['success', 'warning', 'blocked']
+        && data.deviceId is string && data.deviceId.size() >= 4 && data.deviceId.size() <= 128
+        && data.createdAtMs is number
+        && (!('deviceLabel' in data) || (data.deviceLabel is string && data.deviceLabel.size() <= 120))
+        && (!('platform' in data) || (data.platform is string && data.platform.size() <= 80))
+        && (!('userAgent' in data) || (data.userAgent is string && data.userAgent.size() <= 320))
+        && (!('details' in data) || data.details is map);
+    }
+
+    function isValidDeviceSession(data, userId) {
+      return data.keys().hasAll(['id', 'ownerUid', 'deviceId', 'authMethod', 'revoked'])
+        && data.keys().hasOnly([
+          'id', 'ownerUid', 'deviceId', 'deviceLabel', 'platform', 'userAgent',
+          'authMethod', 'firstSeenIso', 'lastActiveIso', 'lastActiveMs',
+          'revoked', 'revokedAtIso', 'updatedAtServer'
+        ])
+        && data.id is string && isValidId(data.id)
+        && data.ownerUid is string && data.ownerUid == userId && data.ownerUid.size() <= 128
+        && data.deviceId is string && data.deviceId.size() >= 4 && data.deviceId.size() <= 128
+        && data.authMethod is string && data.authMethod in ['google', 'anonymous']
+        && data.revoked is bool
+        && (!('deviceLabel' in data) || (data.deviceLabel is string && data.deviceLabel.size() <= 120))
+        && (!('platform' in data) || (data.platform is string && data.platform.size() <= 80))
+        && (!('userAgent' in data) || (data.userAgent is string && data.userAgent.size() <= 320));
+    }
+
+    // ------------------------------------------------------------------------
+    // ISOLASI TENANT MUTLAK BERBASIS UID: /users/{userId}/...
+    // ------------------------------------------------------------------------
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isVerifiedAdmin());
+      allow list: if isVerifiedAdmin();
+      allow create: if isValidId(userId)
+        && (isOwner(userId) || isVerifiedAdmin())
+        && isValidUserProfile(incoming(), userId);
+      allow update: if isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && (
+          isVerifiedAdmin()
+          || (
+            isOwner(userId)
+            && passesRateLimit()
+            && (!('ownerUid' in existing()) || incoming().ownerUid == existing().ownerUid)
+            && (!('status' in existing()) || incoming().status == existing().status)
+          )
+        );
+      allow delete: if isValidId(userId) && isVerifiedAdmin();
+
+      // 2.1 Personal Vault State (Atomic Concurrency + Rate Limiting)
+      match /vault_state/{stateId} {
+        allow get: if isValidId(userId) && isValidId(stateId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(stateId)
+          && isOwner(userId)
+          && isValidVaultState(incoming(), userId);
+        allow update: if isValidId(userId) && isValidId(stateId)
+          && isOwner(userId)
+          && isValidVaultState(incoming(), userId)
+          && preservesImmutableCore(userId)
+          && passesRateLimit()
+          && incoming().syncVersion > existing().syncVersion
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'updatedAt', 'updatedAtServer', 'updatedAtMs', 'updatedAtIso',
+            'syncVersion', 'lastDeviceId', 'payload'
+          ]);
+        allow delete: if isValidId(userId) && isValidId(stateId) && isOwner(userId);
+      }
+
+      // 2.2 Time-Machine Cloud Snapshots (Rolling Max 5 Versions)
+      match /snapshots/{snapshotId} {
+        allow get: if isValidId(userId) && isValidId(snapshotId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(snapshotId)
+          && isOwner(userId)
+          && isValidSnapshot(incoming(), userId);
+        allow update: if false; // Snapshot bersifat immutable setelah dibuat
+        allow delete: if isValidId(userId) && isValidId(snapshotId) && isOwner(userId);
+      }
+
+      // 2.3 Immutable Security Audit Trail (Append-Only)
+      match /security_logs/{logId} {
+        allow get: if isValidId(userId) && isValidId(logId) && (isOwner(userId) || isVerifiedAdmin());
+        allow list: if (isOwner(userId) && resource.data.ownerUid == request.auth.uid) || isVerifiedAdmin();
+        allow create: if isValidId(userId) && isValidId(logId)
+          && isOwner(userId)
+          && isValidSecurityLog(incoming(), userId);
+        allow update: if false; // Audit log tidak pernah boleh diubah
+        allow delete: if false; // Audit log tidak pernah boleh dihapus oleh klien
+      }
+
+      // 2.4 Active Device Sessions Registry
+      match /devices/{deviceId} {
+        allow get: if isValidId(userId) && isValidId(deviceId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerUid == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(deviceId)
+          && isOwner(userId)
+          && isValidDeviceSession(incoming(), userId);
+        allow update: if isValidId(userId) && isValidId(deviceId)
+          && isOwner(userId)
+          && isValidDeviceSession(incoming(), userId)
+          && incoming().ownerUid == existing().ownerUid
+          && incoming().deviceId == existing().deviceId
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'deviceLabel', 'platform', 'userAgent', 'authMethod',
+            'lastActiveIso', 'lastActiveMs', 'revoked', 'revokedAtIso', 'updatedAtServer'
+          ]);
+        allow delete: if isValidId(userId) && isValidId(deviceId) && isOwner(userId);
+      }
+    }
+
+    // ------------------------------------------------------------------------
+    // ADMIN REGISTRY (Hanya bisa dibaca oleh pemilik UID sendiri / Verified Admin)
+    // ------------------------------------------------------------------------
+    match /admins/{adminUid} {
+      allow get: if isValidId(adminUid) && (isOwner(adminUid) || isVerifiedAdmin());
+      allow list, create, update, delete: if false;
+    }
+
+    // ------------------------------------------------------------------------
+    // PROBE KONEKSI & BANK NUSANTARA SHARED OPERATIONAL STATE (AUTH REQUIRED)
+    // ------------------------------------------------------------------------
+    match /test/connection {
+      allow get: if isSignedIn();
+      allow list, write: if false;
+    }
+
+    match /users_by_email/{emailKey} {
+      allow get: if isValidId(emailKey)
+        && isSignedIn()
+        && (
+          isVerifiedAdmin()
+          || (resource != null && resource.data.uid == request.auth.uid)
+          || (request.auth.token.email_verified == true && resource != null && resource.data.email == request.auth.token.email)
+        );
+      allow list: if isVerifiedAdmin();
+      allow create, update: if isValidId(emailKey)
+        && isSignedIn()
+        && (isVerifiedAdmin() || incoming().uid == request.auth.uid);
+      allow delete: if isValidId(emailKey) && isVerifiedAdmin();
+    }
+
+    match /bank_state_v1/{docId} {
+      allow get: if isValidId(docId) && isSignedIn();
+      allow list: if false;
+      allow create, update: if isValidId(docId)
+        && isSignedIn()
+        && incoming().updatedAtMs is number;
+      allow delete: if isValidId(docId) && isVerifiedAdmin();
     }
   }
 }

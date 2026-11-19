@@ -43,6 +43,8 @@ import {
   normalizeNotificationCategory,
   getNotificationCategoryMeta,
 } from '../data/notificationCategories';
+import { LiveSyncTelemetryHud } from './SecurityCommandCenter';
+import { ShieldCheck } from 'lucide-react';
 
 export type AppNavView =
   | 'dashboard'
@@ -64,6 +66,7 @@ interface NavbarProps {
   onOpenRegisterModal: () => void;
   onSecretAdminTrigger: () => void;
   onQuickAdminAccess?: (role: DevRoleConfig) => void;
+  onOpenSecurityCenter?: (section?: 'identity' | 'telemetry' | 'timemachine' | 'audit') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -72,6 +75,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenRegisterModal,
   onSecretAdminTrigger,
   onQuickAdminAccess,
+  onOpenSecurityCenter,
 }) => {
   const {
     accounts,
@@ -400,14 +404,21 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right Action Bar */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Tombol Atas Sync / "Sign in with Google" untuk Akun OA & Akun Guest yang Belum Tersambung Email Google */}
-          {isCurrentAccountUnlinkedToGoogle ? (
+          {/* Live Sync Telemetry HUD (4 Status Real-Time: Tersinkronisasi / Menyinkronkan / Offline / Gangguan + Retry) */}
+          <LiveSyncTelemetryHud
+            onOpenCommandCenter={(sec) => {
+              if (onOpenSecurityCenter) onOpenSecurityCenter(sec || 'telemetry');
+            }}
+          />
+
+          {/* Tombol Cepat "Sign in with Google" untuk Akun OA & Akun Guest yang Belum Tersambung Email Google */}
+          {isCurrentAccountUnlinkedToGoogle && (
             <button
               type="button"
               onClick={handleLinkCurrentAccountToGoogle}
               disabled={isLinkingGoogle}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-900 border border-cyan-400/60 text-[11px] font-black whitespace-nowrap shrink-0 shadow-md shadow-cyan-500/20 cursor-pointer transition disabled:opacity-60"
-              title="Sambungkan Akun OA / Akun Guest ini ke email Google Anda agar tersinkronisasi di Cloud"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-900 border border-cyan-400/60 text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition disabled:opacity-60"
+              title="Hubungkan Akun ini ke email Google Anda agar tersinkronisasi permanen di Cloud"
             >
               <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
                 <path
@@ -427,37 +438,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
                 />
               </svg>
-              <span>{isLinkingGoogle ? 'Menyambungkan...' : 'Sign in with Google'}</span>
+              <span>{isLinkingGoogle ? 'Menghubungkan...' : 'Hubungkan Google'}</span>
             </button>
-          ) : (
-            <div
-              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[10px] font-mono font-bold whitespace-nowrap shrink-0 ${
-                cloudSyncStatus === 'synced'
-                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
-                  : cloudSyncStatus === 'syncing'
-                  ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
-                  : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
-              }`}
-              title={`Tersinkronisasi ke Cloud (${currentAccount?.email || googleUser?.email || 'Cloud Firestore'})`}
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  cloudSyncStatus === 'synced'
-                    ? 'bg-emerald-400'
-                    : cloudSyncStatus === 'syncing'
-                    ? 'bg-amber-400 animate-pulse'
-                    : 'bg-rose-400'
-                }`}
-              />
-              <Cloud className="w-3 h-3 shrink-0" />
-              <span>
-                {cloudSyncStatus === 'synced'
-                  ? 'Tersinkronisasi'
-                  : cloudSyncStatus === 'syncing'
-                  ? 'Menyinkronkan...'
-                  : 'Offline'}
-              </span>
-            </div>
           )}
 
           {/* Money & Coin Icon Indicator Bar */}
@@ -939,6 +921,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                           ? 'Menyambungkan ke Google...'
                           : 'Sign in with Google (Sambungkan Akun Ini)'}
                       </span>
+                    </button>
+                  )}
+
+                  {onOpenSecurityCenter && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowUserDropdown(false);
+                        onOpenSecurityCenter('identity');
+                      }}
+                      className="w-full mt-1.5 py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/35 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-2 cursor-pointer transition"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                      <span>Security &amp; Sync Command Center</span>
                     </button>
                   )}
                 </div>

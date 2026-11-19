@@ -11,19 +11,47 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import confetti from 'canvas-confetti';
 import {
-  db,
   auth,
   onAuthStateChanged,
   signOut,
   signInWithGooglePopup,
   normalizeEmailKey,
   emailToFirestoreDocId,
+  readCloudDoc,
+  writeCloudDoc,
+  subscribeCloudDoc,
+  getEarlyAccountsPrefetch,
+  getEarlyFullMasterPrefetch,
+  toArraySafe,
   testConnection,
   handleFirestoreError,
   OperationType,
   type FirebaseUser,
 } from '../firebase';
-import { doc, getDoc, getDocFromServer, setDoc, onSnapshot } from 'firebase/firestore';
+import {
+  subscribeSyncTelemetry,
+  updateSyncTelemetry,
+  getSyncTelemetrySnapshot,
+  writeVaultStateAtomic,
+  readVaultStateWithOfflineFallback,
+  forceSyncVaultNow,
+  saveFastBootSnapshot,
+  readFastBootSnapshot,
+  type SyncTelemetryState,
+} from '../services/maxSyncService';
+import {
+  ensureAnonymousVaultSession,
+  resolvePendingAuthRedirect,
+  linkCurrentSessionToGoogleZeroLoss,
+  requireGoogleReauthentication,
+  registerActiveDeviceSession,
+  appendSecurityAuditLog,
+  type AtomicMergeSummary,
+} from '../services/authIdentityService';
+import {
+  createCloudSnapshot,
+  type BankingBackupPayload,
+} from '../services/timeMachineBackupService';
 import {
   BankAccount,
   Transaction,
@@ -270,7 +298,24 @@ interface BankContextType {
   ) => { success: boolean; message: string };
   linkCurrentAccountWithGooglePopup: (
     targetAccountId?: string
-  ) => Promise<{ success: boolean; message: string; email?: string; errorCode?: string }>;
+  ) => Promise<{
+    success: boolean;
+    message: string;
+    email?: string;
+    errorCode?: string;
+    atomicMergeSummary?: AtomicMergeSummary;
+  }>;
+  syncTelemetry: SyncTelemetryState;
+  lastAtomicMergeSummary: AtomicMergeSummary | null;
+  dismissAtomicMergeSummary: () => void;
+  buildPersonalBackupPayload: () => BankingBackupPayload;
+  restoreFromBankingPayload: (
+    payload: BankingBackupPayload,
+    sourceLabel: string
+  ) => Promise<{ success: boolean; message: string }>;
+  forceSyncCloudNow: () => Promise<{ success: boolean; message: string }>;
+  resetCloudDataWithReauth: () => Promise<{ success: boolean; message: string }>;
+  ensureAnonymousSessionNow: () => Promise<{ success: boolean; uid?: string; message: string }>;
   enterBankPortal: () => void;
   loginWithGoogle: (email: string, name: string, picture?: string, firebaseUid?: string) => void;
   completeGoogleOnboarding: () => void;
@@ -1504,11 +1549,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isCloudBootReady, setIsCloudBootReady] = useState<boolean>(false);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<CloudSyncStatus>('syncing');
   const [lastCloudSyncAt, setLastCloudSyncAt] = useState<string | null>(null);
+  const [syncTelemetry, setSyncTelemetry] = useState<SyncTelemetryState>(() =>
+    getSyncTelemetrySnapshot()
+  );
+  const [lastAtomicMergeSummary, setLastAtomicMergeSummary] = useState<AtomicMergeSummary | null>(
+    null
+  );
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [activeCloudEmail, setActiveCloudEmail] = useState<string | null>(null);
   const activeCloudEmailRef = useRef<string | null>(null);
   activeCloudEmailRef.current = activeCloudEmail;
   const [cloudUserStatus, setCloudUserStatus] = useState<CloudUserRecord | null>(null);
+
+  useEffect(() => {
+    return subscribeSyncTelemetry((next) => {
+      setSyncTelemetry(next);
+    });
+  }, []);
   const [banSupportConfig, setBanSupportConfig] = useState<BanSupportConfig>({
     whatsappNumber: '6281234567890',
     emailAddress: 'support@banknusantara.id',
@@ -1782,27 +1839,30 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     isApplyingFirestoreRef.current = true;
 
+    const incomingDelAccountIds = toArraySafe<string>(data.deletedAccountIds);
     const mergedDelAccountIds: string[] = Array.from(
       new Set([
         ...PURGED_BOT_ACCOUNT_IDS,
         ...deletedAccountIdsRef.current,
-        ...(Array.isArray(data.deletedAccountIds) ? (data.deletedAccountIds as string[]) : []),
+        ...incomingDelAccountIds,
       ])
     );
     setDeletedAccountIds(mergedDelAccountIds);
     deletedAccountIdsRef.current = mergedDelAccountIds;
 
-    const mergedDelGiftIds: string[] = Array.isArray(data.deletedGiftEventIds)
-      ? Array.from(new Set([...deletedGiftEventIdsRef.current, ...data.deletedGiftEventIds]))
-      : deletedGiftEventIdsRef.current;
-    if (Array.isArray(data.deletedGiftEventIds)) {
+    const incomingDelGiftIds = toArraySafe<string>(data.deletedGiftEventIds);
+    const mergedDelGiftIds: string[] =
+      incomingDelGiftIds.length > 0
+        ? Array.from(new Set([...deletedGiftEventIdsRef.current, ...incomingDelGiftIds]))
+        : deletedGiftEventIdsRef.current;
+    if (incomingDelGiftIds.length > 0) {
       setDeletedGiftEventIds(mergedDelGiftIds);
     }
 
     let hadPurgedBotAccountsInCloud = false;
 
-    if (Array.isArray(data.accounts)) {
-      const incomingAccounts = data.accounts as BankAccount[];
+    const incomingAccounts = toArraySafe<BankAccount>(data.accounts);
+    if (incomingAccounts.length > 0) {
       hadPurgedBotAccountsInCloud = incomingAccounts.some(
         (a) =>
           PURGED_BOT_ACCOUNT_IDS.includes(a.id) ||
@@ -1823,6 +1883,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       latestServerAccountsRef.current = cleanAccounts;
       accountsRef.current = cleanAccounts;
       setAccounts(cleanAccounts);
+      // Simpan Fast-Boot Snapshot ke IndexedDB (Zero localStorage) agar reload berikutnya terbuka instan (< 200ms)
+      void saveFastBootSnapshot({
+        accounts: cleanAccounts,
+        deletedAccountIds: mergedDelAccountIds,
+        banSupportConfig:
+          data.banSupportConfig && typeof data.banSupportConfig === 'object'
+            ? data.banSupportConfig
+            : undefined,
+        cachedAtMs: Date.now(),
+      });
     }
 
     const isNotBotAccountId = (accId?: string) =>
@@ -2156,28 +2226,88 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           updatedAtMs: nowMs,
         }) as Record<string, unknown>;
         if (firebaseUser?.uid) {
-          void setDoc(doc(db, 'users', firebaseUser.uid), vaultPayload, { merge: true }).catch(
+          void writeCloudDoc('users', firebaseUser.uid, vaultPayload, { merge: true }).catch(
             () => {}
           );
         }
-        void setDoc(
-          doc(db, 'users_by_email', eKey),
+        void writeCloudDoc(
+          'users_by_email',
+          eKey,
           { ...vaultPayload, email: activeEmailForVault, emailKey: eKey },
           { merge: true }
         ).catch(() => {});
       }
     }
 
-    return setDoc(doc(db, 'bank_state_v1', 'master_state'), payload, { merge: true })
-      .then(() => {
-        setCloudSyncStatus('synced');
-        setLastCloudSyncAt(new Date().toISOString());
+    updateSyncTelemetry({
+      hasPendingWrites: true,
+      pendingWritesCount: Math.max(1, syncTelemetry.pendingWritesCount + 1),
+      syncedDocCount:
+        cloudSyncedAccounts.length +
+        (overrides?.transactions ?? transactions).length +
+        (overrides?.pockets ?? pockets).length +
+        (overrides?.depositos ?? depositos).length,
+    });
+
+    // Mirror juga ke UID Private Vault (`users/{uid}/vault_state/primary`) secara atomik dengan syncVersion +1
+    const activeAuthUid = auth.currentUser?.uid || firebaseUser?.uid;
+    if (activeAuthUid) {
+      const uidVaultPayload = sanitizeForFirestore({
+        accounts: cloudSyncedAccounts.filter((a) => {
+          const gEm = a.googleEmail ? normalizeEmailKey(a.googleEmail) : '';
+          const aEm = a.email ? normalizeEmailKey(a.email) : '';
+          return (
+            a.firebaseUid === activeAuthUid ||
+            a.id === currentAccountId ||
+            (activeEmailForVault && (gEm === activeEmailForVault || aEm === activeEmailForVault))
+          );
+        }),
+        updatedAtMs: nowMs,
+      }) as Record<string, unknown>;
+      void writeVaultStateAtomic(
+        activeAuthUid,
+        uidVaultPayload,
+        cloudSyncedAccounts.length + (overrides?.transactions ?? transactions).length
+      ).catch(() => {});
+    }
+
+    return writeCloudDoc('bank_state_v1', 'master_state', payload, { merge: true })
+      .then((ok) => {
+        if (ok) {
+          const syncedIso = new Date().toISOString();
+          setCloudSyncStatus('synced');
+          setLastCloudSyncAt(syncedIso);
+          updateSyncTelemetry({
+            fromCache: false,
+            hasPendingWrites: false,
+            pendingWritesCount: 0,
+            lastSyncedAt: syncedIso,
+            lastError: null,
+          });
+        } else {
+          setCloudSyncStatus('offline');
+          updateSyncTelemetry({
+            hasPendingWrites: false,
+            pendingWritesCount: 0,
+            lastError:
+              typeof navigator !== 'undefined' && navigator.onLine
+                ? 'Sinkronisasi ke server azkaakc tertunda. Klik Retry untuk mencoba ulang.'
+                : null,
+          });
+        }
+        return ok;
       })
       .catch((err) => {
         setCloudSyncStatus('offline');
+        updateSyncTelemetry({
+          hasPendingWrites: false,
+          pendingWritesCount: 0,
+          lastError: err instanceof Error ? err.message : 'Gangguan koneksi sinkronisasi cloud.',
+        });
         handleFirestoreError(err, OperationType.WRITE, 'bank_state_v1/master_state', {
           suppressThrow: true,
         });
+        return false;
       });
   };
 
@@ -2186,13 +2316,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     contextUid?: string,
     contextEmail?: string
   ) => {
-    setCloudUserStatus(uData);
+    const normalizedSavedAccounts = toArraySafe<BankAccount>(uData.savedAccounts);
+    const normalizedUserRecord: CloudUserRecord = {
+      ...uData,
+      ...(normalizedSavedAccounts.length > 0 ? { savedAccounts: normalizedSavedAccounts } : {}),
+    };
+    setCloudUserStatus(normalizedUserRecord);
 
     // Dual-Vault Recovery: Jika dokumen profil email/UID memiliki savedAccounts, gabungkan langsung ke daftar accounts agar tidak pernah hilang
-    if (Array.isArray(uData.savedAccounts) && uData.savedAccounts.length > 0) {
+    if (normalizedSavedAccounts.length > 0) {
       const mergedFromUserVault = unionMergeAccountsList(
         accountsRef.current,
-        [uData.savedAccounts, latestServerAccountsRef.current],
+        [normalizedSavedAccounts, latestServerAccountsRef.current],
         deletedAccountIdsRef.current
       );
       latestServerAccountsRef.current = mergedFromUserVault;
@@ -2226,8 +2361,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const cleanTargetEmail = normalizeEmailKey(contextEmail || uData.email || '');
     setAccounts((prev) => {
       const baseList =
-        Array.isArray(uData.savedAccounts) && uData.savedAccounts.length > 0
-          ? unionMergeAccountsList(prev, [uData.savedAccounts], deletedAccountIdsRef.current)
+        normalizedSavedAccounts.length > 0
+          ? unionMergeAccountsList(prev, [normalizedSavedAccounts], deletedAccountIdsRef.current)
           : prev;
       return baseList.map((acc) => {
         const accGoogle = acc.googleEmail ? normalizeEmailKey(acc.googleEmail) : '';
@@ -2330,17 +2465,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       updatedAt: new Date().toISOString(),
       updatedAtMs: Date.now(),
     }) as Record<string, unknown>;
-    const tasks: Promise<void>[] = [];
+    const tasks: Promise<unknown>[] = [];
     if (target.uid) {
       tasks.push(
-        setDoc(doc(db, 'users', target.uid), payload, { merge: true }).catch(() => {})
+        writeCloudDoc('users', target.uid, payload, { merge: true }).catch(() => {})
       );
     }
     emailSet.forEach((em) => {
       const eKey = emailToFirestoreDocId(em);
       tasks.push(
-        setDoc(
-          doc(db, 'users_by_email', eKey),
+        writeCloudDoc(
+          'users_by_email',
+          eKey,
           { ...payload, email: em, emailKey: eKey },
           { merge: true }
         ).catch(() => {})
@@ -2349,12 +2485,66 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await Promise.all(tasks);
   };
 
-  // Pre-Boot Cloud Auth Check + Dedicated Real-Time Listener on users/{uid} (Google) & users_by_email/{emailKey}
+  // Fast-Boot Cloud Auth Check + IndexedDB Instant Hydration + Parallel RTDB Priority Loader (Hard Timeout 2.5s)
   useEffect(() => {
     let active = true;
     let userDocUnsub: (() => void) | null = null;
+    let bootUnlocked = false;
+    let hasCloudAccountsArrived = false;
 
+    const unlockBootUI = () => {
+      if (!active || bootUnlocked) return;
+      bootUnlocked = true;
+      hasBootHydratedRef.current = true;
+      setIsCloudBootReady(true);
+    };
+
+    // Tandai status sinkronisasi halus di HUD Navbar saat boot berlangsung
+    updateSyncTelemetry({
+      hasPendingWrites: true,
+      lastError: null,
+    });
+
+    // Hard timeout 2.5 detik: menjamin layar loading tidak pernah tertahan lama pada jaringan lambat
+    const hardTimeoutId = window.setTimeout(() => {
+      if (!active || bootUnlocked) return;
+      hasFirestoreHydratedRef.current = true;
+      updateSyncTelemetry({
+        fromCache: true,
+        hasPendingWrites: true,
+      });
+      unlockBootUI();
+    }, 2500);
+
+    // Fase 0 (< 100ms): Baca cache Fast-Boot dari IndexedDB secara paralel dengan auth check
+    const fastCachePromise = readFastBootSnapshot();
+
+    // Jalankan pengecekan konektivitas & redirect auth secara non-blocking di latar belakang
     void testConnection();
+    void resolvePendingAuthRedirect();
+
+    // Muat payload riwayat panjang (transactions, chats, notifications, giftEvents, dll.) di latar belakang
+    const hydrateFullMasterInBackground = () => {
+      void getEarlyFullMasterPrefetch(6000)
+        .then((fullMaster) => {
+          if (!active || !fullMaster || isLinkingAccountToGoogleRef.current) return;
+          applyMasterCloudData(fullMaster, { forceInitial: true });
+          hasCloudAccountsArrived = true;
+          hasFirestoreHydratedRef.current = true;
+          const syncedIso = new Date().toISOString();
+          setCloudSyncStatus('synced');
+          setLastCloudSyncAt(syncedIso);
+          updateSyncTelemetry({
+            fromCache: false,
+            hasPendingWrites: false,
+            pendingWritesCount: 0,
+            lastSyncedAt: syncedIso,
+            syncedDocCount: accountsRef.current.length,
+            lastError: null,
+          });
+        })
+        .catch(() => {});
+    };
 
     const authUnsub = onAuthStateChanged(auth, async (fbUser) => {
       if (!active) return;
@@ -2370,68 +2560,297 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // jangan timpa state accounts lokal dengan master_state lama sebelum proses merge & write selesai!
       if (isLinkingAccountToGoogleRef.current) {
         hasFirestoreHydratedRef.current = true;
-        hasBootHydratedRef.current = true;
-        setIsCloudBootReady(true);
+        unlockBootUI();
         return;
       }
 
-      // Wajib cek master_state dari server cloud sebelum membuka halaman utama
-      let cloudAccountsLoaded: BankAccount[] = [];
-      let masterDataSnapshot: Record<string, any> | null = null;
-      try {
-        let masterSnap;
-        try {
-          masterSnap = await getDocFromServer(doc(db, 'bank_state_v1', 'master_state'));
-        } catch {
-          masterSnap = await getDoc(doc(db, 'bank_state_v1', 'master_state'));
+      // 1. Cek Fast-Boot Cache IndexedDB (< 50ms, tanpa jaringan)
+      const cachedBoot = await fastCachePromise;
+      if (!active) return;
+
+      let fastHydratedFromIdb = false;
+      let workingAccounts: BankAccount[] = accountsRef.current;
+
+      if (cachedBoot && cachedBoot.accounts.length > 0 && !hasCloudAccountsArrived) {
+        const cachedDelIds = Array.isArray(cachedBoot.deletedAccountIds)
+          ? cachedBoot.deletedAccountIds
+          : deletedAccountIdsRef.current;
+        if (cachedDelIds.length > 0) {
+          setDeletedAccountIds(cachedDelIds);
         }
-        if (masterSnap && masterSnap.exists() && active) {
-          const masterData = masterSnap.data();
-          masterDataSnapshot = masterData;
-          applyMasterCloudData(masterData, { forceInitial: true });
-          cloudAccountsLoaded = accountsRef.current;
-          setCloudSyncStatus('synced');
-          setLastCloudSyncAt(new Date().toISOString());
+        const mergedCached = unionMergeAccountsList(
+          cachedBoot.accounts as BankAccount[],
+          [latestServerAccountsRef.current, accountsRef.current],
+          cachedDelIds
+        );
+        if (mergedCached.length > 0) {
+          workingAccounts = mergedCached;
+          latestServerAccountsRef.current = mergedCached;
+          accountsRef.current = mergedCached;
+          setAccounts(mergedCached);
+          fastHydratedFromIdb = true;
         }
-      } catch (err) {
-        handleFirestoreError(err, OperationType.GET, 'bank_state_v1/master_state', {
-          suppressThrow: true,
-        });
+        if (cachedBoot.banSupportConfig && typeof cachedBoot.banSupportConfig === 'object') {
+          setBanSupportConfig((prev) => ({
+            ...prev,
+            ...(cachedBoot.banSupportConfig as BanSupportConfig),
+          }));
+        }
       }
 
-      if (fbUser && active) {
+      // Helper: Pasang listener real-time users/{uid} segera agar sinyal Ban mengunci layar seketika
+      const attachGoogleRealtimeListener = (uid: string, cleanEmail: string) => {
+        if (userDocUnsub) {
+          userDocUnsub();
+          userDocUnsub = null;
+        }
+        userDocUnsub = subscribeCloudDoc<CloudUserRecord>(
+          'users',
+          uid,
+          (uData) => {
+            if (!uData) return;
+            applyCloudUserDocSnapshot(uData, uid, cleanEmail);
+          },
+          (err) => {
+            handleFirestoreError(err, OperationType.GET, `users/${uid}`, {
+              suppressThrow: true,
+            });
+          }
+        );
+      };
+
+      // =========================================================================
+      // MODE A: Sesi Anonymous Vault (signInAnonymously)
+      // =========================================================================
+      if (fbUser && fbUser.isAnonymous && active) {
+        // Non-blocking: daftarkan sesi perangkat di latar belakang
+        void registerActiveDeviceSession(fbUser.uid, 'anonymous');
+
+        const applyGuestMatch = (accs: BankAccount[]) => {
+          const matchedGuest =
+            accs.find((a) => a.firebaseUid === fbUser.uid && a.isGuestAccount) ||
+            accs.find((a) => a.firebaseUid === fbUser.uid) ||
+            null;
+          if (matchedGuest && active) {
+            setCurrentAccountIdState(matchedGuest.id);
+            setActiveCloudEmail('');
+            setGoogleUser({
+              email: '',
+              name: matchedGuest.fullName,
+              firebaseUid: fbUser.uid,
+              authMode: 'guest',
+              loggedInAt: new Date().toISOString(),
+              hasCompletedOnboarding: true,
+              isPinVerified: true,
+            });
+          }
+        };
+
+        // Jika cache IndexedDB tersedia -> BUKA INSTAN lalu sinkron latar belakang!
+        if (fastHydratedFromIdb) {
+          applyGuestMatch(workingAccounts);
+          updateSyncTelemetry({
+            fromCache: true,
+            hasPendingWrites: true,
+            syncedDocCount: workingAccounts.length,
+          });
+          unlockBootUI();
+        }
+
+        // Baca paralel: lightweight RTDB accounts prefetch + Anonymous UID vault (maks 2.2 detik)
+        const [earlyAccountsRes, anonVault] = await Promise.all([
+          getEarlyAccountsPrefetch(2200),
+          Promise.race([
+            readVaultStateWithOfflineFallback<Record<string, any>>(fbUser.uid),
+            new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 2200)),
+          ]),
+        ]);
+        if (!active) return;
+
+        let cloudAccountsLoaded = workingAccounts;
+        if (earlyAccountsRes?.accounts) {
+          const delIds = toArraySafe<string>(earlyAccountsRes.deletedAccountIds);
+          const mergedDel = delIds.length > 0
+            ? Array.from(new Set([...deletedAccountIdsRef.current, ...delIds]))
+            : deletedAccountIdsRef.current;
+          if (delIds.length > 0) setDeletedAccountIds(mergedDel);
+          const incomingAccs = toArraySafe<BankAccount>(earlyAccountsRes.accounts);
+          if (incomingAccs.length > 0) {
+            cloudAccountsLoaded = unionMergeAccountsList(
+              incomingAccs,
+              [latestServerAccountsRef.current, accountsRef.current],
+              mergedDel
+            );
+            hasCloudAccountsArrived = true;
+          }
+        }
+
+        const anonVaultAccounts = toArraySafe<BankAccount>(anonVault?.payload?.accounts);
+        if (anonVaultAccounts.length > 0) {
+          cloudAccountsLoaded = unionMergeAccountsList(
+            cloudAccountsLoaded,
+            [anonVaultAccounts, latestServerAccountsRef.current, accountsRef.current],
+            deletedAccountIdsRef.current
+          );
+        }
+
+        if (cloudAccountsLoaded.length > 0) {
+          latestServerAccountsRef.current = cloudAccountsLoaded;
+          accountsRef.current = cloudAccountsLoaded;
+          setAccounts(cloudAccountsLoaded);
+          void saveFastBootSnapshot({
+            accounts: cloudAccountsLoaded,
+            deletedAccountIds: deletedAccountIdsRef.current,
+            cachedAtMs: Date.now(),
+          });
+        }
+
+        applyGuestMatch(cloudAccountsLoaded);
+        hasFirestoreHydratedRef.current = true;
+        unlockBootUI();
+        hydrateFullMasterInBackground();
+        return;
+      }
+
+      // =========================================================================
+      // MODE B: Sesi Google Permanen Terverifikasi
+      // =========================================================================
+      if (fbUser && !fbUser.isAnonymous && active) {
         const cleanEmail = normalizeEmailKey(fbUser.email || '') || 'nasabah@banknusantara.id';
         const cleanName = fbUser.displayName?.trim() || cleanEmail.split('@')[0] || 'Nasabah Bank Nusantara';
         const emailDocId = emailToFirestoreDocId(cleanEmail);
-        const userRef = doc(db, 'users', fbUser.uid);
-        const emailRef = doc(db, 'users_by_email', emailDocId);
 
+        // Non-blocking: tulis sesi perangkat & audit log di latar belakang tanpa menahan UI
+        void registerActiveDeviceSession(fbUser.uid, 'google');
+        void appendSecurityAuditLog(
+          fbUser.uid,
+          'session_init',
+          `Sesi Google terverifikasi aktif (${fbUser.email || fbUser.uid}).`
+        );
+
+        // Pasang listener real-time users/{uid} SEGERA agar sinyal Ban langsung mengunci layar
+        attachGoogleRealtimeListener(fbUser.uid, cleanEmail);
+
+        const applyMatchedGoogleSession = (
+          accs: BankAccount[],
+          userDoc: CloudUserRecord | null
+        ) => {
+          if (!active) return;
+          if (userDoc) {
+            setCloudUserStatus(userDoc);
+          }
+          setActiveCloudEmail(cleanEmail);
+
+          const matchedAccountId = userDoc?.lastAccountId;
+          const matchedAccount =
+            accs.find(
+              (a) =>
+                a.id === matchedAccountId &&
+                (a.firebaseUid === fbUser.uid ||
+                  (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+                  (a.email && normalizeEmailKey(a.email) === cleanEmail))
+            ) ||
+            accs.find(
+              (a) =>
+                a.firebaseUid === fbUser.uid ||
+                (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+                (a.email && normalizeEmailKey(a.email) === cleanEmail)
+            ) ||
+            accs.find((a) => a.id === matchedAccountId && a.id !== 'acc-admin') ||
+            null;
+
+          if (matchedAccount) {
+            setCurrentAccountIdState(matchedAccount.id);
+          }
+
+          setGoogleUser((prev) => ({
+            email: cleanEmail,
+            name: cleanName,
+            picture: fbUser.photoURL || undefined,
+            firebaseUid: fbUser.uid,
+            authMode: 'google',
+            emailKey: emailDocId,
+            loggedInAt: prev?.loggedInAt || new Date().toISOString(),
+            hasCompletedOnboarding: Boolean(matchedAccount || userDoc?.hasCompletedOnboarding),
+            isPinVerified:
+              prev && normalizeEmailKey(prev.email) === cleanEmail ? Boolean(prev.isPinVerified) : false,
+          }));
+        };
+
+        // Jika cache IndexedDB tersedia -> BUKA INSTAN (< 150ms), lalu rekonsiliasi RTDB paralel di latar belakang
+        if (fastHydratedFromIdb) {
+          applyMatchedGoogleSession(workingAccounts, null);
+          updateSyncTelemetry({
+            fromCache: true,
+            hasPendingWrites: true,
+            syncedDocCount: workingAccounts.length,
+          });
+          unlockBootUI();
+        }
+
+        // Baca PARALEL data prioritas: lightweight RTDB accounts prefetch + users/{uid} + users_by_email/{emailKey}
+        let cloudAccountsLoaded = workingAccounts;
         let initialUserData: CloudUserRecord | null = null;
         try {
-          const [userSnap, emailSnap] = await Promise.all([
-            getDocFromServer(userRef).catch(() => getDoc(userRef)),
-            getDocFromServer(emailRef).catch(() => getDoc(emailRef)),
+          const [earlyAccountsRes, uidData, emailData] = await Promise.all([
+            getEarlyAccountsPrefetch(2200),
+            readCloudDoc<CloudUserRecord>('users', fbUser.uid, {
+              timeoutMs: 2200,
+              skipFirestoreFallback: true,
+            }),
+            readCloudDoc<CloudUserRecord>('users_by_email', emailDocId, {
+              timeoutMs: 2200,
+              skipFirestoreFallback: true,
+            }),
           ]);
-          const uidData = userSnap && userSnap.exists() ? (userSnap.data() as CloudUserRecord) : null;
-          const emailData = emailSnap && emailSnap.exists() ? (emailSnap.data() as CloudUserRecord) : null;
 
-          // Gabungkan savedAccounts dari dokumen profil users/{uid} dan users_by_email/{emailKey} dengan master_state
-          const uidSaved = Array.isArray(uidData?.savedAccounts) ? uidData!.savedAccounts : [];
-          const emailSaved = Array.isArray(emailData?.savedAccounts) ? emailData!.savedAccounts : [];
+          if (!active) return;
+
+          if (earlyAccountsRes?.accounts) {
+            const delIds = toArraySafe<string>(earlyAccountsRes.deletedAccountIds);
+            const mergedDel =
+              delIds.length > 0
+                ? Array.from(new Set([...deletedAccountIdsRef.current, ...delIds]))
+                : deletedAccountIdsRef.current;
+            if (delIds.length > 0) setDeletedAccountIds(mergedDel);
+
+            const incomingAccs = toArraySafe<BankAccount>(earlyAccountsRes.accounts);
+            if (incomingAccs.length > 0) {
+              cloudAccountsLoaded = unionMergeAccountsList(
+                incomingAccs,
+                [latestServerAccountsRef.current, accountsRef.current],
+                mergedDel
+              );
+              hasCloudAccountsArrived = true;
+            }
+          }
+
+          // Gabungkan savedAccounts dari dokumen profil users/{uid} dan users_by_email/{emailKey}
+          const uidSaved = toArraySafe<BankAccount>(uidData?.savedAccounts);
+          const emailSaved = toArraySafe<BankAccount>(emailData?.savedAccounts);
           if (uidSaved.length > 0 || emailSaved.length > 0) {
+            const prevLen = cloudAccountsLoaded.length;
             const mergedVaultAccounts = unionMergeAccountsList(
               cloudAccountsLoaded,
               [emailSaved, uidSaved, latestServerAccountsRef.current, accountsRef.current],
               deletedAccountIdsRef.current
             );
-            const hadMissingInMaster = mergedVaultAccounts.length > cloudAccountsLoaded.length;
             cloudAccountsLoaded = mergedVaultAccounts;
-            latestServerAccountsRef.current = mergedVaultAccounts;
-            accountsRef.current = mergedVaultAccounts;
-            setAccounts(mergedVaultAccounts);
-            if (hadMissingInMaster && masterDataSnapshot) {
+            if (mergedVaultAccounts.length > prevLen && hasCloudAccountsArrived) {
+              // Non-blocking: sinkronkan akun yang hilang ke master_state di latar belakang
               void flushMasterStateToCloud({ accounts: mergedVaultAccounts });
             }
+          }
+
+          if (cloudAccountsLoaded.length > 0) {
+            latestServerAccountsRef.current = cloudAccountsLoaded;
+            accountsRef.current = cloudAccountsLoaded;
+            setAccounts(cloudAccountsLoaded);
+            void saveFastBootSnapshot({
+              accounts: cloudAccountsLoaded,
+              deletedAccountIds: deletedAccountIdsRef.current,
+              cachedAtMs: Date.now(),
+            });
           }
 
           const allMatchedForEmail = cloudAccountsLoaded.filter(
@@ -2443,8 +2862,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           if (uidData || emailData) {
             const mergedBanned = uidData?.status === 'banned' || emailData?.status === 'banned';
-            const mergedReason =
-              emailData?.banReason || uidData?.banReason || '';
+            const mergedReason = emailData?.banReason || uidData?.banReason || '';
             const mergedLastAccountId =
               emailData?.lastAccountId || uidData?.lastAccountId || allMatchedForEmail[0]?.id || '';
             const mergedOnboarded = Boolean(
@@ -2466,13 +2884,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               authMode: 'google',
             };
             if (allMatchedForEmail.length > 0) {
-              await Promise.all([
-                setDoc(userRef, sanitizeForFirestore(initialUserData) as Record<string, unknown>, {
-                  merge: true,
-                }).catch(() => {}),
-                setDoc(emailRef, sanitizeForFirestore(initialUserData) as Record<string, unknown>, {
-                  merge: true,
-                }).catch(() => {}),
+              // Non-blocking: perbarui profil cloud di latar belakang tanpa menahan UI
+              const cleanUserPayload = sanitizeForFirestore(initialUserData) as Record<string, unknown>;
+              void Promise.all([
+                writeCloudDoc('users', fbUser.uid, cleanUserPayload, { merge: true }).catch(() => {}),
+                writeCloudDoc('users_by_email', emailDocId, cleanUserPayload, { merge: true }).catch(() => {}),
               ]);
             }
           } else {
@@ -2494,15 +2910,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               updatedAt: nowIso,
               updatedAtMs: Date.now(),
             };
-            await Promise.all([
-              setDoc(userRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
-                merge: true,
-              }),
-              setDoc(emailRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
-                merge: true,
-              }),
-            ]);
             initialUserData = newCloudUser;
+            // Non-blocking: simpan profil awal di latar belakang
+            const cleanNewUserPayload = sanitizeForFirestore(newCloudUser) as Record<string, unknown>;
+            void Promise.all([
+              writeCloudDoc('users', fbUser.uid, cleanNewUserPayload, { merge: true }).catch(() => {}),
+              writeCloudDoc('users_by_email', emailDocId, cleanNewUserPayload, { merge: true }).catch(() => {}),
+            ]);
           }
         } catch (err) {
           handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`, {
@@ -2512,81 +2926,65 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (!active) return;
 
-        if (initialUserData) {
-          setCloudUserStatus(initialUserData);
-        }
+        applyMatchedGoogleSession(cloudAccountsLoaded, initialUserData);
+        hasFirestoreHydratedRef.current = true;
+        unlockBootUI();
+        hydrateFullMasterInBackground();
+        return;
+      }
 
-        setActiveCloudEmail(cleanEmail);
-
-        // Cocokkan rekening milik User ini di Cloud (untuk multi-device & refresh tanpa localStorage)
-        const matchedAccountId = initialUserData?.lastAccountId;
-        const matchedAccount =
-          cloudAccountsLoaded.find(
-            (a) =>
-              a.id === matchedAccountId &&
-              (a.firebaseUid === fbUser.uid ||
-                (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
-                (a.email && normalizeEmailKey(a.email) === cleanEmail))
-          ) ||
-          cloudAccountsLoaded.find(
-            (a) =>
-              a.firebaseUid === fbUser.uid ||
-              (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
-              (a.email && normalizeEmailKey(a.email) === cleanEmail)
-          ) ||
-          cloudAccountsLoaded.find((a) => a.id === matchedAccountId && a.id !== 'acc-admin') ||
-          null;
-
-        if (matchedAccount) {
-          setCurrentAccountIdState(matchedAccount.id);
-        }
-
-        setGoogleUser((prev) => ({
-          email: cleanEmail,
-          name: cleanName,
-          picture: fbUser.photoURL || undefined,
-          firebaseUid: fbUser.uid,
-          authMode: 'google',
-          emailKey: emailDocId,
-          loggedInAt: prev?.loggedInAt || new Date().toISOString(),
-          hasCompletedOnboarding: Boolean(matchedAccount),
-          // Pertahankan isPinVerified jika user sudah verifikasi di sesi tab ini untuk email yang sama
-          isPinVerified:
-            prev && normalizeEmailKey(prev.email) === cleanEmail ? Boolean(prev.isPinVerified) : false,
-        }));
-
-        // Listener Real-Time KHUSUS memantau status ban & akun pada users/{uid}
-        userDocUnsub = onSnapshot(
-          userRef,
-          { includeMetadataChanges: true },
-          (uSnap) => {
-            if (!uSnap.exists()) return;
-            applyCloudUserDocSnapshot(
-              uSnap.data() as CloudUserRecord,
-              fbUser.uid,
-              cleanEmail
-            );
-          },
-          (err) => {
-            handleFirestoreError(err, OperationType.GET, `users/${fbUser.uid}`, {
-              suppressThrow: true,
-            });
-          }
-        );
-      } else if (active && !activeCloudEmailRef.current) {
+      // =========================================================================
+      // MODE C: Belum login (Tampilkan Gerbang Masuk secepat mungkin)
+      // =========================================================================
+      if (active && !activeCloudEmailRef.current) {
         setGoogleUser(null);
         setCloudUserStatus(null);
       }
 
-      if (active) {
+      if (fastHydratedFromIdb) {
+        updateSyncTelemetry({
+          fromCache: true,
+          hasPendingWrites: true,
+          syncedDocCount: workingAccounts.length,
+        });
+        unlockBootUI();
+      } else {
+        const earlyAccountsRes = await getEarlyAccountsPrefetch(2200);
+        if (active && earlyAccountsRes?.accounts) {
+          const delIds = toArraySafe<string>(earlyAccountsRes.deletedAccountIds);
+          const mergedDel =
+            delIds.length > 0
+              ? Array.from(new Set([...deletedAccountIdsRef.current, ...delIds]))
+              : deletedAccountIdsRef.current;
+          if (delIds.length > 0) setDeletedAccountIds(mergedDel);
+          const incomingAccs = toArraySafe<BankAccount>(earlyAccountsRes.accounts);
+          if (incomingAccs.length > 0) {
+            const cleanAccounts = unionMergeAccountsList(
+              incomingAccs,
+              [latestServerAccountsRef.current, accountsRef.current],
+              mergedDel
+            );
+            latestServerAccountsRef.current = cleanAccounts;
+            accountsRef.current = cleanAccounts;
+            setAccounts(cleanAccounts);
+            hasCloudAccountsArrived = true;
+            void saveFastBootSnapshot({
+              accounts: cleanAccounts,
+              deletedAccountIds: mergedDel,
+              cachedAtMs: Date.now(),
+            });
+          }
+        }
         hasFirestoreHydratedRef.current = true;
-        hasBootHydratedRef.current = true;
-        setIsCloudBootReady(true);
+        unlockBootUI();
       }
+
+      hydrateFullMasterInBackground();
     });
 
     return () => {
       active = false;
+      window.clearTimeout(hardTimeoutId);
       authUnsub();
       if (userDocUnsub) userDocUnsub();
     };
@@ -2598,18 +2996,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!activeCloudEmail) return;
     const cleanEmail = normalizeEmailKey(activeCloudEmail);
     const emailDocId = emailToFirestoreDocId(cleanEmail);
-    const emailRef = doc(db, 'users_by_email', emailDocId);
 
-    const unsub = onSnapshot(
-      emailRef,
-      { includeMetadataChanges: true },
-      (eSnap) => {
-        if (!eSnap.exists()) return;
-        applyCloudUserDocSnapshot(
-          eSnap.data() as CloudUserRecord,
-          firebaseUser?.uid,
-          cleanEmail
-        );
+    const unsub = subscribeCloudDoc<CloudUserRecord>(
+      'users_by_email',
+      emailDocId,
+      (eData) => {
+        if (!eData) return;
+        applyCloudUserDocSnapshot(eData, firebaseUser?.uid, cleanEmail);
       },
       (err) => {
         handleFirestoreError(err, OperationType.GET, `users_by_email/${emailDocId}`, {
@@ -2622,32 +3015,34 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCloudEmail]);
 
-  // Real-time Multi-Device Firestore Listener (HP <-> Laptop tanpa refresh)
+  // Real-time Multi-Device Firebase Realtime Database Listener (HP <-> Laptop tanpa refresh)
   useEffect(() => {
-    const unsub = onSnapshot(
-      doc(db, 'bank_state_v1', 'master_state'),
-      { includeMetadataChanges: true },
-      (docSnap) => {
-        if (docSnap.metadata.hasPendingWrites) {
-          setCloudSyncStatus('syncing');
-          return;
-        }
-        if (docSnap.metadata.fromCache && typeof navigator !== 'undefined' && !navigator.onLine) {
+    const unsub = subscribeCloudDoc<Record<string, any>>(
+      'bank_state_v1',
+      'master_state',
+      (data) => {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
           setCloudSyncStatus('offline');
+          updateSyncTelemetry({ isOnline: false, fromCache: true });
         } else {
+          const syncedIso = new Date().toISOString();
           setCloudSyncStatus('synced');
-          setLastCloudSyncAt(new Date().toISOString());
+          setLastCloudSyncAt(syncedIso);
+          updateSyncTelemetry({
+            isOnline: true,
+            fromCache: false,
+            hasPendingWrites: false,
+            pendingWritesCount: 0,
+            lastSyncedAt: syncedIso,
+            syncedDocCount: accountsRef.current.length,
+            lastError: null,
+          });
         }
 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (!isLinkingAccountToGoogleRef.current) {
-            applyMasterCloudData(data);
-          }
+        if (data && !isLinkingAccountToGoogleRef.current) {
+          applyMasterCloudData(data);
         }
-        if (!docSnap.metadata.fromCache || (typeof navigator !== 'undefined' && !navigator.onLine)) {
-          hasFirestoreHydratedRef.current = true;
-        }
+        hasFirestoreHydratedRef.current = true;
       },
       (err) => {
         setCloudSyncStatus('offline');
@@ -2793,7 +3188,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const emailDocId = emailToFirestoreDocId(cleanEmail);
-    const emailRef = doc(db, 'users_by_email', emailDocId);
     const nowIso = new Date().toISOString();
     const defaultNameFromEmail =
       cleanEmail
@@ -2805,25 +3199,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setCloudSyncStatus('syncing');
 
-    // Segarkan master_state & users_by_email terbaru dari Cloud Server secara paralel agar sinkron penuh di perangkat baru
+    // Segarkan master_state & users_by_email terbaru dari Firebase Realtime Database (azkaakc) secara paralel
     let latestAccounts: BankAccount[] = accountsRef.current;
     let userRecord: CloudUserRecord | null = null;
     try {
-      const [masterSnap, emailSnap] = await Promise.all([
-        getDocFromServer(doc(db, 'bank_state_v1', 'master_state')).catch(() =>
-          getDoc(doc(db, 'bank_state_v1', 'master_state'))
-        ),
-        getDocFromServer(emailRef).catch(() => getDoc(emailRef)),
+      const [masterData, existingEmailData] = await Promise.all([
+        readCloudDoc<Record<string, any>>('bank_state_v1', 'master_state'),
+        readCloudDoc<CloudUserRecord>('users_by_email', emailDocId),
       ]);
 
-      const existingEmailData =
-        emailSnap && emailSnap.exists() ? (emailSnap.data() as CloudUserRecord) : null;
-      const emailSavedAccounts = Array.isArray(existingEmailData?.savedAccounts)
-        ? existingEmailData!.savedAccounts
-        : [];
+      const emailSavedAccounts = toArraySafe<BankAccount>(existingEmailData?.savedAccounts);
 
-      if (masterSnap && masterSnap.exists()) {
-        const masterData = masterSnap.data();
+      if (masterData) {
         applyMasterCloudData(masterData, {
           forceInitial: true,
           extraVaultAccounts: [emailSavedAccounts],
@@ -2868,8 +3255,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           updatedAt: nowIso,
           updatedAtMs: Date.now(),
         };
-        await setDoc(
-          emailRef,
+        await writeCloudDoc(
+          'users_by_email',
+          emailDocId,
           sanitizeForFirestore({
             displayName: resolvedName,
             emailVerified: true,
@@ -2902,9 +3290,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           updatedAt: nowIso,
           updatedAtMs: Date.now(),
         };
-        await setDoc(emailRef, sanitizeForFirestore(newRecord) as Record<string, unknown>, {
-          merge: true,
-        });
+        await writeCloudDoc(
+          'users_by_email',
+          emailDocId,
+          sanitizeForFirestore(newRecord) as Record<string, unknown>,
+          { merge: true }
+        );
         userRecord = newRecord;
       }
     } catch (err) {
@@ -2914,7 +3305,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       return {
         success: false,
-        message: 'Gagal terhubung ke Cloud Firestore. Periksa koneksi internet Anda lalu coba lagi.',
+        message: 'Gagal terhubung ke Firebase Realtime Database azkaakc. Periksa koneksi internet Anda lalu coba lagi.',
       };
     }
 
@@ -2982,30 +3373,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const cleanName = fbUser.displayName?.trim() || cleanEmail.split('@')[0] || 'Nasabah Bank Nusantara';
     const emailDocId = emailToFirestoreDocId(cleanEmail);
 
-    const userRef = doc(db, 'users', fbUser.uid);
-    const emailRef = doc(db, 'users_by_email', emailDocId);
     const nowIso = new Date().toISOString();
     let preferredAccId: string | undefined;
     let latestAccounts: BankAccount[] = accountsRef.current;
 
     try {
-      const [masterSnap, userSnap, emailSnap] = await Promise.all([
-        getDocFromServer(doc(db, 'bank_state_v1', 'master_state')).catch(() =>
-          getDoc(doc(db, 'bank_state_v1', 'master_state'))
-        ),
-        getDocFromServer(userRef).catch(() => getDoc(userRef)),
-        getDocFromServer(emailRef).catch(() => getDoc(emailRef)),
+      const [masterData, uidData, emailData] = await Promise.all([
+        readCloudDoc<Record<string, any>>('bank_state_v1', 'master_state'),
+        readCloudDoc<CloudUserRecord>('users', fbUser.uid),
+        readCloudDoc<CloudUserRecord>('users_by_email', emailDocId),
       ]);
 
-      const uidData = userSnap && userSnap.exists() ? (userSnap.data() as CloudUserRecord) : null;
-      const emailData = emailSnap && emailSnap.exists() ? (emailSnap.data() as CloudUserRecord) : null;
-      const uidSaved = Array.isArray(uidData?.savedAccounts) ? uidData!.savedAccounts : [];
-      const emailSaved = Array.isArray(emailData?.savedAccounts) ? emailData!.savedAccounts : [];
+      const uidSaved = toArraySafe<BankAccount>(uidData?.savedAccounts);
+      const emailSaved = toArraySafe<BankAccount>(emailData?.savedAccounts);
 
       let masterAccountsCount = 0;
-      if (masterSnap && masterSnap.exists()) {
-        const masterData = masterSnap.data();
-        masterAccountsCount = Array.isArray(masterData.accounts) ? masterData.accounts.length : 0;
+      if (masterData) {
+        masterAccountsCount = toArraySafe<BankAccount>(masterData.accounts).length;
         applyMasterCloudData(masterData, {
           forceInitial: true,
           extraVaultAccounts: [emailSaved, uidSaved],
@@ -3062,12 +3446,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         };
         setCloudUserStatus(mergedUser);
         await Promise.all([
-          setDoc(userRef, sanitizeForFirestore(mergedUser) as Record<string, unknown>, {
-            merge: true,
-          }),
-          setDoc(emailRef, sanitizeForFirestore(mergedUser) as Record<string, unknown>, {
-            merge: true,
-          }),
+          writeCloudDoc(
+            'users',
+            fbUser.uid,
+            sanitizeForFirestore(mergedUser) as Record<string, unknown>,
+            { merge: true }
+          ),
+          writeCloudDoc(
+            'users_by_email',
+            emailDocId,
+            sanitizeForFirestore(mergedUser) as Record<string, unknown>,
+            { merge: true }
+          ),
         ]);
       } else {
         const newCloudUser: CloudUserRecord = {
@@ -3091,12 +3481,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           updatedAtMs: Date.now(),
         };
         await Promise.all([
-          setDoc(userRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
-            merge: true,
-          }),
-          setDoc(emailRef, sanitizeForFirestore(newCloudUser) as Record<string, unknown>, {
-            merge: true,
-          }),
+          writeCloudDoc(
+            'users',
+            fbUser.uid,
+            sanitizeForFirestore(newCloudUser) as Record<string, unknown>,
+            { merge: true }
+          ),
+          writeCloudDoc(
+            'users_by_email',
+            emailDocId,
+            sanitizeForFirestore(newCloudUser) as Record<string, unknown>,
+            { merge: true }
+          ),
         ]);
         setCloudUserStatus(newCloudUser);
       }
@@ -3283,16 +3679,33 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setGoogleUser({
       email: '',
       name: newGuestAcc.fullName,
+      firebaseUid: auth.currentUser?.uid,
       authMode: 'guest',
       loggedInAt: nowIso,
       hasCompletedOnboarding: true,
       isPinVerified: true,
     });
+
+    // Mode A — Otomatis inisialisasi Anonymous Vault (`signInAnonymously`) agar kartu Guest langsung memiliki UID kriptografis Firebase
+    void ensureAnonymousVaultSession().then((anonRes) => {
+      if (anonRes.success && anonRes.uid) {
+        const boundUid = anonRes.uid;
+        const boundAcc: BankAccount = { ...newGuestAcc, firebaseUid: boundUid };
+        const updatedList = accountsRef.current.map((a) => (a.id === newGuestAcc.id ? boundAcc : a));
+        accountsRef.current = updatedList;
+        latestServerAccountsRef.current = updatedList;
+        setAccounts(updatedList);
+        setGoogleUser((prev) => (prev ? { ...prev, firebaseUid: boundUid } : prev));
+        void flushMasterStateToCloud({ accounts: updatedList });
+        void writeVaultStateAtomic(boundUid, { accounts: [boundAcc], updatedAtMs: Date.now() }, 1);
+      }
+    });
+
     playAtmSound('success');
     return {
       success: true,
       account: newGuestAcc,
-      message: `Kartu Reguler Guest "${cleanName}" berhasil dibuat dan langsung tersimpan real-time di Firebase Cloud Firestore (Project: azkaakc)! Anda dapat menyambungkannya ke Google kapan saja lewat tombol "Sign in with Google" di bagian atas.`,
+      message: `Kartu Reguler Guest "${cleanName}" berhasil dibuat di Anonymous Vault Firebase (Project: azkaakc)! Hubungkan ke Google kapan saja tanpa kehilangan data.`,
     };
   };
 
@@ -3333,11 +3746,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  // Sambungkan Akun OA (tanpa email) atau Akun Guest (LocalStorage) ke Akun Google lewat Pop-Up "Sign in with Google"
-  // Otomatis mengubah status akun dari Akun Guest menjadi Akun Google di aplikasi & Firebase, serta menyimpannya ke dalam email Google tersebut agar langsung muncul di HP & Laptop
+  // Sambungkan Akun OA (tanpa email) atau Akun Guest (Anonymous Vault) ke Akun Google lewat True Cryptographic Linking (`linkWithPopup`) + Atomic Data Rescue & Merge
+  // Otomatis mengubah status akun dari Akun Guest menjadi Akun Google (UID identik jika baru, atau Atomic Merge jika Google sudah pernah terdaftar),
+  // serta menjaga Akun OA tetap berstatus Akun OA Resmi + Terhubung Google agar bisa login lewat Google & Login OA di HP maupun Laptop.
   const linkCurrentAccountWithGooglePopup = async (
     targetAccountId?: string
-  ): Promise<{ success: boolean; message: string; email?: string; errorCode?: string }> => {
+  ): Promise<{
+    success: boolean;
+    message: string;
+    email?: string;
+    errorCode?: string;
+    atomicMergeSummary?: AtomicMergeSummary;
+  }> => {
     const targetAcc =
       (targetAccountId ? accountsRef.current.find((a) => a.id === targetAccountId) : currentAccount) ||
       (targetAccountId ? accounts.find((a) => a.id === targetAccountId) : currentAccount) ||
@@ -3349,39 +3769,72 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     isLinkingAccountToGoogleRef.current = true;
     try {
-      const res = await signInWithGooglePopup();
-      if (!res.success || !res.user) {
-        playAtmSound('alert');
-        return {
-          success: false,
-          errorCode: res.errorCode,
-          message: res.message || 'Pop-up Sign in with Google dibatalkan atau gagal.',
-        };
+      const targetAccountTransactions = transactions.filter((t) => t.accountId === targetAcc.id);
+      const targetAccountPockets = pockets.filter((p) => p.accountId === targetAcc.id);
+      const targetAccountDepositos = depositos.filter((d) => d.accountId === targetAcc.id);
+
+      // Jika sesi Firebase saat ini adalah Anonymous Vault, WAJIB gunakan linkWithPopup (dengan Atomic Data Rescue & Merge jika auth/credential-already-in-use)
+      let fbUser: FirebaseUser | undefined;
+      let atomicMergeSummary: AtomicMergeSummary | undefined;
+
+      if (auth.currentUser?.isAnonymous) {
+        const linkRes = await linkCurrentSessionToGoogleZeroLoss({
+          accounts: [targetAcc],
+          transactions: targetAccountTransactions,
+          pockets: targetAccountPockets,
+          depositos: targetAccountDepositos,
+          userSettings: userSettings as unknown as Record<string, unknown>,
+        });
+        if (!linkRes.success || !linkRes.user) {
+          playAtmSound('alert');
+          return {
+            success: false,
+            errorCode: linkRes.errorCode,
+            message: linkRes.message || 'Penautan ke Google dibatalkan atau gagal.',
+          };
+        }
+        fbUser = linkRes.user;
+        atomicMergeSummary = linkRes.atomicMergeSummary;
+        if (atomicMergeSummary?.performed) {
+          setLastAtomicMergeSummary(atomicMergeSummary);
+        }
+      } else {
+        const res = await signInWithGooglePopup();
+        if (!res.success || !res.user) {
+          playAtmSound('alert');
+          return {
+            success: false,
+            errorCode: res.errorCode,
+            message: res.message || 'Pop-up Sign in with Google dibatalkan atau gagal.',
+          };
+        }
+        fbUser = res.user;
       }
 
-      const fbUser = res.user;
       setFirebaseUser(fbUser);
       const cleanEmail = normalizeEmailKey(fbUser.email || '');
       if (!cleanEmail) {
         return { success: false, message: 'Email Google tidak ditemukan dari sesi login.' };
       }
 
-      // 1. Ambil snapshot terbaru dari Cloud Firestore agar akun yang sudah ada di HP/Cloud tidak tertimpa
+      // 1. Ambil snapshot terbaru dari Firebase Realtime Database azkaakc (master_state + users/{uid} + users_by_email) agar akun yang sudah ada di HP/Cloud tidak tertimpa
       let serverCloudAccounts: BankAccount[] = [];
       let serverDeletedIds: string[] = [];
+      let uidSavedAccounts: BankAccount[] = [];
+      let emailSavedAccounts: BankAccount[] = [];
+      const emailDocId = emailToFirestoreDocId(cleanEmail);
       try {
-        const masterSnap = await getDocFromServer(doc(db, 'bank_state_v1', 'master_state')).catch(
-          () => getDoc(doc(db, 'bank_state_v1', 'master_state'))
-        );
-        if (masterSnap && masterSnap.exists()) {
-          const mData = masterSnap.data();
-          if (Array.isArray(mData.accounts)) {
-            serverCloudAccounts = mData.accounts as BankAccount[];
-          }
-          if (Array.isArray(mData.deletedAccountIds)) {
-            serverDeletedIds = mData.deletedAccountIds as string[];
-          }
+        const [mData, uData, eData] = await Promise.all([
+          readCloudDoc<Record<string, any>>('bank_state_v1', 'master_state'),
+          readCloudDoc<CloudUserRecord>('users', fbUser.uid),
+          readCloudDoc<CloudUserRecord>('users_by_email', emailDocId),
+        ]);
+        if (mData) {
+          serverCloudAccounts = toArraySafe<BankAccount>(mData.accounts);
+          serverDeletedIds = toArraySafe<string>(mData.deletedAccountIds);
         }
+        uidSavedAccounts = toArraySafe<BankAccount>(uData?.savedAccounts);
+        emailSavedAccounts = toArraySafe<BankAccount>(eData?.savedAccounts);
       } catch {
         // fallback ke state lokal jika gagal baca server
       }
@@ -3392,8 +3845,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setDeletedAccountIds(mergedDeletedIds);
       deletedAccountIdsRef.current = mergedDeletedIds;
 
-      // 2. Transformasi penuh Akun Guest (atau Akun OA) menjadi Akun Google yang terikat ke email Google tersebut
+      // 2. Transformasi Akun Guest -> Akun Google, sedangkan Akun OA tetap berstatus Akun OA Resmi SEKALIGUS terhubung ke Google (bisa login lewat Google & Login OA)
       const wasGuest = Boolean(targetAcc.isGuestAccount);
+      const keepAsOfficialOa =
+        !wasGuest && Boolean(targetAcc.isOfficialAdminAccount || targetAcc.id === 'acc-admin');
       const convertedGoogleAccount: BankAccount = {
         ...targetAcc,
         userId16: ensureAccountUserId16(targetAcc),
@@ -3401,50 +3856,31 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         googleEmail: cleanEmail,
         firebaseUid: fbUser.uid,
         isGuestAccount: false,
-        isOfficialAdminAccount: wasGuest ? false : Boolean(targetAcc.isOfficialAdminAccount),
+        isOfficialAdminAccount: keepAsOfficialOa,
+        oaAdminPin: targetAcc.oaAdminPin || '159357',
         cardStatus: targetAcc.cardStatus === 'banned' ? 'banned' : 'active',
         status: targetAcc.status === 'banned' ? 'banned' : 'active',
       };
 
-      // 3. Gabungkan daftar akun dari Server Cloud + State Lokal + Akun yang baru dikonversi ke Google
-      const combinedMap = new Map<string, BankAccount>();
-      for (const sAcc of serverCloudAccounts) {
-        if (
-          sAcc &&
-          sAcc.id &&
-          !mergedDeletedIds.includes(sAcc.id) &&
-          !PURGED_BOT_ACCOUNT_IDS.includes(sAcc.id) &&
-          !PURGED_BOT_ACCOUNT_NUMBERS.includes(sAcc.accountNumber)
-        ) {
-          combinedMap.set(sAcc.id, sAcc);
-        }
-      }
-      for (const lAcc of accountsRef.current) {
-        if (
-          lAcc &&
-          lAcc.id &&
-          !mergedDeletedIds.includes(lAcc.id) &&
-          !PURGED_BOT_ACCOUNT_IDS.includes(lAcc.id) &&
-          !PURGED_BOT_ACCOUNT_NUMBERS.includes(lAcc.accountNumber)
-        ) {
-          if (!combinedMap.has(lAcc.id)) {
-            combinedMap.set(lAcc.id, lAcc);
-          }
-        }
-      }
-      combinedMap.set(convertedGoogleAccount.id, convertedGoogleAccount);
+      // 3. Gabungkan daftar akun dari Server Cloud + Dual-Vault Profil Email + State Lokal + Akun yang baru ditautkan ke Google
+      const nextAccounts = unionMergeAccountsList(
+        [convertedGoogleAccount],
+        [
+          serverCloudAccounts,
+          emailSavedAccounts,
+          uidSavedAccounts,
+          latestServerAccountsRef.current,
+          accountsRef.current,
+        ],
+        mergedDeletedIds
+      );
 
-      const nextAccounts: BankAccount[] = [
-        convertedGoogleAccount,
-        ...Array.from(combinedMap.values()).filter((a) => a.id !== convertedGoogleAccount.id),
-      ];
-
-      // 4. Perbarui state aplikasi & tulis langsung ke Firebase Cloud Firestore (tunggu hingga selesai 100%)
+      // 4. Perbarui state aplikasi & tulis langsung ke Firebase Realtime Database azkaakc (tunggu hingga selesai 100%)
       latestServerAccountsRef.current = nextAccounts;
       accountsRef.current = nextAccounts;
       setAccounts(nextAccounts);
 
-      await Promise.all([
+      const [masterWriteOk] = await Promise.all([
         flushMasterStateToCloud({
           accounts: nextAccounts,
           deletedAccountIds: mergedDeletedIds,
@@ -3461,6 +3897,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           nextAccounts
         ),
       ]);
+
+      if (!masterWriteOk) {
+        playAtmSound('alert');
+        return {
+          success: false,
+          message:
+            'Koneksi ke Firebase Realtime Database azkaakc sedang terputus. Pastikan internet aktif lalu coba sambungkan kembali.',
+        };
+      }
 
       hasFirestoreHydratedRef.current = true;
       hasBootHydratedRef.current = true;
@@ -3493,13 +3938,233 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return {
         success: true,
         email: cleanEmail,
-        message: wasGuest
-          ? `✅ Akun Guest "${convertedGoogleAccount.fullName}" (${convertedGoogleAccount.accountNumber}) resmi berubah menjadi Akun Google di Firebase (${cleanEmail}) dan siap dibuka di HP maupun Laptop!`
-          : `✅ Akun "${convertedGoogleAccount.fullName}" (${convertedGoogleAccount.accountNumber}) berhasil disambungkan ke email Google ${cleanEmail}!`,
+        atomicMergeSummary,
+        message: atomicMergeSummary?.performed
+          ? `Atomic Data Rescue & Merge berhasil! Akun "${convertedGoogleAccount.fullName}" dan seluruh data digabung permanen ke Google (${cleanEmail}) tanpa kehilangan data.`
+          : keepAsOfficialOa
+          ? `Akun OA Resmi "${convertedGoogleAccount.fullName}" (${convertedGoogleAccount.accountNumber}) berhasil disambungkan ke Google (${cleanEmail}) & tersinkronisasi real-time! Anda tetap bisa login lewat Google maupun Login Akun OA.`
+          : `Akun "${convertedGoogleAccount.fullName}" (${convertedGoogleAccount.accountNumber}) berhasil diamankan ke Google (${cleanEmail}) dengan UID permanen & tersinkronisasi real-time!`,
       };
     } finally {
       isLinkingAccountToGoogleRef.current = false;
     }
+  };
+
+  // ============================================================================
+  // ZERO-TRUST VAULT, TIME-MACHINE BACKUP & RE-AUTH CLOUD HELPERS
+  // ============================================================================
+  const dismissAtomicMergeSummary = () => setLastAtomicMergeSummary(null);
+
+  const buildPersonalBackupPayload = (): BankingBackupPayload => {
+    const activeUid =
+      auth.currentUser?.uid || firebaseUser?.uid || googleUser?.firebaseUid || 'local-session';
+    const activeEmail = normalizeEmailKey(
+      auth.currentUser?.email ||
+        googleUser?.email ||
+        currentAccount?.googleEmail ||
+        currentAccount?.email ||
+        ''
+    );
+
+    const ownedAccounts = accounts.filter((acc) => {
+      if (acc.id === currentAccountId) return true;
+      if (activeUid && activeUid !== 'local-session' && acc.firebaseUid === activeUid) return true;
+      const gEm = acc.googleEmail ? normalizeEmailKey(acc.googleEmail) : '';
+      const aEm = acc.email ? normalizeEmailKey(acc.email) : '';
+      return Boolean(activeEmail && (gEm === activeEmail || aEm === activeEmail));
+    });
+    const ownedIds = new Set(ownedAccounts.map((a) => a.id));
+    const ownedTx = transactions.filter((t) => ownedIds.has(t.accountId));
+    const ownedPockets = pockets.filter((p) => ownedIds.has(p.accountId));
+    const ownedDepositos = depositos.filter((d) => ownedIds.has(d.accountId));
+    const totalGrams = ownedAccounts.reduce((s, a) => s + (Number(a.goldGrams) || 0), 0);
+    const totalBatches = ownedAccounts.reduce((s, a) => s + (a.goldBatches?.length || 0), 0);
+
+    return {
+      profile: {
+        uid: activeUid,
+        email: activeEmail,
+        displayName:
+          auth.currentUser?.displayName ||
+          googleUser?.name ||
+          currentAccount?.fullName ||
+          'Nasabah Bank Nusantara',
+        currentAccountId,
+      },
+      accounts: ownedAccounts,
+      transactions: ownedTx,
+      pockets: ownedPockets,
+      depositos: ownedDepositos,
+      budgetCategories,
+      manualExpenses,
+      budgetTxCategoryMap,
+      userSettings,
+      goldSummary: {
+        totalGrams: Number(totalGrams.toFixed(4)),
+        totalBatches,
+      },
+    };
+  };
+
+  const restoreFromBankingPayload = async (
+    payload: BankingBackupPayload,
+    sourceLabel: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const activeUid = auth.currentUser?.uid || firebaseUser?.uid;
+    if (auth.currentUser && !auth.currentUser.isAnonymous) {
+      const reauth = await requireGoogleReauthentication(`Pemulihan data dari ${sourceLabel}`);
+      if (!reauth.success) {
+        return { success: false, message: reauth.message };
+      }
+    }
+
+    if (activeUid) {
+      await createCloudSnapshot(activeUid, buildPersonalBackupPayload(), 'pre_restore');
+    }
+
+    const incomingAccounts = toArraySafe<BankAccount>(payload.accounts);
+    if (incomingAccounts.length === 0) {
+      return {
+        success: false,
+        message: 'Data backup tidak memiliki rekening yang valid untuk dipulihkan.',
+      };
+    }
+
+    const incomingTx = toArraySafe<Transaction>(payload.transactions);
+    const incomingPockets = toArraySafe<PocketSaving>(payload.pockets);
+    const incomingDepositos = toArraySafe<DepositoRecord>(payload.depositos);
+
+    const mergedAccounts = unionMergeAccountsList(
+      incomingAccounts,
+      [accountsRef.current, latestServerAccountsRef.current],
+      deletedAccountIdsRef.current.filter((id) => !incomingAccounts.some((a) => a.id === id))
+    );
+    const mergedTx = [
+      ...incomingTx,
+      ...transactions.filter((existing) => !incomingTx.some((t) => t.id === existing.id)),
+    ].slice(0, 220);
+    const mergedPockets = [
+      ...incomingPockets,
+      ...pockets.filter((existing) => !incomingPockets.some((p) => p.id === existing.id)),
+    ];
+    const mergedDepositos = [
+      ...incomingDepositos,
+      ...depositos.filter((existing) => !incomingDepositos.some((d) => d.id === existing.id)),
+    ];
+
+    latestServerAccountsRef.current = mergedAccounts;
+    accountsRef.current = mergedAccounts;
+    setAccounts(mergedAccounts);
+    setTransactions(mergedTx);
+    setPockets(mergedPockets);
+    setDepositos(mergedDepositos);
+    if (Array.isArray(payload.budgetCategories) && payload.budgetCategories.length > 0) {
+      setBudgetCategories(payload.budgetCategories);
+    }
+    if (Array.isArray(payload.manualExpenses)) {
+      setManualExpenses(payload.manualExpenses);
+    }
+    if (payload.budgetTxCategoryMap && typeof payload.budgetTxCategoryMap === 'object') {
+      setBudgetTxCategoryMap(payload.budgetTxCategoryMap);
+    }
+    if (payload.userSettings && typeof payload.userSettings === 'object') {
+      setUserSettings((prev) => ({ ...prev, ...payload.userSettings }));
+    }
+
+    const targetCurrId =
+      payload.profile?.currentAccountId &&
+      mergedAccounts.some((a) => a.id === payload.profile.currentAccountId)
+        ? payload.profile.currentAccountId
+        : incomingAccounts[0].id;
+    setCurrentAccountIdState(targetCurrId);
+
+    const flushOk = await flushMasterStateToCloud({
+      accounts: mergedAccounts,
+      transactions: mergedTx,
+      pockets: mergedPockets,
+      depositos: mergedDepositos,
+      budgetCategories:
+        Array.isArray(payload.budgetCategories) && payload.budgetCategories.length > 0
+          ? payload.budgetCategories
+          : budgetCategories,
+      manualExpenses: Array.isArray(payload.manualExpenses) ? payload.manualExpenses : manualExpenses,
+      budgetTxCategoryMap: payload.budgetTxCategoryMap || budgetTxCategoryMap,
+      userSettings: payload.userSettings || userSettings,
+    });
+
+    if (activeUid) {
+      await appendSecurityAuditLog(
+        activeUid,
+        sourceLabel.toLowerCase().includes('json') ? 'backup_imported' : 'snapshot_restored',
+        `Data perbankan berhasil dipulihkan dari ${sourceLabel} (${incomingAccounts.length} kartu, ${incomingTx.length} mutasi).`
+      );
+    }
+
+    playAtmSound('success');
+    return {
+      success: flushOk,
+      message: flushOk
+        ? `Pemulihan dari ${sourceLabel} selesai (${incomingAccounts.length} kartu & ${incomingTx.length} mutasi) dan langsung tersinkronisasi ke Cloud.`
+        : 'Data dipulihkan di perangkat ini, namun unggahan cloud tertunda karena jaringan offline.',
+    };
+  };
+
+  const forceSyncCloudNow = async (): Promise<{ success: boolean; message: string }> => {
+    const activeUid = auth.currentUser?.uid || firebaseUser?.uid || null;
+    const backupPayload = buildPersonalBackupPayload();
+    const docCount =
+      backupPayload.accounts.length +
+      backupPayload.transactions.length +
+      backupPayload.pockets.length +
+      backupPayload.depositos.length;
+    const [masterOk, vaultRes] = await Promise.all([
+      flushMasterStateToCloud(),
+      forceSyncVaultNow(activeUid, backupPayload as unknown as Record<string, unknown>, docCount),
+    ]);
+    if (masterOk && vaultRes.success) {
+      return { success: true, message: vaultRes.message };
+    }
+    return {
+      success: false,
+      message: vaultRes.message || 'Sinkronisasi gagal. Periksa koneksi internet Anda lalu coba lagi.',
+    };
+  };
+
+  const resetCloudDataWithReauth = async (): Promise<{ success: boolean; message: string }> => {
+    const activeUid = auth.currentUser?.uid || firebaseUser?.uid;
+    if (auth.currentUser && !auth.currentUser.isAnonymous) {
+      const reauth = await requireGoogleReauthentication('Reset seluruh data cloud Bank Nusantara');
+      if (!reauth.success) {
+        return { success: false, message: reauth.message };
+      }
+    }
+    if (activeUid) {
+      await createCloudSnapshot(activeUid, buildPersonalBackupPayload(), 'pre_reset');
+      await appendSecurityAuditLog(
+        activeUid,
+        'cloud_reset',
+        'Reset data cloud dieksekusi setelah verifikasi ulang Google & pembuatan auto-checkpoint cadangan.',
+        { status: 'warning' }
+      );
+    }
+    resetAllData();
+    return {
+      success: true,
+      message:
+        'Reset data cloud selesai. Auto-checkpoint cadangan telah disimpan di Time-Machine sebelum reset.',
+    };
+  };
+
+  const ensureAnonymousSessionNow = async (): Promise<{
+    success: boolean;
+    uid?: string;
+    message: string;
+  }> => {
+    const res = await ensureAnonymousVaultSession();
+    if (res.success && res.user) {
+      setFirebaseUser(res.user);
+    }
+    return { success: res.success, uid: res.uid, message: res.message };
   };
 
   // Deteksi SELURUH kartu/akun yang terhubung ke email Google yang sedang login (Reguler, Akun OA yang disambungkan, maupun Guest yang disambungkan)
@@ -8350,9 +9015,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       oaAdminPin: cleanOaPin,
     };
 
-    const nextAccounts = [newAcc, ...accounts];
+    const nextAccounts = unionMergeAccountsList(
+      [newAcc, ...accountsRef.current],
+      [latestServerAccountsRef.current, accounts],
+      deletedAccountIdsRef.current
+    );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
-    flushMasterStateToCloud({ accounts: nextAccounts });
+    void flushMasterStateToCloud({ accounts: nextAccounts });
     playAtmSound('success');
     return {
       success: true,
@@ -8528,15 +9199,32 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       failedPinAttempts: 0,
     };
 
-    const nextAccounts = [newAcc, ...accounts];
+    const nextAccounts = unionMergeAccountsList(
+      [newAcc, ...accountsRef.current],
+      [latestServerAccountsRef.current, accounts],
+      deletedAccountIdsRef.current
+    );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
-    flushMasterStateToCloud({ accounts: nextAccounts });
+    void flushMasterStateToCloud({ accounts: nextAccounts });
+    if (finalEmail && isRealGoogleLinkedEmail(finalEmail)) {
+      void syncCloudUserProfile(
+        { email: finalEmail },
+        {
+          lastAccountId: newAcc.id,
+          hasCompletedOnboarding: true,
+          authMode: 'google',
+        },
+        nextAccounts
+      );
+    }
     playAtmSound('cash');
 
     return {
       success: true,
       account: newAcc,
-      message: `🎉 Akun OA "${cleanName}" berhasil dibuat & langsung AKTIF! (No. Rek: ${finalAccountNumber} • ID 16 Digit: ${formatUserId16(
+      message: `🎉 Akun OA "${cleanName}" berhasil dibuat, langsung AKTIF & tersimpan ke Firebase Cloud azkaakc! (No. Rek: ${finalAccountNumber} • ID 16 Digit: ${formatUserId16(
         finalUserId16
       )} • PIN Kartu: ${finalPin} • PIN Admin OA: ${finalOaAdminPin})`,
     };
@@ -8572,8 +9260,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         : a
     );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
-    flushMasterStateToCloud({ accounts: nextAccounts });
+    void flushMasterStateToCloud({ accounts: nextAccounts });
     playAtmSound('success');
     return {
       success: true,
@@ -8619,21 +9309,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    // Ambil state terbaru dari Cloud terlebih dahulu agar Akun OA yang baru dibuat di perangkat lain langsung terbaca
-    let latestAccounts: BankAccount[] = accounts;
+    // Ambil state terbaru dari Firebase Realtime Database azkaakc terlebih dahulu agar Akun OA yang baru dibuat di perangkat lain langsung terbaca
+    let latestAccounts: BankAccount[] = accountsRef.current;
     try {
-      const snap = await getDocFromServer(doc(db, 'bank_state_v1', 'master_state')).catch(() =>
-        getDoc(doc(db, 'bank_state_v1', 'master_state'))
-      );
-      if (snap && snap.exists()) {
-        const masterData = snap.data();
-        if (Array.isArray(masterData.accounts)) {
-          latestAccounts = (masterData.accounts as BankAccount[]).map((a) => ({
-            ...a,
-            userId16: ensureAccountUserId16(a),
-            isOfficialAdminAccount: Boolean(a.isOfficialAdminAccount || a.id === 'acc-admin'),
-            oaAdminPin: a.oaAdminPin || '159357',
-          }));
+      const masterData = await readCloudDoc<Record<string, any>>('bank_state_v1', 'master_state');
+      if (masterData) {
+        const fetchedAccounts = toArraySafe<BankAccount>(masterData.accounts);
+        if (fetchedAccounts.length > 0) {
+          latestAccounts = unionMergeAccountsList(
+            fetchedAccounts,
+            [latestServerAccountsRef.current, accountsRef.current],
+            deletedAccountIdsRef.current
+          );
+          latestServerAccountsRef.current = latestAccounts;
+          accountsRef.current = latestAccounts;
           setAccounts(latestAccounts);
         }
       }
@@ -8759,6 +9448,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const cleanEmail = email.trim() ? normalizeEmailKey(email.trim()) : '';
     const wasGuest = Boolean(target.isGuestAccount);
+    const keepAsOfficialOa =
+      !wasGuest && Boolean(target.isOfficialAdminAccount || target.id === 'acc-admin');
     const nextAccounts = accounts.map((a) =>
       a.id === accountId
         ? {
@@ -8766,11 +9457,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             email: cleanEmail,
             googleEmail: cleanEmail || undefined,
             isGuestAccount: cleanEmail ? false : a.isGuestAccount,
-            isOfficialAdminAccount:
-              cleanEmail && wasGuest ? false : Boolean(a.isOfficialAdminAccount),
+            isOfficialAdminAccount: keepAsOfficialOa,
           }
         : a
     );
+    latestServerAccountsRef.current = nextAccounts;
     accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
     void flushMasterStateToCloud({ accounts: nextAccounts });
@@ -8781,14 +9472,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           lastAccountId: accountId,
           hasCompletedOnboarding: true,
           authMode: 'google',
-        }
+        },
+        nextAccounts
       );
     }
     playAtmSound('success');
     return {
       success: true,
       message: cleanEmail
-        ? `🔗 Akun "${target.fullName}" (${target.accountNumber}) berhasil diubah menjadi Akun Google di Firebase pada email: ${cleanEmail}! Saat Sign in with Google memakai email tersebut di HP maupun Laptop, pengguna dapat memilih akun ini dan memasukkan PIN Kartunya.`
+        ? `🔗 Akun "${target.fullName}" (${target.accountNumber}) berhasil tersimpan & terhubung ke Google (${cleanEmail}) di Firebase azkaakc!${
+            keepAsOfficialOa ? ' Status Akun OA Resmi tetap aktif.' : ''
+          }`
         : `Tautan email Google pada akun "${target.fullName}" telah dilepas (kini tampil tombol "Sign in with Google" di bagian atas).`,
     };
   };
@@ -8812,9 +9506,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isOfficialAdminAccount: true,
       oaAdminPin: source.oaAdminPin || '159357',
     };
-    const nextAccounts = [cloned, ...accounts];
+    const nextAccounts = unionMergeAccountsList(
+      [cloned, ...accountsRef.current],
+      [latestServerAccountsRef.current, accounts],
+      deletedAccountIdsRef.current
+    );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
-    flushMasterStateToCloud({ accounts: nextAccounts });
+    void flushMasterStateToCloud({ accounts: nextAccounts });
     playAtmSound('success');
     return {
       success: true,
@@ -9177,6 +9877,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       remaining.length === 0 || (Boolean(options?.logoutIfCurrent) && isDeletingCurrent);
     const nextGoogleUser = shouldLogout ? null : googleUser;
 
+    deletedAccountIdsRef.current = nextDeletedAccountIds;
+    latestServerAccountsRef.current = remaining;
+    accountsRef.current = remaining;
     setDeletedAccountIds(nextDeletedAccountIds);
     setAccounts(remaining);
     setTransactions(nextTransactions);
@@ -14126,8 +14829,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         : a
     );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
-    flushMasterStateToCloud({ accounts: nextAccounts });
+    void flushMasterStateToCloud({ accounts: nextAccounts });
+    const updatedTarget = nextAccounts.find((a) => a.id === accountId);
+    const targetEmail = updatedTarget?.googleEmail || updatedTarget?.email;
+    if (updatedTarget && targetEmail && isRealGoogleLinkedEmail(targetEmail)) {
+      void syncCloudUserProfile(
+        { uid: updatedTarget.firebaseUid, email: targetEmail },
+        { lastAccountId: updatedTarget.id, hasCompletedOnboarding: true },
+        nextAccounts
+      );
+    }
     playAtmSound('success');
     return {
       success: true,
@@ -16939,6 +17653,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         registerGuestRegularCard,
         loginToGuestAccountWithPin,
         linkCurrentAccountWithGooglePopup,
+        syncTelemetry,
+        lastAtomicMergeSummary,
+        dismissAtomicMergeSummary,
+        buildPersonalBackupPayload,
+        restoreFromBankingPayload,
+        forceSyncCloudNow,
+        resetCloudDataWithReauth,
+        ensureAnonymousSessionNow,
         enterBankPortal,
         loginWithGoogle,
         completeGoogleOnboarding,

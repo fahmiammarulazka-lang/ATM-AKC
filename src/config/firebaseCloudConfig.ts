@@ -8,6 +8,7 @@
 export interface FirebaseCloudConfig {
   apiKey: string;
   authDomain: string;
+  databaseURL: string;
   projectId: string;
   firestoreDatabaseId: string;
   storageBucket: string;
@@ -21,6 +22,7 @@ export interface FirebaseCloudConfig {
 export const FIREBASE_CLOUD_CONFIG: FirebaseCloudConfig = {
   apiKey: 'AIzaSyAD1MYxchkSYAEExsQ6RoBOrQ1DOU8U16g',
   authDomain: 'azkaakc.firebaseapp.com',
+  databaseURL: 'https://azkaakc-default-rtdb.asia-southeast1.firebasedatabase.app',
   projectId: 'azkaakc',
   firestoreDatabaseId: '(default)',
   storageBucket: 'azkaakc.firebasestorage.app',

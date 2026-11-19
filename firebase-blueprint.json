@@ -2,79 +2,117 @@
   "entities": {
     "CloudUser": {
       "title": "CloudUser",
-      "description": "Authenticated Google user profile, real-time ban enforcement status, and in-app ban appeal state",
+      "description": "Authenticated Google or Anonymous Vault user profile, real-time ban enforcement status, and sync metadata",
       "type": "object",
       "properties": {
-        "uid": { "type": "string" },
-        "email": { "type": "string" },
-        "displayName": { "type": "string" },
-        "photoUrl": { "type": "string" },
+        "uid": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 254 },
+        "displayName": { "type": "string", "maxLength": 160 },
+        "photoURL": { "type": "string", "maxLength": 1000 },
         "status": { "type": "string", "enum": ["active", "banned"] },
-        "banReason": { "type": "string" },
-        "bannedAt": { "type": "string" },
-        "banAppealStatus": { "type": "string", "enum": ["none", "pending", "rejected", "approved"] },
-        "banAppealMessage": { "type": "string" },
-        "banAppealSubmittedAt": { "type": "string" },
-        "banAppealAdminNote": { "type": "string" },
-        "currentAccountId": { "type": "string" },
-        "lastAccountId": { "type": "string" },
+        "banReason": { "type": "string", "maxLength": 1000 },
+        "lastAccountId": { "type": "string", "maxLength": 128 },
         "hasCompletedOnboarding": { "type": "boolean" },
-        "authMode": { "type": "string", "enum": ["email_direct", "google"] },
-        "emailKey": { "type": "string" },
+        "isAnonymousVault": { "type": "boolean" },
+        "authMode": { "type": "string", "enum": ["google", "guest", "email_direct"] },
+        "emailKey": { "type": "string", "maxLength": 128 },
+        "lastDeviceId": { "type": "string", "maxLength": 128 },
+        "syncVersion": { "type": "integer" },
         "updatedAtMs": { "type": "number" }
       },
-      "required": ["uid", "email", "status"]
+      "required": ["uid", "ownerUid", "status"]
     },
-    "Account": {
-      "title": "Account",
-      "description": "Bank Nusantara customer and admin accounts",
+    "VaultState": {
+      "title": "VaultState",
+      "description": "UID-isolated personal banking vault synchronized with optimistic concurrency control",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "accountNumber": { "type": "string" },
-        "fullName": { "type": "string" },
-        "email": { "type": "string" },
-        "firebaseUid": { "type": "string" },
-        "balance": { "type": "number" },
-        "pin": { "type": "string" },
-        "status": { "type": "string", "enum": ["active", "banned"] },
-        "banReason": { "type": "string" },
-        "isVerified": { "type": "boolean" },
-        "tier": { "type": "string" },
-        "hasAccessedAdminPanel": { "type": "boolean" }
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "createdAtMs": { "type": "number" },
+        "updatedAtMs": { "type": "number" },
+        "createdAtIso": { "type": "string", "maxLength": 64 },
+        "updatedAtIso": { "type": "string", "maxLength": 64 },
+        "syncVersion": { "type": "integer" },
+        "lastDeviceId": { "type": "string", "maxLength": 128 },
+        "payload": { "type": "object" }
       },
-      "required": ["id", "accountNumber", "fullName", "balance"]
+      "required": ["ownerUid", "syncVersion", "lastDeviceId", "payload"]
     },
-    "GiftEvent": {
-      "title": "GiftEvent",
-      "description": "Admin gift and letter event packages",
+    "TimeMachineSnapshot": {
+      "title": "TimeMachineSnapshot",
+      "description": "Rolling cloud checkpoint (max 5 newest) with SHA-256 integrity hash",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "title": { "type": "string" },
-        "senderName": { "type": "string" },
-        "letterMessage": { "type": "string" },
-        "isActive": { "type": "boolean" }
+        "id": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "label": { "type": "string", "maxLength": 160 },
+        "triggerReason": {
+          "type": "string",
+          "enum": ["manual", "pre_restore", "pre_import", "pre_reset", "pre_merge"]
+        },
+        "createdAtMs": { "type": "number" },
+        "createdAtIso": { "type": "string", "maxLength": 64 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "sha256": { "type": "string", "minLength": 64, "maxLength": 64 },
+        "accountCount": { "type": "integer" },
+        "transactionCount": { "type": "integer" },
+        "pocketCount": { "type": "integer" },
+        "totalBalance": { "type": "number" },
+        "totalGoldGrams": { "type": "number" },
+        "payload": { "type": "object" }
       },
-      "required": ["id", "title"]
+      "required": ["id", "ownerUid", "label", "triggerReason", "sha256", "payload"]
     },
-    "BanSupportConfig": {
-      "title": "BanSupportConfig",
-      "description": "Admin-configured WhatsApp phone number and email address shown on the banned screen",
+    "SecurityAuditLog": {
+      "title": "SecurityAuditLog",
+      "description": "Immutable append-only security audit trail per user UID",
       "type": "object",
       "properties": {
-        "whatsappNumber": { "type": "string" },
-        "emailAddress": { "type": "string" },
-        "updatedAt": { "type": "string" }
+        "id": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "eventType": { "type": "string", "maxLength": 64 },
+        "summary": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["success", "warning", "blocked"] },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "deviceLabel": { "type": "string", "maxLength": 120 },
+        "platform": { "type": "string", "maxLength": 80 },
+        "userAgent": { "type": "string", "maxLength": 320 },
+        "createdAtMs": { "type": "number" },
+        "createdAtIso": { "type": "string", "maxLength": 64 }
       },
-      "required": ["whatsappNumber", "emailAddress"]
+      "required": ["id", "ownerUid", "eventType", "summary", "status", "deviceId", "createdAtMs"]
+    },
+    "DeviceSession": {
+      "title": "DeviceSession",
+      "description": "Registered browser device sessions per user UID with revocation support",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "ownerUid": { "type": "string", "maxLength": 128 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "deviceLabel": { "type": "string", "maxLength": 120 },
+        "platform": { "type": "string", "maxLength": 80 },
+        "userAgent": { "type": "string", "maxLength": 320 },
+        "authMethod": { "type": "string", "enum": ["google", "anonymous"] },
+        "firstSeenIso": { "type": "string", "maxLength": 64 },
+        "lastActiveIso": { "type": "string", "maxLength": 64 },
+        "lastActiveMs": { "type": "number" },
+        "revoked": { "type": "boolean" },
+        "revokedAtIso": { "type": "string", "maxLength": 64 }
+      },
+      "required": ["id", "ownerUid", "deviceId", "authMethod", "revoked"]
     },
     "MasterCloudState": {
       "title": "MasterCloudState",
-      "description": "Real-time shared state document syncing accounts, transactions, giftEvents, deletedGiftEventIds, and banSupportConfig",
+      "description": "Shared Bank Nusantara real-time state document for inter-account transfers and admin operations",
       "type": "object",
       "properties": {
         "updatedAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "writerSessionId": { "type": "string", "maxLength": 128 },
         "giftEventsInitialized": { "type": "boolean" }
       },
       "required": ["updatedAtMs"]
@@ -83,23 +121,31 @@
   "firestore": {
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/CloudUser" },
-      "description": "Per-Google-user status and real-time ban listener document"
+      "description": "UID-isolated user identity profile and protection status"
+    },
+    "/users/{userId}/vault_state/{stateId}": {
+      "schema": { "$ref": "#/entities/VaultState" },
+      "description": "UID-isolated personal banking vault with atomic concurrency metadata"
+    },
+    "/users/{userId}/snapshots/{snapshotId}": {
+      "schema": { "$ref": "#/entities/TimeMachineSnapshot" },
+      "description": "UID-isolated Time-Machine rolling cloud snapshots (max 5 versions)"
+    },
+    "/users/{userId}/security_logs/{logId}": {
+      "schema": { "$ref": "#/entities/SecurityAuditLog" },
+      "description": "UID-isolated immutable append-only security audit trail"
+    },
+    "/users/{userId}/devices/{deviceId}": {
+      "schema": { "$ref": "#/entities/DeviceSession" },
+      "description": "UID-isolated browser device registry and revocation control"
     },
     "/users_by_email/{emailKey}": {
       "schema": { "$ref": "#/entities/CloudUser" },
-      "description": "Per-email cloud user document enabling instant registration and real-time multi-device sync for any email address without Firebase verification"
+      "description": "Email-indexed user profile mirror for cross-device account lookup"
     },
     "/bank_state_v1/{docId}": {
       "schema": { "$ref": "#/entities/MasterCloudState" },
-      "description": "Unified real-time cloud state for accounts, ledgers, gift events, deleted tombstones, and ban support settings"
-    },
-    "/accounts/{accountId}": {
-      "schema": { "$ref": "#/entities/Account" },
-      "description": "Customer accounts collection"
-    },
-    "/giftEvents/{eventId}": {
-      "schema": { "$ref": "#/entities/GiftEvent" },
-      "description": "Admin gift events collection"
+      "description": "Shared Bank Nusantara operational state for inter-account transfers and OA accounts"
     }
   }
 }

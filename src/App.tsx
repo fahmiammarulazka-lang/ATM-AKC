@@ -27,6 +27,7 @@ import {
   AllowNotificationFooterButton,
 } from './components/GlobalChatAndNotificationLayer';
 import { GiftLetterOverlayAndCornerPopup } from './components/GiftLetterOverlayAndCornerPopup';
+import { SecurityCommandCenter } from './components/SecurityCommandCenter';
 import {
   CreditCard,
   Building,
@@ -65,7 +66,17 @@ function BankAppContent() {
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState<boolean>(false);
   const [showAdminPinModal, setShowAdminPinModal] = useState<boolean>(false);
   const [adminViewDuringOnboarding, setAdminViewDuringOnboarding] = useState<boolean>(false);
+  const [securityCenterState, setSecurityCenterState] = useState<{
+    open: boolean;
+    section: 'identity' | 'telemetry' | 'timemachine' | 'audit';
+  }>({ open: false, section: 'identity' });
   const [quotaExceeded, setQuotaExceeded] = useState<boolean>(() => Boolean(window.__gmpQuotaExceeded));
+
+  const openSecurityCenter = (
+    section: 'identity' | 'telemetry' | 'timemachine' | 'audit' = 'identity'
+  ) => {
+    setSecurityCenterState({ open: true, section });
+  };
 
   useEffect(() => {
     const handler = () => setQuotaExceeded(true);
@@ -179,21 +190,96 @@ function BankAppContent() {
     }
   };
 
-  // 1. Wajib cek status akun & data Cloud Firestore terlebih dahulu sebelum membuka halaman utama
+  // 1. Tampilan skeleton super singkat saat fase boot awal (< 2.5 detik maks)
   if (!isCloudBootReady) {
     return (
-      <div className="min-h-screen bg-[#070c18] text-slate-100 flex flex-col items-center justify-center p-6">
-        <div className="max-w-sm w-full bg-[#0c111d] border border-amber-500/30 rounded-3xl p-6 text-center space-y-4 shadow-2xl">
-          <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/15 border border-amber-400/40 flex items-center justify-center text-amber-300">
-            <Cloud className="w-6 h-6 animate-pulse" />
+      <div className="min-h-screen bg-[#070c18] text-slate-100 flex flex-col">
+        {/* Skeleton Navbar */}
+        <header className="h-16 border-b border-slate-800/80 bg-[#0a101f]/90 px-4 sm:px-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 animate-pulse" />
+            <div className="space-y-1.5">
+              <div className="h-3.5 w-32 rounded-md bg-slate-800 animate-pulse" />
+              <div className="h-2.5 w-20 rounded-md bg-slate-800/70 animate-pulse" />
+            </div>
           </div>
-          <div className="space-y-1">
-            <h2 className="text-base font-black text-white">Menghubungkan ke Cloud Real-Time...</h2>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Memeriksa status keamanan akun, saldo, dan sinkronisasi data terbaru dari Cloud Firestore.
-            </p>
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-24 rounded-lg bg-slate-800/80 animate-pulse" />
+            <div className="w-8 h-8 rounded-lg bg-slate-800/80 animate-pulse" />
           </div>
-        </div>
+        </header>
+
+        {/* Skeleton Body */}
+        <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <div className="h-6 w-48 rounded-lg bg-slate-800 animate-pulse" />
+              <div className="h-3.5 w-64 rounded-md bg-slate-800/60 animate-pulse" />
+            </div>
+            <div className="hidden sm:flex items-center gap-2 text-xs font-medium text-slate-400">
+              <Cloud className="w-4 h-4 text-amber-400/80" />
+              <span>Menyiapkan sesi...</span>
+            </div>
+          </div>
+
+          {/* Hero Balance & Card Skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <div className="lg:col-span-7 bg-[#0c1324] border border-slate-800/80 rounded-3xl p-6 space-y-5">
+              <div className="flex items-center justify-between">
+                <div className="h-4 w-28 rounded-md bg-slate-800 animate-pulse" />
+                <div className="h-6 w-20 rounded-md bg-amber-500/10 border border-amber-500/20 animate-pulse" />
+              </div>
+              <div className="h-10 w-60 rounded-xl bg-slate-800 animate-pulse" />
+              <div className="grid grid-cols-4 gap-3 pt-2">
+                {[0, 1, 2, 3].map((idx) => (
+                  <div key={idx} className="h-16 rounded-2xl bg-slate-800/70 animate-pulse" />
+                ))}
+              </div>
+            </div>
+
+            <div className="lg:col-span-5 bg-[#0c1324] border border-slate-800/80 rounded-3xl p-6 flex flex-col justify-between min-h-[210px]">
+              <div className="flex items-center justify-between">
+                <div className="h-4 w-24 rounded-md bg-slate-800 animate-pulse" />
+                <div className="h-5 w-14 rounded-md bg-slate-800/70 animate-pulse" />
+              </div>
+              <div className="space-y-2.5 my-4">
+                <div className="h-5 w-52 rounded-md bg-slate-800 animate-pulse" />
+                <div className="h-3.5 w-36 rounded-md bg-slate-800/60 animate-pulse" />
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="h-3.5 w-28 rounded-md bg-slate-800/70 animate-pulse" />
+                <div className="h-3.5 w-16 rounded-md bg-slate-800/70 animate-pulse" />
+              </div>
+            </div>
+          </div>
+
+          {/* Activity & Services Skeleton */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="bg-[#0c1324] border border-slate-800/80 rounded-3xl p-5 space-y-3.5">
+              <div className="h-4 w-36 rounded-md bg-slate-800 animate-pulse" />
+              {[0, 1, 2].map((row) => (
+                <div key={row} className="flex items-center justify-between py-2 border-t border-slate-800/60">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-slate-800/80 animate-pulse" />
+                    <div className="space-y-1.5">
+                      <div className="h-3.5 w-32 rounded bg-slate-800 animate-pulse" />
+                      <div className="h-2.5 w-20 rounded bg-slate-800/60 animate-pulse" />
+                    </div>
+                  </div>
+                  <div className="h-4 w-20 rounded bg-slate-800 animate-pulse" />
+                </div>
+              ))}
+            </div>
+            <div className="bg-[#0c1324] border border-slate-800/80 rounded-3xl p-5 space-y-3.5">
+              <div className="h-4 w-32 rounded-md bg-slate-800 animate-pulse" />
+              <div className="grid grid-cols-3 gap-3 pt-1">
+                {[0, 1, 2, 3, 4, 5].map((tile) => (
+                  <div key={tile} className="h-20 rounded-2xl bg-slate-800/60 animate-pulse" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </main>
       </div>
     );
   }
@@ -319,6 +405,7 @@ function BankAppContent() {
         onOpenRegisterModal={() => setIsRegisterModalOpen(true)}
         onSecretAdminTrigger={handleSecretAdminTrigger}
         onQuickAdminAccess={handleQuickAdminAccess}
+        onOpenSecurityCenter={openSecurityCenter}
       />
 
       {/* Main Container */}
@@ -327,6 +414,7 @@ function BankAppContent() {
           <CustomerDashboard
             requestedSubTab={requestedDashboardTab}
             onQuickAdminAccess={handleQuickAdminAccess}
+            onOpenSecurityCenter={openSecurityCenter}
           />
         )}
         {activeView === 'transfer' && (
@@ -411,6 +499,13 @@ function BankAppContent() {
         onCancel={() => setShowAdminPinModal(false)}
       />
 
+      {/* Zero-Trust Security & Sync Command Center Modal */}
+      <SecurityCommandCenter
+        isOpen={securityCenterState.open}
+        initialSection={securityCenterState.section}
+        onClose={() => setSecurityCenterState((prev) => ({ ...prev, open: false }))}
+      />
+
       {/* Official Banking Footer with Izinkan Notifikasi & Secret Admin Portal Link at the very bottom */}
       <footer className="mt-12 bg-slate-950 border-t border-slate-900 py-8 px-4 text-xs text-slate-400">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
@@ -452,13 +547,12 @@ function BankAppContent() {
 
           <div className="flex flex-wrap items-center justify-center gap-2.5">
             <button
-              onClick={() => {
-                if (confirm('Mulai ulang data dari awal / reset ke kondisi awal?')) resetAllData();
-              }}
+              type="button"
+              onClick={() => openSecurityCenter('identity')}
               className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer flex items-center gap-1"
             >
               <RotateCcw className="w-3 h-3" />
-              <span>Ulang dari Awal</span>
+              <span>Keamanan &amp; Reset Cloud</span>
             </button>
 
             <span className="text-slate-800">•</span>

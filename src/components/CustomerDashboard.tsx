@@ -53,6 +53,7 @@ import {
 } from '../utils/bankUtils';
 import { CardTier, DevRoleConfig, LoanType, TransferBebasAssetMode } from '../types/bank';
 import { getDevBadgeColorStyle } from '../data/devRolesCatalog';
+import { SmartProtectionBanner } from './SecurityCommandCenter';
 
 export type DashboardTab =
   | 'ringkasan'
@@ -68,11 +69,13 @@ export type DashboardTab =
 interface CustomerDashboardProps {
   requestedSubTab?: { tab: DashboardTab; nonce: number } | null;
   onQuickAdminAccess?: (role: DevRoleConfig) => void;
+  onOpenSecurityCenter?: (section?: 'identity' | 'telemetry' | 'timemachine' | 'audit') => void;
 }
 
 export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   requestedSubTab,
   onQuickAdminAccess,
+  onOpenSecurityCenter,
 }) => {
   const {
     currentAccount,
@@ -257,6 +260,9 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
+      {/* SMART PROTECTION BANNER (Sesi Sementara -> Hubungkan Google & Ringkasan Atomic Merge) */}
+      <SmartProtectionBanner onOpenCommandCenter={onOpenSecurityCenter} />
+
       {/* TOP USER WELCOME & QUICK STATS */}
       <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-5 sm:p-7 border border-blue-900/60 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div className="space-y-1">

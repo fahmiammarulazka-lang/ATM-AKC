@@ -3,6 +3,7 @@
   "appId": "1:1070517785090:web:158d14b8bf1975b5138d1b",
   "apiKey": "AIzaSyAD1MYxchkSYAEExsQ6RoBOrQ1DOU8U16g",
   "authDomain": "azkaakc.firebaseapp.com",
+  "databaseURL": "https://azkaakc-default-rtdb.asia-southeast1.firebasedatabase.app",
   "firestoreDatabaseId": "(default)",
   "storageBucket": "azkaakc.firebasestorage.app",
   "messagingSenderId": "1070517785090",
