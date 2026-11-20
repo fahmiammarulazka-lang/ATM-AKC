@@ -1326,12 +1326,25 @@ export interface AdminGiftEventPackage {
 }
 
 export type DashboardEffectDurationType =
-  | 'permanent'
+  | '15s'
+  | '30s'
+  | '1m'
+  | '5m'
+  | '15m'
+  | '30m'
   | '1h'
   | '6h'
   | '24h'
   | '72h'
-  | '168h';
+  | '168h'
+  | 'permanent';
+
+export type DashboardEffectBannerStyle =
+  | 'full_top_banner'
+  | 'compact_ribbon'
+  | 'aura_only_no_banner';
+
+export type DashboardEffectSoundMode = 'fanfare_auto' | 'silent';
 
 export interface AdminDashboardEffectPackage {
   id: string;
@@ -1343,11 +1356,16 @@ export interface AdminDashboardEffectPackage {
   targetAccountId: string; // '__ALL__' | '__MULTI__' | specific BankAccount.id
   targetAccountIds?: string[];
   revokedAccountIds?: string[];
+  forcedPrimaryForAccountIds?: string[];
   durationType: DashboardEffectDurationType;
   expiresAt?: string | null;
   autoBlastOnOpen: boolean;
   showPersistentDashboardAura: boolean;
   decorateBalanceCard: boolean;
+  showAmbientParticles?: boolean;
+  bannerStyle?: DashboardEffectBannerStyle;
+  soundMode?: DashboardEffectSoundMode;
+  stageDurationSeconds?: number;
   isActive: boolean;
   triggerNonce: number;
   createdAt: string;

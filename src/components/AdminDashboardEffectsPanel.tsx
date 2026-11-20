@@ -1,11 +1,19 @@
 /**
  * AdminDashboardEffectsPanel.tsx
- * Studio Efek Dashboard 100.000x (Fitur Tersendiri di Panel Admin)
+ * Studio Efek Dashboard 100.000x (Fitur & Pengaturan 100% Terpusat di Panel Admin)
  * - Menggunakan Katalog 108 Efek Perayaan (9 Kategori) & Mesin Panggung 100.000x Ultra Max Overdrive
  *   yang sama persis dengan Hadiah & Surat.
- * - Bisa dikirim ke: Semua Nasabah (__ALL__), 1 Akun Spesifik, atau Centang Banyak Akun Sekaligus (__MULTI__).
- * - Saat dikirim atau ditembak ulang, Panggung 100.000x langsung meledak real-time via Cloud RTDB di layar Dashboard nasabah,
- *   serta menghiasi Spanduk Sambutan Dashboard, Kartu Saldo Utama, dan Partikel Latar Layar.
+ * - Tab & seluruh pengaturan Efek Dashboard hanya berada di Panel Admin (Zero Customer Controls).
+ * - Bebas dikirim ke: Semua Nasabah (__ALL__), 1 Akun Spesifik, atau Centang Banyak Akun Sekaligus (__MULTI__).
+ * - Dilengkapi:
+ *   1) Saklar On/Off per Elemen Tampilan Nasabah (Ledakan Panggung 100.000x, Spanduk Sambutan & Segel 3D,
+ *      Aura Kartu Saldo Utama, dan Hujan Partikel Latar Layar).
+ *   2) Pengatur Gaya & Posisi Spanduk (Spanduk Penuh, Pita Ringkas, atau Hanya Aura Tanpa Spanduk).
+ *   3) Pengatur Suara Fanfare Synthesizer (Suara Fanfare Otomatis vs Mode Senyap).
+ *   4) Pengatur Durasi Granular (15 Detik, 30 Detik, 1 Menit, 5 Menit, 15 Menit, 30 Menit, 1 Jam, 6 Jam,
+ *      24 Jam, 3 Hari, 7 Hari, hingga Permanen) + Durasi Tampil Panggung Ledakan (6s - 30s).
+ *   5) Tabel Pantauan Live Efek Aktif Per Akun Nasabah dengan kontrol 1-klik: Tembak Ledakan ke Akun,
+ *      Ganti Efek Utama Akun, dan Sembunyikan / Paksa Tampil per Akun secara Real-Time.
  */
 import React, { useState } from 'react';
 import {
@@ -27,11 +35,19 @@ import {
   Clock,
   Layers,
   CreditCard,
+  Volume2,
+  VolumeX,
+  Eye,
+  EyeOff,
+  Layout,
+  Monitor,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
   AdminDashboardEffectPackage,
+  DashboardEffectBannerStyle,
   DashboardEffectDurationType,
+  DashboardEffectSoundMode,
 } from '../types/bank';
 import {
   CELEBRATION_CATEGORIES,
@@ -43,18 +59,57 @@ import {
   triggerCanvasConfettiForCelebration,
 } from '../data/celebrationEffectsCatalog';
 import { CelebrationClaimBurstOverlay } from './CelebrationSpectacleOverlay';
+import {
+  formatDashboardEffectRemainingLabel,
+  resolveActiveDashboardEffectsForAccount,
+} from './DashboardEffectLayerAndStudio';
 
 const DURATION_OPTIONS: {
   id: DashboardEffectDurationType;
   label: string;
   desc: string;
 }[] = [
-  { id: 'permanent', label: '♾️ Permanen (Tanpa Batas)', desc: 'Aktif terus hingga dimatikan Admin' },
-  { id: '1h', label: '⏱️ 1 Jam', desc: 'Aktif selama 60 menit' },
-  { id: '6h', label: '⏱️ 6 Jam', desc: 'Aktif selama 6 jam' },
-  { id: '24h', label: '📅 24 Jam (1 Hari)', desc: 'Aktif selama 1 hari penuh' },
-  { id: '72h', label: '📅 3 Hari (72 Jam)', desc: 'Aktif selama 3 hari' },
-  { id: '168h', label: '📅 7 Hari (1 Minggu)', desc: 'Aktif selama 1 minggu penuh' },
+  { id: '15s', label: '⚡ 15 Detik', desc: 'Kilat 15 detik' },
+  { id: '30s', label: '⚡ 30 Detik', desc: 'Singkat 30 detik' },
+  { id: '1m', label: '⏱️ 1 Menit', desc: 'Aktif 60 detik' },
+  { id: '5m', label: '⏱️ 5 Menit', desc: 'Aktif 5 menit' },
+  { id: '15m', label: '⏱️ 15 Menit', desc: 'Aktif 15 menit' },
+  { id: '30m', label: '⏱️ 30 Menit', desc: 'Aktif setengah jam' },
+  { id: '1h', label: '🕐 1 Jam', desc: 'Aktif 60 menit' },
+  { id: '6h', label: '🕕 6 Jam', desc: 'Aktif 6 jam' },
+  { id: '24h', label: '📅 24 Jam (1 Hari)', desc: 'Aktif 1 hari penuh' },
+  { id: '72h', label: '📅 3 Hari (72 Jam)', desc: 'Aktif 3 hari' },
+  { id: '168h', label: '📅 7 Hari (1 Minggu)', desc: 'Aktif 1 minggu penuh' },
+  { id: 'permanent', label: '♾️ Permanen', desc: 'Aktif terus sampai dimatikan Admin' },
+];
+
+const BANNER_STYLE_OPTIONS: {
+  id: DashboardEffectBannerStyle;
+  label: string;
+  desc: string;
+}[] = [
+  {
+    id: 'full_top_banner',
+    label: '👑 Spanduk Penuh & Segel Mandala 3D',
+    desc: 'Spanduk besar di atas Kartu Saldo lengkap dengan segel 3D, judul & pesan',
+  },
+  {
+    id: 'compact_ribbon',
+    label: '🎗️ Pita Ringkas Elegan',
+    desc: 'Baris pita kompak di bagian atas Dashboard tanpa memakan ruang vertikal',
+  },
+  {
+    id: 'aura_only_no_banner',
+    label: '✨ Hanya Aura Kartu & Partikel (Tanpa Spanduk)',
+    desc: 'Sembunyikan kotak spanduk teks, hanya tampilkan aura Kartu Saldo & partikel',
+  },
+];
+
+const STAGE_DURATION_OPTIONS: { seconds: number; label: string }[] = [
+  { seconds: 6, label: '6 Detik (Cepat)' },
+  { seconds: 10, label: '10 Detik (Standar)' },
+  { seconds: 15, label: '15 Detik (Sinematik)' },
+  { seconds: 25, label: '25 Detik (Festival Panjang)' },
 ];
 
 export const AdminDashboardEffectsPanel: React.FC = () => {
@@ -68,6 +123,9 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
     adminUpdateDashboardEffectQuickSettings,
     adminDuplicateDashboardEffect,
     adminToggleRevokeDashboardEffectRecipient,
+    adminSetPrimaryDashboardEffectForAccount,
+    adminHideAllDashboardEffectsForAccount,
+    adminRestoreAllDashboardEffectsForAccount,
   } = useBank();
 
   const [editingPkgId, setEditingPkgId] = useState<string | null>(null);
@@ -88,21 +146,28 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
   const [selectedRecipientIds, setSelectedRecipientIds] = useState<string[]>([]);
   const [recipientSearchQuery, setRecipientSearchQuery] = useState<string>('');
 
-  // Behavior & Duration Controls
+  // Full Admin Behavior, Element Switches, Audio, Banner Style & Duration Controls
   const [durationType, setDurationType] = useState<DashboardEffectDurationType>('permanent');
+  const [stageDurationSeconds, setStageDurationSeconds] = useState<number>(12);
+  const [bannerStyle, setBannerStyle] =
+    useState<DashboardEffectBannerStyle>('full_top_banner');
+  const [soundMode, setSoundMode] = useState<DashboardEffectSoundMode>('fanfare_auto');
   const [isActive, setIsActive] = useState<boolean>(true);
   const [autoBlastOnOpen, setAutoBlastOnOpen] = useState<boolean>(true);
   const [showPersistentDashboardAura, setShowPersistentDashboardAura] = useState<boolean>(true);
   const [decorateBalanceCard, setDecorateBalanceCard] = useState<boolean>(true);
+  const [showAmbientParticles, setShowAmbientParticles] = useState<boolean>(true);
 
-  // Management & Live Preview States
+  // Management, Live Account Monitor & Preview States
   const [managingPkgId, setManagingPkgId] = useState<string | null>(null);
   const [manageRecipientSearch, setManageRecipientSearch] = useState<string>('');
+  const [accountMonitorSearch, setAccountMonitorSearch] = useState<string>('');
   const [feedback, setFeedback] = useState<string>('');
   const [previewBurstState, setPreviewBurstState] = useState<{
     effectId: string;
     intensity: CelebrationIntensityLevel;
     headline?: string;
+    soundMode?: DashboardEffectSoundMode;
     nonce: number;
   } | null>(null);
 
@@ -138,6 +203,16 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
     );
   });
 
+  const filteredMonitorAccounts = accounts.filter((acc) => {
+    if (!accountMonitorSearch.trim()) return true;
+    const q = accountMonitorSearch.toLowerCase();
+    return (
+      acc.fullName.toLowerCase().includes(q) ||
+      acc.accountNumber.toLowerCase().includes(q) ||
+      acc.cardTier.toLowerCase().includes(q)
+    );
+  });
+
   const toggleRecipientAccountCheckbox = (accountId: string) => {
     setSelectedRecipientIds((prev) =>
       prev.includes(accountId) ? prev.filter((id) => id !== accountId) : [...prev, accountId]
@@ -158,10 +233,14 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
     setSelectedRecipientIds([]);
     setRecipientSearchQuery('');
     setDurationType('permanent');
+    setStageDurationSeconds(12);
+    setBannerStyle('full_top_banner');
+    setSoundMode('fanfare_auto');
     setIsActive(true);
     setAutoBlastOnOpen(true);
     setShowPersistentDashboardAura(true);
     setDecorateBalanceCard(true);
+    setShowAmbientParticles(true);
   };
 
   const loadPackageIntoEditor = (pkg: AdminDashboardEffectPackage) => {
@@ -176,10 +255,14 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
     );
     setCelebrationIntensity(pkg.celebrationIntensity || '100000x');
     setDurationType(pkg.durationType || 'permanent');
+    setStageDurationSeconds(pkg.stageDurationSeconds || 12);
+    setBannerStyle(pkg.bannerStyle || 'full_top_banner');
+    setSoundMode(pkg.soundMode || 'fanfare_auto');
     setIsActive(pkg.isActive);
     setAutoBlastOnOpen(pkg.autoBlastOnOpen);
     setShowPersistentDashboardAura(pkg.showPersistentDashboardAura);
     setDecorateBalanceCard(pkg.decorateBalanceCard);
+    setShowAmbientParticles(pkg.showAmbientParticles !== false);
 
     const existingTargets =
       Array.isArray(pkg.targetAccountIds) && pkg.targetAccountIds.length > 0
@@ -205,20 +288,22 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
     }
 
     setFeedback(
-      `✏️ Mengedit Efek Dashboard "${pkg.title}". Silakan sesuaikan efek 100.000x, target nasabah, atau spanduk sambutan lalu klik Simpan / Tembakkan!`
+      `✏️ Mengedit Efek Dashboard "${pkg.title}". Silakan sesuaikan saklar tampilan, durasi, suara, atau target nasabah lalu klik Simpan / Tembakkan!`
     );
   };
 
   const handleTestStage = (
     effectId: string,
     intensity: CelebrationIntensityLevel = celebrationIntensity,
-    customHeadline?: string
+    customHeadline?: string,
+    overrideSoundMode: DashboardEffectSoundMode = soundMode
   ) => {
     triggerCanvasConfettiForCelebration(effectId, intensity);
     setPreviewBurstState({
       effectId,
       intensity,
       headline: customHeadline || title,
+      soundMode: overrideSoundMode,
       nonce: Date.now(),
     });
   };
@@ -267,6 +352,10 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
       autoBlastOnOpen: blastImmediately ? true : autoBlastOnOpen,
       showPersistentDashboardAura,
       decorateBalanceCard,
+      showAmbientParticles,
+      bannerStyle,
+      soundMode,
+      stageDurationSeconds,
       durationType,
       sendNow: blastImmediately,
     });
@@ -275,6 +364,35 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
     if (!editingPkgId) {
       resetFormToNew();
     }
+  };
+
+  // Helper to blast a fresh single-account effect directly from the Live Account Monitor Table
+  const handleQuickSendNewEffectToAccount = (accountId: string, effectId: string) => {
+    const acc = accounts.find((a) => a.id === accountId);
+    const prof = getCelebrationEffectProfile(effectId);
+    const res = adminCreateOrUpdateDashboardEffect({
+      title: `${prof.primaryEmoji} ${prof.celebrationHeadline}`,
+      senderName: 'Otoritas Panel Admin Bank Nusantara',
+      welcomeMessage: `Panggung Selebrasi ${prof.name} (100.000x Ultra Max Overdrive) diaktifkan langsung oleh Admin untuk rekening ${
+        acc ? acc.fullName : 'Anda'
+      }!`,
+      celebrationEffect: prof.id,
+      celebrationIntensity: '100000x',
+      targetAccountId: accountId,
+      targetAccountIds: [accountId],
+      forcedPrimaryForAccountIds: [accountId],
+      isActive: true,
+      autoBlastOnOpen: true,
+      showPersistentDashboardAura: true,
+      decorateBalanceCard: true,
+      showAmbientParticles: true,
+      bannerStyle: 'full_top_banner',
+      soundMode: 'fanfare_auto',
+      stageDurationSeconds: 12,
+      durationType: 'permanent',
+      sendNow: true,
+    });
+    setFeedback(res.message);
   };
 
   return (
@@ -286,6 +404,8 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
           burstNonce={previewBurstState.nonce}
           intensityLevel={previewBurstState.intensity}
           customHeadlineOverride={previewBurstState.headline}
+          forceSilentAudio={previewBurstState.soundMode === 'silent'}
+          autoDismissSeconds={stageDurationSeconds}
           isPreviewMode
           onDismiss={() => setPreviewBurstState(null)}
         />
@@ -297,21 +417,21 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
           <div className="space-y-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-3 py-1 rounded-full bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 text-slate-950 font-black text-[10px] uppercase tracking-wider">
-                💥 STUDIO EFEK DASHBOARD 100.000X (FITUR TERSENDIRI)
+                💥 STUDIO EFEK DASHBOARD 100.000X (KHUSUS PANEL ADMIN)
+              </span>
+              <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-mono font-bold text-[10px]">
+                100% Dikendalikan Admin • Tanpa Tombol di Sisi Nasabah
               </span>
               <span className="px-2.5 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 font-mono font-bold text-[10px]">
                 {usableCelebrations.length} Efek • 9 Kategori • Real-Time Cloud RTDB
               </span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-white">
-              Kirim Panggung Selebrasi 100.000x &amp; Dekorasi Aura ke Dashboard Nasabah
+              Pusat Kendali Penuh Efek Dashboard 100.000x (1 Orang, Banyak Akun &amp; Semua Nasabah)
             </h2>
             <p className="text-slate-300 max-w-3xl leading-relaxed">
-              Menggunakan katalog <strong>{usableCelebrations.length} Efek Perayaan</strong> &amp;{' '}
-              <strong>Mesin Panggung 7-Lapis 100.000x Ultra Max Overdrive</strong> yang sama persis dengan Hadiah &amp; Surat! Bebas kirim ke{' '}
-              <strong className="text-emerald-300">Semua Nasabah</strong>,{' '}
-              <strong className="text-cyan-300">1 Akun Spesifik</strong>, atau{' '}
-              <strong className="text-amber-300">Banyak Akun Sekaligus</strong>.
+              Seluruh tab &amp; pengaturan Efek Dashboard berada <strong>100% di Panel Admin</strong>. Saat Anda mengirim atau menembak efek dari halaman ini, layar Dashboard nasabah yang dituju{' '}
+              <strong className="text-amber-300">otomatis meledakkan Panggung 7-Lapis 100.000x</strong> serta menampilkan Spanduk, Aura Kartu Saldo, Partikel Latar, dan Suara Fanfare sesuai saklar yang Anda atur di bawah.
             </p>
           </div>
 
@@ -322,7 +442,8 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                 handleTestStage(
                   activeCelebrationProfile.id,
                   celebrationIntensity,
-                  title
+                  title,
+                  soundMode
                 )
               }
               className="px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 hover:from-amber-200 hover:to-yellow-300 text-slate-950 font-black text-xs cursor-pointer flex items-center gap-2 shadow-xl"
@@ -350,17 +471,17 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
         )}
       </div>
 
-      {/* MAIN STUDIO GRID: LEFT = TARGET & BANNER CONFIG (5 COLS), RIGHT = 108 EFFECTS PICKER (7 COLS) */}
+      {/* MAIN STUDIO GRID: LEFT = TARGET, BANNER & FULL ADMIN SETTINGS (5 COLS), RIGHT = 108 EFFECTS PICKER (7 COLS) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-        {/* LEFT COLUMN: RECIPIENT SELECTOR, BANNER MESSAGE, DURATION & DISPLAY OPTIONS */}
+        {/* LEFT COLUMN: RECIPIENT SELECTOR, BANNER MESSAGE, DURATION & GRANULAR ADMIN DISPLAY SWITCHES */}
         <div className="lg:col-span-5 bg-slate-900/95 border border-slate-800 rounded-3xl p-5 space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <h3 className="font-black text-white text-sm flex items-center gap-2">
               <Zap className="w-4 h-4 text-amber-400" />
               <span>
                 {editingPkgId
-                  ? '✏️ Edit Paket Efek Dashboard'
-                  : '🚀 Buat & Kirim Efek Dashboard Baru'}
+                  ? '✏️ Edit Paket & Pengaturan Efek Dashboard'
+                  : '🚀 Buat & Pengaturan Penuh Efek Dashboard'}
               </span>
             </h3>
             {editingPkgId && (
@@ -608,12 +729,12 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
             </div>
           </div>
 
-          {/* 3. DURASI AKTIF & MODE HIASAN DASHBOARD */}
+          {/* 3. DURASI AKTIF (DETIK / MENIT / JAM / HARI / PERMANEN) & DURASI TAMPIL PANGGUNG */}
           <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-cyan-400/40 space-y-3">
             <div>
               <label className="text-[11px] font-black text-cyan-300 flex items-center gap-1.5 mb-1.5">
                 <Clock className="w-3.5 h-3.5 text-cyan-400" />
-                <span>3. Durasi Aktif Efek di Dashboard Nasabah</span>
+                <span>3. Durasi Aktif Efek di Dashboard Nasabah (Detik / Menit / Jam / Hari / Permanen)</span>
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                 {DURATION_OPTIONS.map((d) => {
@@ -643,7 +764,132 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
               </div>
             </div>
 
+            {/* STAGE AUTO-DISMISS DURATION */}
+            <div className="pt-2 border-t border-slate-800">
+              <label className="text-[11px] font-bold text-amber-300 block mb-1.5">
+                ⏱️ Durasi Tampil Panggung Ledakan 100.000x di Layar Nasabah:
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {STAGE_DURATION_OPTIONS.map((st) => {
+                  const isSel = stageDurationSeconds === st.seconds;
+                  return (
+                    <button
+                      key={st.seconds}
+                      type="button"
+                      onClick={() => setStageDurationSeconds(st.seconds)}
+                      className={`py-1.5 px-2 rounded-xl border text-[10px] font-black cursor-pointer transition ${
+                        isSel
+                          ? 'bg-amber-400 text-slate-950 border-white'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-400/40'
+                      }`}
+                    >
+                      {st.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* 4. PENGATURAN PENUH ELEMEN TAMPILAN, POSISI SPANDUK & SUARA FANFARE (100% ADMIN CONTROL) */}
+          <div className="p-3.5 rounded-2xl bg-slate-950/90 border-2 border-amber-400/50 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
+                <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                <span>4. Pengaturan Elemen Tampilan, Gaya Spanduk &amp; Suara di Layar Nasabah</span>
+              </span>
+              <span className="px-2 py-0.5 rounded bg-amber-400/20 text-amber-200 font-mono font-bold text-[9px]">
+                100% Kontrol Admin
+              </span>
+            </div>
+
+            {/* BANNER POSITION / STYLE PRESET */}
+            <div className="space-y-1.5">
+              <label className="text-[10.5px] font-bold text-slate-300 flex items-center gap-1">
+                <Layout className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Gaya &amp; Posisi Spanduk di Dashboard Nasabah:</span>
+              </label>
+              <div className="grid grid-cols-1 gap-1.5">
+                {BANNER_STYLE_OPTIONS.map((bs) => {
+                  const isSel = bannerStyle === bs.id;
+                  return (
+                    <button
+                      key={bs.id}
+                      type="button"
+                      onClick={() => {
+                        setBannerStyle(bs.id);
+                        if (bs.id === 'aura_only_no_banner') {
+                          setShowPersistentDashboardAura(false);
+                        } else {
+                          setShowPersistentDashboardAura(true);
+                        }
+                      }}
+                      className={`p-2.5 rounded-xl border text-left cursor-pointer transition ${
+                        isSel
+                          ? 'bg-gradient-to-r from-amber-400/25 to-cyan-500/20 border-amber-300 text-white'
+                          : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="font-black text-[11px] flex items-center justify-between">
+                        <span>{bs.label}</span>
+                        {isSel && (
+                          <span className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 text-[9px] font-black">
+                            ✓ Terpilih
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[9.5px] text-slate-400 block mt-0.5">{bs.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* AUDIO SYNTHESIZER CONTROL */}
+            <div className="space-y-1.5 pt-2 border-t border-slate-800">
+              <label className="text-[10.5px] font-bold text-slate-300 block">
+                🔊 Pengaturan Suara Musik Fanfare Synthesizer di Layar Nasabah:
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSoundMode('fanfare_auto')}
+                  className={`p-2.5 rounded-xl border text-left cursor-pointer flex items-center gap-2 transition ${
+                    soundMode === 'fanfare_auto'
+                      ? 'bg-emerald-400 text-slate-950 border-white font-black shadow'
+                      : 'bg-slate-900 text-slate-300 border-slate-800'
+                  }`}
+                >
+                  <Volume2 className="w-4 h-4 shrink-0" />
+                  <div>
+                    <span className="text-[10.5px] font-black block">Suara Fanfare Aktif</span>
+                    <span className="text-[9px] block opacity-80">Musik &amp; dentuman otomatis</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSoundMode('silent')}
+                  className={`p-2.5 rounded-xl border text-left cursor-pointer flex items-center gap-2 transition ${
+                    soundMode === 'silent'
+                      ? 'bg-rose-400 text-slate-950 border-white font-black shadow'
+                      : 'bg-slate-900 text-slate-300 border-slate-800'
+                  }`}
+                >
+                  <VolumeX className="w-4 h-4 shrink-0" />
+                  <div>
+                    <span className="text-[10.5px] font-black block">Mode Senyap (Silent)</span>
+                    <span className="text-[9px] block opacity-80">Visual 100.000x tanpa suara</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* 4 GRANULAR ELEMENT SWITCHES */}
             <div className="space-y-2 pt-2 border-t border-slate-800">
+              <span className="text-[10.5px] font-black text-cyan-300 block">
+                Saklar On/Off Per Elemen Tampilan di Dashboard Nasabah:
+              </span>
+
               <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-900/90 border border-amber-400/40 cursor-pointer">
                 <input
                   type="checkbox"
@@ -654,10 +900,10 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                 <div>
                   <span className="font-black text-amber-200 text-[11px] flex items-center gap-1">
                     <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Otomatis Ledakkan Panggung 100.000x Saat Diterima Nasabah</span>
+                    <span>1. Otomatis Ledakkan Panggung 100.000x Saat Dikirim Admin</span>
                   </span>
                   <span className="text-[10px] text-slate-400 block">
-                    Begitu Admin menekan Kirim, layar Dashboard nasabah yang dituju langsung meledakkan Panggung 7-Lapis 100.000x secara Real-Time!
+                    Begitu Admin menekan Kirim / Tembak Ulang, layar Dashboard nasabah langsung meledakkan Panggung 7-Lapis 100.000x secara Real-Time!
                   </span>
                 </div>
               </label>
@@ -672,10 +918,10 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                 <div>
                   <span className="font-bold text-cyan-200 text-[11px] flex items-center gap-1">
                     <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Pasang Spanduk Sambutan, Cincin Mandala &amp; Partikel Latar di Dashboard</span>
+                    <span>2. Tampilkan Spanduk Sambutan &amp; Segel Mandala 3D di Dashboard</span>
                   </span>
                   <span className="text-[10px] text-slate-400 block">
-                    Menghiasi bagian atas halaman Dashboard nasabah beserta hujan partikel tema &amp; tombol Putar Ulang Panggung 100.000x.
+                    Menampilkan spanduk pengumuman dan segel mandala 3D di atas Dashboard nasabah (tanpa tombol di sisi nasabah).
                   </span>
                 </div>
               </label>
@@ -690,10 +936,28 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                 <div>
                   <span className="font-bold text-emerald-200 text-[11px] flex items-center gap-1">
                     <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Hiasi Kartu Saldo Utama &amp; Header Dashboard dengan Aura Neon Tema</span>
+                    <span>3. Hiasi Kartu Saldo Utama &amp; Header Dashboard dengan Aura Neon</span>
                   </span>
                   <span className="text-[10px] text-slate-400 block">
-                    Memberikan bingkai neon menyala &amp; lencana kehormatan tema pada Kartu Saldo Utama nasabah.
+                    Memberikan bingkai neon menyala &amp; pancaran warna tema pada Kartu Saldo Utama nasabah.
+                  </span>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showAmbientParticles}
+                  onChange={(e) => setShowAmbientParticles(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <div>
+                  <span className="font-bold text-fuchsia-200 text-[11px] flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
+                    <span>4. Tampilkan Hujan Partikel Latar Melayang di Layar Dashboard</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 block">
+                    Menampilkan partikel tema melayang halus di seluruh latar layar Dashboard nasabah.
                   </span>
                 </div>
               </label>
@@ -708,7 +972,7 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
               className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-400/50 text-amber-300 font-black cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
             >
               <Plus className="w-4 h-4" />
-              <span>{editingPkgId ? 'Simpan Perubahan' : 'Simpan Tanpa Ledakan'}</span>
+              <span>{editingPkgId ? 'Simpan Pengaturan' : 'Simpan Tanpa Ledakan'}</span>
             </button>
             <button
               type="button"
@@ -815,7 +1079,8 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                   handleTestStage(
                     activeCelebrationProfile.id,
                     celebrationIntensity,
-                    title
+                    title,
+                    soundMode
                   )
                 }
                 className="px-3 py-2 rounded-xl bg-amber-300 hover:bg-white text-slate-950 font-black text-[11px] cursor-pointer shadow-lg shrink-0"
@@ -857,7 +1122,7 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
           </div>
 
           {/* 108 EFFECTS RADIO GRID */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[470px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[540px] overflow-y-auto pr-1">
             {filteredCelebrations.map((item) => {
               const isSelected = activeCelebrationProfile.id === item.id;
               return (
@@ -927,7 +1192,12 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                       onClick={(e) => {
                         e.stopPropagation();
                         setCelebrationEffect(item.id);
-                        handleTestStage(item.id, celebrationIntensity, item.celebrationHeadline);
+                        handleTestStage(
+                          item.id,
+                          celebrationIntensity,
+                          item.celebrationHeadline,
+                          soundMode
+                        );
                       }}
                       className="px-2.5 py-1 rounded-lg bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-400/50 text-amber-200 font-black text-[9.5px] cursor-pointer transition"
                     >
@@ -942,6 +1212,234 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
       </div>
 
       {/* =========================================================================
+          TABEL PANTAUAN LIVE EFEK AKTIF PER AKUN NASABAH (KONTROL REAL-TIME 1-KLIK)
+         ========================================================================= */}
+      <div className="bg-slate-900/95 border-2 border-cyan-400/60 rounded-3xl p-5 space-y-4 shadow-2xl">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div>
+            <span className="px-2.5 py-0.5 rounded-md bg-cyan-400 text-slate-950 font-black text-[9.5px] uppercase tracking-wider inline-block mb-1">
+              📡 PANTAUAN LIVE &amp; KONTROL PAKSA PER AKUN NASABAH
+            </span>
+            <h3 className="font-black text-white text-sm sm:text-base flex items-center gap-2">
+              <Monitor className="w-4 h-4 text-cyan-400" />
+              <span>
+                Tabel Status Efek Dashboard Aktif di Setiap Akun Nasabah ({accounts.length} Akun)
+              </span>
+            </h3>
+            <p className="text-[11px] text-slate-400">
+              Pantau efek mana yang sedang tampil di layar masing-masing nasabah, ganti efek utama per akun, tembak ledakan 100.000x ke 1 akun, atau sembunyikan/tampilkan efek secara real-time.
+            </p>
+          </div>
+
+          <div className="relative w-full sm:w-72">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={accountMonitorSearch}
+              onChange={(e) => setAccountMonitorSearch(e.target.value)}
+              placeholder="Cari nama nasabah / nomor rekening..."
+              className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs"
+            />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-400">
+                <th className="py-2.5 px-3">Nasabah &amp; Rekening</th>
+                <th className="py-2.5 px-3">Efek Utama yang Tampil di Dashboard</th>
+                <th className="py-2.5 px-3">Elemen &amp; Durasi</th>
+                <th className="py-2.5 px-3 text-right">Kontrol Langsung Admin (Real-Time)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/80 text-xs">
+              {filteredMonitorAccounts.map((acc) => {
+                const { eligiblePackages, primaryPackage } =
+                  resolveActiveDashboardEffectsForAccount(dashboardEffectEvents, acc.id);
+                const activeCeleb = primaryPackage
+                  ? getCelebrationEffectProfile(primaryPackage.celebrationEffect)
+                  : null;
+
+                return (
+                  <tr
+                    key={acc.id}
+                    className="hover:bg-slate-950/60 transition-colors"
+                  >
+                    <td className="py-3 px-3">
+                      <div className="font-black text-white">{acc.fullName}</div>
+                      <div className="text-[10.5px] font-mono text-slate-400">
+                        Rek: {acc.accountNumber} •{' '}
+                        <span className="text-amber-300 uppercase">{acc.cardTier}</span>
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-3">
+                      {primaryPackage && activeCeleb ? (
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 rounded-xl bg-slate-950 border border-amber-400/50 flex items-center justify-center text-lg shrink-0">
+                            {activeCeleb.primaryEmoji}
+                          </div>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-black text-white text-xs">
+                                {activeCeleb.name}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[9px]">
+                                {(primaryPackage.celebrationIntensity || '100000x').toUpperCase()}
+                              </span>
+                              {eligiblePackages.length > 1 && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 font-mono text-[9px]">
+                                  +{eligiblePackages.length - 1} paket lain
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10.5px] text-slate-300 line-clamp-1">
+                              {primaryPackage.title}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="px-2.5 py-1 rounded-full bg-slate-950 border border-slate-800 text-slate-400 text-[10.5px] font-semibold inline-block">
+                          🚫 Tidak Ada Efek Tampil (Disembunyikan / Kosong)
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="py-3 px-3">
+                      {primaryPackage ? (
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/40 text-cyan-200 font-mono font-bold text-[9.5px]">
+                              {formatDashboardEffectRemainingLabel(primaryPackage)}
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-slate-300 text-[9.5px]">
+                              {primaryPackage.soundMode === 'silent' ? '🔇 Senyap' : '🔊 Fanfare'}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {primaryPackage.showPersistentDashboardAura ? '✓ Spanduk' : '✗ Spanduk'} •{' '}
+                            {primaryPackage.decorateBalanceCard ? '✓ Aura Kartu' : '✗ Aura Kartu'} •{' '}
+                            {primaryPackage.showAmbientParticles !== false
+                              ? '✓ Partikel'
+                              : '✗ Partikel'}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[10.5px] text-slate-500">—</span>
+                      )}
+                    </td>
+
+                    <td className="py-3 px-3 text-right">
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                        {/* Quick Switch Primary Package or Blast Directly from 108 Catalog */}
+                        {dashboardEffectEvents.length > 0 && (
+                          <select
+                            value={primaryPackage?.id || ''}
+                            onChange={(e) => {
+                              const chosenPkgId = e.target.value;
+                              if (!chosenPkgId) return;
+                              const res = adminSetPrimaryDashboardEffectForAccount(
+                                chosenPkgId,
+                                acc.id,
+                                true
+                              );
+                              setFeedback(res.message);
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-amber-400/50 text-amber-200 font-bold text-[10.5px] max-w-[180px]"
+                            title="Pilih Paket Efek Utama untuk Akun Ini"
+                          >
+                            <option value="" disabled>
+                              🎨 Pilih Paket Efek...
+                            </option>
+                            {dashboardEffectEvents.map((p) => {
+                              const c = getCelebrationEffectProfile(p.celebrationEffect);
+                              return (
+                                <option key={p.id} value={p.id}>
+                                  {c.primaryEmoji} {p.title}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        )}
+
+                        {/* Quick Blast Current Active Effect to This Account */}
+                        {primaryPackage ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminSetPrimaryDashboardEffectForAccount(
+                                primaryPackage.id,
+                                acc.id,
+                                true
+                              );
+                              setFeedback(res.message);
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-300 to-yellow-400 hover:from-white hover:to-amber-200 text-slate-950 font-black text-[10.5px] cursor-pointer flex items-center gap-1 shadow"
+                            title="Tembak Ulang Ledakan 100.000x ke Akun Ini"
+                          >
+                            <Zap className="w-3 h-3" />
+                            <span>💥 Tembak</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleQuickSendNewEffectToAccount(
+                                acc.id,
+                                activeCelebrationProfile.id
+                              )
+                            }
+                            className="px-2.5 py-1.5 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-[10.5px] cursor-pointer flex items-center gap-1 shadow"
+                          >
+                            <Zap className="w-3 h-3" />
+                            <span>
+                              💥 Pasang {activeCelebrationProfile.primaryEmoji}
+                            </span>
+                          </button>
+                        )}
+
+                        {/* Force Hide or Restore for This Specific Account */}
+                        {primaryPackage ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminHideAllDashboardEffectsForAccount(acc.id);
+                              setFeedback(res.message);
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-400/50 text-rose-200 font-bold text-[10.5px] cursor-pointer flex items-center gap-1"
+                            title="Sembunyikan Seluruh Efek Dashboard di Akun Ini"
+                          >
+                            <EyeOff className="w-3 h-3" />
+                            <span>Sembunyikan</span>
+                          </button>
+                        ) : (
+                          dashboardEffectEvents.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const res = adminRestoreAllDashboardEffectsForAccount(acc.id);
+                                setFeedback(res.message);
+                              }}
+                              className="px-2.5 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 text-cyan-200 font-bold text-[10.5px] cursor-pointer flex items-center gap-1"
+                              title="Tampilkan Kembali Efek Dashboard di Akun Ini"
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>Tampilkan</span>
+                            </button>
+                          )
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* =========================================================================
           DAFTAR PAKET EFEK DASHBOARD YANG SUDAH DIKIRIM / AKTIF
          ========================================================================= */}
       <div className="bg-slate-900/95 border border-slate-800 rounded-3xl p-5 space-y-4">
@@ -950,11 +1448,11 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
             <h3 className="font-black text-white text-sm sm:text-base flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-400" />
               <span>
-                Daftar Efek Dashboard Terkirim &amp; Aktif ({dashboardEffectEvents.length} Paket)
+                Daftar Paket Efek Dashboard Terkirim &amp; Pengaturan Cepat ({dashboardEffectEvents.length} Paket)
               </span>
             </h3>
             <p className="text-[11px] text-slate-400">
-              Kelola Efek Dashboard yang sedang tayang di layar nasabah: ganti efek cepat, tembak ulang ledakan 100.000x secara real-time, atau cabut dari akun tertentu.
+              Ubah saklar tampilan (Spanduk, Aura Kartu Saldo, Partikel Latar, Suara Fanfare, Gaya Spanduk, Durasi), ganti efek cepat, atau tembak ulang ledakan 100.000x secara real-time.
             </p>
           </div>
         </div>
@@ -979,7 +1477,8 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                   : [];
               const isManagingThis = managingPkgId === pkg.id;
               const durationMeta =
-                DURATION_OPTIONS.find((d) => d.id === pkg.durationType) || DURATION_OPTIONS[0];
+                DURATION_OPTIONS.find((d) => d.id === pkg.durationType) ||
+                DURATION_OPTIONS[DURATION_OPTIONS.length - 1];
 
               const baseRecipientAccounts = isAllTarget
                 ? accounts
@@ -1028,7 +1527,11 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                         </span>
 
                         <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 font-bold text-[10px]">
-                          {durationMeta.label}
+                          {durationMeta.label} ({formatDashboardEffectRemainingLabel(pkg)})
+                        </span>
+
+                        <span className="px-2 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300 font-bold text-[10px]">
+                          {pkg.soundMode === 'silent' ? '🔇 Mode Senyap' : '🔊 Fanfare Aktif'}
                         </span>
 
                         <span
@@ -1057,6 +1560,82 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* QUICK ADMIN ELEMENT TOGGLE PILLS DIRECTLY ON PACKAGE CARD */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] font-bold text-slate-400 mr-1">
+                      Saklar Cepat Admin:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminUpdateDashboardEffectQuickSettings(pkg.id, {
+                          showPersistentDashboardAura: !pkg.showPersistentDashboardAura,
+                        });
+                        setFeedback(res.message);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer border transition ${
+                        pkg.showPersistentDashboardAura
+                          ? 'bg-cyan-500/20 border-cyan-400/60 text-cyan-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      {pkg.showPersistentDashboardAura ? '✓ Spanduk ON' : '✗ Spanduk OFF'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminUpdateDashboardEffectQuickSettings(pkg.id, {
+                          decorateBalanceCard: !pkg.decorateBalanceCard,
+                        });
+                        setFeedback(res.message);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer border transition ${
+                        pkg.decorateBalanceCard
+                          ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      {pkg.decorateBalanceCard ? '✓ Aura Kartu ON' : '✗ Aura Kartu OFF'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminUpdateDashboardEffectQuickSettings(pkg.id, {
+                          showAmbientParticles: pkg.showAmbientParticles === false,
+                        });
+                        setFeedback(res.message);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer border transition ${
+                        pkg.showAmbientParticles !== false
+                          ? 'bg-fuchsia-500/20 border-fuchsia-400/60 text-fuchsia-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      {pkg.showAmbientParticles !== false
+                        ? '✓ Partikel Latar ON'
+                        : '✗ Partikel Latar OFF'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminUpdateDashboardEffectQuickSettings(pkg.id, {
+                          soundMode: pkg.soundMode === 'silent' ? 'fanfare_auto' : 'silent',
+                        });
+                        setFeedback(res.message);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold cursor-pointer border transition ${
+                        pkg.soundMode !== 'silent'
+                          ? 'bg-amber-500/20 border-amber-400/60 text-amber-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {pkg.soundMode !== 'silent' ? '🔊 Suara Fanfare ON' : '🔇 Mode Senyap'}
+                    </button>
+                  </div>
+
                   <p className="text-[11px] text-slate-300 bg-slate-900/75 p-2.5 rounded-xl border border-slate-800">
                     <strong className="text-amber-300">Spanduk Dashboard:</strong>{' '}
                     {pkg.welcomeMessage}
@@ -1079,7 +1658,12 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                     <button
                       type="button"
                       onClick={() =>
-                        handleTestStage(celeb.id, intensity, pkg.title)
+                        handleTestStage(
+                          celeb.id,
+                          intensity,
+                          pkg.title,
+                          pkg.soundMode || 'fanfare_auto'
+                        )
                       }
                       className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 font-black text-[11px] cursor-pointer flex items-center gap-1"
                     >
@@ -1102,7 +1686,7 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                       <span>
                         {isManagingThis
                           ? 'Tutup Panel Kelola'
-                          : 'Ganti Efek Cepat & Kelola Penerima'}
+                          : 'Pengaturan Cepat & Kelola Penerima'}
                       </span>
                     </button>
 
@@ -1152,13 +1736,13 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* EXPANDABLE DRAWER: QUICK EFFECT / INTENSITY SWITCHER & PER-ACCOUNT REVOKE */}
+                  {/* EXPANDABLE DRAWER: QUICK EFFECT / INTENSITY / DURATION / BANNER STYLE SWITCHER & PER-ACCOUNT REVOKE */}
                   {isManagingThis && (
                     <div className="p-4 rounded-2xl bg-slate-900/95 border-2 border-cyan-400/60 space-y-4 animate-fadeIn">
                       <div className="p-3 rounded-xl bg-slate-950 border border-amber-400/40 flex flex-wrap items-center justify-between gap-2">
                         <div>
                           <span className="text-[11px] font-black text-amber-200 block">
-                            💥 Ganti Cepat Efek ({usableCelebrations.length} Tema) &amp; Intensitas Panggung 100.000x:
+                            💥 Ganti Cepat Efek ({usableCelebrations.length} Tema), Intensitas, Gaya Spanduk &amp; Durasi:
                           </span>
                           <span className="text-[10px] text-slate-400 block">
                             Langsung berubah &amp; meledak real-time di layar Dashboard nasabah penerima!
@@ -1200,14 +1784,51 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                               </option>
                             ))}
                           </select>
+
+                          <select
+                            value={pkg.durationType || 'permanent'}
+                            onChange={(e) => {
+                              const res = adminUpdateDashboardEffectQuickSettings(pkg.id, {
+                                durationType: e.target.value as DashboardEffectDurationType,
+                              });
+                              setFeedback(res.message);
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-emerald-400/50 text-emerald-200 font-bold text-[11px]"
+                          >
+                            {DURATION_OPTIONS.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.label}
+                              </option>
+                            ))}
+                          </select>
+
+                          <select
+                            value={pkg.bannerStyle || 'full_top_banner'}
+                            onChange={(e) => {
+                              const nextStyle = e.target.value as DashboardEffectBannerStyle;
+                              const res = adminUpdateDashboardEffectQuickSettings(pkg.id, {
+                                bannerStyle: nextStyle,
+                                showPersistentDashboardAura:
+                                  nextStyle !== 'aura_only_no_banner',
+                              });
+                              setFeedback(res.message);
+                            }}
+                            className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-fuchsia-400/50 text-fuchsia-200 font-bold text-[11px]"
+                          >
+                            {BANNER_STYLE_OPTIONS.map((bs) => (
+                              <option key={bs.id} value={bs.id}>
+                                {bs.label}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
 
-                      {/* Per-Recipient Revoke / Restore List */}
+                      {/* Per-Recipient Revoke / Restore / Force Primary List */}
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="text-[11px] font-black text-white">
-                            Daftar Akun Penerima Efek Dashboard Ini ({filteredManageAccounts.length} Akun):
+                            Daftar Akun Penerima Paket Ini ({filteredManageAccounts.length} Akun):
                           </span>
                           <div className="relative w-full sm:w-64">
                             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -1224,6 +1845,9 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                         <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
                           {filteredManageAccounts.map((acc) => {
                             const isRevoked = (pkg.revokedAccountIds || []).includes(acc.id);
+                            const isForcedPrimary = (
+                              pkg.forcedPrimaryForAccountIds || []
+                            ).includes(acc.id);
                             return (
                               <div
                                 key={acc.id}
@@ -1247,37 +1871,64 @@ export const AdminDashboardEffectsPanel: React.FC = () => {
                                         : 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/50'
                                     }`}
                                   >
-                                    {isRevoked ? '🚫 Efek Dicabut' : '✨ Efek Aktif di Dashboard'}
+                                    {isRevoked
+                                      ? '🚫 Disembunyikan dari Akun Ini'
+                                      : '✨ Tampil di Dashboard Akun Ini'}
                                   </span>
+                                  {isForcedPrimary && !isRevoked && (
+                                    <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[9px]">
+                                      ★ Efek Utama Akun Ini
+                                    </span>
+                                  )}
                                 </div>
 
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const res = adminToggleRevokeDashboardEffectRecipient(
-                                      pkg.id,
-                                      acc.id
-                                    );
-                                    setFeedback(res.message);
-                                  }}
-                                  className={`px-2.5 py-1 rounded-lg font-bold text-[10px] cursor-pointer flex items-center gap-1 border ${
-                                    isRevoked
-                                      ? 'bg-cyan-500/20 hover:bg-cyan-500/30 border-cyan-400/50 text-cyan-200'
-                                      : 'bg-rose-500/20 hover:bg-rose-500/30 border-rose-400/50 text-rose-200'
-                                  }`}
-                                >
-                                  {isRevoked ? (
-                                    <>
-                                      <CheckCircle2 className="w-3 h-3" />
-                                      <span>Pulihkan Efek</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Ban className="w-3 h-3" />
-                                      <span>Cabut dari Akun Ini</span>
-                                    </>
+                                <div className="flex items-center gap-1.5">
+                                  {!isRevoked && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const res = adminSetPrimaryDashboardEffectForAccount(
+                                          pkg.id,
+                                          acc.id,
+                                          true
+                                        );
+                                        setFeedback(res.message);
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[10px] cursor-pointer flex items-center gap-1"
+                                    >
+                                      <Zap className="w-3 h-3" />
+                                      <span>💥 Jadikan Utama &amp; Ledakkan</span>
+                                    </button>
                                   )}
-                                </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const res = adminToggleRevokeDashboardEffectRecipient(
+                                        pkg.id,
+                                        acc.id
+                                      );
+                                      setFeedback(res.message);
+                                    }}
+                                    className={`px-2.5 py-1 rounded-lg font-bold text-[10px] cursor-pointer flex items-center gap-1 border ${
+                                      isRevoked
+                                        ? 'bg-cyan-500/20 hover:bg-cyan-500/30 border-cyan-400/50 text-cyan-200'
+                                        : 'bg-rose-500/20 hover:bg-rose-500/30 border-rose-400/50 text-rose-200'
+                                    }`}
+                                  >
+                                    {isRevoked ? (
+                                      <>
+                                        <CheckCircle2 className="w-3 h-3" />
+                                        <span>Tampilkan Kembali</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Ban className="w-3 h-3" />
+                                        <span>Sembunyikan dari Akun Ini</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
                               </div>
                             );
                           })}

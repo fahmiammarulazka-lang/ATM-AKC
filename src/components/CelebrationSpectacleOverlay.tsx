@@ -211,6 +211,8 @@ export const CelebrationClaimBurstOverlay: React.FC<{
   customSenderOverride?: string;
   onDismiss?: () => void;
   isPreviewMode?: boolean;
+  forceSilentAudio?: boolean;
+  autoDismissSeconds?: number;
 }> = ({
   effectId,
   intensityLevel = '100000x',
@@ -220,6 +222,8 @@ export const CelebrationClaimBurstOverlay: React.FC<{
   customSenderOverride,
   onDismiss,
   isPreviewMode = false,
+  forceSilentAudio = false,
+  autoDismissSeconds,
 }) => {
   const profile: CelebrationEffectProfile = getCelebrationEffectProfile(effectId);
   const intensityMeta = getCelebrationIntensityMeta(intensityLevel);
@@ -227,8 +231,12 @@ export const CelebrationClaimBurstOverlay: React.FC<{
   const [stagePhase, setStagePhase] = useState<'buildup' | 'climax'>('buildup');
   const [countdownNum, setCountdownNum] = useState<number>(3);
   const [comboCount, setComboCount] = useState<number>(1);
-  const [audioMuted, setAudioMuted] = useState<boolean>(false);
+  const [audioMuted, setAudioMuted] = useState<boolean>(forceSilentAudio);
   const [clickRipples, setClickRipples] = useState<ClickRippleBurst[]>([]);
+
+  useEffect(() => {
+    setAudioMuted(forceSilentAudio);
+  }, [forceSilentAudio]);
 
   // Trigger dramatic 3-2-1 buildup and then climax eruption whenever burstNonce changes
   useEffect(() => {
@@ -238,7 +246,8 @@ export const CelebrationClaimBurstOverlay: React.FC<{
     setComboCount(1);
     setClickRipples([]);
 
-    if (!audioMuted) {
+    const shouldMute = forceSilentAudio || audioMuted;
+    if (!shouldMute) {
       playCelebrationBuildupRiserSynth();
     }
 
@@ -247,18 +256,26 @@ export const CelebrationClaimBurstOverlay: React.FC<{
     const t3 = window.setTimeout(() => {
       setStagePhase('climax');
       triggerCanvasConfettiForCelebration(profile.id, intensityMeta.id);
-      if (!audioMuted) {
+      if (!shouldMute) {
         playCelebrationFanfareSynth(profile.id);
       }
     }, 580);
+
+    let tAutoDismiss: number | undefined;
+    if (autoDismissSeconds && autoDismissSeconds > 0 && onDismiss) {
+      tAutoDismiss = window.setTimeout(() => {
+        onDismiss();
+      }, autoDismissSeconds * 1000);
+    }
 
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
       window.clearTimeout(t3);
+      if (tAutoDismiss) window.clearTimeout(tAutoDismiss);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [burstNonce, profile.id]);
+  }, [burstNonce, profile.id, forceSilentAudio, autoDismissSeconds]);
 
   // 96+ Multi-Depth Particle Storm scaled by Intensity Level
   const particles = useMemo(() => {

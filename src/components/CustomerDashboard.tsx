@@ -56,14 +56,12 @@ import { getDevBadgeColorStyle } from '../data/devRolesCatalog';
 import { SmartProtectionBanner } from './SecurityCommandCenter';
 import {
   DashboardActiveEffectBannerAndAura,
-  CustomerDashboardEffectStudioView,
   useActiveCustomerDashboardEffects,
 } from './DashboardEffectLayerAndStudio';
 import { getCelebrationEffectProfile } from '../data/celebrationEffectsCatalog';
 
 export type DashboardTab =
   | 'ringkasan'
-  | 'efek_dashboard'
   | 'pekerjaan'
   | 'layanan'
   | 'chat'
@@ -173,9 +171,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   const [schName, setSchName] = useState<string>('');
   const [schAmount, setSchAmount] = useState<string>('');
   const [schDay, setSchDay] = useState<number>(25);
-  const [selectedDashEffectId, setSelectedDashEffectId] = useState<string | null>(null);
-  const { eligiblePackages: activeDashboardEffectPackages, primaryPackage: primaryDashEffectPkg } =
-    useActiveCustomerDashboardEffects();
+  const { primaryPackage: primaryDashEffectPkg } = useActiveCustomerDashboardEffects();
 
   if (!currentAccount) {
     return (
@@ -268,10 +264,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     return false;
   });
 
-  const activeDashboardEffectPkg =
-    (selectedDashEffectId
-      ? activeDashboardEffectPackages.find((p) => p.id === selectedDashEffectId)
-      : null) || primaryDashEffectPkg;
+  const activeDashboardEffectPkg = primaryDashEffectPkg;
   const activeDashboardEffectProfile =
     activeDashboardEffectPkg && activeDashboardEffectPkg.decorateBalanceCard
       ? getCelebrationEffectProfile(activeDashboardEffectPkg.celebrationEffect)
@@ -282,12 +275,8 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       {/* SMART PROTECTION BANNER (Sesi Sementara -> Hubungkan Google & Ringkasan Atomic Merge) */}
       <SmartProtectionBanner onOpenCommandCenter={onOpenSecurityCenter} />
 
-      {/* EFEK DASHBOARD 100.000X (AUTO-BLAST REAL-TIME + SPANDUK SAMBUTAN + AURA + PARTIKEL) */}
-      <DashboardActiveEffectBannerAndAura
-        selectedPackageIdOverride={selectedDashEffectId}
-        onSelectPackageId={(id) => setSelectedDashEffectId(id)}
-        onOpenStudioTab={() => setActiveTab('efek_dashboard')}
-      />
+      {/* EFEK DASHBOARD 100.000X (AUTO-BLAST REAL-TIME + SPANDUK SAMBUTAN + AURA + PARTIKEL • 100% DIKENDALIKAN ADMIN) */}
+      <DashboardActiveEffectBannerAndAura />
 
       {/* TOP USER WELCOME & QUICK STATS */}
       <div
@@ -525,20 +514,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveTab('efek_dashboard')}
-          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
-            activeTab === 'efek_dashboard'
-              ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-cyan-400 text-slate-950 font-black shadow-lg shadow-amber-500/40'
-              : 'text-amber-300 hover:text-white hover:bg-amber-500/15 border border-amber-400/50'
-          }`}
-        >
-          <Sparkles className="w-4 h-4" />
-          <span>
-            ✨ Efek Dashboard 100.000x ({activeDashboardEffectPackages.length})
-          </span>
-        </button>
-
-        <button
           onClick={() => setActiveTab('pekerjaan')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'pekerjaan'
@@ -634,16 +609,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           <span>Jadwal Pembayaran</span>
         </button>
       </div>
-
-      {/* =========================================================================
-          TAB EFEK DASHBOARD 100.000X (STUDIO & TEATER 108 EFEK DI SISI NASABAH)
-         ========================================================================= */}
-      {activeTab === 'efek_dashboard' && (
-        <CustomerDashboardEffectStudioView
-          selectedPackageId={selectedDashEffectId}
-          onSelectPackageId={(id) => setSelectedDashEffectId(id)}
-        />
-      )}
 
       {/* =========================================================================
           TAB PEKERJAAN: LOWONGAN PEKERJAAN, SISTEM LEVEL & SUIT KOMPUTER MEDIUM
