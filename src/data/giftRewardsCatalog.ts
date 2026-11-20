@@ -196,64 +196,24 @@ export const GIFT_REWARD_CATALOG: GiftRewardCatalogMeta[] = [
     description: 'Membuat kantong Celengan Impian berisi dana tunai siap pakai.',
   },
   {
-    type: 'mining_rig_rtx',
-    label: 'Rig Mining GPU RTX 5090 Ti',
-    emoji: '⛏️',
-    unitLabel: 'Unit',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Menghadiahkan unit mesin mining penghasil uang & koin harian.',
-  },
-  {
-    type: 'mining_ai_cluster',
-    label: 'Server Cloud AI H100 Cluster',
-    emoji: '🖥️',
-    unitLabel: 'Unit',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Menghadiahkan unit server AI kelas enterprise ke portofolio.',
-  },
-  {
-    type: 'supercar_porsche',
-    label: 'Supercar Porsche 911 GT3 RS',
-    emoji: '🏎️',
-    unitLabel: 'Unit',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Menghadiahkan aset lelang Supercar VIP bernilai tinggi.',
-  },
-  {
-    type: 'supercar_lambo',
-    label: 'Lamborghini Revuelto Carbon',
-    emoji: '🔥',
-    unitLabel: 'Unit',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Menghadiahkan aset lelang Hypercar V12 edisi kolektor.',
-  },
-  {
     type: 'trading_gold_kg',
-    label: 'Aset Bursa Emas Bullion 1 Kg',
+    label: 'Portofolio Emas Bullion 1 Kg',
     emoji: '📊',
     unitLabel: 'Lot',
     defaultAmount: 2,
     step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Menambahkan kepemilikan aset Emas Bullion di Bursa Trading.',
+    category: 'Emas & Tabungan',
+    description: 'Menambahkan kepemilikan aset Emas Bullion 24K ke portofolio nasabah.',
   },
   {
     type: 'trading_btc_vip',
-    label: 'Aset Bursa Bitcoin VIP',
+    label: 'Aset Digital Cadangan VIP',
     emoji: '₿',
     unitLabel: 'Unit',
     defaultAmount: 1,
     step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Menambahkan unit Bitcoin VIP ke portofolio trading nasabah.',
+    category: 'Emas & Tabungan',
+    description: 'Menambahkan unit aset digital VIP ke portofolio nasabah.',
   },
   {
     type: 'forgive_loans',
@@ -558,54 +518,24 @@ export const GIFT_REWARD_CATALOG: GiftRewardCatalogMeta[] = [
     description: 'Mengisi kuota listrik PLN super hemat dalam jumlah besar.',
   },
   {
-    type: 'mining_quantum_datacenter',
-    label: 'Quantum AI Mining Datacenter',
-    emoji: '🛸',
-    unitLabel: 'Unit',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Unit server komputasi kuantum dengan yield profit tertinggi.',
-  },
-  {
-    type: 'supercar_bugatti_chiron',
-    label: 'Hypercar Bugatti Chiron Sport',
-    emoji: '🏁',
-    unitLabel: 'Unit',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Koleksi hypercar lelang ultra-langka masuk garasi VIP.',
-  },
-  {
-    type: 'supercar_ferrari_sf90',
-    label: 'Supercar Ferrari SF90 Stradale',
-    emoji: '🚘',
-    unitLabel: 'Unit',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Mobil sport hybrid kelas kolektor untuk portofolio Lelang VIP.',
-  },
-  {
     type: 'trading_sp500_vip',
-    label: 'Saham Global Bluechip Index Lot',
+    label: 'Obligasi & Reksa Dana Bluechip VIP',
     emoji: '📈',
     unitLabel: 'Lot',
     defaultAmount: 3,
     step: 1,
-    category: 'Aset & Bisnis',
-    description: 'Tambahan lot saham indeks global pada portofolio bursa VIP.',
+    category: 'Emas & Tabungan',
+    description: 'Tambahan lot portofolio indeks perbankan pada tabungan investasi VIP.',
   },
   {
     type: 'sultan_empire_dividend',
-    label: 'Dividen Laba Kerajaan Bisnis Sultan',
+    label: 'Dividen Tunai Prioritas Nusantara',
     emoji: '💸',
     unitLabel: 'Rupiah',
     defaultAmount: 8_000_000,
     step: 500_000,
-    category: 'Aset & Bisnis',
-    description: 'Pencairan dividen instan hasil ekspansi bisnis sultan ke saldo.',
+    category: 'Uang & Koin',
+    description: 'Pencairan dividen tunai instan langsung ke saldo rekening utama.',
   },
   {
     type: 'upgrade_card_platinum_perm',
@@ -735,72 +665,34 @@ export const GIFT_REWARD_CATALOG: GiftRewardCatalogMeta[] = [
     ],
   },
   {
-    type: 'business_custom_selector',
-    label: 'Aset Bisnis & Supercar Pilihan (Multi-Varian)',
-    emoji: '🏭',
-    unitLabel: 'Unit',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Aset & Bisnis',
-    description:
-      'Klik untuk memilih jenis aset bisnis atau supercar VIP yang ingin dikirimkan ke rekening penerima!',
-    subOptionsPrompt: 'Pilih Jenis Aset Bisnis / Supercar:',
-    subOptions: [
-      {
-        id: 'mining_rtx_rig',
-        label: 'Rig Mining GPU RTX 5090 Ti',
-        emoji: '⛏️',
-        description: 'Unit mesin mining kripto & penghasilan pasif harian.',
-      },
-      {
-        id: 'mining_ai_datacenter',
-        label: 'Server Cloud AI H100 Cluster',
-        emoji: '🖥️',
-        description: 'Cluster server komputasi AI berpenghasilan tinggi.',
-      },
-      {
-        id: 'auction_porsche_gt3rs',
-        label: 'Supercar Porsche 911 GT3 RS',
-        emoji: '🏎️',
-        description: 'Aset lelang supercar edisi kolektor VIP.',
-      },
-      {
-        id: 'auction_lambo_revuelto',
-        label: 'Hypercar Lamborghini Revuelto',
-        emoji: '🔥',
-        description: 'Hypercar flagship bermesin V12 masuk garasi nasabah.',
-      },
-    ],
-  },
-  {
     type: 'trading_custom_selector',
-    label: 'Portofolio Bursa Trading Pilihan (Multi-Aset)',
+    label: 'Portofolio Investasi & Emas Pilihan (Multi-Aset)',
     emoji: '📈',
     unitLabel: 'Lot/Unit',
     defaultAmount: 2,
     step: 1,
-    category: 'Aset & Bisnis',
+    category: 'Emas & Tabungan',
     description:
-      'Klik untuk memilih aset bursa spesifik (Emas Bullion, Bitcoin VIP, atau Saham Bluechip) untuk dikirim ke portofolio trading!',
-    subOptionsPrompt: 'Pilih Aset Bursa Trading:',
+      'Klik untuk memilih aset investasi spesifik (Emas Bullion, Cadangan Digital VIP, atau Reksa Dana Bluechip) untuk dikirim ke portofolio!',
+    subOptionsPrompt: 'Pilih Aset Portofolio:',
     subOptions: [
       {
         id: 'gold_antam_kg',
         label: 'Emas Bullion Antam 1 Kg',
         emoji: '🥇',
-        description: 'Kepemilikan lot Emas Antam fisik di bursa trading.',
+        description: 'Kepemilikan lot Emas Antam fisik di portofolio.',
       },
       {
         id: 'crypto_btc_vip',
-        label: 'Bitcoin VIP Reserve',
+        label: 'Cadangan Digital VIP Reserve',
         emoji: '₿',
-        description: 'Unit Bitcoin VIP untuk diperdagangkan di bursa.',
+        description: 'Unit aset digital VIP di portofolio.',
       },
       {
         id: 'stock_bbca_vip',
-        label: 'Saham Bluechip Nusantara VIP',
+        label: 'Obligasi Bluechip Nusantara VIP',
         emoji: '📊',
-        description: 'Lot saham unggulan berdividen tinggi di portofolio bursa.',
+        description: 'Lot obligasi unggulan berdividen tinggi di portofolio.',
       },
     ],
   },
@@ -1057,51 +949,7 @@ export const GIFT_REWARD_CATALOG: GiftRewardCatalogMeta[] = [
     category: 'Hadiah Trial',
     isTrial: true,
     defaultTrialMinutes: 720,
-    description: 'Meminjamkan lot Emas Bullion 1 Kg di bursa selama durasi Trial Admin.',
-  },
-  {
-    type: 'trial_business_selector',
-    label: 'Trial Aset Bisnis & Supercar Pilihan',
-    emoji: '🏢',
-    unitLabel: 'Unit Trial',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Hadiah Trial',
-    isTrial: true,
-    defaultTrialMinutes: 720,
-    description:
-      'Pilih aset bisnis/supercar Trial (Mining RTX, Server AI H100, Porsche, atau Lamborghini) untuk dinikmati sementara!',
-    subOptionsPrompt: 'Pilih Aset Bisnis / Supercar Trial:',
-    subOptions: [
-      { id: 'mining_rtx_rig', label: 'Trial Rig Mining RTX 5090 Ti', emoji: '⛏️' },
-      { id: 'mining_ai_datacenter', label: 'Trial Server AI H100 Cluster', emoji: '🖥️' },
-      { id: 'auction_porsche_gt3rs', label: 'Trial Porsche 911 GT3 RS', emoji: '🏎️' },
-      { id: 'auction_lambo_revuelto', label: 'Trial Lamborghini Revuelto', emoji: '🔥' },
-    ],
-  },
-  {
-    type: 'trial_business_mining_farm',
-    label: 'Trial Mining Farm RTX + Server AI',
-    emoji: '⛏️',
-    unitLabel: 'Paket Trial',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Hadiah Trial',
-    isTrial: true,
-    defaultTrialMinutes: 720,
-    description: 'Menyewakan 1 Mining RTX + 1 AI Datacenter secara Trial ke bisnis nasabah.',
-  },
-  {
-    type: 'trial_business_hypercar_garage',
-    label: 'Trial Garasi Hypercar Porsche + Lamborghini',
-    emoji: '🏎️',
-    unitLabel: 'Paket Trial',
-    defaultAmount: 1,
-    step: 1,
-    category: 'Hadiah Trial',
-    isTrial: true,
-    defaultTrialMinutes: 720,
-    description: 'Menyewakan koleksi Porsche GT3 RS & Lamborghini Revuelto selama masa Trial.',
+    description: 'Meminjamkan lot Emas Bullion 1 Kg selama durasi Trial Admin.',
   },
   {
     type: 'trial_royal_emperor_all_access',
@@ -1308,6 +1156,39 @@ export const formatTrialDurationLabel = (minutes?: number): string => {
     return `${h} Jam ${rem} Menit`;
   }
   return `${m} Menit`;
+};
+
+export const REMOVED_MINING_SUPERCAR_REWARD_TYPES = new Set<string>([
+  'mining_rig_rtx',
+  'mining_ai_cluster',
+  'supercar_porsche',
+  'supercar_lambo',
+  'mining_quantum_datacenter',
+  'supercar_bugatti_chiron',
+  'supercar_ferrari_sf90',
+  'business_custom_selector',
+  'trial_business_selector',
+  'trial_business_mining_farm',
+  'trial_business_hypercar_garage',
+]);
+
+export const sanitizeGiftEventsRemoveMiningRewards = (
+  events: AdminGiftEventPackage[]
+): AdminGiftEventPackage[] => {
+  if (!Array.isArray(events)) return [];
+  return events.map((ev) => ({
+    ...ev,
+    rewards: Array.isArray(ev.rewards)
+      ? ev.rewards.filter(
+          (r) =>
+            r &&
+            !REMOVED_MINING_SUPERCAR_REWARD_TYPES.has(String(r.type)) &&
+            !/mining|supercar|hypercar|rtx|porsche|lambo|bugatti|ferrari/i.test(
+              `${r.type} ${r.label} ${r.selectedSubOptionId || ''}`
+            )
+        )
+      : [],
+  }));
 };
 
 export const DEFAULT_ADMIN_GIFT_EVENTS: AdminGiftEventPackage[] = [

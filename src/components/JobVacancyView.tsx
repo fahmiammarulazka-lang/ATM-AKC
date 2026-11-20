@@ -24,6 +24,7 @@ import { useBank } from '../context/BankContext';
 import { JOB_VACANCIES_CATALOG } from '../data/featuresCatalog';
 import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
 import { JobVacancyItem } from '../types/bank';
+import { ArcadeMinigameHub } from './ArcadeMinigameHub';
 
 type JobFilterMode = 'all' | 'unlocked' | 'locked' | 'pemula' | 'menengah' | 'eksekutif';
 
@@ -224,6 +225,7 @@ export const JobVacancyView: React.FC = () => {
     computerChoice: 'batu' | 'gunting' | 'kertas';
     rewardCash: number;
     rewardVoucher: number;
+    winStreakAfter?: number;
     message: string;
   } | null>(null);
 
@@ -480,6 +482,7 @@ export const JobVacancyView: React.FC = () => {
         computerChoice: res.computerChoice,
         rewardCash: res.rewardCash || 0,
         rewardVoucher: res.rewardVoucher || 0,
+        winStreakAfter: res.winStreakAfter,
         message: res.message,
       });
     }, 280);
@@ -788,7 +791,7 @@ export const JobVacancyView: React.FC = () => {
                       🤖 KOMPUTER LEVEL: MEDIUM
                     </span>
                     <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-mono font-bold text-[10px]">
-                      Menang: +1 Voucher Level &amp; +Rp 300.000
+                      Tiap Menang: +Rp 100.000 • 5x Menang Beruntun: +1 Voucher
                     </span>
                   </div>
                   <h3 className="font-black text-white text-base sm:text-lg mt-1">
@@ -803,6 +806,37 @@ export const JobVacancyView: React.FC = () => {
               </div>
             </div>
 
+            {/* Win Streak 0/5 Progress Tracker */}
+            {(() => {
+              const currentStreak = currentAccount.suitWinStreak || 0;
+              return (
+                <div className="p-3 rounded-2xl bg-slate-950/90 border border-cyan-400/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-mono uppercase text-cyan-300 font-bold block">
+                      STREAK MENANG TANPA KALAH (SYARAT 1 VOUCHER LEVEL):
+                    </span>
+                    <span className="text-xs text-slate-200 font-bold">
+                      {currentStreak} / 5 Kemenangan Beruntun {currentStreak >= 4 ? '— 🔥 1 Kemenangan Lagi Dapat 1 Voucher!' : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {[1, 2, 3, 4, 5].map((step) => (
+                      <div
+                        key={step}
+                        className={`w-8 h-8 rounded-xl border-2 flex items-center justify-center font-mono font-black text-xs ${
+                          currentStreak >= step
+                            ? 'bg-emerald-400 text-slate-950 border-white shadow'
+                            : 'bg-slate-900 text-slate-500 border-slate-700'
+                        }`}
+                      >
+                        {currentStreak >= step ? '✓' : step}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="p-4 rounded-2xl bg-slate-950/90 border border-indigo-500/30 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
               <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800">
                 <span className="text-[10px] font-mono text-amber-400 font-bold uppercase block">
@@ -810,7 +844,7 @@ export const JobVacancyView: React.FC = () => {
                 </span>
                 <p className="text-white font-bold mt-0.5">Bayar Rp 500.000</p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Jika hasil Seri, saldo tidak dipotong!
+                  Jika hasil Seri, saldo tidak dipotong &amp; streak aman!
                 </p>
               </div>
               <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-500/40">
@@ -818,19 +852,19 @@ export const JobVacancyView: React.FC = () => {
                   2. HADIAH MENANG
                 </span>
                 <p className="text-emerald-300 font-black mt-0.5">
-                  1 Voucher + Rp 300.000
+                  +Rp 100.000 / Menang
                 </p>
                 <p className="text-[11px] text-slate-300 mt-0.5">
-                  Langsung dapat 1 Voucher Level + uang tunai!
+                  Langsung cair ke rekening setiap kali menang suit!
                 </p>
               </div>
               <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/40">
                 <span className="text-[10px] font-mono text-cyan-300 font-bold uppercase block">
-                  3. BUKA 25 LOWONGAN
+                  3. SYARAT 1 VOUCHER
                 </span>
-                <p className="text-cyan-200 font-bold mt-0.5">Naik +1 Level Gratis</p>
+                <p className="text-cyan-200 font-bold mt-0.5">5x Menang Beruntun</p>
                 <p className="text-[11px] text-slate-300 mt-0.5">
-                  Buka hingga Lowongan #25 (Gaji Rp 10.000.000).
+                  Menang 5x tanpa kalah = +1 Voucher Level (Kalah = Reset 0).
                 </p>
               </div>
             </div>
@@ -889,10 +923,12 @@ export const JobVacancyView: React.FC = () => {
                 </div>
                 <span className="px-3 py-1 rounded-full font-black text-xs uppercase bg-white/15">
                   {suitResult.outcome === 'win'
-                    ? '🏆 MENANG (+1 VOUCHER & +Rp 300.000)'
+                    ? suitResult.rewardVoucher > 0
+                      ? '🏆 MENANG +Rp 100.000 & +1 VOUCHER!'
+                      : `🏆 MENANG (+Rp 100.000 • Streak ${suitResult.winStreakAfter ?? currentAccount.suitWinStreak ?? 0}/5)`
                     : suitResult.outcome === 'draw'
-                    ? '🤝 SERI (TIDAK DIPOTONG)'
-                    : '💥 KALAH'}
+                    ? '🤝 SERI (TIDAK DIPOTONG • STREAK AMAN)'
+                    : '💥 KALAH (STREAK RESET 0/5)'}
                 </span>
               </div>
               <p className="text-xs leading-relaxed font-semibold">{suitResult.message}</p>
@@ -904,6 +940,11 @@ export const JobVacancyView: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* =====================================================================
+          SECTION 1.5: 12 MINIGAME ARCADE SULTAN (DINO CHROME + 11 GAME EKSTREM)
+         ===================================================================== */}
+      <ArcadeMinigameHub />
 
       {/* =====================================================================
           SECTION 2: DAFTAR 25 LOWONGAN PEKERJAAN (Rp 100.000 - Rp 10.000.000)

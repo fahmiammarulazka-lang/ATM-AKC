@@ -19,15 +19,18 @@ import {
   BellRing,
   Check,
   RotateCcw,
+  OctagonX,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { MINTOL_ADMIN_FEATURES_CATALOG } from '../data/empireAndMintolCatalog';
 import { AccountDeletion10StepModal } from './AccountDeletion10StepModal';
+import { stopAllCelebrationEffectsAndAudio } from '../data/celebrationEffectsCatalog';
 
 export const GlobalChatAndNotificationLayer: React.FC = () => {
   const {
     currentAccount,
     googleUser,
+    adminUnlocked,
     bugReports,
     isBugReportModalOpen,
     setIsBugReportModalOpen,
@@ -38,7 +41,21 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
     submitMintolRequest,
     activePushBanners,
     dismissPushBanner,
+    stageForceClearNonce,
+    forceClearAllCelebrationStages,
+    dashboardEffectEvents,
   } = useBank();
+
+  const [forceClearToast, setForceClearToast] = React.useState<string>('');
+  const lastGlobalForceClearRef = React.useRef<number>(stageForceClearNonce);
+  React.useEffect(() => {
+    if (stageForceClearNonce !== lastGlobalForceClearRef.current) {
+      lastGlobalForceClearRef.current = stageForceClearNonce;
+      stopAllCelebrationEffectsAndAudio();
+    }
+  }, [stageForceClearNonce]);
+
+  const hasAnyActiveDashboardEffects = dashboardEffectEvents.some((p) => p.isActive);
 
   // State Lapor Bug
   const [description, setDescription] = useState('');
@@ -199,10 +216,46 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
     return matchCat && matchSearch;
   });
 
-  if (!isBugReportModalOpen && !isMintolModalOpen && activePushBanners.length === 0) return null;
+  const showAdminForceClearPill = adminUnlocked && (hasAnyActiveDashboardEffects || Boolean(forceClearToast));
+
+  if (
+    !isBugReportModalOpen &&
+    !isMintolModalOpen &&
+    activePushBanners.length === 0 &&
+    !showAdminForceClearPill
+  ) {
+    return null;
+  }
 
   return (
     <>
+      {/* ADMIN GLOBAL FORCE CLEAR STAGE EMERGENCY BAR (Z-150 ABOVE STAGE OVERLAYS) */}
+      {showAdminForceClearPill && (
+        <div className="fixed bottom-4 left-4 z-[150] flex flex-col items-start gap-2 max-w-[calc(100vw-2rem)]">
+          {forceClearToast && (
+            <div className="px-3 py-2 rounded-xl bg-emerald-950/95 border border-emerald-400 text-emerald-200 text-[11px] font-bold shadow-2xl">
+              {forceClearToast}
+            </div>
+          )}
+          {hasAnyActiveDashboardEffects && (
+            <button
+              type="button"
+              onClick={() => {
+                stopAllCelebrationEffectsAndAudio();
+                const res = forceClearAllCelebrationStages({ deactivateEffects: true });
+                setForceClearToast(res.message);
+                window.setTimeout(() => setForceClearToast(''), 4000);
+              }}
+              className="px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-rose-600 via-red-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 border-2 border-white/80 text-white font-black text-xs shadow-2xl flex items-center gap-2 cursor-pointer transition active:scale-95"
+              title="Hapus Paksa Semua Panggung, Partikel, Konfeti, Suara, dan Aura di Semua Layar Live"
+            >
+              <OctagonX className="w-4 h-4 shrink-0" />
+              <span>🛑 Force Clear Stage (Hapus Paksa Tahap)</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* FLOATING PUSH NOTIFICATION BANNERS (BACKGROUND + MULTI-EVENT STREAM) */}
       {activePushBanners.length > 0 && (
         <div className="fixed top-20 right-3 sm:right-5 z-[120] flex flex-col gap-2 w-[calc(100%-1.5rem)] max-w-sm pointer-events-none">

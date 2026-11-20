@@ -89,6 +89,7 @@ export const AdminGiftEventPanel: React.FC = () => {
     devRoles,
     defaultLetterSealConfig,
     adminUpdateDefaultLetterSealConfig,
+    stageForceClearNonce,
   } = useBank();
 
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -490,12 +491,14 @@ export const AdminGiftEventPanel: React.FC = () => {
 
   return (
     <div className="space-y-6 text-xs">
-      {/* FULL-SCREEN LIVE PREVIEW OVERLAY FOR 108 CELEBRATION EFFECTS (100,000X STAGE) */}
+      {/* FULL-SCREEN LIVE PREVIEW OVERLAY FOR CELEBRATION EFFECTS */}
       {previewBurstState && (
         <CelebrationClaimBurstOverlay
           effectId={previewBurstState.effectId}
           burstNonce={previewBurstState.nonce}
           intensityLevel={previewBurstState.intensity}
+          autoDismissSeconds={8}
+          forceClearNonce={stageForceClearNonce}
           isPreviewMode
           onDismiss={() => setPreviewBurstState(null)}
         />
@@ -1214,10 +1217,10 @@ export const AdminGiftEventPanel: React.FC = () => {
                 <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-800 pb-2.5">
                   <div>
                     <span className="px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 font-black text-[9.5px] uppercase tracking-wider inline-block mb-1">
-                      💥 {CELEBRATION_EFFECTS_CATALOG.length} EFEK PANGGUNG SINEMATIK 100.000X (9 KATEGORI • 1 PILIHAN AKTIF)
+                      💥 {CELEBRATION_EFFECTS_CATALOG.filter((c) => c.id !== 'none').length} EFEK PANGGUNG SINEMATIK HINGGA 1.000.000X (16 KATEGORI • 1 PILIHAN AKTIF)
                     </span>
                     <h5 className="font-black text-white text-xs sm:text-sm">
-                      Pilih 1 Tema Perayaan untuk Hiasan Sebelum Diklaim &amp; Panggung 100.000x Saat Diklaim
+                      Pilih 1 Tema Perayaan untuk Hiasan Sebelum Diklaim &amp; Panggung Hingga 1.000.000x Saat Diklaim
                     </h5>
                     <p className="text-[10.5px] text-slate-300 mt-0.5 leading-snug">
                       Dilengkapi <strong>Hitung Mundur 3-2-1 Dramatis, Portal 3D, 14 Sinar Laser, Parade Maskot Raksasa, Trofi Hologram 3D, Synthesizer Musik Fanfare, &amp; Kombo Klik Interaktif</strong>!
@@ -1252,7 +1255,7 @@ export const AdminGiftEventPanel: React.FC = () => {
                       Mode Aktif: {celebrationIntensity.toUpperCase()}
                     </span>
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {CELEBRATION_INTENSITY_OPTIONS.map((opt) => {
                       const isActiveInt = celebrationIntensity === opt.id;
                       return (

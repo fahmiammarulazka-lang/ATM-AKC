@@ -138,6 +138,7 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
     isGiftEventOpenableNow,
     devRoles,
     defaultLetterSealConfig,
+    stageForceClearNonce,
   } = useBank();
 
   // Independent stages for Envelope (Surat) vs Gift Box (Hadiah)
@@ -217,6 +218,14 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
     }, 9500);
     return () => window.clearTimeout(timer);
   }, [burstState]);
+
+  const lastForceClearSeenRef = React.useRef<number>(stageForceClearNonce);
+  useEffect(() => {
+    if (stageForceClearNonce !== lastForceClearSeenRef.current) {
+      lastForceClearSeenRef.current = stageForceClearNonce;
+      setBurstState(null);
+    }
+  }, [stageForceClearNonce]);
 
   if (!currentAccount || !googleUser?.hasCompletedOnboarding) {
     return null;
@@ -356,13 +365,15 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
 
   return (
     <>
-      {/* FULL-SCREEN SPECTACULAR 100,000X MULTI-LAYERED CELEBRATION BURST OVERLAY */}
+      {/* FULL-SCREEN SPECTACULAR STAGE BURST OVERLAY */}
       {burstState && (
         <CelebrationClaimBurstOverlay
           effectId={burstState.effectId}
           burstNonce={burstState.nonce}
           intensityLevel={activeEvent?.celebrationIntensity || '100000x'}
           customHeadlineOverride={activeEvent?.title}
+          autoDismissSeconds={8}
+          forceClearNonce={stageForceClearNonce}
           onDismiss={() => setBurstState(null)}
         />
       )}

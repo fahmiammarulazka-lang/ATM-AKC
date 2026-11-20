@@ -117,6 +117,11 @@ import {
   DashboardEffectDurationType,
   DashboardEffectBannerStyle,
   DashboardEffectSoundMode,
+  DashboardScreenBorderFrameStyle,
+  DashboardCursorTrailStyle,
+  DashboardParticleGravityStyle,
+  DashboardBalanceCardThemeOverride,
+  DashboardEffectBlastLogEntry,
   ActiveAccountTrial,
   GachaTierRange,
   GachaClaimedItemResult,
@@ -152,7 +157,21 @@ import {
   GIFT_REWARD_CATALOG,
   MONTHS_INDO,
   formatTrialDurationLabel,
+  sanitizeGiftEventsRemoveMiningRewards,
 } from '../data/giftRewardsCatalog';
+import {
+  stopAllCelebrationEffectsAndAudio,
+  CelebrationAudioSynthStyle,
+} from '../data/celebrationEffectsCatalog';
+import {
+  ARCADE_MINIGAMES_12,
+  ARCADE_MINIGAME_ENTRY_COST,
+  ARCADE_TARGET_COUNT,
+  ArcadeGameId,
+  ArcadeTargetReward,
+  getArcadeTargetReward,
+  getArcadeTargetScore,
+} from '../data/arcadeMinigamesCatalog';
 import { DEFAULT_DEV_ROLES_10 } from '../data/devRolesCatalog';
 import { rollGachaOutcome } from '../utils/gachaUtils';
 import {
@@ -892,6 +911,23 @@ interface BankContextType {
     computerChoice?: 'batu' | 'gunting' | 'kertas';
     rewardCash?: number;
     rewardVoucher?: number;
+    winStreakAfter?: number;
+    message: string;
+  };
+  startArcadeMinigameRun: (gameId: ArcadeGameId) => {
+    success: boolean;
+    message: string;
+  };
+  claimArcadeMinigameScore: (
+    gameId: ArcadeGameId,
+    score: number
+  ) => {
+    success: boolean;
+    score: number;
+    isNewHighScore: boolean;
+    newlyPassedTargets: ArcadeTargetReward[];
+    totalCashWon: number;
+    totalVouchersWon: number;
     message: string;
   };
 
@@ -1329,7 +1365,7 @@ interface BankContextType {
     targetCardTier?: CardTier | 'all';
     targetDevRoleOnly?: string;
     celebrationEffect?: string;
-    celebrationIntensity?: '1000x' | '10000x' | '100000x';
+    celebrationIntensity?: '1000x' | '10000x' | '100000x' | '1000000x';
     soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
     requireAdminVerifiedAccessForNotif?: boolean;
     adminAuditLogTag?: string;
@@ -1379,15 +1415,22 @@ interface BankContextType {
       title?: string;
       senderName?: string;
       celebrationEffect?: string;
-      celebrationIntensity?: '1000x' | '10000x' | '100000x';
+      celebrationIntensity?: '1000x' | '10000x' | '100000x' | '1000000x';
       retriggerPopup?: boolean;
     }
   ) => { success: boolean; message: string };
   adminSetGiftDateTestOverride: (override: { month: number; day: number } | null) => void;
 
-  // Sistem Studio Efek Dashboard 100.000x (108 Efek di 9 Kategori • 100% Dikendalikan dari Panel Admin)
+  // Sistem Studio Efek Dashboard hingga 1.000.000x (311 Efek di 16 Kategori • 100% Dikendalikan Admin) + Force Clear Stage
   dashboardEffectEvents: AdminDashboardEffectPackage[];
   activeDashboardEffectModal: { packageId: string; nonce: number } | null;
+  stageForceClearNonce: number;
+  dismissedDashPackageNonces: Record<string, number>;
+  markDashboardPackageDismissed: (packageId: string, triggerNonce: number) => void;
+  forceClearAllCelebrationStages: (options?: { deactivateEffects?: boolean }) => {
+    success: boolean;
+    message: string;
+  };
   triggerDashboardEffectStageModal: (packageId: string) => void;
   closeDashboardEffectStageModal: () => void;
   adminCreateOrUpdateDashboardEffect: (input: {
@@ -1396,7 +1439,8 @@ interface BankContextType {
     senderName: string;
     welcomeMessage: string;
     celebrationEffect: string;
-    celebrationIntensity?: '1000x' | '10000x' | '100000x';
+    secondaryComboEffectIds?: string[];
+    celebrationIntensity?: '1000x' | '10000x' | '100000x' | '1000000x';
     targetAccountId?: string;
     targetAccountIds?: string[];
     revokedAccountIds?: string[];
@@ -1408,8 +1452,36 @@ interface BankContextType {
     showAmbientParticles?: boolean;
     bannerStyle?: DashboardEffectBannerStyle;
     soundMode?: DashboardEffectSoundMode;
+    audioSynthOverride?: CelebrationAudioSynthStyle | 'auto_theme';
+    soundVolumePercent?: number;
+    ttsVoiceAnnouncementEnabled?: boolean;
+    ttsCustomText?: string;
     stageDurationSeconds?: number;
     durationType: DashboardEffectDurationType;
+    customParticleCount?: number;
+    animationSpeedMultiplier?: number;
+    particleSizeScale?: number;
+    gravityDirection?: DashboardParticleGravityStyle;
+    screenBorderFrame?: DashboardScreenBorderFrameStyle;
+    showMarqueeTicker?: boolean;
+    marqueeTickerText?: string;
+    cursorTrailMode?: DashboardCursorTrailStyle;
+    showFloatingTrophyBadge?: boolean;
+    floatingBadgePosition?: 'top_right' | 'bottom_right' | 'bottom_left';
+    balanceCardThemeOverride?: DashboardBalanceCardThemeOverride;
+    showStadiumSpotlights?: boolean;
+    showLightningBolts?: boolean;
+    vipSirenAlertMode?: boolean;
+    gachaRandomEffectOnBlast?: boolean;
+    autoRotatePlaylistEnabled?: boolean;
+    playlistEffectIds?: string[];
+    playlistIntervalSeconds?: number;
+    scheduledTriggerTime?: string;
+    targetCardTiers?: CardTier[];
+    minJobLevelTarget?: number;
+    targetDevRoleId?: string;
+    vipPriorityLock?: boolean;
+    presetTemplateId?: string;
     sendNow?: boolean;
   }) => { success: boolean; message: string; pkg: AdminDashboardEffectPackage };
   adminDeleteDashboardEffect: (packageId: string) => { success: boolean; message: string };
@@ -1419,7 +1491,8 @@ interface BankContextType {
     packageId: string,
     patch: {
       celebrationEffect?: string;
-      celebrationIntensity?: '1000x' | '10000x' | '100000x';
+      secondaryComboEffectIds?: string[];
+      celebrationIntensity?: '1000x' | '10000x' | '100000x' | '1000000x';
       title?: string;
       welcomeMessage?: string;
       senderName?: string;
@@ -1430,7 +1503,34 @@ interface BankContextType {
       showAmbientParticles?: boolean;
       bannerStyle?: DashboardEffectBannerStyle;
       soundMode?: DashboardEffectSoundMode;
+      audioSynthOverride?: CelebrationAudioSynthStyle | 'auto_theme';
+      soundVolumePercent?: number;
+      ttsVoiceAnnouncementEnabled?: boolean;
+      ttsCustomText?: string;
       stageDurationSeconds?: number;
+      customParticleCount?: number;
+      animationSpeedMultiplier?: number;
+      particleSizeScale?: number;
+      gravityDirection?: DashboardParticleGravityStyle;
+      screenBorderFrame?: DashboardScreenBorderFrameStyle;
+      showMarqueeTicker?: boolean;
+      marqueeTickerText?: string;
+      cursorTrailMode?: DashboardCursorTrailStyle;
+      showFloatingTrophyBadge?: boolean;
+      floatingBadgePosition?: 'top_right' | 'bottom_right' | 'bottom_left';
+      balanceCardThemeOverride?: DashboardBalanceCardThemeOverride;
+      showStadiumSpotlights?: boolean;
+      showLightningBolts?: boolean;
+      vipSirenAlertMode?: boolean;
+      gachaRandomEffectOnBlast?: boolean;
+      autoRotatePlaylistEnabled?: boolean;
+      playlistEffectIds?: string[];
+      playlistIntervalSeconds?: number;
+      scheduledTriggerTime?: string;
+      targetCardTiers?: CardTier[];
+      minJobLevelTarget?: number;
+      targetDevRoleId?: string;
+      vipPriorityLock?: boolean;
       autoBlastNow?: boolean;
     }
   ) => { success: boolean; message: string };
@@ -1942,11 +2042,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const giftEventsInitializedRef = useRef<boolean>(giftEventsInitialized);
   giftEventsInitializedRef.current = giftEventsInitialized;
 
-  const [giftEvents, setGiftEvents] = useState<AdminGiftEventPackage[]>(DEFAULT_ADMIN_GIFT_EVENTS);
+  const [giftEvents, setGiftEvents] = useState<AdminGiftEventPackage[]>(() =>
+    sanitizeGiftEventsRemoveMiningRewards(DEFAULT_ADMIN_GIFT_EVENTS)
+  );
   const [activeGiftModal, setActiveGiftModal] = useState<{ eventId: string; isReplay: boolean } | null>(null);
   const [openingGiftBoxKeys, setOpeningGiftBoxKeys] = useState<string[]>([]);
   const openingGiftBoxKeysRef = useRef<Set<string>>(new Set());
   const [giftDateTestOverride, setGiftDateTestOverride] = useState<{ month: number; day: number } | null>(null);
+  const [stageForceClearNonce, setStageForceClearNonce] = useState<number>(0);
+  const [dismissedDashPackageNonces, setDismissedDashPackageNonces] = useState<Record<string, number>>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = window.sessionStorage.getItem('bn_dismissed_dash_fx_nonces');
+        if (raw) return JSON.parse(raw) as Record<string, number>;
+      }
+    } catch {
+      /* ignore */
+    }
+    return {};
+  });
   const [dashboardEffectEvents, setDashboardEffectEvents] = useState<AdminDashboardEffectPackage[]>(() => [
     {
       id: 'dash-fx-default-sultan-100000x',
@@ -1967,14 +2081,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       triggerNonce: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      lastTriggeredAt: new Date().toISOString(),
+      lastTriggeredAt: new Date(0).toISOString(),
     },
     {
       id: 'dash-fx-default-cyberpunk-100000x',
       title: '⚡ Cyberpunk 2099 Matrix Overdrive 100.000x',
       senderName: 'Divisi Cyber & Inovasi Bank Nusantara',
       welcomeMessage:
-        'Mode Cyberpunk Matrix Overdrive siap menggetarkan Dashboard Anda! Klik tombol Putar Panggung 100.000x kapan saja untuk menyalakan laser 3D & synthesizer fanfare.',
+        'Mode Cyberpunk Matrix Overdrive siap memancarkan aura futuristik di Dashboard Anda!',
       celebrationEffect: 'cyberpunk_neon_matrix',
       celebrationIntensity: '100000x',
       targetAccountId: '__ALL__',
@@ -1988,7 +2102,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       triggerNonce: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      lastTriggeredAt: new Date().toISOString(),
+      lastTriggeredAt: new Date(0).toISOString(),
     },
     {
       id: 'dash-fx-default-dirgahayu-100000x',
@@ -2009,7 +2123,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       triggerNonce: 1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      lastTriggeredAt: new Date().toISOString(),
+      lastTriggeredAt: new Date(0).toISOString(),
     },
   ]);
   const [activeDashboardEffectModal, setActiveDashboardEffectModal] = useState<{
@@ -2292,14 +2406,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (Boolean(data.giftEventsInitialized) || Array.isArray(data.giftEvents)) {
       setGiftEventsInitialized(true);
       if (Array.isArray(data.giftEvents)) {
-        const filteredGifts = (data.giftEvents as AdminGiftEventPackage[]).filter(
-          (ev) => !mergedDelGiftIds.includes(ev.id)
+        const filteredGifts = sanitizeGiftEventsRemoveMiningRewards(
+          (data.giftEvents as AdminGiftEventPackage[]).filter(
+            (ev) => !mergedDelGiftIds.includes(ev.id)
+          )
         );
         setGiftEvents(filteredGifts);
       }
     }
     if (Array.isArray(data.dashboardEffectEvents)) {
       setDashboardEffectEvents(data.dashboardEffectEvents as AdminDashboardEffectPackage[]);
+    }
+    if (typeof data.stageForceClearNonce === 'number') {
+      setStageForceClearNonce((prev) => {
+        const nextVal = data.stageForceClearNonce as number;
+        if (nextVal > prev) {
+          stopAllCelebrationEffectsAndAudio();
+          setActiveDashboardEffectModal(null);
+        }
+        return Math.max(prev, nextVal);
+      });
     }
 
     if (data.banSupportConfig && typeof data.banSupportConfig === 'object') {
@@ -2406,6 +2532,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     deletedGiftEventIds?: string[];
     giftEventsInitialized?: boolean;
     dashboardEffectEvents?: AdminDashboardEffectPackage[];
+    stageForceClearNonce?: number;
     pockets?: PocketSaving[];
     depositos?: DepositoRecord[];
     banSupportConfig?: BanSupportConfig;
@@ -2493,6 +2620,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       deletedGiftEventIds: overrides?.deletedGiftEventIds ?? deletedGiftEventIds,
       giftEventsInitialized: overrides?.giftEventsInitialized ?? true,
       dashboardEffectEvents: overrides?.dashboardEffectEvents ?? dashboardEffectEvents,
+      stageForceClearNonce: overrides?.stageForceClearNonce ?? stageForceClearNonce,
       banSupportConfig: overrides?.banSupportConfig ?? banSupportConfig,
       pockets: (overrides?.pockets ?? pockets).filter((p) => isNotBotAccountId(p.accountId)),
       depositos: (overrides?.depositos ?? depositos).filter((d) => isNotBotAccountId(d.accountId)),
@@ -12575,6 +12703,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     computerChoice?: 'batu' | 'gunting' | 'kertas';
     rewardCash?: number;
     rewardVoucher?: number;
+    winStreakAfter?: number;
     message: string;
   } => {
     if (!currentAccount) {
@@ -12586,7 +12715,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const SUIT_COST = 500_000;
-    const WIN_CASH_PRIZE = 300_000;
+    const WIN_CASH_PRIZE = 100_000;
+    const STREAK_TARGET = 5;
     const isUnlim =
       currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
 
@@ -12595,13 +12725,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return {
         success: false,
         playerChoice,
-        message: `Saldo tidak mencukupi untuk Suit! Biaya Suit lawan Komputer (Medium) adalah Rp 500.000 (Saldo Anda: ${formatRupiah(
+        message: `Saldo tidak mencukupi untuk Suit! Biaya Suit adalah Rp 500.000 (Saldo Anda: ${formatRupiah(
           currentAccount.balance
         )}). Kerjakan lowongan Rp 100.000 (Gratis) terlebih dahulu untuk mengumpulkan modal!`,
       };
     }
 
-    // Komputer Level Medium (Sedang): peluang adil & seimbang (45% Menang, 25% Seri/Ulang Gratis, 30% Kalah)
     const roll = Math.random();
     let outcome: 'win' | 'draw' | 'lose';
     if (roll < 0.45) {
@@ -12613,9 +12742,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const winningMap: Record<'batu' | 'gunting' | 'kertas', 'batu' | 'gunting' | 'kertas'> = {
-      batu: 'gunting', // batu mengalahkan gunting
-      gunting: 'kertas', // gunting mengalahkan kertas
-      kertas: 'batu', // kertas mengalahkan batu
+      batu: 'gunting',
+      gunting: 'kertas',
+      kertas: 'batu',
     };
     const losingMap: Record<'batu' | 'gunting' | 'kertas', 'batu' | 'gunting' | 'kertas'> = {
       batu: 'kertas',
@@ -12632,30 +12761,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       computerChoice = losingMap[playerChoice];
     }
 
+    const prevStreak = currentAccount.suitWinStreak || 0;
+
     if (outcome === 'win') {
-      // Bayar 500.000, dapat 1 Voucher Level + hadiah uang 300.000
+      const nextRawStreak = prevStreak + 1;
+      const earnedVoucherNow = nextRawStreak >= STREAK_TARGET ? 1 : 0;
+      const winStreakAfter = nextRawStreak >= STREAK_TARGET ? 0 : nextRawStreak;
+
       const afterEntryBal = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance - SUIT_COST;
       const finalBal = isUnlim ? UNLIMITED_BALANCE : afterEntryBal + WIN_CASH_PRIZE;
 
-      setAccounts((prev) =>
-        prev.map((a) =>
-          a.id === currentAccount.id
-            ? {
-                ...a,
-                balance: finalBal,
-                levelVouchers: (a.levelVouchers || 0) + 1,
-                suitWins: (a.suitWins || 0) + 1,
-                suitPlayed: (a.suitPlayed || 0) + 1,
-              }
-            : a
-        )
+      const nextAccounts = accounts.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              balance: finalBal,
+              levelVouchers: (a.levelVouchers || 0) + earnedVoucherNow,
+              suitWins: (a.suitWins || 0) + 1,
+              suitPlayed: (a.suitPlayed || 0) + 1,
+              suitWinStreak: winStreakAfter,
+            }
+          : a
       );
+      setAccounts(nextAccounts);
 
       const entryTx: Transaction = {
         id: `tx-suit-in-${Date.now()}`,
         accountId: currentAccount.id,
         type: 'tagihan',
-        title: `🎮 Biaya Suit Lawan Komputer Medium (${playerChoice.toUpperCase()} vs ${computerChoice.toUpperCase()})`,
+        title: `🎮 Biaya Suit Lawan Komputer (${playerChoice.toUpperCase()} vs ${computerChoice.toUpperCase()})`,
         amount: SUIT_COST,
         balanceAfter: afterEntryBal,
         date: new Date().toISOString(),
@@ -12667,7 +12801,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         id: `tx-suit-win-${Date.now() + 1}`,
         accountId: currentAccount.id,
         type: 'setor',
-        title: `🏆 Menang Suit Komputer Medium (+1 Voucher Level & Hadiah Rp 300.000)`,
+        title: earnedVoucherNow
+          ? `🏆 STREAK 5 MENANG SUIT! (+1 Voucher Level & Hadiah Rp 100.000)`
+          : `🏆 Menang Suit Komputer (Streak ${nextRawStreak}/5 • Hadiah Rp 100.000)`,
         amount: WIN_CASH_PRIZE,
         balanceAfter: finalBal,
         date: new Date().toISOString(),
@@ -12675,7 +12811,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         referenceNo: `WIN-${Date.now().toString().slice(-6)}`,
         status: 'berhasil',
       };
-      setTransactions((prev) => [prizeTx, entryTx, ...prev]);
+      const nextTxs = [prizeTx, entryTx, ...transactions];
+      setTransactions(nextTxs);
+      flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
       playAtmSound('cash');
 
       return {
@@ -12684,21 +12822,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         playerChoice,
         computerChoice,
         rewardCash: WIN_CASH_PRIZE,
-        rewardVoucher: 1,
-        message: `🎉 MENANG SUIT! (${playerChoice.toUpperCase()} mengalahkan ${computerChoice.toUpperCase()} Komputer Medium). Anda mendapatkan +1 VOUCHER LEVEL dan hadiah uang Rp 300.000!`,
+        rewardVoucher: earnedVoucherNow,
+        winStreakAfter: earnedVoucherNow ? STREAK_TARGET : winStreakAfter,
+        message: earnedVoucherNow
+          ? `🎉 STREAK 5/5 TERCAPAI TANPA KALAH! (${playerChoice.toUpperCase()} mengalahkan ${computerChoice.toUpperCase()}). Anda mendapatkan +1 VOUCHER LEVEL & hadiah uang Rp 100.000! Streak dimulai ulang 0/5.`
+          : `🎉 MENANG SUIT! (${playerChoice.toUpperCase()} mengalahkan ${computerChoice.toUpperCase()}). Hadiah +Rp 100.000! Progres Streak Menang: ${nextRawStreak}/5 menuju 1 Voucher Level!`,
       };
     } else if (outcome === 'draw') {
-      // Seri: biaya 500.000 dikembalikan utuh
-      setAccounts((prev) =>
-        prev.map((a) =>
-          a.id === currentAccount.id
-            ? {
-                ...a,
-                suitPlayed: (a.suitPlayed || 0) + 1,
-              }
-            : a
-        )
+      const nextAccounts = accounts.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              suitPlayed: (a.suitPlayed || 0) + 1,
+            }
+          : a
       );
+      setAccounts(nextAccounts);
       playAtmSound('beep');
       return {
         success: true,
@@ -12707,28 +12846,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         computerChoice,
         rewardCash: 0,
         rewardVoucher: 0,
-        message: `🤝 SERI / DRAW! (${playerChoice.toUpperCase()} vs ${computerChoice.toUpperCase()}). Biaya Rp 500.000 TIDAK DIPOTONG (dikembalikan 100%). Ayo suit lagi!`,
+        winStreakAfter: prevStreak,
+        message: `🤝 SERI / DRAW! (${playerChoice.toUpperCase()} vs ${computerChoice.toUpperCase()}). Saldo TIDAK DIPOTONG & Streak Anda tetap aman di ${prevStreak}/5!`,
       };
     } else {
-      // Kalah: potong 500.000
       const finalBal = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance - SUIT_COST;
-      setAccounts((prev) =>
-        prev.map((a) =>
-          a.id === currentAccount.id
-            ? {
-                ...a,
-                balance: finalBal,
-                suitPlayed: (a.suitPlayed || 0) + 1,
-              }
-            : a
-        )
+      const nextAccounts = accounts.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              balance: finalBal,
+              suitPlayed: (a.suitPlayed || 0) + 1,
+              suitWinStreak: 0,
+            }
+          : a
       );
+      setAccounts(nextAccounts);
 
       const loseTx: Transaction = {
         id: `tx-suit-lose-${Date.now()}`,
         accountId: currentAccount.id,
         type: 'tagihan',
-        title: `🎮 Suit Lawan Komputer Medium - Kalah (${playerChoice.toUpperCase()} vs ${computerChoice.toUpperCase()})`,
+        title: `🎮 Suit Lawan Komputer - Kalah (${playerChoice.toUpperCase()} vs ${computerChoice.toUpperCase()})`,
         amount: SUIT_COST,
         balanceAfter: finalBal,
         date: new Date().toISOString(),
@@ -12736,7 +12875,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         referenceNo: `SUIT-${Date.now().toString().slice(-6)}`,
         status: 'berhasil',
       };
-      setTransactions((prev) => [loseTx, ...prev]);
+      const nextTxs = [loseTx, ...transactions];
+      setTransactions(nextTxs);
+      flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
       playAtmSound('alert');
 
       return {
@@ -12746,9 +12887,182 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         computerChoice,
         rewardCash: 0,
         rewardVoucher: 0,
-        message: `💥 Komputer Medium menang (${computerChoice.toUpperCase()} mengalahkan ${playerChoice.toUpperCase()}). Biaya Rp 500.000 terpakai. Coba lagi untuk merebut Voucher Level + Rp 300.000!`,
+        winStreakAfter: 0,
+        message: `💥 Komputer menang (${computerChoice.toUpperCase()} mengalahkan ${playerChoice.toUpperCase()}). Biaya Rp 500.000 terpakai & Win Streak reset kembali ke 0/5!`,
       };
     }
+  };
+
+  const startArcadeMinigameRun = (
+    gameId: ArcadeGameId
+  ): { success: boolean; message: string } => {
+    if (!currentAccount) {
+      return { success: false, message: 'Silakan login terlebih dahulu.' };
+    }
+    const gameMeta = ARCADE_MINIGAMES_12.find((g) => g.id === gameId);
+    const title = gameMeta ? gameMeta.title : gameId;
+    const isUnlim =
+      currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+
+    if (!isUnlim && currentAccount.balance < ARCADE_MINIGAME_ENTRY_COST) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Saldo kurang! Biaya main ${title} adalah ${formatRupiah(
+          ARCADE_MINIGAME_ENTRY_COST
+        )}. Kerjakan lowongan kerja atau kumpulkan saldo terlebih dahulu.`,
+      };
+    }
+
+    const nextBal = isUnlim
+      ? UNLIMITED_BALANCE
+      : currentAccount.balance - ARCADE_MINIGAME_ENTRY_COST;
+    const nextAccounts = accounts.map((a) =>
+      a.id === currentAccount.id ? { ...a, balance: nextBal } : a
+    );
+    setAccounts(nextAccounts);
+
+    const entryTx: Transaction = {
+      id: `tx-arc-in-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      accountId: currentAccount.id,
+      type: 'tagihan',
+      title: `🕹️ Tiket Main Arcade: ${title}`,
+      amount: ARCADE_MINIGAME_ENTRY_COST,
+      balanceAfter: nextBal,
+      date: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+      referenceNo: `ARC-${Date.now().toString().slice(-6)}`,
+      status: 'berhasil',
+    };
+    const nextTxs = [entryTx, ...transactions];
+    setTransactions(nextTxs);
+    flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+    playAtmSound('beep');
+
+    return {
+      success: true,
+      message: `Tiket ${title} (Rp 500.000) berhasil dibeli! Raih skor tinggi untuk menembus Target 1–100!`,
+    };
+  };
+
+  const claimArcadeMinigameScore = (
+    gameId: ArcadeGameId,
+    rawScore: number
+  ): {
+    success: boolean;
+    score: number;
+    isNewHighScore: boolean;
+    newlyPassedTargets: ArcadeTargetReward[];
+    totalCashWon: number;
+    totalVouchersWon: number;
+    message: string;
+  } => {
+    const score = Math.max(0, Math.round(rawScore));
+    if (!currentAccount) {
+      return {
+        success: false,
+        score,
+        isNewHighScore: false,
+        newlyPassedTargets: [],
+        totalCashWon: 0,
+        totalVouchersWon: 0,
+        message: 'Silakan login terlebih dahulu.',
+      };
+    }
+
+    const gameMeta = ARCADE_MINIGAMES_12.find((g) => g.id === gameId);
+    const title = gameMeta ? gameMeta.title : gameId;
+    const prevClaimed = (currentAccount.arcadeClaimedTargets?.[gameId] || []).slice();
+    const prevHighScore = currentAccount.arcadeHighScores?.[gameId] || 0;
+    const isNewHighScore = score > prevHighScore;
+
+    const newlyPassedTargets: ArcadeTargetReward[] = [];
+    for (let t = 1; t <= ARCADE_TARGET_COUNT; t++) {
+      if (!prevClaimed.includes(t) && score >= getArcadeTargetScore(t)) {
+        newlyPassedTargets.push(getArcadeTargetReward(t));
+      }
+    }
+
+    const totalCashWon = newlyPassedTargets.reduce((sum, r) => sum + r.cashReward, 0);
+    const totalVouchersWon = newlyPassedTargets.reduce((sum, r) => sum + r.voucherReward, 0);
+    const isUnlim =
+      currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+
+    const updatedClaimed = Array.from(
+      new Set([...prevClaimed, ...newlyPassedTargets.map((r) => r.targetNumber)])
+    ).sort((a, b) => a - b);
+
+    const nextBalance =
+      totalCashWon > 0
+        ? isUnlim
+          ? UNLIMITED_BALANCE
+          : currentAccount.balance + totalCashWon
+        : currentAccount.balance;
+
+    const nextAccounts = accounts.map((a) =>
+      a.id === currentAccount.id
+        ? {
+            ...a,
+            balance: nextBalance,
+            levelVouchers: (a.levelVouchers || 0) + totalVouchersWon,
+            arcadeClaimedTargets: {
+              ...(a.arcadeClaimedTargets || {}),
+              [gameId]: updatedClaimed,
+            },
+            arcadeHighScores: {
+              ...(a.arcadeHighScores || {}),
+              [gameId]: Math.max(prevHighScore, score),
+            },
+          }
+        : a
+    );
+    setAccounts(nextAccounts);
+
+    let nextTxs = transactions;
+    if (totalCashWon > 0 || totalVouchersWon > 0) {
+      const firstT = newlyPassedTargets[0]?.targetNumber;
+      const lastT = newlyPassedTargets[newlyPassedTargets.length - 1]?.targetNumber;
+      const rangeLabel =
+        firstT === lastT ? `Target #${firstT}` : `Target #${firstT}–#${lastT}`;
+      const winTx: Transaction = {
+        id: `tx-arc-win-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+        accountId: currentAccount.id,
+        type: 'setor',
+        title: `🏆 Hadiah ${title} (${newlyPassedTargets.length} Target Baru: ${rangeLabel} • +${totalVouchersWon} Voucher)`,
+        amount: totalCashWon,
+        balanceAfter: nextBalance,
+        date: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+        referenceNo: `ARCW-${Date.now().toString().slice(-6)}`,
+        status: 'berhasil',
+      };
+      nextTxs = [winTx, ...transactions];
+      setTransactions(nextTxs);
+      playAtmSound('cash');
+    } else {
+      playAtmSound('beep');
+    }
+
+    flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+
+    const message =
+      newlyPassedTargets.length > 0
+        ? `🎉 LUAR BIASA! Skor ${score.toLocaleString('id-ID')} di ${title} langsung menembus ${newlyPassedTargets.length} target baru! Total Hadiah: +${formatRupiah(
+            totalCashWon
+          )} & +${totalVouchersWon} Voucher Level!`
+        : `Skor akhir Anda: ${score.toLocaleString(
+            'id-ID'
+          )} poin. Belum ada target baru yang terlewati — kejar skor berikutnya!`;
+
+    return {
+      success: true,
+      score,
+      isNewHighScore,
+      newlyPassedTargets,
+      totalCashWon,
+      totalVouchersWon,
+      message,
+    };
   };
 
   // ============================================================================
@@ -17291,18 +17605,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         case 'dream_pocket_fund':
           pocketAmount += qty;
           break;
-        case 'mining_rig_rtx':
-          addBusinesses['mining_rtx_rig'] = (addBusinesses['mining_rtx_rig'] || 0) + qty;
-          break;
-        case 'mining_ai_cluster':
-          addBusinesses['mining_ai_datacenter'] = (addBusinesses['mining_ai_datacenter'] || 0) + qty;
-          break;
-        case 'supercar_porsche':
-          addBusinesses['auction_porsche_gt3rs'] = (addBusinesses['auction_porsche_gt3rs'] || 0) + qty;
-          break;
-        case 'supercar_lambo':
-          addBusinesses['auction_lambo_revuelto'] = (addBusinesses['auction_lambo_revuelto'] || 0) + qty;
-          break;
         case 'trading_gold_kg':
           addTrading['gold_antam_kg'] = (addTrading['gold_antam_kg'] || 0) + qty;
           break;
@@ -17517,13 +17819,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         case 'pln_super_pack':
           addPlnKwh += qty;
           break;
-        case 'mining_quantum_datacenter':
-          addBusinesses['mining_ai_datacenter'] = (addBusinesses['mining_ai_datacenter'] || 0) + qty;
-          break;
-        case 'supercar_bugatti_chiron':
-        case 'supercar_ferrari_sf90':
-          addBusinesses['auction_lambo_revuelto'] = (addBusinesses['auction_lambo_revuelto'] || 0) + qty;
-          break;
         case 'trading_sp500_vip':
           addTrading['gold_antam_kg'] = (addTrading['gold_antam_kg'] || 0) + qty;
           break;
@@ -17604,11 +17899,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               revertSnapshot: { deltaClickPower: 5, deltaSalaryMultiplier: qty },
             });
           }
-          break;
-        }
-        case 'business_custom_selector': {
-          const bizId = rew.selectedSubOptionId || 'mining_rtx_rig';
-          addBusinesses[bizId] = (addBusinesses[bizId] || 0) + qty;
           break;
         }
         case 'trading_custom_selector': {
@@ -17875,53 +18165,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             expiresAt: expiresIso,
             durationMinutes: trialMins,
             revertSnapshot: { temporaryTradingDeltas: { gold_antam_kg: qty } },
-          });
-          break;
-        case 'trial_business_selector': {
-          const bizId = rew.selectedSubOptionId || 'mining_rtx_rig';
-          addBusinesses[bizId] = (addBusinesses[bizId] || 0) + qty;
-          createdTrials.push({
-            id: `trial-bizsel-${Date.now()}-${Math.floor(Math.random() * 999)}`,
-            rewardType: 'trial_business_selector',
-            label: `${rew.selectedSubOptionLabel || 'Trial Bisnis'} (${formatTrialDurationLabel(trialMins)})`,
-            emoji: '🏢',
-            startedAt: nowDate.toISOString(),
-            expiresAt: expiresIso,
-            durationMinutes: trialMins,
-            revertSnapshot: { temporaryBusinessDeltas: { [bizId]: qty } },
-          });
-          break;
-        }
-        case 'trial_business_mining_farm':
-          addBusinesses['mining_rtx_rig'] = (addBusinesses['mining_rtx_rig'] || 0) + qty;
-          addBusinesses['mining_ai_datacenter'] = (addBusinesses['mining_ai_datacenter'] || 0) + qty;
-          createdTrials.push({
-            id: `trial-mfarm-${Date.now()}-${Math.floor(Math.random() * 999)}`,
-            rewardType: 'trial_business_mining_farm',
-            label: `Trial Mining Farm RTX & AI (${formatTrialDurationLabel(trialMins)})`,
-            emoji: '⛏️',
-            startedAt: nowDate.toISOString(),
-            expiresAt: expiresIso,
-            durationMinutes: trialMins,
-            revertSnapshot: {
-              temporaryBusinessDeltas: { mining_rtx_rig: qty, mining_ai_datacenter: qty },
-            },
-          });
-          break;
-        case 'trial_business_hypercar_garage':
-          addBusinesses['auction_porsche_gt3rs'] = (addBusinesses['auction_porsche_gt3rs'] || 0) + qty;
-          addBusinesses['auction_lambo_revuelto'] = (addBusinesses['auction_lambo_revuelto'] || 0) + qty;
-          createdTrials.push({
-            id: `trial-hcar-${Date.now()}-${Math.floor(Math.random() * 999)}`,
-            rewardType: 'trial_business_hypercar_garage',
-            label: `Trial Garasi Hypercar (${formatTrialDurationLabel(trialMins)})`,
-            emoji: '🏎️',
-            startedAt: nowDate.toISOString(),
-            expiresAt: expiresIso,
-            durationMinutes: trialMins,
-            revertSnapshot: {
-              temporaryBusinessDeltas: { auction_porsche_gt3rs: qty, auction_lambo_revuelto: qty },
-            },
           });
           break;
         case 'trial_royal_emperor_all_access':
@@ -18254,7 +18497,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     targetCardTier?: CardTier | 'all';
     targetDevRoleOnly?: string;
     celebrationEffect?: string;
-    celebrationIntensity?: '1000x' | '10000x' | '100000x';
+    celebrationIntensity?: '1000x' | '10000x' | '100000x' | '1000000x';
     soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
     requireAdminVerifiedAccessForNotif?: boolean;
     adminAuditLogTag?: string;
@@ -18696,7 +18939,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       title?: string;
       senderName?: string;
       celebrationEffect?: string;
-      celebrationIntensity?: '1000x' | '10000x' | '100000x';
+      celebrationIntensity?: '1000x' | '10000x' | '100000x' | '1000000x';
       retriggerPopup?: boolean;
     }
   ): { success: boolean; message: string } => {
@@ -18774,6 +19017,68 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return new Date(fromMs + deltaMs).toISOString();
   };
 
+  const markDashboardPackageDismissed = (packageId: string, triggerNonce: number) => {
+    setDismissedDashPackageNonces((prev) => {
+      const current = prev[packageId] || 0;
+      if (triggerNonce <= current) return prev;
+      const next = { ...prev, [packageId]: triggerNonce };
+      try {
+        if (typeof window !== 'undefined') {
+          window.sessionStorage.setItem('bn_dismissed_dash_fx_nonces', JSON.stringify(next));
+        }
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  const forceClearAllCelebrationStages = (options?: {
+    deactivateEffects?: boolean;
+  }): { success: boolean; message: string } => {
+    const nextForceNonce = Date.now();
+    stopAllCelebrationEffectsAndAudio();
+    setStageForceClearNonce(nextForceNonce);
+    setActiveDashboardEffectModal(null);
+
+    const nowIso = new Date().toISOString();
+    const shouldDeactivateAll = options?.deactivateEffects !== false;
+    const nextDashList = dashboardEffectEvents.map((pkg) => ({
+      ...pkg,
+      autoBlastOnOpen: false,
+      isActive: shouldDeactivateAll ? false : pkg.isActive,
+      updatedAt: nowIso,
+    }));
+    setDashboardEffectEvents(nextDashList);
+
+    // Mark every current package nonce as dismissed locally too
+    const nextDismissed: Record<string, number> = { ...dismissedDashPackageNonces };
+    nextDashList.forEach((p) => {
+      nextDismissed[p.id] = Math.max(nextDismissed[p.id] || 0, p.triggerNonce || 1);
+    });
+    setDismissedDashPackageNonces(nextDismissed);
+    try {
+      if (typeof window !== 'undefined') {
+        window.sessionStorage.setItem('bn_dismissed_dash_fx_nonces', JSON.stringify(nextDismissed));
+      }
+    } catch {
+      /* ignore */
+    }
+
+    flushMasterStateToCloud({
+      stageForceClearNonce: nextForceNonce,
+      dashboardEffectEvents: nextDashList,
+    });
+    playAtmSound('beep');
+
+    return {
+      success: true,
+      message: shouldDeactivateAll
+        ? '🛑 FORCE CLEAR STAGE SELESAI! Seluruh panggung, partikel, konfeti, suara, dan aura Dashboard di semua layar langsung dihentikan seketika!'
+        : '🛑 Seluruh panggung burst & suara di layar live berhasil dihentikan seketika!',
+    };
+  };
+
   const triggerDashboardEffectStageModal = (packageId: string) => {
     setActiveDashboardEffectModal({
       packageId,
@@ -18791,7 +19096,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     senderName: string;
     welcomeMessage: string;
     celebrationEffect: string;
-    celebrationIntensity?: '1000x' | '10000x' | '100000x';
+    secondaryComboEffectIds?: string[];
+    celebrationIntensity?: '1000x' | '10000x' | '100000x' | '1000000x';
     targetAccountId?: string;
     targetAccountIds?: string[];
     revokedAccountIds?: string[];
@@ -18803,8 +19109,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     showAmbientParticles?: boolean;
     bannerStyle?: DashboardEffectBannerStyle;
     soundMode?: DashboardEffectSoundMode;
+    audioSynthOverride?: CelebrationAudioSynthStyle | 'auto_theme';
+    soundVolumePercent?: number;
+    ttsVoiceAnnouncementEnabled?: boolean;
+    ttsCustomText?: string;
     stageDurationSeconds?: number;
     durationType: DashboardEffectDurationType;
+    customParticleCount?: number;
+    animationSpeedMultiplier?: number;
+    particleSizeScale?: number;
+    gravityDirection?: DashboardParticleGravityStyle;
+    screenBorderFrame?: DashboardScreenBorderFrameStyle;
+    showMarqueeTicker?: boolean;
+    marqueeTickerText?: string;
+    cursorTrailMode?: DashboardCursorTrailStyle;
+    showFloatingTrophyBadge?: boolean;
+    floatingBadgePosition?: 'top_right' | 'bottom_right' | 'bottom_left';
+    balanceCardThemeOverride?: DashboardBalanceCardThemeOverride;
+    showStadiumSpotlights?: boolean;
+    showLightningBolts?: boolean;
+    vipSirenAlertMode?: boolean;
+    gachaRandomEffectOnBlast?: boolean;
+    autoRotatePlaylistEnabled?: boolean;
+    playlistEffectIds?: string[];
+    playlistIntervalSeconds?: number;
+    scheduledTriggerTime?: string;
+    targetCardTiers?: CardTier[];
+    minJobLevelTarget?: number;
+    targetDevRoleId?: string;
+    vipPriorityLock?: boolean;
+    presetTemplateId?: string;
     sendNow?: boolean;
   }): { success: boolean; message: string; pkg: AdminDashboardEffectPackage } => {
     const existing = input.id ? dashboardEffectEvents.find((e) => e.id === input.id) : null;
@@ -18828,21 +19162,47 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const shouldBlastNow = input.sendNow !== false;
     const nextTriggerNonce = shouldBlastNow
-      ? nowMs
+      ? Math.max(nowMs, stageForceClearNonce + 10)
       : existing?.triggerNonce || nowMs;
+
+    const recipientLabel =
+      resolvedTargetAccountId === '__ALL__'
+        ? `Semua Nasabah (${accounts.length} akun)`
+        : `${resolvedTargetAccountIds.length} akun terpilih`;
+
+    const resolvedEffectId =
+      input.celebrationEffect && input.celebrationEffect !== 'none'
+        ? input.celebrationEffect
+        : 'sultan_mahkota_emas';
+    const resolvedIntensity = input.celebrationIntensity || '100000x';
+
+    const newLogEntry: DashboardEffectBlastLogEntry = {
+      id: `log-${nowMs}`,
+      timestamp: nowIso,
+      effectId: resolvedEffectId,
+      intensity: resolvedIntensity,
+      targetSummary: recipientLabel,
+      actionType: existing ? 'quick_update' : shouldBlastNow ? 'create_blast' : 'preset_applied',
+    };
+
+    const prevLogHistory = existing?.blastLogHistory || [];
+    const nextLogHistory = shouldBlastNow
+      ? [newLogEntry, ...prevLogHistory].slice(0, 20)
+      : prevLogHistory;
 
     const savedPkg: AdminDashboardEffectPackage = {
       id: existing ? existing.id : `dash-fx-${nowMs}-${Math.floor(Math.random() * 999)}`,
-      title: input.title.trim() || '✨ Efek Perayaan Dashboard Spesial 100.000x',
+      title: input.title.trim() || '✨ Efek Perayaan Dashboard Spesial 1.000.000x',
       senderName: input.senderName.trim() || 'Admin Utama Bank Nusantara',
       welcomeMessage:
         input.welcomeMessage.trim() ||
-        'Selamat menikmati Panggung Selebrasi 100.000x Ultra Max Overdrive di halaman Dashboard Anda!',
-      celebrationEffect:
-        input.celebrationEffect && input.celebrationEffect !== 'none'
-          ? input.celebrationEffect
-          : 'sultan_mahkota_emas',
-      celebrationIntensity: input.celebrationIntensity || '100000x',
+        'Selamat menikmati Panggung Selebrasi 1.000.000x HYPER GODLIKE di halaman Dashboard Anda!',
+      celebrationEffect: resolvedEffectId,
+      secondaryComboEffectIds:
+        input.secondaryComboEffectIds !== undefined
+          ? input.secondaryComboEffectIds
+          : existing?.secondaryComboEffectIds || [],
+      celebrationIntensity: resolvedIntensity,
       targetAccountId: resolvedTargetAccountId,
       targetAccountIds: resolvedTargetAccountIds,
       revokedAccountIds:
@@ -18863,12 +19223,107 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           : existing?.showAmbientParticles ?? true,
       bannerStyle: input.bannerStyle || existing?.bannerStyle || 'full_top_banner',
       soundMode: input.soundMode || existing?.soundMode || 'fanfare_auto',
+      audioSynthOverride:
+        input.audioSynthOverride || existing?.audioSynthOverride || 'auto_theme',
+      soundVolumePercent:
+        input.soundVolumePercent !== undefined
+          ? input.soundVolumePercent
+          : existing?.soundVolumePercent ?? 100,
+      ttsVoiceAnnouncementEnabled:
+        input.ttsVoiceAnnouncementEnabled !== undefined
+          ? input.ttsVoiceAnnouncementEnabled
+          : existing?.ttsVoiceAnnouncementEnabled ?? false,
+      ttsCustomText:
+        input.ttsCustomText !== undefined ? input.ttsCustomText : existing?.ttsCustomText || '',
       stageDurationSeconds:
         input.stageDurationSeconds !== undefined
           ? input.stageDurationSeconds
-          : existing?.stageDurationSeconds ?? 12,
+          : existing?.stageDurationSeconds ?? 8,
       durationType: input.durationType || 'permanent',
       expiresAt: computeDashboardEffectExpiresAt(input.durationType || 'permanent', nowMs),
+      customParticleCount:
+        input.customParticleCount !== undefined
+          ? input.customParticleCount
+          : existing?.customParticleCount,
+      animationSpeedMultiplier:
+        input.animationSpeedMultiplier !== undefined
+          ? input.animationSpeedMultiplier
+          : existing?.animationSpeedMultiplier ?? 1,
+      particleSizeScale:
+        input.particleSizeScale !== undefined
+          ? input.particleSizeScale
+          : existing?.particleSizeScale ?? 1,
+      gravityDirection:
+        input.gravityDirection || existing?.gravityDirection || 'theme_default',
+      screenBorderFrame:
+        input.screenBorderFrame || existing?.screenBorderFrame || 'none',
+      showMarqueeTicker:
+        input.showMarqueeTicker !== undefined
+          ? input.showMarqueeTicker
+          : existing?.showMarqueeTicker ?? false,
+      marqueeTickerText:
+        input.marqueeTickerText !== undefined
+          ? input.marqueeTickerText
+          : existing?.marqueeTickerText || '',
+      cursorTrailMode: input.cursorTrailMode || existing?.cursorTrailMode || 'none',
+      showFloatingTrophyBadge:
+        input.showFloatingTrophyBadge !== undefined
+          ? input.showFloatingTrophyBadge
+          : existing?.showFloatingTrophyBadge ?? false,
+      floatingBadgePosition:
+        input.floatingBadgePosition || existing?.floatingBadgePosition || 'bottom_right',
+      balanceCardThemeOverride:
+        input.balanceCardThemeOverride || existing?.balanceCardThemeOverride || 'auto_effect',
+      showStadiumSpotlights:
+        input.showStadiumSpotlights !== undefined
+          ? input.showStadiumSpotlights
+          : existing?.showStadiumSpotlights ?? false,
+      showLightningBolts:
+        input.showLightningBolts !== undefined
+          ? input.showLightningBolts
+          : existing?.showLightningBolts ?? false,
+      vipSirenAlertMode:
+        input.vipSirenAlertMode !== undefined
+          ? input.vipSirenAlertMode
+          : existing?.vipSirenAlertMode ?? false,
+      gachaRandomEffectOnBlast:
+        input.gachaRandomEffectOnBlast !== undefined
+          ? input.gachaRandomEffectOnBlast
+          : existing?.gachaRandomEffectOnBlast ?? false,
+      autoRotatePlaylistEnabled:
+        input.autoRotatePlaylistEnabled !== undefined
+          ? input.autoRotatePlaylistEnabled
+          : existing?.autoRotatePlaylistEnabled ?? false,
+      playlistEffectIds:
+        input.playlistEffectIds !== undefined
+          ? input.playlistEffectIds
+          : existing?.playlistEffectIds || [],
+      playlistIntervalSeconds:
+        input.playlistIntervalSeconds !== undefined
+          ? input.playlistIntervalSeconds
+          : existing?.playlistIntervalSeconds ?? 10,
+      scheduledTriggerTime:
+        input.scheduledTriggerTime !== undefined
+          ? input.scheduledTriggerTime
+          : existing?.scheduledTriggerTime || '',
+      targetCardTiers:
+        input.targetCardTiers !== undefined
+          ? input.targetCardTiers
+          : existing?.targetCardTiers || [],
+      minJobLevelTarget:
+        input.minJobLevelTarget !== undefined
+          ? input.minJobLevelTarget
+          : existing?.minJobLevelTarget ?? 1,
+      targetDevRoleId:
+        input.targetDevRoleId !== undefined
+          ? input.targetDevRoleId
+          : existing?.targetDevRoleId || '',
+      vipPriorityLock:
+        input.vipPriorityLock !== undefined
+          ? input.vipPriorityLock
+          : existing?.vipPriorityLock ?? false,
+      presetTemplateId: input.presetTemplateId || existing?.presetTemplateId,
+      blastLogHistory: nextLogHistory,
       triggerNonce: nextTriggerNonce,
       createdAt: existing ? existing.createdAt : nowIso,
       updatedAt: nowIso,
@@ -18883,17 +19338,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('success');
 
-    const recipientLabel =
-      resolvedTargetAccountId === '__ALL__'
-        ? `Semua Nasabah (${accounts.length} akun)`
-        : `${resolvedTargetAccountIds.length} akun terpilih`;
-
     return {
       success: true,
       pkg: savedPkg,
       message: existing
         ? `💥 Efek Dashboard "${savedPkg.title}" [${recipientLabel}] berhasil diperbarui & disinkronkan ke Cloud!`
-        : `💥 Efek Dashboard baru "${savedPkg.title}" [${recipientLabel}] berhasil dikirimkan & siap meledak 100.000x di layar nasabah!`,
+        : `💥 Efek Dashboard baru "${savedPkg.title}" [${recipientLabel}] berhasil dikirimkan & siap meledak di layar nasabah!`,
     };
   };
 
@@ -18927,27 +19377,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const adminTriggerDashboardEffectBlastNow = (packageId: string) => {
     const target = dashboardEffectEvents.find((e) => e.id === packageId);
     if (!target) return { success: false, message: 'Paket Efek Dashboard tidak ditemukan.' };
-    const nowMs = Date.now();
+    const nowMs = Math.max(Date.now(), stageForceClearNonce + 10);
     const nowIso = new Date(nowMs).toISOString();
-    const nextList = dashboardEffectEvents.map((e) =>
-      e.id === packageId
-        ? {
-            ...e,
-            isActive: true,
-            autoBlastOnOpen: true,
-            triggerNonce: nowMs,
-            expiresAt: computeDashboardEffectExpiresAt(e.durationType, nowMs),
-            lastTriggeredAt: nowIso,
-            updatedAt: nowIso,
-          }
-        : e
-    );
+    const nextList = dashboardEffectEvents.map((e) => {
+      if (e.id !== packageId) return e;
+      const logEntry: DashboardEffectBlastLogEntry = {
+        id: `log-${nowMs}`,
+        timestamp: nowIso,
+        effectId: e.celebrationEffect,
+        intensity: e.celebrationIntensity || '100000x',
+        targetSummary: e.targetAccountId === '__ALL__' ? 'Semua Nasabah' : `${(e.targetAccountIds || []).length || 1} akun`,
+        actionType: 'reblast',
+      };
+      return {
+        ...e,
+        isActive: true,
+        autoBlastOnOpen: true,
+        triggerNonce: nowMs,
+        expiresAt: computeDashboardEffectExpiresAt(e.durationType, nowMs),
+        lastTriggeredAt: nowIso,
+        updatedAt: nowIso,
+        blastLogHistory: [logEntry, ...(e.blastLogHistory || [])].slice(0, 20),
+      };
+    });
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('success');
     return {
       success: true,
-      message: `💥 Ledakan Panggung 100.000x "${target.title}" langsung ditembakkan secara Real-Time ke layar Dashboard penerima!`,
+      message: `💥 Ledakan Panggung "${target.title}" langsung ditembakkan secara Real-Time ke layar Dashboard penerima!`,
     };
   };
 
@@ -18955,7 +19413,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     packageId: string,
     patch: {
       celebrationEffect?: string;
-      celebrationIntensity?: '1000x' | '10000x' | '100000x';
+      secondaryComboEffectIds?: string[];
+      celebrationIntensity?: '1000x' | '10000x' | '100000x' | '1000000x';
       title?: string;
       welcomeMessage?: string;
       senderName?: string;
@@ -18966,13 +19425,40 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       showAmbientParticles?: boolean;
       bannerStyle?: DashboardEffectBannerStyle;
       soundMode?: DashboardEffectSoundMode;
+      audioSynthOverride?: CelebrationAudioSynthStyle | 'auto_theme';
+      soundVolumePercent?: number;
+      ttsVoiceAnnouncementEnabled?: boolean;
+      ttsCustomText?: string;
       stageDurationSeconds?: number;
+      customParticleCount?: number;
+      animationSpeedMultiplier?: number;
+      particleSizeScale?: number;
+      gravityDirection?: DashboardParticleGravityStyle;
+      screenBorderFrame?: DashboardScreenBorderFrameStyle;
+      showMarqueeTicker?: boolean;
+      marqueeTickerText?: string;
+      cursorTrailMode?: DashboardCursorTrailStyle;
+      showFloatingTrophyBadge?: boolean;
+      floatingBadgePosition?: 'top_right' | 'bottom_right' | 'bottom_left';
+      balanceCardThemeOverride?: DashboardBalanceCardThemeOverride;
+      showStadiumSpotlights?: boolean;
+      showLightningBolts?: boolean;
+      vipSirenAlertMode?: boolean;
+      gachaRandomEffectOnBlast?: boolean;
+      autoRotatePlaylistEnabled?: boolean;
+      playlistEffectIds?: string[];
+      playlistIntervalSeconds?: number;
+      scheduledTriggerTime?: string;
+      targetCardTiers?: CardTier[];
+      minJobLevelTarget?: number;
+      targetDevRoleId?: string;
+      vipPriorityLock?: boolean;
       autoBlastNow?: boolean;
     }
   ): { success: boolean; message: string } => {
     const target = dashboardEffectEvents.find((e) => e.id === packageId);
     if (!target) return { success: false, message: 'Paket Efek Dashboard tidak ditemukan.' };
-    const nowMs = Date.now();
+    const nowMs = Math.max(Date.now(), stageForceClearNonce + 10);
     const nowIso = new Date(nowMs).toISOString();
 
     const nextList = dashboardEffectEvents.map((e) => {
@@ -18987,6 +19473,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           patch.celebrationEffect && patch.celebrationEffect !== 'none'
             ? patch.celebrationEffect
             : e.celebrationEffect,
+        secondaryComboEffectIds:
+          patch.secondaryComboEffectIds !== undefined
+            ? patch.secondaryComboEffectIds
+            : e.secondaryComboEffectIds,
         celebrationIntensity: patch.celebrationIntensity || e.celebrationIntensity || '100000x',
         durationType: nextDuration,
         expiresAt:
@@ -19009,10 +19499,78 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             : e.showAmbientParticles ?? true,
         bannerStyle: patch.bannerStyle || e.bannerStyle || 'full_top_banner',
         soundMode: patch.soundMode || e.soundMode || 'fanfare_auto',
+        audioSynthOverride: patch.audioSynthOverride || e.audioSynthOverride || 'auto_theme',
+        soundVolumePercent:
+          patch.soundVolumePercent !== undefined ? patch.soundVolumePercent : e.soundVolumePercent,
+        ttsVoiceAnnouncementEnabled:
+          patch.ttsVoiceAnnouncementEnabled !== undefined
+            ? patch.ttsVoiceAnnouncementEnabled
+            : e.ttsVoiceAnnouncementEnabled,
+        ttsCustomText: patch.ttsCustomText !== undefined ? patch.ttsCustomText : e.ttsCustomText,
         stageDurationSeconds:
           patch.stageDurationSeconds !== undefined
             ? patch.stageDurationSeconds
-            : e.stageDurationSeconds ?? 12,
+            : e.stageDurationSeconds ?? 8,
+        customParticleCount:
+          patch.customParticleCount !== undefined
+            ? patch.customParticleCount
+            : e.customParticleCount,
+        animationSpeedMultiplier:
+          patch.animationSpeedMultiplier !== undefined
+            ? patch.animationSpeedMultiplier
+            : e.animationSpeedMultiplier,
+        particleSizeScale:
+          patch.particleSizeScale !== undefined ? patch.particleSizeScale : e.particleSizeScale,
+        gravityDirection: patch.gravityDirection || e.gravityDirection,
+        screenBorderFrame: patch.screenBorderFrame || e.screenBorderFrame,
+        showMarqueeTicker:
+          patch.showMarqueeTicker !== undefined ? patch.showMarqueeTicker : e.showMarqueeTicker,
+        marqueeTickerText:
+          patch.marqueeTickerText !== undefined ? patch.marqueeTickerText : e.marqueeTickerText,
+        cursorTrailMode: patch.cursorTrailMode || e.cursorTrailMode,
+        showFloatingTrophyBadge:
+          patch.showFloatingTrophyBadge !== undefined
+            ? patch.showFloatingTrophyBadge
+            : e.showFloatingTrophyBadge,
+        floatingBadgePosition: patch.floatingBadgePosition || e.floatingBadgePosition,
+        balanceCardThemeOverride:
+          patch.balanceCardThemeOverride || e.balanceCardThemeOverride,
+        showStadiumSpotlights:
+          patch.showStadiumSpotlights !== undefined
+            ? patch.showStadiumSpotlights
+            : e.showStadiumSpotlights,
+        showLightningBolts:
+          patch.showLightningBolts !== undefined
+            ? patch.showLightningBolts
+            : e.showLightningBolts,
+        vipSirenAlertMode:
+          patch.vipSirenAlertMode !== undefined ? patch.vipSirenAlertMode : e.vipSirenAlertMode,
+        gachaRandomEffectOnBlast:
+          patch.gachaRandomEffectOnBlast !== undefined
+            ? patch.gachaRandomEffectOnBlast
+            : e.gachaRandomEffectOnBlast,
+        autoRotatePlaylistEnabled:
+          patch.autoRotatePlaylistEnabled !== undefined
+            ? patch.autoRotatePlaylistEnabled
+            : e.autoRotatePlaylistEnabled,
+        playlistEffectIds:
+          patch.playlistEffectIds !== undefined ? patch.playlistEffectIds : e.playlistEffectIds,
+        playlistIntervalSeconds:
+          patch.playlistIntervalSeconds !== undefined
+            ? patch.playlistIntervalSeconds
+            : e.playlistIntervalSeconds,
+        scheduledTriggerTime:
+          patch.scheduledTriggerTime !== undefined
+            ? patch.scheduledTriggerTime
+            : e.scheduledTriggerTime,
+        targetCardTiers:
+          patch.targetCardTiers !== undefined ? patch.targetCardTiers : e.targetCardTiers,
+        minJobLevelTarget:
+          patch.minJobLevelTarget !== undefined ? patch.minJobLevelTarget : e.minJobLevelTarget,
+        targetDevRoleId:
+          patch.targetDevRoleId !== undefined ? patch.targetDevRoleId : e.targetDevRoleId,
+        vipPriorityLock:
+          patch.vipPriorityLock !== undefined ? patch.vipPriorityLock : e.vipPriorityLock,
         triggerNonce: patch.autoBlastNow ? nowMs : e.triggerNonce,
         lastTriggeredAt: patch.autoBlastNow ? nowIso : e.lastTriggeredAt,
         updatedAt: nowIso,
@@ -20136,6 +20694,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         upgradeJobLevelWithCash,
         useJobLevelVoucher,
         playSuitForLevelVoucher,
+        startArcadeMinigameRun,
+        claimArcadeMinigameScore,
         atmVaultBalance,
         adminSetAccountJobLevel,
         adminAdjustLevelVouchers,
@@ -20258,6 +20818,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminSetGiftDateTestOverride,
         dashboardEffectEvents,
         activeDashboardEffectModal,
+        stageForceClearNonce,
+        dismissedDashPackageNonces,
+        markDashboardPackageDismissed,
+        forceClearAllCelebrationStages,
         triggerDashboardEffectStageModal,
         closeDashboardEffectStageModal,
         adminCreateOrUpdateDashboardEffect,

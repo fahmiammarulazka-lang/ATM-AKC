@@ -270,6 +270,39 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       ? getCelebrationEffectProfile(activeDashboardEffectPkg.celebrationEffect)
       : null;
 
+  const balanceOverrideMap: Record<string, { border: string; bg: string; badge: string }> = {
+    gold_sultan: {
+      border: 'border-amber-300 shadow-amber-500/35',
+      bg: 'from-amber-950/80 via-slate-950 to-yellow-950/60',
+      badge: 'from-amber-300 via-yellow-400 to-amber-500',
+    },
+    cyber_cyan: {
+      border: 'border-cyan-300 shadow-cyan-500/35',
+      bg: 'from-cyan-950/80 via-slate-950 to-indigo-950/70',
+      badge: 'from-cyan-400 to-blue-500',
+    },
+    emerald_royal: {
+      border: 'border-emerald-300 shadow-emerald-500/35',
+      bg: 'from-emerald-950/80 via-slate-950 to-teal-950/70',
+      badge: 'from-emerald-400 to-teal-500',
+    },
+    crimson_fire: {
+      border: 'border-rose-400 shadow-rose-500/35',
+      bg: 'from-rose-950/80 via-slate-950 to-orange-950/70',
+      badge: 'from-rose-500 to-amber-500',
+    },
+    galaxy_purple: {
+      border: 'border-fuchsia-400 shadow-fuchsia-500/35',
+      bg: 'from-fuchsia-950/80 via-slate-950 to-purple-950/70',
+      badge: 'from-fuchsia-500 to-indigo-500',
+    },
+  };
+  const balanceThemeOverride =
+    activeDashboardEffectPkg?.balanceCardThemeOverride &&
+    activeDashboardEffectPkg.balanceCardThemeOverride !== 'auto_effect'
+      ? balanceOverrideMap[activeDashboardEffectPkg.balanceCardThemeOverride] || null
+      : null;
+
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
       {/* SMART PROTECTION BANNER (Sesi Sementara -> Hubungkan Google & Ringkasan Atomic Merge) */}
@@ -382,16 +415,22 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
         {/* Balance Card Highlight (Decorated when Dashboard Effect is Active) */}
         <div
-          className={`relative bg-black/50 border-2 ${
-            activeDashboardEffectProfile
-              ? `${activeDashboardEffectProfile.cardBorderAccentClass} ${activeDashboardEffectProfile.cardGlowClass}`
-              : 'border-white/10'
+          className={`relative border-2 ${
+            balanceThemeOverride
+              ? `bg-gradient-to-br ${balanceThemeOverride.bg} ${balanceThemeOverride.border} shadow-2xl`
+              : activeDashboardEffectProfile
+              ? `bg-black/50 ${activeDashboardEffectProfile.cardBorderAccentClass} ${activeDashboardEffectProfile.cardGlowClass}`
+              : 'bg-black/50 border-white/10'
           } rounded-2xl p-4 sm:p-5 backdrop-blur-md min-w-[260px] text-right overflow-hidden transition-all`}
         >
           {activeDashboardEffectProfile && (
             <div className="flex items-center justify-end gap-1.5 mb-1">
               <span
-                className={`px-2 py-0.5 rounded-full bg-gradient-to-r ${activeDashboardEffectProfile.bannerGradientClass} text-white font-black text-[9px] uppercase tracking-wider flex items-center gap-1 shadow`}
+                className={`px-2 py-0.5 rounded-full bg-gradient-to-r ${
+                  balanceThemeOverride
+                    ? balanceThemeOverride.badge
+                    : activeDashboardEffectProfile.bannerGradientClass
+                } text-white font-black text-[9px] uppercase tracking-wider flex items-center gap-1 shadow`}
               >
                 <span>{activeDashboardEffectProfile.primaryEmoji}</span>
                 <span>AURA {activeDashboardEffectProfile.name.toUpperCase()}</span>
@@ -522,7 +561,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           }`}
         >
           <Briefcase className="w-4 h-4" />
-          <span>💼 Lowongan Pekerjaan &amp; Suit Level (Lv.{currentAccount.jobLevel || 1})</span>
+          <span>💼 Lowongan Kerja, Suit &amp; 12 Game (Lv.{currentAccount.jobLevel || 1})</span>
         </button>
 
         <button

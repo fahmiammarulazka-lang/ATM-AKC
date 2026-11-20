@@ -791,7 +791,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           }`}
         >
           <Gift className="w-4 h-4" />
-          <span>🎁 Hadiah &amp; Surat (100 Hadiah &amp; 108 Efek 100.000x) ({giftEvents.length})</span>
+          <span>🎁 Hadiah &amp; Surat (Bebas Mining • 311 Efek 1.000.000x) ({giftEvents.length})</span>
         </button>
 
         <button
@@ -803,7 +803,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           }`}
         >
           <Zap className="w-4 h-4" />
-          <span>💥 Studio Efek Dashboard 100.000x (108 Efek) ({dashboardEffectEvents.length})</span>
+          <span>💥 Studio Efek Dashboard (311 Efek • 16 Kategori) ({dashboardEffectEvents.length})</span>
         </button>
 
         <button

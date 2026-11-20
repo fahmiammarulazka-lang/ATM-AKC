@@ -4,6 +4,10 @@
  * + Synthesizer Musik & Fanfare Web Audio API Otomatis Sesuai Tema
  */
 import confetti from 'canvas-confetti';
+import {
+  EXTRA_CELEBRATION_SEEDS_200,
+  ExtraCompactCelebSeed,
+} from './extraCelebrationSeeds200';
 
 export type CelebrationCategoryKey =
   | 'all'
@@ -15,9 +19,16 @@ export type CelebrationCategoryKey =
   | 'cyberpunk_scifi'
   | 'anime_fantasi'
   | 'alam_galaksi'
-  | 'profesi_gaya_hidup';
+  | 'profesi_gaya_hidup'
+  | 'kerajaan_nusantara'
+  | 'mitologi_legenda'
+  | 'esports_gaming'
+  | 'kuliner_nusantara'
+  | 'musik_konser'
+  | 'otomotif_balap'
+  | 'olahraga_cuaca_quantum';
 
-export type CelebrationIntensityLevel = '1000x' | '10000x' | '100000x';
+export type CelebrationIntensityLevel = '1000x' | '10000x' | '100000x' | '1000000x';
 
 export type CelebrationMotionStyle =
   | 'dragon_parade'
@@ -30,6 +41,11 @@ export type CelebrationMotionStyle =
   | 'supernova_vortex'
   | 'anime_aura_burst'
   | 'festival_carnival'
+  | 'matrix_digital_rain'
+  | 'thunderbolt_strike'
+  | 'theater_curtain_spotlight'
+  | 'coin_3d_deluge'
+  | 'aurora_wave_ribbon'
   | 'fireworks'
   | 'fountain_burst'
   | 'gentle_snow'
@@ -47,7 +63,39 @@ export type CelebrationAudioSynthStyle =
   | 'cosmic_arp'
   | 'festive_party'
   | 'gentle_harp'
+  | 'gamelan_royal'
+  | 'mythic_orchestra'
+  | 'arcade_8bit'
+  | 'edm_stadium_drop'
+  | 'racing_nitro_rev'
+  | 'stadium_champion_horn'
+  | 'thunder_storm_bass'
+  | 'quantum_ai_pulse'
   | 'silent';
+
+export const AUDIO_SYNTH_STYLE_OPTIONS: {
+  id: CelebrationAudioSynthStyle | 'auto_theme';
+  label: string;
+}[] = [
+  { id: 'auto_theme', label: '🎼 Otomatis Sesuai Tema Efek (16 Gaya)' },
+  { id: 'royal_fanfare', label: '🎺 Fanfare Istana Kerajaan (Royal Brass)' },
+  { id: 'gamelan_royal', label: '🔔 Gamelan Kencana Keraton Nusantara' },
+  { id: 'patriot_march', label: '🥁 Mars Patriot & Terompet Kemerdekaan' },
+  { id: 'sacred_chime', label: '🕌 Lonceng Suci & Nada Harmoni Kedamaian' },
+  { id: 'cyber_synth', label: '🤖 Cyberpunk Sawtooth Synth Overdrive' },
+  { id: 'quantum_ai_pulse', label: '⚛️ Quantum AI Neural Pulse Synth' },
+  { id: 'anime_power', label: '⚡ Anime Power Opening Shonen Lead' },
+  { id: 'arcade_8bit', label: '🕹️ Retro Arcade 8-Bit Chiptune Victory' },
+  { id: 'edm_stadium_drop', label: '🎧 EDM Konser Stadion Drop & Bass' },
+  { id: 'racing_nitro_rev', label: '🏎️ Turbo Racing Nitro Rev & Finish Horn' },
+  { id: 'stadium_champion_horn', label: '🏆 Terompet Juara Stadion Piala Dunia' },
+  { id: 'mythic_orchestra', label: '🐉 Orkestra Epik Mitologi Naga & Dewata' },
+  { id: 'thunder_storm_bass', label: '🌩️ Sub-Bass Petir Halilintar Menggelegar' },
+  { id: 'cosmic_arp', label: '🌌 Arpeggio Galaksi & Nebula Kosmik' },
+  { id: 'festive_party', label: '🎉 Musik Pesta Karnaval & Kembang Api' },
+  { id: 'gentle_harp', label: '🪷 Harpa Lembut Musim Semi & Sakura' },
+  { id: 'silent', label: '🔇 Mode Senyap Tanpa Audio Synth' },
+];
 
 export interface CelebrationEffectProfile {
   id: string;
@@ -122,6 +170,17 @@ export const CELEBRATION_INTENSITY_OPTIONS: {
     paradeCount: 10,
     confettiSalvos: 8,
   },
+  {
+    id: '1000000x',
+    label: '🌌 Mode 1.000.000x HYPER GODLIKE OVERDRIVE (Panggung Maksimal 1 Juta Kali)',
+    shortLabel: '1.000.000x GODLIKE',
+    badgeText: '🌌 1.000.000X HYPER GODLIKE OVERDRIVE',
+    particleCount: 160,
+    laserBeamCount: 22,
+    shockwaveCount: 8,
+    paradeCount: 14,
+    confettiSalvos: 12,
+  },
 ];
 
 export const getCelebrationIntensityMeta = (level?: string | null) => {
@@ -136,16 +195,23 @@ export const CELEBRATION_CATEGORIES: {
   label: string;
   emoji: string;
 }[] = [
-  { key: 'all', label: 'Semua Perayaan (108)', emoji: '💥' },
-  { key: 'momen_spesial', label: 'Momen Spesial & Ultah (14)', emoji: '🎂' },
-  { key: 'nasional_ri', label: 'Nasional & Kemerdekaan RI (12)', emoji: '🇮🇩' },
-  { key: 'hari_raya', label: 'Hari Raya & Keagamaan (14)', emoji: '🕌' },
-  { key: 'musim_dunia', label: 'Musim & Festival Dunia (12)', emoji: '🎄' },
-  { key: 'sultan_vip', label: 'Sultan & Kemewahan VIP (14)', emoji: '👑' },
-  { key: 'cyberpunk_scifi', label: 'Cyberpunk, Mecha & Sci-Fi (12)', emoji: '🤖' },
-  { key: 'anime_fantasi', label: 'Anime, Esports & Fantasi (12)', emoji: '⚡' },
-  { key: 'alam_galaksi', label: 'Alam Semesta & Galaksi (10)', emoji: '🌌' },
-  { key: 'profesi_gaya_hidup', label: 'Pencapaian & Gaya Hidup (8)', emoji: '🏆' },
+  { key: 'all', label: 'Semua Perayaan (311 Efek • 16 Kategori)', emoji: '💥' },
+  { key: 'momen_spesial', label: 'Momen Spesial & Ultah', emoji: '🎂' },
+  { key: 'nasional_ri', label: 'Nasional & Kemerdekaan RI', emoji: '🇮🇩' },
+  { key: 'hari_raya', label: 'Hari Raya & Keagamaan', emoji: '🕌' },
+  { key: 'musim_dunia', label: 'Musim & Festival Dunia', emoji: '🎄' },
+  { key: 'sultan_vip', label: 'Sultan & Kemewahan VIP', emoji: '👑' },
+  { key: 'cyberpunk_scifi', label: 'Cyberpunk, Mecha & Sci-Fi', emoji: '🤖' },
+  { key: 'anime_fantasi', label: 'Anime, Esports & Fantasi', emoji: '⚡' },
+  { key: 'alam_galaksi', label: 'Alam Semesta & Galaksi', emoji: '🌌' },
+  { key: 'profesi_gaya_hidup', label: 'Pencapaian & Gaya Hidup', emoji: '🏆' },
+  { key: 'kerajaan_nusantara', label: 'Kerajaan Nusantara & Pusaka', emoji: '🏛️' },
+  { key: 'mitologi_legenda', label: 'Mitologi, Naga & Dewata', emoji: '🐉' },
+  { key: 'esports_gaming', label: 'Esports, Gaming & Retro Arcade', emoji: '🎮' },
+  { key: 'kuliner_nusantara', label: 'Kuliner & Jamuan Nusantara', emoji: '🍜' },
+  { key: 'musik_konser', label: 'Musik, Konser & Festival DJ', emoji: '🎧' },
+  { key: 'otomotif_balap', label: 'Otomotif, Balap & Sirkuit', emoji: '🏎️' },
+  { key: 'olahraga_cuaca_quantum', label: 'Olahraga Juara, Cuaca & Quantum AI', emoji: '⚛️' },
 ];
 
 type CompactCelebSeed = {
@@ -2719,8 +2785,14 @@ const CATALOG_SEEDS: CompactCelebSeed[] = [
   },
 ];
 
+const COMBINED_CATALOG_SEEDS: (CompactCelebSeed | ExtraCompactCelebSeed)[] = [
+  ...CATALOG_SEEDS.filter((s) => s.id !== 'none'),
+  ...EXTRA_CELEBRATION_SEEDS_200,
+  ...CATALOG_SEEDS.filter((s) => s.id === 'none'),
+];
+
 export const CELEBRATION_EFFECTS_CATALOG: CelebrationEffectProfile[] =
-  CATALOG_SEEDS.map(buildCatalogEntry);
+  COMBINED_CATALOG_SEEDS.map((seed) => buildCatalogEntry(seed as CompactCelebSeed));
 
 const LEGACY_EFFECT_MAP: Record<string, string> = {
   confetti: 'ulang_tahun_meriah',
@@ -2739,73 +2811,172 @@ export const getCelebrationEffectProfile = (effectId?: string | null): Celebrati
 };
 
 // ============================================================================
-// SYNTHESIZER WEB AUDIO API OTOMATIS (TANPA FILE MP3 EKSTERNAL)
+// TRACKING TIMER KONFETI & SYNTH AUDIO AGAR BISA DIHENTIKAN SEKETIKA (FORCE CLEAR)
 // ============================================================================
+let activeConfettiTimeoutIds: number[] = [];
 let sharedAudioCtx: AudioContext | null = null;
+let sharedMasterGain: GainNode | null = null;
+let activeOscillators: OscillatorNode[] = [];
 
-const getOrCreateAudioContext = (): AudioContext | null => {
+const getOrCreateAudioContext = (): { ctx: AudioContext; masterGain: GainNode } | null => {
   if (typeof window === 'undefined') return null;
   try {
     if (!sharedAudioCtx) {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
         sharedAudioCtx = new AudioCtx();
+        sharedMasterGain = sharedAudioCtx.createGain();
+        sharedMasterGain.gain.setValueAtTime(1, sharedAudioCtx.currentTime);
+        sharedMasterGain.connect(sharedAudioCtx.destination);
       }
     }
-    if (sharedAudioCtx && sharedAudioCtx.state === 'suspended') {
+    if (!sharedAudioCtx) return null;
+    if (!sharedMasterGain) {
+      sharedMasterGain = sharedAudioCtx.createGain();
+      sharedMasterGain.gain.setValueAtTime(1, sharedAudioCtx.currentTime);
+      sharedMasterGain.connect(sharedAudioCtx.destination);
+    }
+    if (sharedAudioCtx.state === 'suspended') {
       sharedAudioCtx.resume().catch(() => {});
     }
-    return sharedAudioCtx;
+    return { ctx: sharedAudioCtx, masterGain: sharedMasterGain };
   } catch {
     return null;
   }
 };
 
-export const playCelebrationBuildupRiserSynth = (): void => {
-  const ctx = getOrCreateAudioContext();
-  if (!ctx) return;
+export const stopAllCelebrationEffectsAndAudio = (): void => {
+  // 1. Batalkan seluruh timer salvo confetti yang masih antre
+  if (typeof window !== 'undefined') {
+    activeConfettiTimeoutIds.forEach((tid) => window.clearTimeout(tid));
+    activeConfettiTimeoutIds = [];
+  }
+
+  // 2. Bersihkan kanvas confetti seketika
+  try {
+    confetti.reset();
+  } catch {
+    /* ignore */
+  }
+
+  // 3. Hentikan paksa semua oscillator synthesizer yang masih berbunyi
+  try {
+    activeOscillators.forEach((osc) => {
+      try {
+        osc.stop();
+        osc.disconnect();
+      } catch {
+        /* already stopped */
+      }
+    });
+    activeOscillators = [];
+    if (sharedAudioCtx && sharedMasterGain) {
+      sharedMasterGain.gain.cancelScheduledValues(sharedAudioCtx.currentTime);
+      sharedMasterGain.gain.setValueAtTime(0, sharedAudioCtx.currentTime);
+      // Restore master gain slightly after for future blasts
+      window.setTimeout(() => {
+        if (sharedAudioCtx && sharedMasterGain) {
+          sharedMasterGain.gain.setValueAtTime(1, sharedAudioCtx.currentTime);
+        }
+      }, 60);
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // 4. Hentikan suara Web Speech TTS seketika
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      /* ignore */
+    }
+  }
+};
+
+export const speakCelebrationTtsAnnouncement = (
+  text: string,
+  volumePercent: number = 100
+): void => {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  const clean = text.trim();
+  if (!clean) return;
+  try {
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(clean);
+    utter.lang = 'id-ID';
+    utter.rate = 1.03;
+    utter.pitch = 1.05;
+    utter.volume = Math.max(0.05, Math.min(1, volumePercent / 100));
+    window.speechSynthesis.speak(utter);
+  } catch {
+    /* ignore TTS failure */
+  }
+};
+
+export const playCelebrationBuildupRiserSynth = (volumePercent: number = 100): void => {
+  const audio = getOrCreateAudioContext();
+  if (!audio) return;
+  const { ctx, masterGain } = audio;
+  const volScale = Math.max(0.05, Math.min(1, volumePercent / 100));
   try {
     const now = ctx.currentTime;
-    // Riser sweep oscillator
+    masterGain.gain.setValueAtTime(volScale, now);
+
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(110, now);
     osc.frequency.exponentialRampToValueAtTime(880, now + 0.58);
     gain.gain.setValueAtTime(0.01, now);
-    gain.gain.linearRampToValueAtTime(0.14, now + 0.48);
+    gain.gain.linearRampToValueAtTime(0.14 * volScale, now + 0.48);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.62);
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(masterGain);
     osc.start(now);
     osc.stop(now + 0.64);
+    activeOscillators.push(osc);
 
-    // Countdown tick beeps (3 - 2 - 1)
     [0, 0.19, 0.38].forEach((offset, idx) => {
       const tickOsc = ctx.createOscillator();
       const tickGain = ctx.createGain();
       tickOsc.type = 'triangle';
       tickOsc.frequency.setValueAtTime(523.25 + idx * 130, now + offset);
-      tickGain.gain.setValueAtTime(0.14, now + offset);
+      tickGain.gain.setValueAtTime(0.14 * volScale, now + offset);
       tickGain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.12);
       tickOsc.connect(tickGain);
-      tickGain.connect(ctx.destination);
+      tickGain.connect(masterGain);
       tickOsc.start(now + offset);
       tickOsc.stop(now + offset + 0.13);
+      activeOscillators.push(tickOsc);
     });
   } catch {
     /* ignore audio errors */
   }
 };
 
-export const playCelebrationFanfareSynth = (effectId?: string | null): void => {
+export const playCelebrationFanfareSynth = (
+  effectId?: string | null,
+  styleOverride?: CelebrationAudioSynthStyle | 'auto_theme',
+  volumePercent: number = 100
+): void => {
   const profile = getCelebrationEffectProfile(effectId);
-  if (profile.id === 'none' || profile.audioSynthStyle === 'silent') return;
-  const ctx = getOrCreateAudioContext();
-  if (!ctx) return;
+  const resolvedStyle: CelebrationAudioSynthStyle =
+    styleOverride && styleOverride !== 'auto_theme'
+      ? styleOverride
+      : profile.audioSynthStyle;
+
+  if (profile.id === 'none' || resolvedStyle === 'silent') return;
+  const audio = getOrCreateAudioContext();
+  if (!audio) return;
+  const { ctx, masterGain } = audio;
+  const volScale = Math.max(0.05, Math.min(1, volumePercent / 100));
 
   try {
     const now = ctx.currentTime;
+    masterGain.gain.setValueAtTime(volScale, now);
 
     // 1. Sub-Bass Impact Drop
     const bassOsc = ctx.createOscillator();
@@ -2813,14 +2984,15 @@ export const playCelebrationFanfareSynth = (effectId?: string | null): void => {
     bassOsc.type = 'sine';
     bassOsc.frequency.setValueAtTime(135, now);
     bassOsc.frequency.exponentialRampToValueAtTime(36, now + 0.55);
-    bassGain.gain.setValueAtTime(0.28, now);
+    bassGain.gain.setValueAtTime(0.28 * volScale, now);
     bassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
     bassOsc.connect(bassGain);
-    bassGain.connect(ctx.destination);
+    bassGain.connect(masterGain);
     bassOsc.start(now);
     bassOsc.stop(now + 0.62);
+    activeOscillators.push(bassOsc);
 
-    // 2. Thematic Melodic Fanfare Arpeggio
+    // 2. Thematic Melodic Fanfare Arpeggio (16 Styles)
     const melodies: Record<
       Exclude<CelebrationAudioSynthStyle, 'silent'>,
       { notes: number[]; wave: OscillatorType; stepSec: number }
@@ -2829,6 +3001,11 @@ export const playCelebrationFanfareSynth = (effectId?: string | null): void => {
         notes: [261.63, 329.63, 392.0, 523.25, 659.25, 783.99, 1046.5],
         wave: 'triangle',
         stepSec: 0.09,
+      },
+      gamelan_royal: {
+        notes: [293.66, 329.63, 392.0, 440.0, 587.33, 659.25, 783.99],
+        wave: 'sine',
+        stepSec: 0.11,
       },
       patriot_march: {
         notes: [392.0, 392.0, 523.25, 659.25, 783.99, 659.25, 1046.5],
@@ -2845,10 +3022,45 @@ export const playCelebrationFanfareSynth = (effectId?: string | null): void => {
         wave: 'sawtooth',
         stepSec: 0.075,
       },
+      quantum_ai_pulse: {
+        notes: [246.94, 369.99, 493.88, 739.99, 987.77, 1479.98],
+        wave: 'sine',
+        stepSec: 0.065,
+      },
       anime_power: {
         notes: [329.63, 392.0, 493.88, 659.25, 783.99, 987.77, 1318.5],
         wave: 'square',
         stepSec: 0.07,
+      },
+      arcade_8bit: {
+        notes: [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1567.98],
+        wave: 'square',
+        stepSec: 0.06,
+      },
+      edm_stadium_drop: {
+        notes: [196.0, 293.66, 392.0, 587.33, 783.99, 1174.66],
+        wave: 'sawtooth',
+        stepSec: 0.07,
+      },
+      racing_nitro_rev: {
+        notes: [185.0, 277.18, 369.99, 554.37, 739.99, 1108.73],
+        wave: 'sawtooth',
+        stepSec: 0.055,
+      },
+      stadium_champion_horn: {
+        notes: [349.23, 440.0, 523.25, 698.46, 880.0, 1046.5, 1396.91],
+        wave: 'triangle',
+        stepSec: 0.09,
+      },
+      mythic_orchestra: {
+        notes: [220.0, 261.63, 329.63, 440.0, 523.25, 659.25, 880.0],
+        wave: 'triangle',
+        stepSec: 0.1,
+      },
+      thunder_storm_bass: {
+        notes: [110.0, 146.83, 220.0, 293.66, 440.0, 587.33],
+        wave: 'sawtooth',
+        stepSec: 0.085,
       },
       cosmic_arp: {
         notes: [261.63, 311.13, 392.0, 466.16, 523.25, 622.25, 783.99, 1046.5],
@@ -2867,7 +3079,7 @@ export const playCelebrationFanfareSynth = (effectId?: string | null): void => {
       },
     };
 
-    const conf = melodies[profile.audioSynthStyle] || melodies.royal_fanfare;
+    const conf = melodies[resolvedStyle] || melodies.royal_fanfare;
 
     conf.notes.forEach((freq, idx) => {
       const start = now + idx * conf.stepSec;
@@ -2875,23 +3087,29 @@ export const playCelebrationFanfareSynth = (effectId?: string | null): void => {
       const gain = ctx.createGain();
       osc.type = conf.wave;
       osc.frequency.setValueAtTime(freq, start);
-      const peakGain = conf.wave === 'square' || conf.wave === 'sawtooth' ? 0.08 : 0.14;
+      const peakGain = (conf.wave === 'square' || conf.wave === 'sawtooth' ? 0.08 : 0.14) * volScale;
       gain.gain.setValueAtTime(0.001, start);
       gain.gain.linearRampToValueAtTime(peakGain, start + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, start + 0.45);
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(masterGain);
       osc.start(start);
       osc.stop(start + 0.48);
+      activeOscillators.push(osc);
     });
   } catch {
     /* ignore audio errors */
   }
 };
 
-export const playCelebrationComboHitSynth = (comboCount: number): void => {
-  const ctx = getOrCreateAudioContext();
-  if (!ctx) return;
+export const playCelebrationComboHitSynth = (
+  comboCount: number,
+  volumePercent: number = 100
+): void => {
+  const audio = getOrCreateAudioContext();
+  if (!audio) return;
+  const { ctx, masterGain } = audio;
+  const volScale = Math.max(0.05, Math.min(1, volumePercent / 100));
   try {
     const now = ctx.currentTime;
     const baseFreq = 440 + Math.min(comboCount, 24) * 32;
@@ -2900,12 +3118,13 @@ export const playCelebrationComboHitSynth = (comboCount: number): void => {
       const gain = ctx.createGain();
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(freq, now + idx * 0.04);
-      gain.gain.setValueAtTime(0.12, now + idx * 0.04);
+      gain.gain.setValueAtTime(0.12 * volScale, now + idx * 0.04);
       gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.04 + 0.28);
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(masterGain);
       osc.start(now + idx * 0.04);
       osc.stop(now + idx * 0.04 + 0.3);
+      activeOscillators.push(osc);
     });
   } catch {
     /* ignore audio errors */
@@ -2913,7 +3132,7 @@ export const playCelebrationComboHitSynth = (comboCount: number): void => {
 };
 
 // ============================================================================
-// KOREOGRAFI MULTI-SALVO CANVAS CONFETTI 100.000X ULTRA MAX OVERDRIVE
+// KOREOGRAFI MULTI-SALVO CANVAS CONFETTI HINGGA 1.000.000X HYPER GODLIKE
 // ============================================================================
 export const triggerCanvasConfettiForCelebration = (
   effectId?: string | null,
@@ -2924,7 +3143,25 @@ export const triggerCanvasConfettiForCelebration = (
 
   const colors = profile.confettiColors;
   const mult =
-    intensityLevel === '100000x' ? 1.45 : intensityLevel === '10000x' ? 1.15 : 0.75;
+    intensityLevel === '1000000x'
+      ? 1.9
+      : intensityLevel === '100000x'
+      ? 1.45
+      : intensityLevel === '10000x'
+      ? 1.15
+      : 0.75;
+
+  const queueConfetti = (delayMs: number, fn: () => void) => {
+    if (typeof window === 'undefined') return;
+    const tid = window.setTimeout(() => {
+      try {
+        fn();
+      } catch {
+        /* ignore */
+      }
+    }, delayMs);
+    activeConfettiTimeoutIds.push(tid);
+  };
 
   try {
     // Gelombang 1: Ledakan Inti Pusat (Super Center Nova)
@@ -2938,113 +3175,116 @@ export const triggerCanvasConfettiForCelebration = (
     });
 
     // Gelombang 2: Salvo Meriam Kembar Kiri & Kanan
-    setTimeout(() => {
-      try {
-        confetti({
-          particleCount: Math.round(80 * mult),
-          angle: 62,
-          spread: 72,
-          startVelocity: 62,
-          origin: { x: 0.04, y: 0.78 },
-          colors,
-        });
-        confetti({
-          particleCount: Math.round(80 * mult),
-          angle: 118,
-          spread: 72,
-          startVelocity: 62,
-          origin: { x: 0.96, y: 0.78 },
-          colors,
-        });
-      } catch {
-        /* ignore */
-      }
-    }, 220);
+    queueConfetti(220, () => {
+      confetti({
+        particleCount: Math.round(80 * mult),
+        angle: 62,
+        spread: 72,
+        startVelocity: 62,
+        origin: { x: 0.04, y: 0.78 },
+        colors,
+      });
+      confetti({
+        particleCount: Math.round(80 * mult),
+        angle: 118,
+        spread: 72,
+        startVelocity: 62,
+        origin: { x: 0.96, y: 0.78 },
+        colors,
+      });
+    });
 
     // Gelombang 3: Kembang Api Udara Kiri-Atas & Kanan-Atas
-    setTimeout(() => {
-      try {
-        confetti({
-          particleCount: Math.round(75 * mult),
-          spread: 360,
-          startVelocity: 38,
-          origin: { x: 0.24, y: 0.28 },
-          colors,
-          scalar: 1.15,
-        });
-        confetti({
-          particleCount: Math.round(75 * mult),
-          spread: 360,
-          startVelocity: 38,
-          origin: { x: 0.76, y: 0.28 },
-          colors,
-          scalar: 1.15,
-        });
-      } catch {
-        /* ignore */
-      }
-    }, 480);
+    queueConfetti(480, () => {
+      confetti({
+        particleCount: Math.round(75 * mult),
+        spread: 360,
+        startVelocity: 38,
+        origin: { x: 0.24, y: 0.28 },
+        colors,
+        scalar: 1.15,
+      });
+      confetti({
+        particleCount: Math.round(75 * mult),
+        spread: 360,
+        startVelocity: 38,
+        origin: { x: 0.76, y: 0.28 },
+        colors,
+        scalar: 1.15,
+      });
+    });
 
-    if (intensityLevel === '10000x' || intensityLevel === '100000x') {
-      // Gelombang 4: Tirai Emas / Bintang dari Atas Layar
-      setTimeout(() => {
-        try {
-          confetti({
-            particleCount: Math.round(95 * mult),
-            spread: 150,
-            startVelocity: 25,
-            gravity: 0.75,
-            origin: { x: 0.5, y: 0.08 },
-            colors,
-            scalar: 1.3,
-          });
-        } catch {
-          /* ignore */
-        }
-      }, 780);
+    if (
+      intensityLevel === '10000x' ||
+      intensityLevel === '100000x' ||
+      intensityLevel === '1000000x'
+    ) {
+      queueConfetti(780, () => {
+        confetti({
+          particleCount: Math.round(95 * mult),
+          spread: 150,
+          startVelocity: 25,
+          gravity: 0.75,
+          origin: { x: 0.5, y: 0.08 },
+          colors,
+          scalar: 1.3,
+        });
+      });
     }
 
-    if (intensityLevel === '100000x') {
-      // Gelombang 5 & 6: Salvo Penutup 100.000x Ultra Max Overdrive
-      setTimeout(() => {
-        try {
-          confetti({
-            particleCount: 110,
-            angle: 75,
-            spread: 85,
-            startVelocity: 65,
-            origin: { x: 0.15, y: 0.85 },
-            colors,
-            scalar: 1.35,
-          });
-          confetti({
-            particleCount: 110,
-            angle: 105,
-            spread: 85,
-            startVelocity: 65,
-            origin: { x: 0.85, y: 0.85 },
-            colors,
-            scalar: 1.35,
-          });
-        } catch {
-          /* ignore */
-        }
-      }, 1120);
+    if (intensityLevel === '100000x' || intensityLevel === '1000000x') {
+      queueConfetti(1120, () => {
+        confetti({
+          particleCount: 110,
+          angle: 75,
+          spread: 85,
+          startVelocity: 65,
+          origin: { x: 0.15, y: 0.85 },
+          colors,
+          scalar: 1.35,
+        });
+        confetti({
+          particleCount: 110,
+          angle: 105,
+          spread: 85,
+          startVelocity: 65,
+          origin: { x: 0.85, y: 0.85 },
+          colors,
+          scalar: 1.35,
+        });
+      });
 
-      setTimeout(() => {
-        try {
-          confetti({
-            particleCount: 140,
-            spread: 360,
-            startVelocity: 48,
-            origin: { x: 0.5, y: 0.38 },
-            colors,
-            scalar: 1.4,
-          });
-        } catch {
-          /* ignore */
-        }
-      }, 1480);
+      queueConfetti(1480, () => {
+        confetti({
+          particleCount: 140,
+          spread: 360,
+          startVelocity: 48,
+          origin: { x: 0.5, y: 0.38 },
+          colors,
+          scalar: 1.4,
+        });
+      });
+    }
+
+    if (intensityLevel === '1000000x') {
+      queueConfetti(1820, () => {
+        confetti({
+          particleCount: 160,
+          spread: 360,
+          startVelocity: 55,
+          origin: { x: 0.2, y: 0.5 },
+          colors,
+          scalar: 1.5,
+        });
+        confetti({
+          particleCount: 160,
+          spread: 360,
+          startVelocity: 55,
+          origin: { x: 0.8, y: 0.5 },
+          colors,
+          scalar: 1.5,
+        });
+      });
     }
   } catch {
     /* ignore canvas-confetti errors */

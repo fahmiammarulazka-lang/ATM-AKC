@@ -250,6 +250,9 @@ export interface BankAccount {
   totalJobEarnings?: number;
   suitWins?: number;
   suitPlayed?: number;
+  suitWinStreak?: number;
+  arcadeClaimedTargets?: Record<string, number[]>;
+  arcadeHighScores?: Record<string, number>;
   clickPower?: number; // Default 1 klik per tap (bisa di-boost lewat Super Tools Admin)
   salaryMultiplier?: number; // Default 1x gaji (bisa di-boost lewat Super Tools Admin)
   cashbackPercent?: number; // Cashback otomatis setiap transaksi (Super Tools Admin)
@@ -1066,10 +1069,6 @@ export type GiftRewardType =
   | 'upgrade_card_tier'
   | 'special_deposito'
   | 'dream_pocket_fund'
-  | 'mining_rig_rtx'
-  | 'mining_ai_cluster'
-  | 'supercar_porsche'
-  | 'supercar_lambo'
   | 'trading_gold_kg'
   | 'trading_btc_vip'
   | 'forgive_loans'
@@ -1085,7 +1084,7 @@ export type GiftRewardType =
   | 'role_grant_trial'
   | 'role_gacha_random_permanent'
   | 'role_gacha_random_trial'
-  // Hadiah Tambahan 50+ Katalog (Saldo, Koin, Karir, Emas, Bisnis, VIP)
+  // Hadiah Tambahan Katalog (Saldo, Koin, Karir, Emas, Tabungan, VIP — Tanpa Mining / Supercar)
   | 'salary_jackpot_drop'
   | 'coin_jackpot_rain'
   | 'cashback_tier_max'
@@ -1102,9 +1101,6 @@ export type GiftRewardType =
   | 'high_yield_deposito_vip'
   | 'emergency_vault_fund'
   | 'pln_super_pack'
-  | 'mining_quantum_datacenter'
-  | 'supercar_bugatti_chiron'
-  | 'supercar_ferrari_sf90'
   | 'trading_sp500_vip'
   | 'sultan_empire_dividend'
   | 'upgrade_card_platinum_perm'
@@ -1112,9 +1108,7 @@ export type GiftRewardType =
   | 'trial_all_assets_boost'
   | 'upgrade_card_admin_infinity_perm'
   | 'royal_crown_100g_50m_pack'
-  // 40 Hadiah Tambahan (Melengkapi Tepat 100 Macam Hadiah + Banyak Fitur Trial & Sub-Pilihan)
   | 'job_career_custom_selector'
-  | 'business_custom_selector'
   | 'trading_custom_selector'
   | 'vip_protection_selector'
   | 'trial_card_tier_selector'
@@ -1133,9 +1127,6 @@ export type GiftRewardType =
   | 'trial_trading_selector'
   | 'trial_trading_btc_whale'
   | 'trial_trading_gold_bullion'
-  | 'trial_business_selector'
-  | 'trial_business_mining_farm'
-  | 'trial_business_hypercar_garage'
   | 'trial_royal_emperor_all_access'
   | 'trial_gacha_mystery_duration'
   | 'trial_double_reward_points'
@@ -1201,7 +1192,6 @@ export interface GiftRewardCatalogMeta {
     | 'Uang & Koin'
     | 'Karir & Level'
     | 'Emas & Tabungan'
-    | 'Aset & Bisnis'
     | 'VIP & Proteksi'
     | 'Hadiah Trial';
   description: string;
@@ -1308,7 +1298,7 @@ export interface AdminGiftEventPackage {
   targetCardTier?: CardTier | 'all';
   targetDevRoleOnly?: string;
   celebrationEffect?: string;
-  celebrationIntensity?: '1000x' | '10000x' | '100000x';
+  celebrationIntensity?: '1000x' | '10000x' | '100000x' | '1000000x';
   soundEffect?: 'chime' | 'harp' | 'fanfare' | 'silent';
   requireAdminVerifiedAccessForNotif?: boolean;
   adminAuditLogTag?: string;
@@ -1346,13 +1336,59 @@ export type DashboardEffectBannerStyle =
 
 export type DashboardEffectSoundMode = 'fanfare_auto' | 'silent';
 
+export type DashboardScreenBorderFrameStyle =
+  | 'none'
+  | 'gold_royal'
+  | 'cyber_neon'
+  | 'rainbow_prism'
+  | 'fire_inferno'
+  | 'emerald_laser'
+  | 'emerald_matrix'
+  | 'crimson_alert'
+  | 'rainbow_overdrive';
+
+export type DashboardCursorTrailStyle =
+  | 'none'
+  | 'sparkle_dust'
+  | 'rainbow_stars'
+  | 'theme_sparkles'
+  | 'gold_coins'
+  | 'neon_laser'
+  | 'fire_aura';
+
+export type DashboardParticleGravityStyle =
+  | 'theme_default'
+  | 'fall_down'
+  | 'float_up'
+  | 'diagonal_storm'
+  | 'vortex_spiral'
+  | 'matrix_digital_rain';
+
+export type DashboardBalanceCardThemeOverride =
+  | 'auto_effect'
+  | 'gold_sultan'
+  | 'cyber_cyan'
+  | 'emerald_royal'
+  | 'crimson_fire'
+  | 'galaxy_purple';
+
+export interface DashboardEffectBlastLogEntry {
+  id: string;
+  timestamp: string;
+  effectId: string;
+  intensity: string;
+  targetLabel?: string;
+  targetSummary?: string;
+  actionType?: string;
+}
+
 export interface AdminDashboardEffectPackage {
   id: string;
   title: string;
   senderName: string;
   welcomeMessage: string;
   celebrationEffect: string;
-  celebrationIntensity: '1000x' | '10000x' | '100000x';
+  celebrationIntensity: '1000x' | '10000x' | '100000x' | '1000000x';
   targetAccountId: string; // '__ALL__' | '__MULTI__' | specific BankAccount.id
   targetAccountIds?: string[];
   revokedAccountIds?: string[];
@@ -1366,6 +1402,43 @@ export interface AdminDashboardEffectPackage {
   bannerStyle?: DashboardEffectBannerStyle;
   soundMode?: DashboardEffectSoundMode;
   stageDurationSeconds?: number;
+  // 20+ Fitur Canggih Studio Efek Dashboard (100% Dikendalikan Admin)
+  secondaryComboEffectIds?: string[]; // Fitur 2: Multi-Combo Layering (Gabung 2-3 Efek Sekaligus)
+  customParticleCount?: number; // Fitur 3: Custom Slider Kepadatan Partikel (20 - 240)
+  animationSpeedMultiplier?: number; // Fitur 4: Kecepatan Animasi (0.5x, 1x, 1.5x, 2.5x)
+  particleSizeScale?: number; // Fitur 5: Ukuran Partikel (0.75x, 1x, 1.35x, 1.75x)
+  gravityDirection?: DashboardParticleGravityStyle; // Fitur 6: Arah Jatuh & Gravitasi Partikel
+  screenBorderFrame?: DashboardScreenBorderFrameStyle; // Fitur 7: Bingkai Layar Penuh Neon 3D
+  showMarqueeTicker?: boolean; // Fitur 8: Ticker Teks Berjalan di Atas Dashboard
+  marqueeTickerText?: string; // Isi Teks Marquee Berjalan
+  cursorTrailMode?: DashboardCursorTrailStyle; // Fitur 9: Efek Jejak Kursor / Sentuhan di Dashboard Nasabah
+  showFloatingTrophyBadge?: boolean; // Fitur 10: Lencana Trofi Hologram 3D Mengambang di Pojok Dashboard
+  floatingBadgePosition?:
+    | 'top_right'
+    | 'bottom_right'
+    | 'bottom_left'
+    | 'bottom-right'
+    | 'bottom-left'
+    | 'top-right';
+  balanceCardThemeOverride?: DashboardBalanceCardThemeOverride; // Fitur 11: Tema Warna Kartu Saldo Utama
+  showStadiumSpotlights?: boolean; // Fitur 12a: Sorot Lampu Stadion & Tirai Teater
+  showLightningBolts?: boolean; // Fitur 12b: Sambaran Petir Halilintar Sinematik
+  ttsVoiceAnnouncementEnabled?: boolean; // Fitur 13: Pengumuman Suara Bicara TTS Bahasa Indonesia Otomatis
+  ttsCustomText?: string;
+  audioSynthOverride?: string; // Fitur 14: Pemilih 16 Gaya Musik Synthesizer & Volume
+  soundVolumePercent?: number;
+  gachaRandomEffectOnBlast?: boolean; // Fitur 15: Mode Gacha Efek Acak Saat Ditembak
+  autoRotatePlaylistEnabled?: boolean; // Fitur 16: Playlist Auto-Rotate Efek
+  playlistEffectIds?: string[];
+  playlistIntervalSeconds?: number;
+  scheduledTriggerTime?: string; // Fitur 17: Jadwal Jam/Tanggal Otomatis
+  vipSirenAlertMode?: boolean; // Fitur 18: Sirine Darurat / Pengumuman VIP Prioritas
+  targetCardTiers?: CardTier[]; // Fitur 19: Filter Target Per Tier Kartu
+  minJobLevelTarget?: number; // Fitur 20: Filter Target Per Level Karir / Role Dev
+  targetDevRoleId?: string;
+  vipPriorityLock?: boolean; // Fitur 21: Kunci Prioritas VIP (Anti-Tertimpa)
+  presetTemplateId?: string; // Fitur 22: ID Preset Template Cepat
+  blastLogHistory?: DashboardEffectBlastLogEntry[];
   isActive: boolean;
   triggerNonce: number;
   createdAt: string;

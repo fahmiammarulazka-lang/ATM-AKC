@@ -1,22 +1,32 @@
 /**
- * CelebrationSpectacleOverlay — Mesin Panggung Sinematik 100.000x Ultra Max Overdrive
+ * CelebrationSpectacleOverlay — Mesin Panggung Sinematik hingga 1.000.000x HYPER GODLIKE OVERDRIVE
  * Digunakan bersama oleh:
- * 1) Hadiah & Surat (108 Efek Perayaan di 9 Kategori)
- * 2) Studio Efek Dashboard 100.000x (1 Orang, Banyak Akun, atau Semua Nasabah)
+ * 1) Hadiah & Surat (311 Efek Perayaan di 16 Kategori)
+ * 2) Studio Efek Dashboard (1 Orang, Banyak Akun, atau Semua Nasabah)
  *
- * Mencakup:
- * - PreClaimCelebrationAmbientBackdrop: Cincin mandala berputar di sudut + 22 partikel atmosfer hidup
- * - PreClaimCardOrnamentStrip: Lencana perayaan + koreografi + badge 100.000x
- * - PreClaimMagicRingSealAura: Cincin sihir / mandala berputar hidup di belakang segel lilin 3D & kotak hadiah
- * - CelebrationClaimBurstOverlay (7 Lapis Panggung Sinematik 100.000x):
- *   Fase 1: Hitung Mundur Dramatis (3 • 2 • 1 • MAX OVERDRIVE!) + Getaran Layar + Kilatan Cahaya + Riser Synth
- *   Fase 2: Portal Dimensi 3D + 14 Sinar Laser Menyapu + Cincin Gelombang Kejut + Parade Maskot Unik +
- *           96+ Badai Partikel + Trofi Hologram 3D Tengah Layar + Klik Kombo Interaktif (COMBO x2..x99!) +
- *           Synthesizer Musik Fanfare Web Audio API Otomatis
+ * Perbaikan Bug Panggung & Fitur Lengkap:
+ * - Tombol Tutup Panggung + shortcut ESC tampil bersih tepat setelah hitung mundur 3-2-1 selesai.
+ * - Penutupan panggung / Force Clear Stage langsung menghentikan semua salvo konfeti,
+ *   AudioContext oscillator, dan Web Speech TTS seketika tanpa menyisakan animasi/suara.
+ * - Setiap panggung memiliki batas auto-tutup bawaan agar tidak pernah macet terbuka permanen.
+ * - Mendukung Multi-Combo Layering (gabung hingga 3 efek), Badai Partikel Kustom,
+ *   Kecepatan Animasi, Skala Ukuran, Arah Gravitasi, Sorot Stadion + Tirai Teater,
+ *   Petir Halilintar, 16 Gaya Audio Synth + TTS Bahasa Indonesia.
  */
-import React, { useEffect, useMemo, useState } from 'react';
-import { Sparkles, Volume2, VolumeX, RotateCcw, X, Flame, Zap, Trophy } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Sparkles,
+  Volume2,
+  VolumeX,
+  RotateCcw,
+  X,
+  Flame,
+  Zap,
+  Trophy,
+  Clock,
+} from 'lucide-react';
+import {
+  CelebrationAudioSynthStyle,
   CelebrationEffectProfile,
   CelebrationIntensityLevel,
   getCelebrationEffectProfile,
@@ -24,9 +34,12 @@ import {
   playCelebrationBuildupRiserSynth,
   playCelebrationComboHitSynth,
   playCelebrationFanfareSynth,
+  speakCelebrationTtsAnnouncement,
+  stopAllCelebrationEffectsAndAudio,
   triggerCanvasConfettiForCelebration,
   triggerComboClickConfettiAtPoint,
 } from '../data/celebrationEffectsCatalog';
+import { DashboardParticleGravityStyle } from '../types/bank';
 
 // ============================================================================
 // 1. HIASAN PRA-KLAIM & AURA LATAR HIDUP (MODAL & DASHBOARD)
@@ -40,7 +53,14 @@ export const PreClaimCelebrationAmbientBackdrop: React.FC<{
   const ambientNodes = useMemo(() => {
     if (profile.id === 'none') return [];
     const emojis = profile.particleEmojis;
-    const count = intensityLevel === '100000x' ? 22 : intensityLevel === '10000x' ? 16 : 12;
+    const count =
+      intensityLevel === '1000000x'
+        ? 30
+        : intensityLevel === '100000x'
+        ? 22
+        : intensityLevel === '10000x'
+        ? 16
+        : 12;
     return Array.from({ length: count }).map((_, idx) => {
       const emoji = emojis[idx % emojis.length];
       const leftPct = 3 + ((idx * 19) % 94);
@@ -66,7 +86,6 @@ export const PreClaimCelebrationAmbientBackdrop: React.FC<{
       className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl z-0"
       aria-hidden="true"
     >
-      {/* Aura Cahaya Sudut Berdenyut */}
       <div
         style={{
           background: `radial-gradient(circle at 15% 15%, ${profile.laserColors[0]}28 0%, transparent 55%), radial-gradient(circle at 85% 85%, ${profile.laserColors[1]}28 0%, transparent 55%)`,
@@ -74,7 +93,6 @@ export const PreClaimCelebrationAmbientBackdrop: React.FC<{
         className="absolute inset-0 animate-pulse"
       />
 
-      {/* Cincin Sihir Mandala Sudut Berputar */}
       <div
         style={{ borderColor: `${profile.laserColors[0]}55` }}
         className="absolute -top-12 -left-12 w-36 h-36 rounded-full border-2 border-dashed animate-spin opacity-45"
@@ -84,7 +102,6 @@ export const PreClaimCelebrationAmbientBackdrop: React.FC<{
         className="absolute -bottom-12 -right-12 w-36 h-36 rounded-full border-2 border-dashed animate-spin opacity-45"
       />
 
-      {/* Sudut Ornamen Khas Perayaan */}
       <div className="absolute top-3 left-3 text-lg sm:text-xl opacity-85 select-none animate-pulse">
         {profile.cornerOrnamentSymbol}
       </div>
@@ -98,7 +115,6 @@ export const PreClaimCelebrationAmbientBackdrop: React.FC<{
         {profile.cornerOrnamentSymbol}
       </div>
 
-      {/* Partikel Atmosfer Melayang Halus Sebelum Diklaim */}
       {ambientNodes.map((node) => (
         <span
           key={node.id}
@@ -130,7 +146,6 @@ export const PreClaimMagicRingSealAura: React.FC<{
       className="pointer-events-none absolute inset-0 flex items-center justify-center"
       aria-hidden="true"
     >
-      {/* Cincin Luar Berputar Searah Jarum Jam */}
       <div
         style={{
           borderColor: `${profile.laserColors[0]}88`,
@@ -138,7 +153,6 @@ export const PreClaimMagicRingSealAura: React.FC<{
         }}
         className="w-36 h-36 rounded-full border-2 border-dashed animate-spin opacity-75"
       />
-      {/* Cincin Dalam Berputar & Berdenyut */}
       <div
         style={{
           borderColor: `${profile.laserColors[1]}aa`,
@@ -151,7 +165,7 @@ export const PreClaimMagicRingSealAura: React.FC<{
 };
 
 // ============================================================================
-// 3. HIASAN GARLAND & LENCANA TEMA 100.000X PADA AMPLOP & KOTAK HADIAH TERSEGEL
+// 3. HIASAN GARLAND & LENCANA TEMA PADA AMPLOP & KOTAK HADIAH TERSEGEL
 // ============================================================================
 export const PreClaimCardOrnamentStrip: React.FC<{
   effectId?: string | null;
@@ -192,7 +206,7 @@ export const PreClaimCardOrnamentStrip: React.FC<{
 };
 
 // ============================================================================
-// 4. PANGGUNG SINEMATIK 100.000X ULTRA MAX OVERDRIVE (7 LAPIS + KLIK KOMBO)
+// 4. PANGGUNG SINEMATIK HINGGA 1.000.000X HYPER GODLIKE OVERDRIVE
 // ============================================================================
 interface ClickRippleBurst {
   id: number;
@@ -204,6 +218,7 @@ interface ClickRippleBurst {
 
 export const CelebrationClaimBurstOverlay: React.FC<{
   effectId?: string | null;
+  secondaryComboEffectIds?: string[];
   intensityLevel?: CelebrationIntensityLevel;
   burstNonce: number;
   customHeadlineOverride?: string;
@@ -213,8 +228,20 @@ export const CelebrationClaimBurstOverlay: React.FC<{
   isPreviewMode?: boolean;
   forceSilentAudio?: boolean;
   autoDismissSeconds?: number;
+  customParticleCount?: number;
+  animationSpeedMultiplier?: number;
+  particleSizeScale?: number;
+  gravityDirection?: DashboardParticleGravityStyle;
+  showStadiumSpotlights?: boolean;
+  showLightningBolts?: boolean;
+  ttsVoiceAnnouncementEnabled?: boolean;
+  ttsCustomText?: string;
+  audioSynthOverride?: CelebrationAudioSynthStyle | 'auto_theme';
+  soundVolumePercent?: number;
+  forceClearNonce?: number;
 }> = ({
   effectId,
+  secondaryComboEffectIds = [],
   intensityLevel = '100000x',
   burstNonce,
   customHeadlineOverride,
@@ -224,31 +251,99 @@ export const CelebrationClaimBurstOverlay: React.FC<{
   isPreviewMode = false,
   forceSilentAudio = false,
   autoDismissSeconds,
+  customParticleCount,
+  animationSpeedMultiplier = 1,
+  particleSizeScale = 1,
+  gravityDirection = 'theme_default',
+  showStadiumSpotlights = false,
+  showLightningBolts = false,
+  ttsVoiceAnnouncementEnabled = false,
+  ttsCustomText,
+  audioSynthOverride = 'auto_theme',
+  soundVolumePercent = 100,
+  forceClearNonce = 0,
 }) => {
   const profile: CelebrationEffectProfile = getCelebrationEffectProfile(effectId);
+  const comboProfiles = useMemo(
+    () =>
+      (secondaryComboEffectIds || [])
+        .filter((cid) => cid && cid !== profile.id && cid !== 'none')
+        .slice(0, 2)
+        .map((cid) => getCelebrationEffectProfile(cid)),
+    [secondaryComboEffectIds, profile.id]
+  );
+
   const intensityMeta = getCelebrationIntensityMeta(intensityLevel);
+  const resolvedAutoDismissSec =
+    autoDismissSeconds && autoDismissSeconds > 0 ? autoDismissSeconds : 8;
 
   const [stagePhase, setStagePhase] = useState<'buildup' | 'climax'>('buildup');
   const [countdownNum, setCountdownNum] = useState<number>(3);
+  const [remainingAutoCloseSec, setRemainingAutoCloseSec] = useState<number>(
+    resolvedAutoDismissSec
+  );
   const [comboCount, setComboCount] = useState<number>(1);
   const [audioMuted, setAudioMuted] = useState<boolean>(forceSilentAudio);
   const [clickRipples, setClickRipples] = useState<ClickRippleBurst[]>([]);
+
+  const dismissedForNonceRef = useRef<number>(0);
+  const prevForceClearRef = useRef<number>(forceClearNonce);
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
+  const handleCleanDismiss = useCallback(() => {
+    if (dismissedForNonceRef.current === burstNonce) return;
+    dismissedForNonceRef.current = burstNonce;
+    stopAllCelebrationEffectsAndAudio();
+    onDismissRef.current?.();
+  }, [burstNonce]);
 
   useEffect(() => {
     setAudioMuted(forceSilentAudio);
   }, [forceSilentAudio]);
 
+  // Immediate emergency shutdown if Admin triggers global Force Clear Stage
+  useEffect(() => {
+    if (forceClearNonce > prevForceClearRef.current) {
+      prevForceClearRef.current = forceClearNonce;
+      stopAllCelebrationEffectsAndAudio();
+      onDismissRef.current?.();
+    }
+  }, [forceClearNonce]);
+
+  // ESC key handler (active once countdown finishes, per user rule)
+  useEffect(() => {
+    if (!burstNonce || stagePhase !== 'climax') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleCleanDismiss();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [burstNonce, stagePhase, handleCleanDismiss]);
+
+  // Cleanup on unmount so no stray confetti/audio/TTS ever lingers
+  useEffect(() => {
+    return () => {
+      stopAllCelebrationEffectsAndAudio();
+    };
+  }, []);
+
   // Trigger dramatic 3-2-1 buildup and then climax eruption whenever burstNonce changes
   useEffect(() => {
     if (!burstNonce || profile.id === 'none') return;
+    dismissedForNonceRef.current = 0;
     setStagePhase('buildup');
     setCountdownNum(3);
     setComboCount(1);
     setClickRipples([]);
+    setRemainingAutoCloseSec(resolvedAutoDismissSec);
 
     const shouldMute = forceSilentAudio || audioMuted;
     if (!shouldMute) {
-      playCelebrationBuildupRiserSynth();
+      playCelebrationBuildupRiserSynth(soundVolumePercent);
     }
 
     const t1 = window.setTimeout(() => setCountdownNum(2), 190);
@@ -256,44 +351,77 @@ export const CelebrationClaimBurstOverlay: React.FC<{
     const t3 = window.setTimeout(() => {
       setStagePhase('climax');
       triggerCanvasConfettiForCelebration(profile.id, intensityMeta.id);
+      comboProfiles.forEach((cp, idx) => {
+        window.setTimeout(() => {
+          triggerCanvasConfettiForCelebration(cp.id, '1000x');
+        }, 180 * (idx + 1));
+      });
       if (!shouldMute) {
-        playCelebrationFanfareSynth(profile.id);
+        playCelebrationFanfareSynth(
+          profile.id,
+          audioSynthOverride,
+          soundVolumePercent
+        );
+        if (ttsVoiceAnnouncementEnabled) {
+          const spoken =
+            (ttsCustomText && ttsCustomText.trim()) ||
+            customHeadlineOverride ||
+            profile.celebrationHeadline;
+          window.setTimeout(() => {
+            speakCelebrationTtsAnnouncement(spoken, soundVolumePercent);
+          }, 350);
+        }
       }
     }, 580);
 
-    let tAutoDismiss: number | undefined;
-    if (autoDismissSeconds && autoDismissSeconds > 0 && onDismiss) {
-      tAutoDismiss = window.setTimeout(() => {
-        onDismiss();
-      }, autoDismissSeconds * 1000);
-    }
+    // Countdown tick for auto-dismiss badge + guaranteed hard auto-close timeout
+    const autoCloseInterval = window.setInterval(() => {
+      setRemainingAutoCloseSec((prev) => (prev > 1 ? prev - 1 : 0));
+    }, 1000);
+
+    const tAutoDismiss = window.setTimeout(() => {
+      handleCleanDismiss();
+    }, resolvedAutoDismissSec * 1000);
 
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
       window.clearTimeout(t3);
-      if (tAutoDismiss) window.clearTimeout(tAutoDismiss);
+      window.clearInterval(autoCloseInterval);
+      window.clearTimeout(tAutoDismiss);
+      stopAllCelebrationEffectsAndAudio();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [burstNonce, profile.id, forceSilentAudio, autoDismissSeconds]);
+  }, [burstNonce, profile.id, resolvedAutoDismissSec]);
 
-  // 96+ Multi-Depth Particle Storm scaled by Intensity Level
+  // Merged particle emojis across primary + combo effects
+  const mergedParticleEmojis = useMemo(() => {
+    const base = [...profile.particleEmojis];
+    comboProfiles.forEach((cp) => {
+      cp.particleEmojis.slice(0, 4).forEach((em) => base.push(em));
+    });
+    return base;
+  }, [profile, comboProfiles]);
+
+  const effectiveParticleCount = customParticleCount
+    ? Math.max(20, Math.min(240, customParticleCount))
+    : intensityMeta.particleCount;
+
+  const speedFactor = Math.max(0.4, Math.min(3, animationSpeedMultiplier || 1));
+  const sizeFactor = Math.max(0.6, Math.min(2.2, particleSizeScale || 1));
+
+  // Particle Storm
   const particles = useMemo(() => {
     if (!burstNonce || profile.id === 'none') return [];
-    const emojis = profile.particleEmojis;
-    return Array.from({ length: intensityMeta.particleCount }).map((_, i) => {
+    const emojis = mergedParticleEmojis;
+    return Array.from({ length: effectiveParticleCount }).map((_, i) => {
       const emoji = emojis[i % emojis.length];
       const left = 1 + ((i * 11 + (burstNonce % 7) * 3) % 97);
-      const delayMs = (i % 12) * 90;
-      const durationMs = 2100 + (i % 6) * 360;
-      const sizeRem =
-        i % 5 === 0
-          ? '2.55rem'
-          : i % 3 === 0
-          ? '1.95rem'
-          : i % 2 === 0
-          ? '1.5rem'
-          : '1.25rem';
+      const delayMs = Math.round(((i % 12) * 90) / speedFactor);
+      const durationMs = Math.round((2100 + (i % 6) * 360) / speedFactor);
+      const baseRem =
+        i % 5 === 0 ? 2.5 : i % 3 === 0 ? 1.9 : i % 2 === 0 ? 1.45 : 1.2;
+      const sizeRem = `${(baseRem * sizeFactor).toFixed(2)}rem`;
       return {
         id: `${burstNonce}-pt-${i}`,
         emoji,
@@ -303,14 +431,19 @@ export const CelebrationClaimBurstOverlay: React.FC<{
         sizeRem,
       };
     });
-  }, [burstNonce, profile, intensityMeta.particleCount]);
+  }, [burstNonce, profile.id, mergedParticleEmojis, effectiveParticleCount, speedFactor, sizeFactor]);
 
-  // 14 Sweeping Stage Laser Beams
+  // Laser Beams
   const laserBeams = useMemo(() => {
     if (!burstNonce || profile.id === 'none') return [];
+    const colors = [
+      ...profile.laserColors,
+      ...comboProfiles.flatMap((c) => c.laserColors),
+    ];
     return Array.from({ length: intensityMeta.laserBeamCount }).map((_, idx) => {
-      const color = profile.laserColors[idx % profile.laserColors.length];
-      const angleDeg = -65 + (idx * 130) / Math.max(1, intensityMeta.laserBeamCount - 1);
+      const color = colors[idx % colors.length];
+      const angleDeg =
+        -65 + (idx * 130) / Math.max(1, intensityMeta.laserBeamCount - 1);
       const delayMs = (idx % 5) * 120;
       return {
         id: `laser-${idx}`,
@@ -319,20 +452,22 @@ export const CelebrationClaimBurstOverlay: React.FC<{
         delayMs,
       };
     });
-  }, [burstNonce, profile, intensityMeta.laserBeamCount]);
+  }, [burstNonce, profile, comboProfiles, intensityMeta.laserBeamCount]);
 
-  // Choreographed Giant Mascots Parade (Unique per Motion Style)
+  // Choreographed Giant Mascots Parade
   const paradeMascots = useMemo(() => {
     if (!burstNonce || profile.id === 'none') return [];
-    const mascots =
-      profile.mascotParadeEmojis.length > 0
+    const mascots = [
+      ...(profile.mascotParadeEmojis.length > 0
         ? profile.mascotParadeEmojis
-        : profile.particleEmojis;
+        : profile.particleEmojis),
+      ...comboProfiles.flatMap((c) => c.mascotParadeEmojis.slice(0, 2)),
+    ];
     return Array.from({ length: intensityMeta.paradeCount }).map((_, idx) => {
       const emoji = mascots[idx % mascots.length];
       const laneTopPct = 14 + ((idx * 17) % 68);
-      const delayMs = idx * 210;
-      const durationMs = 2500 + (idx % 3) * 450;
+      const delayMs = Math.round((idx * 210) / speedFactor);
+      const durationMs = Math.round((2500 + (idx % 3) * 450) / speedFactor);
       return {
         id: `parade-${idx}`,
         emoji,
@@ -342,16 +477,22 @@ export const CelebrationClaimBurstOverlay: React.FC<{
         reverse: idx % 2 === 1,
       };
     });
-  }, [burstNonce, profile, intensityMeta.paradeCount]);
+  }, [burstNonce, profile, comboProfiles, intensityMeta.paradeCount, speedFactor]);
 
   if (!burstNonce || profile.id === 'none') return null;
 
-  // Choose particle animation based on choreography archetype
-  const getParticleKeyframesName = (style: CelebrationEffectProfile['motionStyle']): string => {
-    switch (style) {
+  const getParticleKeyframesName = (): string => {
+    if (gravityDirection === 'fall_down') return 'bnCelebrationFall';
+    if (gravityDirection === 'float_up') return 'bnCelebrationRise';
+    if (gravityDirection === 'diagonal_storm') return 'bnMeteorDiagonal';
+    if (gravityDirection === 'vortex_spiral') return 'bnVortexSpiral';
+    if (gravityDirection === 'matrix_digital_rain') return 'bnMatrixRainDrop';
+
+    switch (profile.motionStyle) {
       case 'dragon_parade':
         return 'bnDragonWeave';
       case 'meteor_shower':
+      case 'thunderbolt_strike':
         return 'bnMeteorDiagonal';
       case 'patriot_salute':
       case 'sacred_mandala':
@@ -362,45 +503,50 @@ export const CelebrationClaimBurstOverlay: React.FC<{
       case 'anime_aura_burst':
       case 'cyber_laser_grid':
         return 'bnAnimeSpeedSurge';
+      case 'matrix_digital_rain':
+        return 'bnMatrixRainDrop';
       default:
         return 'bnCelebrationFall';
     }
   };
 
-  const handleStageComboClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  const triggerManualComboBlast = (clientX?: number, clientY?: number) => {
     if (stagePhase !== 'climax') return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickX = e.clientX;
-    const clickY = e.clientY;
-    const normX = rect.width > 0 ? (clickX - rect.left) / rect.width : 0.5;
-    const normY = rect.height > 0 ? (clickY - rect.top) / rect.height : 0.5;
-
+    const w = typeof window !== 'undefined' ? window.innerWidth : 1000;
+    const h = typeof window !== 'undefined' ? window.innerHeight : 700;
+    const cx = clientX ?? w * 0.5;
+    const cy = clientY ?? h * 0.45;
     const nextCombo = comboCount + 1;
     setComboCount(nextCombo);
 
-    triggerComboClickConfettiAtPoint(profile.id, normX, normY);
+    triggerComboClickConfettiAtPoint(profile.id, cx / w, cy / h);
     if (!audioMuted) {
-      playCelebrationComboHitSynth(nextCombo);
+      playCelebrationComboHitSynth(nextCombo, soundVolumePercent);
     }
 
-    const emoji = profile.particleEmojis[nextCombo % profile.particleEmojis.length];
+    const emoji =
+      mergedParticleEmojis[nextCombo % mergedParticleEmojis.length];
     const rippleId = Date.now() + Math.floor(Math.random() * 999);
     setClickRipples((prev) => [
       ...prev.slice(-8),
-      { id: rippleId, x: clickX, y: clickY, comboNum: nextCombo, emoji },
+      { id: rippleId, x: cx, y: cy, comboNum: nextCombo, emoji },
     ]);
   };
 
-  const particleAnimName = getParticleKeyframesName(profile.motionStyle);
+  const particleAnimName = getParticleKeyframesName();
 
   return (
     <div
-      onClick={handleStageComboClick}
-      className={`fixed inset-0 z-[75] flex flex-col items-center justify-between p-4 sm:p-6 overflow-hidden select-none cursor-pointer ${
+      onClick={(e) => {
+        // Clicking the outer dimmed backdrop after countdown closes stage easily!
+        if (stagePhase === 'climax' && e.target === e.currentTarget) {
+          handleCleanDismiss();
+        }
+      }}
+      className={`fixed inset-0 z-[75] flex flex-col items-center justify-between p-4 sm:p-6 overflow-hidden select-none ${
         stagePhase === 'buildup' ? 'bn-stage-screen-shake' : ''
       }`}
       aria-live="polite"
-      title="Klik di mana saja untuk memicu Ledakan Kombo 100.000x!"
     >
       <style>{`
         @keyframes bnStageScreenShake {
@@ -453,6 +599,18 @@ export const CelebrationClaimBurstOverlay: React.FC<{
           }
           100% {
             transform: translate3d(20px, 108vh, 0) scale(0.75) rotate(28deg);
+            opacity: 0;
+          }
+        }
+        @keyframes bnMatrixRainDrop {
+          0% {
+            transform: translate3d(0, -12vh, 0) scale(0.95);
+            opacity: 0;
+          }
+          12% { opacity: 1; }
+          88% { opacity: 0.95; }
+          100% {
+            transform: translate3d(0, 106vh, 0) scale(0.95);
             opacity: 0;
           }
         }
@@ -593,7 +751,7 @@ export const CelebrationClaimBurstOverlay: React.FC<{
         }
       `}</style>
 
-      {/* Latar Panggung Sinematik Gelap Transparan dengan Gradasi Tema */}
+      {/* Latar Panggung Sinematik Gelap Transparan */}
       <div
         style={{
           background: `radial-gradient(circle at 50% 50%, ${profile.laserColors[0]}38 0%, ${profile.laserColors[1]}22 42%, rgba(2,6,23,0.78) 100%)`,
@@ -601,11 +759,9 @@ export const CelebrationClaimBurstOverlay: React.FC<{
         className="pointer-events-none absolute inset-0 backdrop-blur-[3px]"
       />
 
-      {/* ====================================================================
-          FASE 1: ADEGAN PEMBUKA SINEMATIK (CINEMATIC BUILDUP 3 • 2 • 1)
-         ==================================================================== */}
+      {/* FASE 1: HITUNG MUNDUR 3 • 2 • 1 */}
       {stagePhase === 'buildup' && (
-        <div className="relative z-30 my-auto flex flex-col items-center justify-center text-center space-y-4 animate-fadeIn">
+        <div className="pointer-events-none relative z-30 my-auto flex flex-col items-center justify-center text-center space-y-4 animate-fadeIn">
           <div className="relative flex items-center justify-center">
             <div
               style={{ borderColor: profile.laserColors[0] }}
@@ -635,12 +791,9 @@ export const CelebrationClaimBurstOverlay: React.FC<{
         </div>
       )}
 
-      {/* ====================================================================
-          FASE 2: PUNCAK PANGGUNG SINEMATIK 100.000X (7 LAPIS SERENTAK)
-         ==================================================================== */}
+      {/* FASE 2: PUNCAK PANGGUNG SINEMATIK */}
       {stagePhase === 'climax' && (
         <>
-          {/* Kilatan Blitz Pembuka Puncak (Camera Flash) */}
           <div
             style={{
               background: `radial-gradient(circle, #ffffff 0%, ${profile.laserColors[0]} 60%, transparent 100%)`,
@@ -649,7 +802,41 @@ export const CelebrationClaimBurstOverlay: React.FC<{
             className="pointer-events-none absolute inset-0 z-20"
           />
 
-          {/* LAPIS 1: 14 Sorot Sinar Laser Panggung Menyapu dari Atas & Bawah */}
+          {/* SOROT LAMPU STADION & TIRAI TEATER OPSIONAL */}
+          {(showStadiumSpotlights ||
+            profile.motionStyle === 'theater_curtain_spotlight') && (
+            <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+              <div
+                style={{
+                  background: `conic-gradient(from 140deg at 12% 0%, transparent 0deg, ${profile.laserColors[0]}45 18deg, transparent 36deg)`,
+                }}
+                className="absolute inset-0 animate-pulse"
+              />
+              <div
+                style={{
+                  background: `conic-gradient(from 200deg at 88% 0%, transparent 0deg, ${profile.laserColors[1]}45 18deg, transparent 36deg)`,
+                }}
+                className="absolute inset-0 animate-pulse"
+              />
+              <div className="absolute inset-y-0 left-0 w-10 sm:w-16 bg-gradient-to-r from-rose-950/85 via-rose-900/40 to-transparent" />
+              <div className="absolute inset-y-0 right-0 w-10 sm:w-16 bg-gradient-to-l from-rose-950/85 via-rose-900/40 to-transparent" />
+            </div>
+          )}
+
+          {/* PETIR HALILINTAR MENYAMBAR OPSIONAL */}
+          {(showLightningBolts ||
+            profile.motionStyle === 'thunderbolt_strike') && (
+            <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
+              <div
+                style={{
+                  background: `linear-gradient(125deg, transparent 47%, #fff 49%, ${profile.laserColors[0]} 50%, transparent 52%)`,
+                }}
+                className="absolute inset-0 opacity-60 animate-ping"
+              />
+            </div>
+          )}
+
+          {/* LAPIS 1: Sorot Sinar Laser Panggung */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden z-0">
             {laserBeams.map((beam) => (
               <div
@@ -664,7 +851,7 @@ export const CelebrationClaimBurstOverlay: React.FC<{
                     background: `linear-gradient(to top, ${beam.color}, ${beam.color}88, transparent)`,
                     boxShadow: `0 0 24px ${beam.color}`,
                     transformOrigin: 'bottom center',
-                    animation: `bnLaserSweep ${2.2 + (beam.delayMs % 3) * 0.4}s ease-in-out infinite`,
+                    animation: `bnLaserSweep ${((2.2 + (beam.delayMs % 3) * 0.4) / speedFactor).toFixed(2)}s ease-in-out infinite`,
                     animationDelay: `${beam.delayMs}ms`,
                   } as React.CSSProperties
                 }
@@ -673,7 +860,7 @@ export const CelebrationClaimBurstOverlay: React.FC<{
             ))}
           </div>
 
-          {/* LAPIS 2: Portal Dimensi 3D & Cincin Mandala Raksasa di Pusat Layar */}
+          {/* LAPIS 2: Portal Dimensi 3D */}
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-0">
             <div
               style={{
@@ -691,7 +878,7 @@ export const CelebrationClaimBurstOverlay: React.FC<{
             />
           </div>
 
-          {/* LAPIS 3: Gelombang Kejut Berlapis (Multi-Wave Shockwave Rings) */}
+          {/* LAPIS 3: Gelombang Kejut Berlapis */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden z-0">
             {Array.from({ length: intensityMeta.shockwaveCount }).map((_, idx) => (
               <div
@@ -701,7 +888,7 @@ export const CelebrationClaimBurstOverlay: React.FC<{
                   top: '50%',
                   borderColor: profile.laserColors[idx % profile.laserColors.length],
                   boxShadow: `0 0 35px ${profile.laserColors[idx % profile.laserColors.length]}`,
-                  animation: `bnShockwaveExpand 2.2s cubic-bezier(0.16, 1, 0.3, 1) infinite`,
+                  animation: `bnShockwaveExpand ${(2.2 / speedFactor).toFixed(2)}s cubic-bezier(0.16, 1, 0.3, 1) infinite`,
                   animationDelay: `${idx * 360}ms`,
                 }}
                 className="absolute w-44 h-44 sm:w-64 sm:h-64 rounded-full border-4"
@@ -709,7 +896,7 @@ export const CelebrationClaimBurstOverlay: React.FC<{
             ))}
           </div>
 
-          {/* LAPIS 4: Parade Maskot Raksasa Melintasi Layar Sesuai Koreografi Tema */}
+          {/* LAPIS 4: Parade Maskot Raksasa */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden z-10">
             {paradeMascots.map((m) => (
               <div
@@ -730,7 +917,7 @@ export const CelebrationClaimBurstOverlay: React.FC<{
             ))}
           </div>
 
-          {/* LAPIS 5: 96+ Badai Partikel Tematik Berlapis */}
+          {/* LAPIS 5: Badai Partikel Tematik + Kombo */}
           <div className="pointer-events-none absolute inset-0 overflow-hidden z-10">
             {particles.map((p) => (
               <span
@@ -752,7 +939,7 @@ export const CelebrationClaimBurstOverlay: React.FC<{
             ))}
           </div>
 
-          {/* Efek Riak Kombo di Titik Klik Nasabah */}
+          {/* Efek Riak Kombo */}
           {clickRipples.map((rip) => (
             <div
               key={rip.id}
@@ -766,10 +953,10 @@ export const CelebrationClaimBurstOverlay: React.FC<{
             </div>
           ))}
 
-          {/* BAR ATAS: KONTROL PANGGUNG, KOMBO COUNTER, AUDIO SYNTH & TOMBOL TUTUP */}
+          {/* BAR ATAS: KONTROL PANGGUNG + HITUNG MUNDUR AUTO-TUTUP + TOMBOL TUTUP BESAR */}
           <div
             onClick={(e) => e.stopPropagation()}
-            className="relative z-30 w-full max-w-4xl flex flex-wrap items-center justify-between gap-2 bg-slate-950/90 border-2 border-amber-400/70 rounded-2xl px-3.5 py-2.5 shadow-2xl backdrop-blur-xl"
+            className="relative z-40 w-full max-w-5xl flex flex-wrap items-center justify-between gap-2 bg-slate-950/95 border-2 border-amber-400/80 rounded-2xl px-4 py-2.5 shadow-2xl backdrop-blur-xl"
           >
             <div className="flex flex-wrap items-center gap-2">
               <span
@@ -778,21 +965,37 @@ export const CelebrationClaimBurstOverlay: React.FC<{
                 <Zap className="w-3.5 h-3.5" />
                 <span>{intensityMeta.badgeText}</span>
               </span>
-              <span className="px-2.5 py-1 rounded-lg bg-rose-500/25 border border-rose-400 text-rose-200 font-mono font-black text-[11px] flex items-center gap-1 tabular-nums">
-                <Flame className="w-3.5 h-3.5 text-amber-400" />
-                <span>COMBO x{comboCount}</span>
-              </span>
-              <span className="hidden sm:inline-block text-[10.5px] text-amber-200 font-bold">
-                💡 Klik layar di mana saja untuk memicu Ledakan Kombo Ekstra!
+              {comboProfiles.length > 0 && (
+                <span className="px-2 py-1 rounded-lg bg-fuchsia-500/20 border border-fuchsia-400/50 text-fuchsia-200 font-bold text-[10px]">
+                  + {comboProfiles.length} Efek Kombo
+                </span>
+              )}
+              <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-cyan-400/50 text-cyan-200 font-mono font-bold text-[10px] flex items-center gap-1 tabular-nums">
+                <Clock className="w-3 h-3 text-cyan-400" />
+                <span>Tutup otomatis {remainingAutoCloseSec}d</span>
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => setAudioMuted((m) => !m)}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-200 font-bold text-[10.5px] cursor-pointer flex items-center gap-1"
-                title={audioMuted ? 'Aktifkan Musik Fanfare' : 'Matikan Suara'}
+                onClick={(e) => triggerManualComboBlast(e.clientX, e.clientY)}
+                className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 border border-rose-400 text-rose-100 font-black text-[11px] cursor-pointer flex items-center gap-1 tabular-nums"
+              >
+                <Flame className="w-3.5 h-3.5 text-amber-400" />
+                <span>Ledakan Kombo (x{comboCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAudioMuted((prev) => {
+                    const next = !prev;
+                    if (next) stopAllCelebrationEffectsAndAudio();
+                    return next;
+                  });
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-200 font-bold text-[11px] cursor-pointer flex items-center gap-1"
               >
                 {audioMuted ? (
                   <>
@@ -802,7 +1005,7 @@ export const CelebrationClaimBurstOverlay: React.FC<{
                 ) : (
                   <>
                     <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Fanfare Aktif</span>
+                    <span>Audio Aktif</span>
                   </>
                 )}
               </button>
@@ -812,32 +1015,36 @@ export const CelebrationClaimBurstOverlay: React.FC<{
                 onClick={() => {
                   triggerCanvasConfettiForCelebration(profile.id, intensityMeta.id);
                   if (!audioMuted) {
-                    playCelebrationFanfareSynth(profile.id);
+                    playCelebrationFanfareSynth(
+                      profile.id,
+                      audioSynthOverride,
+                      soundVolumePercent
+                    );
                   }
                   setComboCount((c) => c + 1);
                 }}
-                className="px-2.5 py-1.5 rounded-xl bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-300/60 text-amber-200 font-black text-[10.5px] cursor-pointer flex items-center gap-1 transition"
+                className="px-2.5 py-1.5 rounded-xl bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-300/60 text-amber-200 font-black text-[11px] cursor-pointer flex items-center gap-1 transition"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Tembak Lagi</span>
               </button>
 
-              {onDismiss && (
-                <button
-                  type="button"
-                  onClick={onDismiss}
-                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-[10.5px] cursor-pointer flex items-center gap-1 shadow-lg"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  <span>Tutup Panggung</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleCleanDismiss}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 border-2 border-rose-300 text-white font-black text-xs cursor-pointer flex items-center gap-1.5 shadow-lg shadow-rose-600/40"
+              >
+                <X className="w-4 h-4" />
+                <span>Tutup Panggung (ESC)</span>
+              </button>
             </div>
           </div>
 
           {/* LAPIS 6: TROFI / MEDALI HOLOGRAM 3D RAKSASA DI TENGAH LAYAR */}
-          <div className="relative z-20 my-auto max-w-2xl w-full flex flex-col items-center text-center space-y-4 px-2">
-            {/* Medali / Trofi Hologram 3D Berputar & Bersinar */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-20 my-auto max-w-2xl w-full flex flex-col items-center text-center space-y-4 px-2"
+          >
             <div className="relative flex items-center justify-center">
               <div
                 style={{
@@ -858,7 +1065,6 @@ export const CelebrationClaimBurstOverlay: React.FC<{
               </div>
             </div>
 
-            {/* Spanduk Utama Puncak Selebrasi 100.000x */}
             <div
               className={`w-full rounded-3xl bg-gradient-to-r ${profile.bannerGradientClass} border-2 border-amber-300/90 p-5 sm:p-6 shadow-[0_0_80px_rgba(0,0,0,0.85)] backdrop-blur-xl space-y-2.5`}
             >
@@ -892,9 +1098,8 @@ export const CelebrationClaimBurstOverlay: React.FC<{
                 {customSubtextOverride || profile.celebrationSubtext}
               </p>
 
-              {/* Deretan Ikon Partikel & Maskot Tema */}
-              <div className="pt-1 flex items-center justify-center gap-2 text-lg sm:text-xl">
-                {profile.particleEmojis.map((em, idx) => (
+              <div className="pt-1 flex flex-wrap items-center justify-center gap-2 text-lg sm:text-xl">
+                {mergedParticleEmojis.slice(0, 12).map((em, idx) => (
                   <span
                     key={idx}
                     style={{ animationDelay: `${idx * 100}ms` }}
@@ -907,22 +1112,21 @@ export const CelebrationClaimBurstOverlay: React.FC<{
             </div>
           </div>
 
-          {/* BAR BAWAH: PETUNJUK INTERAKSI KLIK KOMBO */}
-          <div className="relative z-20 text-center">
-            <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-950/85 border border-amber-400/50 text-amber-200 font-mono font-bold text-[11px] shadow-lg">
-              <span>🔥 KLIK LAYAR UNTUK LEDAKAN KOMBO EKSTRA ({comboCount}x)</span>
-              {onDismiss && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDismiss();
-                  }}
-                  className="ml-2 underline text-white hover:text-amber-300 cursor-pointer"
-                >
-                  Selesai &amp; Tutup
-                </button>
-              )}
+          {/* BAR BAWAH: TOMBOL SELESAI & TUTUP BESAR + BANTUAN KLIK LUAR */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-30 flex flex-wrap items-center justify-center gap-3"
+          >
+            <button
+              type="button"
+              onClick={handleCleanDismiss}
+              className="px-6 py-2.5 rounded-2xl bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:from-rose-500 hover:to-red-500 border-2 border-white/70 text-white font-black text-xs sm:text-sm cursor-pointer shadow-2xl flex items-center gap-2"
+            >
+              <X className="w-4 h-4" />
+              <span>Selesai &amp; Tutup Panggung Sekarang</span>
+            </button>
+            <span className="px-3 py-1.5 rounded-full bg-slate-950/80 border border-white/20 text-[11px] text-slate-200 font-semibold">
+              Atau klik area latar gelap di luar kartu / tekan ESC
             </span>
           </div>
         </>
