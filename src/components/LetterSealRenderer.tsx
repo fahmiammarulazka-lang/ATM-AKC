@@ -18,6 +18,11 @@ import {
   SignatureTemplateId,
   StampTemplateId,
 } from '../types/bank';
+import {
+  compressCanvasToSignatureDataUrl,
+  compressSignatureDataUrl,
+  estimateDataUrlKb,
+} from '../utils/signatureCompression';
 
 export const DEFAULT_LETTER_SEAL_CONFIG: LetterSignatureStampConfig = {
   signatureMode: 'template',
@@ -365,6 +370,7 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
   const [brushSize, setBrushSize] = useState<number>(3.5);
   const [autoSaveStatus, setAutoSaveStatus] = useState<string>('');
   const [uploadError, setUploadError] = useState<string>('');
+  const [isProcessingImage, setIsProcessingImage] = useState<boolean>(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const isDrawingRef = useRef<boolean>(false);
 
@@ -407,17 +413,29 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
       return;
     }
     setUploadError('');
+    setIsProcessingImage(true);
     const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result;
-      if (typeof result === 'string' && result) {
-        onChange({
-          ...value,
-          signatureMode: 'draw',
-          signatureDrawingDataUrl: result,
-        });
-        setAutoSaveStatus('✓ Foto tanda tangan otomatis tersimpan');
+    reader.onload = async (event) => {
+      try {
+        const result = event.target?.result;
+        if (typeof result === 'string' && result) {
+          const compressed = await compressSignatureDataUrl(result, 44000);
+          onChange({
+            ...value,
+            signatureMode: 'draw',
+            signatureDrawingDataUrl: compressed.dataUrl,
+          });
+          setAutoSaveStatus(
+            `✓ Foto tanda tangan terkompresi (${compressed.kbText}) & siap disimpan ke Cloud`
+          );
+        }
+      } finally {
+        setIsProcessingImage(false);
       }
+    };
+    reader.onerror = () => {
+      setIsProcessingImage(false);
+      setUploadError('Gagal membaca file gambar tanda tangan.');
     };
     reader.readAsDataURL(file);
   };
@@ -478,12 +496,15 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
     lastPointRef.current = null;
     const canvas = canvasRef.current;
     if (canvas) {
+      const compressed = compressCanvasToSignatureDataUrl(canvas, 44000);
       onChange({
         ...value,
         signatureMode: 'draw',
-        signatureDrawingDataUrl: canvas.toDataURL('image/png'),
+        signatureDrawingDataUrl: compressed.dataUrl,
       });
-      setAutoSaveStatus('✓ Goresan tanda tangan otomatis tersimpan');
+      setAutoSaveStatus(
+        `✓ Goresan tanda tangan terkompresi (${compressed.kbText}) & siap disimpan ke Cloud`
+      );
     }
   };
 
@@ -551,10 +572,17 @@ export const LetterSealStudioEditor: React.FC<LetterSealStudioEditorProps> = ({
             </div>
           </div>
 
-          {(autoSaveStatus || (value.signatureMode === 'draw' && value.signatureDrawingDataUrl)) && (
+          {(isProcessingImage || autoSaveStatus || (value.signatureMode === 'draw' && value.signatureDrawingDataUrl)) && (
             <div className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 text-[10px] font-bold flex items-center justify-between gap-2">
-              <span>{autoSaveStatus || '✓ Tanda tangan aktif & tersimpan otomatis'}</span>
-              <span className="font-mono text-[9px] text-emerald-400/90 uppercase">Auto-Save Aktif</span>
+              <span>
+                {isProcessingImage
+                  ? '⏳ Mengompresi gambar tanda tangan agar tersimpan ringan di Cloud...'
+                  : autoSaveStatus ||
+                    `✓ Tanda tangan gambar aktif (${estimateDataUrlKb(value.signatureDrawingDataUrl)})`}
+              </span>
+              <span className="font-mono text-[9px] text-emerald-400/90 uppercase shrink-0">
+                Siap Cloud ({estimateDataUrlKb(value.signatureDrawingDataUrl)})
+              </span>
             </div>
           )}
 

@@ -20,6 +20,10 @@ import {
   readCloudDoc,
   writeCloudDoc,
   subscribeCloudDoc,
+  writeCloudDocDual,
+  readCloudDocDual,
+  subscribeCloudDocDual,
+  ensureFirestoreActiveNow,
   getEarlyAccountsPrefetch,
   getEarlyFullMasterPrefetch,
   toArraySafe,
@@ -37,6 +41,8 @@ import {
   forceSyncVaultNow,
   saveFastBootSnapshot,
   readFastBootSnapshot,
+  saveGiftAndSealRegistryIdb,
+  readGiftAndSealRegistryIdb,
   saveActiveBootSession,
   readActiveBootSession,
   clearActiveBootSession,
@@ -1313,6 +1319,9 @@ interface BankContextType {
   giftEvents: AdminGiftEventPackage[];
   deletedGiftEventIds: string[];
   giftEventsInitialized: boolean;
+  giftRegistryCloudStatus: 'idle' | 'saving' | 'saved' | 'error';
+  giftRegistryLastSavedAt: string | null;
+  giftRegistrySaveError: string | null;
   activeGiftModal: { eventId: string; isReplay: boolean } | null;
   giftDateTestOverride: { month: number; day: number } | null;
   isGiftEventOpenableNow: (ev: AdminGiftEventPackage, accountId?: string) => boolean;
@@ -1380,7 +1389,12 @@ interface BankContextType {
     attachmentFileName?: string;
     autoExpireHours?: number;
     allowTransferableGift?: boolean;
-  }) => { success: boolean; message: string; event: AdminGiftEventPackage };
+  }) => {
+    success: boolean;
+    message: string;
+    event: AdminGiftEventPackage;
+    cloudSyncPromise?: Promise<boolean>;
+  };
   adminDeleteGiftEvent: (eventId: string) => { success: boolean; message: string };
   adminToggleGiftEventActive: (eventId: string) => { success: boolean; message: string };
   adminTriggerGiftEventNow: (eventId: string) => { success: boolean; message: string };
@@ -1590,10 +1604,16 @@ interface BankContextType {
 
   // Konfigurasi Tanda Tangan & Stempel Surat Admin (Default Global)
   defaultLetterSealConfig: LetterSignatureStampConfig;
+  letterSealCloudStatus: 'idle' | 'saving' | 'saved' | 'error';
+  letterSealLastSavedAt: string | null;
+  letterSealSaveError: string | null;
   adminUpdateDefaultLetterSealConfig: (config: LetterSignatureStampConfig) => {
     success: boolean;
     message: string;
   };
+  adminSaveDefaultLetterSealConfigNow: (
+    config?: LetterSignatureStampConfig
+  ) => Promise<{ success: boolean; message: string }>;
 }
 
 const BankContext = createContext<BankContextType | undefined>(undefined);
@@ -1664,10 +1684,10 @@ function sanitizeForFirestore(value: unknown, depth = 0): unknown {
     return Number.isFinite(value) ? value : 0;
   }
   if (typeof value === 'string') {
-    if (value.startsWith('data:image/') && value.length > 4096) {
-      return '';
+    if (value.startsWith('data:image/')) {
+      return value.length <= 65536 ? value : '';
     }
-    return value.length > 8000 ? value.slice(0, 8000) : value;
+    return value.length > 24000 ? value.slice(0, 24000) : value;
   }
   if (Array.isArray(value)) {
     return value
@@ -1684,6 +1704,93 @@ function sanitizeForFirestore(value: unknown, depth = 0): unknown {
     return out;
   }
   return String(value);
+}
+
+const FALLBACK_LETTER_SEAL_BASE: LetterSignatureStampConfig = {
+  signatureMode: 'template',
+  signatureDrawingDataUrl: '',
+  signatureTemplateId: 'kaligrafi_royal',
+  signatureName: 'Admin Utama Bank Nusantara',
+  signatureColor: 'amber',
+  stampTemplateId: 'royal_wax',
+  stampPrimaryName: 'BANK NUSANTARA',
+  stampSecondaryName: 'RESMI • TERVERIFIKASI',
+  stampColor: 'amber',
+};
+
+function normalizeLetterSealConfig(
+  raw: unknown,
+  fallback: LetterSignatureStampConfig = FALLBACK_LETTER_SEAL_BASE
+): LetterSignatureStampConfig {
+  const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const mode = src.signatureMode === 'draw' ? 'draw' : 'template';
+  const rawDataUrl =
+    typeof src.signatureDrawingDataUrl === 'string' &&
+    src.signatureDrawingDataUrl.startsWith('data:image/') &&
+    src.signatureDrawingDataUrl.length <= 66000
+      ? src.signatureDrawingDataUrl
+      : mode === 'draw' && typeof fallback.signatureDrawingDataUrl === 'string' && !('signatureDrawingDataUrl' in src)
+      ? fallback.signatureDrawingDataUrl
+      : typeof src.signatureDrawingDataUrl === 'string'
+      ? src.signatureDrawingDataUrl.slice(0, 66000)
+      : '';
+
+  const allowedColors = new Set(['amber', 'white', 'cyan', 'emerald', 'rose']);
+  const sigColor =
+    typeof src.signatureColor === 'string' && allowedColors.has(src.signatureColor)
+      ? (src.signatureColor as LetterSignatureStampConfig['signatureColor'])
+      : fallback.signatureColor || 'amber';
+  const stampColor =
+    typeof src.stampColor === 'string' && allowedColors.has(src.stampColor)
+      ? (src.stampColor as LetterSignatureStampConfig['stampColor'])
+      : fallback.stampColor || 'amber';
+
+  return {
+    signatureMode: mode,
+    signatureDrawingDataUrl: rawDataUrl,
+    signatureTemplateId: String(
+      src.signatureTemplateId || fallback.signatureTemplateId || 'kaligrafi_royal'
+    ).slice(0, 64) as LetterSignatureStampConfig['signatureTemplateId'],
+    signatureName: String(
+      src.signatureName !== undefined ? src.signatureName : fallback.signatureName || 'Admin Utama Bank Nusantara'
+    ).slice(0, 160),
+    signatureColor: sigColor,
+    stampTemplateId: String(
+      src.stampTemplateId || fallback.stampTemplateId || 'royal_wax'
+    ).slice(0, 64) as LetterSignatureStampConfig['stampTemplateId'],
+    stampPrimaryName: String(
+      src.stampPrimaryName !== undefined ? src.stampPrimaryName : fallback.stampPrimaryName || 'BANK NUSANTARA'
+    ).slice(0, 160),
+    stampSecondaryName: String(
+      src.stampSecondaryName !== undefined
+        ? src.stampSecondaryName
+        : fallback.stampSecondaryName || 'RESMI • TERVERIFIKASI'
+    ).slice(0, 160),
+    stampColor,
+  };
+}
+
+function normalizeGiftEventPackage(raw: AdminGiftEventPackage): AdminGiftEventPackage {
+  const rewards = toArraySafe<AdminGiftRewardItem>(raw?.rewards).map((r) => ({
+    ...r,
+    ...(r?.gachaTiers !== undefined ? { gachaTiers: toArraySafe<GachaTierRange>(r.gachaTiers) } : {}),
+  }));
+  return {
+    ...raw,
+    rewards,
+    targetAccountIds: toArraySafe<string>(raw?.targetAccountIds),
+    revokedAccountIds: toArraySafe<string>(raw?.revokedAccountIds),
+    letterOpenedByAccountIds: toArraySafe<string>(raw?.letterOpenedByAccountIds),
+    claimedByAccountIds: toArraySafe<string>(raw?.claimedByAccountIds),
+    viewedByAccountIds: toArraySafe<string>(raw?.viewedByAccountIds),
+    transferredOutByAccountIds: toArraySafe<string>(raw?.transferredOutByAccountIds),
+    transferredToAccountIds: toArraySafe<string>(raw?.transferredToAccountIds),
+    ...(raw?.customSealConfig && typeof raw.customSealConfig === 'object'
+      ? { customSealConfig: normalizeLetterSealConfig(raw.customSealConfig) }
+      : raw?.customSealConfig === null
+      ? { customSealConfig: null }
+      : {}),
+  };
 }
 
 const getLocalDateKey = (d: Date = new Date()): string => {
@@ -2045,6 +2152,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [giftEvents, setGiftEvents] = useState<AdminGiftEventPackage[]>(() =>
     sanitizeGiftEventsRemoveMiningRewards(DEFAULT_ADMIN_GIFT_EVENTS)
   );
+  const giftEventsRef = useRef<AdminGiftEventPackage[]>(giftEvents);
+  giftEventsRef.current = giftEvents;
+  const giftEventsUpdatedAtMsRef = useRef<number>(0);
+  const hasLoadedGiftRegistryRef = useRef<boolean>(false);
+  const [giftRegistryCloudStatus, setGiftRegistryCloudStatus] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const [giftRegistryLastSavedAt, setGiftRegistryLastSavedAt] = useState<string | null>(null);
+  const [giftRegistrySaveError, setGiftRegistrySaveError] = useState<string | null>(null);
+
   const [activeGiftModal, setActiveGiftModal] = useState<{ eventId: string; isReplay: boolean } | null>(null);
   const [openingGiftBoxKeys, setOpeningGiftBoxKeys] = useState<string[]>([]);
   const openingGiftBoxKeysRef = useRef<Set<string>>(new Set());
@@ -2403,16 +2520,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }, 250);
     }
 
-    if (Boolean(data.giftEventsInitialized) || Array.isArray(data.giftEvents)) {
-      setGiftEventsInitialized(true);
-      if (Array.isArray(data.giftEvents)) {
-        const filteredGifts = sanitizeGiftEventsRemoveMiningRewards(
-          (data.giftEvents as AdminGiftEventPackage[]).filter(
-            (ev) => !mergedDelGiftIds.includes(ev.id)
-          )
-        );
-        setGiftEvents(filteredGifts);
+    const incomingGiftTs = Number(data.giftEventsUpdatedAtMs || data.updatedAtMs || 0);
+    const hasGiftPayload =
+      Boolean(data.giftEventsInitialized) ||
+      Array.isArray(data.giftEvents) ||
+      Boolean(data.giftEvents && typeof data.giftEvents === 'object');
+    if (
+      hasGiftPayload &&
+      (!hasLoadedGiftRegistryRef.current || incomingGiftTs >= giftEventsUpdatedAtMsRef.current)
+    ) {
+      const normalizedIncomingGifts = toArraySafe<AdminGiftEventPackage>(data.giftEvents).map(
+        normalizeGiftEventPackage
+      );
+      const filteredGifts = sanitizeGiftEventsRemoveMiningRewards(
+        normalizedIncomingGifts.filter((ev) => ev && ev.id && !mergedDelGiftIds.includes(ev.id))
+      );
+      if (incomingGiftTs > giftEventsUpdatedAtMsRef.current) {
+        giftEventsUpdatedAtMsRef.current = incomingGiftTs;
       }
+      hasLoadedGiftRegistryRef.current = true;
+      setGiftEventsInitialized(true);
+      giftEventsInitializedRef.current = true;
+      giftEventsRef.current = filteredGifts;
+      setGiftEvents(filteredGifts);
+      void saveGiftAndSealRegistryIdb({
+        giftEvents: filteredGifts,
+        deletedGiftEventIds: mergedDelGiftIds,
+        giftEventsInitialized: true,
+        giftEventsUpdatedAtMs: giftEventsUpdatedAtMsRef.current || Date.now(),
+      });
     }
     if (Array.isArray(data.dashboardEffectEvents)) {
       setDashboardEffectEvents(data.dashboardEffectEvents as AdminDashboardEffectPackage[]);
@@ -2434,11 +2570,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ...(data.banSupportConfig as BanSupportConfig),
       }));
     }
-    if (data.defaultLetterSealConfig && typeof data.defaultLetterSealConfig === 'object') {
-      setDefaultLetterSealConfig((prev) => ({
-        ...prev,
-        ...(data.defaultLetterSealConfig as LetterSignatureStampConfig),
-      }));
+    const incomingSealTs = Number(data.letterSealUpdatedAtMs || data.updatedAtMs || 0);
+    if (
+      data.defaultLetterSealConfig &&
+      typeof data.defaultLetterSealConfig === 'object' &&
+      (!hasLoadedSealRegistryRef.current || incomingSealTs >= letterSealUpdatedAtMsRef.current)
+    ) {
+      const normalizedSeal = normalizeLetterSealConfig(
+        data.defaultLetterSealConfig,
+        defaultLetterSealConfigRef.current
+      );
+      if (incomingSealTs > letterSealUpdatedAtMsRef.current) {
+        letterSealUpdatedAtMsRef.current = incomingSealTs;
+      }
+      hasLoadedSealRegistryRef.current = true;
+      defaultLetterSealConfigRef.current = normalizedSeal;
+      setDefaultLetterSealConfig(normalizedSeal);
+      void saveGiftAndSealRegistryIdb({
+        defaultLetterSealConfig: normalizedSeal,
+        letterSealUpdatedAtMs: letterSealUpdatedAtMsRef.current || Date.now(),
+      });
     }
     if (data.jobCoinBonusConfig && typeof data.jobCoinBonusConfig === 'object') {
       setJobCoinBonusConfig((prev) => ({
@@ -2602,6 +2753,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isNotBotAccountNum = (accNum?: string) =>
       !accNum || !PURGED_BOT_ACCOUNT_NUMBERS.includes(accNum);
 
+    const shouldIncludeGiftSlice =
+      overrides?.giftEvents !== undefined ||
+      overrides?.deletedGiftEventIds !== undefined ||
+      hasLoadedGiftRegistryRef.current;
+    const shouldIncludeSealSlice =
+      overrides?.defaultLetterSealConfig !== undefined || hasLoadedSealRegistryRef.current;
+
     const payload = sanitizeForFirestore({
       accounts: cloudSyncedAccounts,
       deletedAccountIds: mergedDeletedAccountIds,
@@ -2616,9 +2774,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             isNotBotAccountNum(t.recipientAccount)
         )
         .slice(0, 220),
-      giftEvents: overrides?.giftEvents ?? giftEvents,
-      deletedGiftEventIds: overrides?.deletedGiftEventIds ?? deletedGiftEventIds,
-      giftEventsInitialized: overrides?.giftEventsInitialized ?? true,
+      ...(shouldIncludeGiftSlice
+        ? {
+            giftEvents: overrides?.giftEvents ?? giftEventsRef.current,
+            deletedGiftEventIds: overrides?.deletedGiftEventIds ?? deletedGiftEventIdsRef.current,
+            giftEventsInitialized: overrides?.giftEventsInitialized ?? true,
+            giftEventsUpdatedAtMs: giftEventsUpdatedAtMsRef.current || nowMs,
+          }
+        : {}),
       dashboardEffectEvents: overrides?.dashboardEffectEvents ?? dashboardEffectEvents,
       stageForceClearNonce: overrides?.stageForceClearNonce ?? stageForceClearNonce,
       banSupportConfig: overrides?.banSupportConfig ?? banSupportConfig,
@@ -2662,7 +2825,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       budgetAlertHistory: overrides?.budgetAlertHistory ?? budgetAlertHistory,
       appUpdates: overrides?.appUpdates ?? appUpdates,
       devRoles: overrides?.devRoles ?? devRoles,
-      defaultLetterSealConfig: overrides?.defaultLetterSealConfig ?? defaultLetterSealConfig,
+      ...(shouldIncludeSealSlice
+        ? {
+            defaultLetterSealConfig:
+              overrides?.defaultLetterSealConfig ?? defaultLetterSealConfigRef.current,
+            letterSealUpdatedAtMs: letterSealUpdatedAtMsRef.current || nowMs,
+          }
+        : {}),
       jobCoinBonusConfig: overrides?.jobCoinBonusConfig ?? jobCoinBonusConfig,
       adminHelpRequests: overrides?.adminHelpRequests ?? adminHelpRequests,
       websitePopups: (overrides?.websitePopups ?? websitePopups).slice(0, 40),
@@ -3217,6 +3386,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // MODE B: Sesi Google Permanen Terverifikasi
       // =========================================================================
       if (fbUser && !fbUser.isAnonymous && active) {
+        void ensureFirestoreActiveNow();
         const cleanEmail = normalizeEmailKey(fbUser.email || '') || 'nasabah@banknusantara.id';
         const cleanName =
           fbUser.displayName?.trim() || cleanEmail.split('@')[0] || 'Nasabah Bank Nusantara';
@@ -3660,16 +3830,221 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const [defaultLetterSealConfig, setDefaultLetterSealConfig] = useState<LetterSignatureStampConfig>({
-    signatureMode: 'template',
-    signatureDrawingDataUrl: '',
-    signatureTemplateId: 'kaligrafi_royal',
-    signatureName: 'Admin Utama Bank Nusantara',
-    signatureColor: 'amber',
-    stampTemplateId: 'royal_wax',
-    stampPrimaryName: 'BANK NUSANTARA',
-    stampSecondaryName: 'RESMI • TERVERIFIKASI',
-    stampColor: 'amber',
+    ...FALLBACK_LETTER_SEAL_BASE,
   });
+  const defaultLetterSealConfigRef = useRef<LetterSignatureStampConfig>(defaultLetterSealConfig);
+  defaultLetterSealConfigRef.current = defaultLetterSealConfig;
+  const letterSealUpdatedAtMsRef = useRef<number>(0);
+  const hasLoadedSealRegistryRef = useRef<boolean>(false);
+  const [letterSealCloudStatus, setLetterSealCloudStatus] = useState<
+    'idle' | 'saving' | 'saved' | 'error'
+  >('idle');
+  const [letterSealLastSavedAt, setLetterSealLastSavedAt] = useState<string | null>(null);
+  const [letterSealSaveError, setLetterSealSaveError] = useState<string | null>(null);
+
+  const applyDedicatedGiftRegistrySnapshot = (
+    docData: Record<string, any> | null,
+    options?: { markLoadedIfNull?: boolean }
+  ) => {
+    if (!docData || typeof docData !== 'object') {
+      if (options?.markLoadedIfNull && !hasLoadedGiftRegistryRef.current) {
+        hasLoadedGiftRegistryRef.current = true;
+      }
+      return;
+    }
+    const incomingTs = Number(docData.giftEventsUpdatedAtMs || docData.updatedAtMs || 0);
+    if (
+      docData.writerSessionId === clientSessionId &&
+      hasLoadedGiftRegistryRef.current &&
+      incomingTs <= giftEventsUpdatedAtMsRef.current
+    ) {
+      return;
+    }
+    if (hasLoadedGiftRegistryRef.current && incomingTs > 0 && incomingTs < giftEventsUpdatedAtMsRef.current) {
+      return;
+    }
+    const incomingDelIds = toArraySafe<string>(docData.deletedGiftEventIds);
+    const mergedDelIds = Array.from(new Set([...deletedGiftEventIdsRef.current, ...incomingDelIds]));
+    const incomingEvents = toArraySafe<AdminGiftEventPackage>(docData.giftEvents).map(
+      normalizeGiftEventPackage
+    );
+    const filteredEvents = sanitizeGiftEventsRemoveMiningRewards(
+      incomingEvents.filter((ev) => ev && ev.id && !mergedDelIds.includes(ev.id))
+    );
+
+    if (incomingTs > giftEventsUpdatedAtMsRef.current) {
+      giftEventsUpdatedAtMsRef.current = incomingTs;
+    }
+    hasLoadedGiftRegistryRef.current = true;
+    isApplyingFirestoreRef.current = true;
+    deletedGiftEventIdsRef.current = mergedDelIds;
+    setDeletedGiftEventIds(mergedDelIds);
+    giftEventsInitializedRef.current = true;
+    setGiftEventsInitialized(true);
+    giftEventsRef.current = filteredEvents;
+    setGiftEvents(filteredEvents);
+    setGiftRegistryCloudStatus('saved');
+    setGiftRegistryLastSavedAt(
+      typeof docData.updatedAt === 'string' ? docData.updatedAt : new Date().toISOString()
+    );
+    void saveGiftAndSealRegistryIdb({
+      giftEvents: filteredEvents,
+      deletedGiftEventIds: mergedDelIds,
+      giftEventsInitialized: true,
+      giftEventsUpdatedAtMs: giftEventsUpdatedAtMsRef.current || Date.now(),
+    });
+    window.setTimeout(() => {
+      isApplyingFirestoreRef.current = false;
+    }, 80);
+  };
+
+  const applyDedicatedSealRegistrySnapshot = (
+    docData: Record<string, any> | null,
+    options?: { markLoadedIfNull?: boolean }
+  ) => {
+    if (!docData || typeof docData !== 'object') {
+      if (options?.markLoadedIfNull && !hasLoadedSealRegistryRef.current) {
+        hasLoadedSealRegistryRef.current = true;
+      }
+      return;
+    }
+    const rawCfg =
+      docData.config && typeof docData.config === 'object' ? docData.config : docData;
+    if (!rawCfg || typeof rawCfg !== 'object' || !('signatureMode' in rawCfg)) {
+      return;
+    }
+    const incomingTs = Number(docData.updatedAtMs || 0);
+    if (
+      docData.writerSessionId === clientSessionId &&
+      hasLoadedSealRegistryRef.current &&
+      incomingTs <= letterSealUpdatedAtMsRef.current
+    ) {
+      return;
+    }
+    if (hasLoadedSealRegistryRef.current && incomingTs > 0 && incomingTs < letterSealUpdatedAtMsRef.current) {
+      return;
+    }
+    const normalizedSeal = normalizeLetterSealConfig(rawCfg, defaultLetterSealConfigRef.current);
+    if (incomingTs > letterSealUpdatedAtMsRef.current) {
+      letterSealUpdatedAtMsRef.current = incomingTs;
+    }
+    hasLoadedSealRegistryRef.current = true;
+    isApplyingFirestoreRef.current = true;
+    defaultLetterSealConfigRef.current = normalizedSeal;
+    setDefaultLetterSealConfig(normalizedSeal);
+    setLetterSealCloudStatus('saved');
+    setLetterSealLastSavedAt(
+      typeof docData.updatedAt === 'string' ? docData.updatedAt : new Date().toISOString()
+    );
+    void saveGiftAndSealRegistryIdb({
+      defaultLetterSealConfig: normalizedSeal,
+      letterSealUpdatedAtMs: letterSealUpdatedAtMsRef.current || Date.now(),
+    });
+    window.setTimeout(() => {
+      isApplyingFirestoreRef.current = false;
+    }, 80);
+  };
+
+  // Dedicated Boot + Real-Time Subscriptions for Gift Events & Letter Seal Registries
+  useEffect(() => {
+    let mounted = true;
+    void readGiftAndSealRegistryIdb().then((cached) => {
+      if (!mounted || !cached) return;
+      if (
+        Array.isArray(cached.giftEvents) &&
+        (!hasLoadedGiftRegistryRef.current ||
+          Number(cached.giftEventsUpdatedAtMs || 0) > giftEventsUpdatedAtMsRef.current)
+      ) {
+        const cachedDelIds = Array.isArray(cached.deletedGiftEventIds)
+          ? cached.deletedGiftEventIds
+          : deletedGiftEventIdsRef.current;
+        const normalizedCachedGifts = sanitizeGiftEventsRemoveMiningRewards(
+          cached.giftEvents
+            .map(normalizeGiftEventPackage)
+            .filter((ev) => ev && ev.id && !cachedDelIds.includes(ev.id))
+        );
+        giftEventsUpdatedAtMsRef.current = Number(cached.giftEventsUpdatedAtMs || Date.now());
+        hasLoadedGiftRegistryRef.current = true;
+        deletedGiftEventIdsRef.current = cachedDelIds;
+        setDeletedGiftEventIds(cachedDelIds);
+        giftEventsInitializedRef.current = true;
+        setGiftEventsInitialized(true);
+        giftEventsRef.current = normalizedCachedGifts;
+        setGiftEvents(normalizedCachedGifts);
+      }
+      if (
+        cached.defaultLetterSealConfig &&
+        typeof cached.defaultLetterSealConfig === 'object' &&
+        (!hasLoadedSealRegistryRef.current ||
+          Number(cached.letterSealUpdatedAtMs || 0) > letterSealUpdatedAtMsRef.current)
+      ) {
+        const normalizedSeal = normalizeLetterSealConfig(
+          cached.defaultLetterSealConfig,
+          defaultLetterSealConfigRef.current
+        );
+        letterSealUpdatedAtMsRef.current = Number(cached.letterSealUpdatedAtMs || Date.now());
+        hasLoadedSealRegistryRef.current = true;
+        defaultLetterSealConfigRef.current = normalizedSeal;
+        setDefaultLetterSealConfig(normalizedSeal);
+      }
+    });
+
+    void Promise.all([
+      readCloudDocDual<Record<string, any>>('bank_state_v1', 'gift_events_registry', {
+        timeoutMs: 4500,
+      }),
+      readCloudDocDual<Record<string, any>>('bank_state_v1', 'letter_seal_config', {
+        timeoutMs: 4500,
+      }),
+    ]).then(([giftRes, sealRes]) => {
+      if (!mounted) return;
+      if (giftRes.data) {
+        applyDedicatedGiftRegistrySnapshot(giftRes.data);
+      } else if (giftRes.respondedCleanly) {
+        hasLoadedGiftRegistryRef.current = true;
+      }
+      if (sealRes.data) {
+        applyDedicatedSealRegistrySnapshot(sealRes.data);
+      } else if (sealRes.respondedCleanly) {
+        hasLoadedSealRegistryRef.current = true;
+      }
+    });
+
+    const unsubGiftDual = subscribeCloudDocDual<Record<string, any>>(
+      'bank_state_v1',
+      'gift_events_registry',
+      (data) => {
+        if (!mounted || !data) return;
+        applyDedicatedGiftRegistrySnapshot(data);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, 'bank_state_v1/gift_events_registry', {
+          suppressThrow: true,
+        });
+      }
+    );
+
+    const unsubSealDual = subscribeCloudDocDual<Record<string, any>>(
+      'bank_state_v1',
+      'letter_seal_config',
+      (data) => {
+        if (!mounted || !data) return;
+        applyDedicatedSealRegistrySnapshot(data);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, 'bank_state_v1/letter_seal_config', {
+          suppressThrow: true,
+        });
+      }
+    );
+
+    return () => {
+      mounted = false;
+      unsubGiftDual();
+      unsubSealDual();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser?.uid]);
 
   // Automatic Real-Time Cloud Sync Coordinator (Debounced Firestore Write - Zero localStorage)
   // KUNCI ANTI-TIMPA: Jangan pernah auto-flush master_state di latar belakang dari perangkat yang masih berada di halaman login / belum verifikasi PIN!
@@ -3744,7 +4119,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const syncGiftEventsToServer = (
     eventsToSync: AdminGiftEventPackage[],
-    deletedIdsToSync: string[] = deletedGiftEventIdsRef.current
+    deletedIdsToSync: string[] = deletedGiftEventIdsRef.current,
+    giftEventsUpdatedAtMs: number = giftEventsUpdatedAtMsRef.current || Date.now()
   ) => {
     try {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -3755,6 +4131,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               giftEvents: eventsToSync,
               deletedGiftEventIds: deletedIdsToSync,
               giftEventsInitialized: true,
+              giftEventsUpdatedAtMs,
             },
           })
         );
@@ -3767,9 +4144,163 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         giftEvents: eventsToSync,
         deletedGiftEventIds: deletedIdsToSync,
         giftEventsInitialized: true,
+        giftEventsUpdatedAtMs,
       }),
       keepalive: true,
     }).catch(() => { /* ignore offline */ });
+  };
+
+  const persistGiftEventsRegistryImmediately = (
+    nextListRaw: AdminGiftEventPackage[],
+    nextDeletedIds: string[] = deletedGiftEventIdsRef.current,
+    options?: { isAdminMutation?: boolean }
+  ): Promise<boolean> => {
+    const isAdminMutation = options?.isAdminMutation !== false;
+    const nowMs = Date.now();
+    const nextRegTs = isAdminMutation
+      ? Math.max(nowMs, giftEventsUpdatedAtMsRef.current + 1)
+      : giftEventsUpdatedAtMsRef.current || nowMs;
+    const normalizedList = sanitizeGiftEventsRemoveMiningRewards(
+      nextListRaw.map(normalizeGiftEventPackage)
+    ).slice(0, 150);
+    const cleanDeletedIds = Array.from(new Set(nextDeletedIds.map((x) => String(x)))).slice(0, 500);
+
+    giftEventsUpdatedAtMsRef.current = nextRegTs;
+    hasLoadedGiftRegistryRef.current = true;
+    deletedGiftEventIdsRef.current = cleanDeletedIds;
+    setDeletedGiftEventIds(cleanDeletedIds);
+    giftEventsInitializedRef.current = true;
+    setGiftEventsInitialized(true);
+    giftEventsRef.current = normalizedList;
+    setGiftEvents(normalizedList);
+
+    const nowIso = new Date(nowMs).toISOString();
+    setGiftRegistryCloudStatus('saving');
+    setGiftRegistrySaveError(null);
+
+    void saveGiftAndSealRegistryIdb({
+      giftEvents: normalizedList,
+      deletedGiftEventIds: cleanDeletedIds,
+      giftEventsInitialized: true,
+      giftEventsUpdatedAtMs: nextRegTs,
+    });
+    syncGiftEventsToServer(normalizedList, cleanDeletedIds, nextRegTs);
+
+    const registryPayload: Record<string, unknown> = isAdminMutation
+      ? {
+          giftEvents: normalizedList,
+          deletedGiftEventIds: cleanDeletedIds,
+          giftEventsInitialized: true,
+          giftEventsUpdatedAtMs: nextRegTs,
+          updatedAtMs: nowMs,
+          updatedAt: nowIso,
+          writerSessionId: clientSessionId,
+          ...(auth.currentUser?.uid ? { updatedByUid: auth.currentUser.uid } : {}),
+          ...(auth.currentUser?.email ? { updatedByEmail: auth.currentUser.email } : {}),
+        }
+      : {
+          giftEvents: normalizedList,
+          giftEventsInitialized: true,
+          giftEventsUpdatedAtMs: nextRegTs,
+          updatedAtMs: nowMs,
+          updatedAt: nowIso,
+          writerSessionId: clientSessionId,
+        };
+
+    const masterPromise = flushMasterStateToCloud({
+      giftEvents: normalizedList,
+      deletedGiftEventIds: cleanDeletedIds,
+      giftEventsInitialized: true,
+    });
+
+    const dualPromise = writeCloudDocDual(
+      'bank_state_v1',
+      'gift_events_registry',
+      registryPayload,
+      { merge: !isAdminMutation }
+    );
+
+    return Promise.all([dualPromise, masterPromise])
+      .then(([dualRes, masterOk]) => {
+        const overallOk = dualRes.ok || Boolean(masterOk);
+        if (overallOk) {
+          setGiftRegistryCloudStatus('saved');
+          setGiftRegistryLastSavedAt(new Date().toISOString());
+          setGiftRegistrySaveError(null);
+        } else {
+          setGiftRegistryCloudStatus('error');
+          setGiftRegistrySaveError(
+            dualRes.errorMessage || 'Gagal menyinkronkan ke Cloud, tersimpan aman di perangkat.'
+          );
+        }
+        return overallOk;
+      })
+      .catch((err) => {
+        setGiftRegistryCloudStatus('error');
+        setGiftRegistrySaveError(err instanceof Error ? err.message : 'Gangguan sinkronisasi Cloud.');
+        return false;
+      });
+  };
+
+  const persistLetterSealImmediately = (
+    rawConfig: LetterSignatureStampConfig
+  ): Promise<boolean> => {
+    const normalized = normalizeLetterSealConfig(rawConfig, defaultLetterSealConfigRef.current);
+    const nowMs = Date.now();
+    const nextSealTs = Math.max(nowMs, letterSealUpdatedAtMsRef.current + 1);
+    const nowIso = new Date(nowMs).toISOString();
+
+    letterSealUpdatedAtMsRef.current = nextSealTs;
+    hasLoadedSealRegistryRef.current = true;
+    defaultLetterSealConfigRef.current = normalized;
+    setDefaultLetterSealConfig(normalized);
+    setLetterSealCloudStatus('saving');
+    setLetterSealSaveError(null);
+
+    void saveGiftAndSealRegistryIdb({
+      defaultLetterSealConfig: normalized,
+      letterSealUpdatedAtMs: nextSealTs,
+    });
+
+    const registryPayload: Record<string, unknown> = {
+      config: normalized,
+      updatedAtMs: nextSealTs,
+      updatedAt: nowIso,
+      writerSessionId: clientSessionId,
+      ...(auth.currentUser?.uid ? { updatedByUid: auth.currentUser.uid } : {}),
+      ...(auth.currentUser?.email ? { updatedByEmail: auth.currentUser.email } : {}),
+    };
+
+    const dualPromise = writeCloudDocDual(
+      'bank_state_v1',
+      'letter_seal_config',
+      registryPayload,
+      { merge: false }
+    );
+    const masterPromise = flushMasterStateToCloud({
+      defaultLetterSealConfig: normalized,
+    });
+
+    return Promise.all([dualPromise, masterPromise])
+      .then(([dualRes, masterOk]) => {
+        const overallOk = dualRes.ok || Boolean(masterOk);
+        if (overallOk) {
+          setLetterSealCloudStatus('saved');
+          setLetterSealLastSavedAt(new Date().toISOString());
+          setLetterSealSaveError(null);
+        } else {
+          setLetterSealCloudStatus('error');
+          setLetterSealSaveError(
+            dualRes.errorMessage || 'Tersimpan lokal di perangkat; login Admin Google untuk Cloud sync penuh.'
+          );
+        }
+        return overallOk;
+      })
+      .catch((err) => {
+        setLetterSealCloudStatus('error');
+        setLetterSealSaveError(err instanceof Error ? err.message : 'Gangguan sinkronisasi tanda tangan.');
+        return false;
+      });
   };
 
   const accountsRef = useRef<BankAccount[]>(accounts);
@@ -6280,19 +6811,52 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const mergedDeleted = Array.from(
             new Set([...deletedGiftEventIdsRef.current, ...data.deletedGiftEventIds])
           );
+          deletedGiftEventIdsRef.current = mergedDeleted;
           setDeletedGiftEventIds(mergedDeleted);
         }
 
+        const serverGiftTs = Number(data.giftEventsUpdatedAtMs) || 0;
         if (Boolean(data.giftEventsInitialized) && Array.isArray(data.giftEvents)) {
-          const deletedSet = new Set([
-            ...deletedGiftEventIdsRef.current,
-            ...(Array.isArray(data.deletedGiftEventIds) ? data.deletedGiftEventIds : []),
-          ]);
-          const filtered = (data.giftEvents as AdminGiftEventPackage[]).filter(
-            (ev) => !deletedSet.has(ev.id)
+          if (serverGiftTs > giftEventsUpdatedAtMsRef.current) {
+            const deletedSet = new Set([
+              ...deletedGiftEventIdsRef.current,
+              ...(Array.isArray(data.deletedGiftEventIds) ? data.deletedGiftEventIds : []),
+            ]);
+            const filtered = sanitizeGiftEventsRemoveMiningRewards(
+              (data.giftEvents as AdminGiftEventPackage[])
+                .map(normalizeGiftEventPackage)
+                .filter((ev) => !deletedSet.has(ev.id))
+            );
+            giftEventsUpdatedAtMsRef.current = serverGiftTs;
+            hasLoadedGiftRegistryRef.current = true;
+            setGiftEventsInitialized(true);
+            giftEventsRef.current = filtered;
+            setGiftEvents(filtered);
+            void saveGiftAndSealRegistryIdb({
+              giftEvents: filtered,
+              deletedGiftEventIds: Array.from(deletedSet),
+              giftEventsInitialized: true,
+              giftEventsUpdatedAtMs: serverGiftTs,
+            });
+          } else if (
+            hasLoadedGiftRegistryRef.current &&
+            giftEventsUpdatedAtMsRef.current > serverGiftTs
+          ) {
+            syncGiftEventsToServer(
+              giftEventsRef.current,
+              deletedGiftEventIdsRef.current,
+              giftEventsUpdatedAtMsRef.current
+            );
+          }
+        } else if (
+          hasLoadedGiftRegistryRef.current &&
+          giftEventsUpdatedAtMsRef.current > 0
+        ) {
+          syncGiftEventsToServer(
+            giftEventsRef.current,
+            deletedGiftEventIdsRef.current,
+            giftEventsUpdatedAtMsRef.current
           );
-          setGiftEventsInitialized(true);
-          setGiftEvents(filtered);
         }
 
         if (Array.isArray(data.pushAlerts)) {
@@ -6380,22 +6944,38 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   Array.from(new Set([...prev, ...msg.payload.deletedGiftEventIds]))
                 );
               }
+              const initGiftTs = Number(msg.payload.giftEventsUpdatedAtMs) || 0;
               if (
                 Boolean(msg.payload.giftEventsInitialized) &&
                 Array.isArray(msg.payload.giftEvents)
               ) {
-                const deletedSet = new Set([
-                  ...deletedGiftEventIdsRef.current,
-                  ...(Array.isArray(msg.payload.deletedGiftEventIds)
-                    ? msg.payload.deletedGiftEventIds
-                    : []),
-                ]);
-                setGiftEventsInitialized(true);
-                setGiftEvents(
-                  (msg.payload.giftEvents as AdminGiftEventPackage[]).filter(
-                    (ev) => !deletedSet.has(ev.id)
-                  )
-                );
+                if (initGiftTs > giftEventsUpdatedAtMsRef.current) {
+                  const deletedSet = new Set([
+                    ...deletedGiftEventIdsRef.current,
+                    ...(Array.isArray(msg.payload.deletedGiftEventIds)
+                      ? msg.payload.deletedGiftEventIds
+                      : []),
+                  ]);
+                  const nextGifts = sanitizeGiftEventsRemoveMiningRewards(
+                    (msg.payload.giftEvents as AdminGiftEventPackage[])
+                      .map(normalizeGiftEventPackage)
+                      .filter((ev) => !deletedSet.has(ev.id))
+                  );
+                  giftEventsUpdatedAtMsRef.current = initGiftTs;
+                  hasLoadedGiftRegistryRef.current = true;
+                  setGiftEventsInitialized(true);
+                  giftEventsRef.current = nextGifts;
+                  setGiftEvents(nextGifts);
+                } else if (
+                  hasLoadedGiftRegistryRef.current &&
+                  giftEventsUpdatedAtMsRef.current > initGiftTs
+                ) {
+                  syncGiftEventsToServer(
+                    giftEventsRef.current,
+                    deletedGiftEventIdsRef.current,
+                    giftEventsUpdatedAtMsRef.current
+                  );
+                }
               }
               if (Array.isArray(msg.payload.pushAlerts)) {
                 msg.payload.pushAlerts.forEach((pa: AppNotification) => seenPushIdsRef.current.add(pa.id));
@@ -6407,19 +6987,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               msg.type === 'gift_events:updated' &&
               Array.isArray(msg.payload?.giftEvents)
             ) {
-              const incomingDel: string[] = Array.isArray(msg.payload?.deletedGiftEventIds)
-                ? msg.payload.deletedGiftEventIds
-                : [];
-              if (incomingDel.length > 0) {
-                setDeletedGiftEventIds((prev) => Array.from(new Set([...prev, ...incomingDel])));
+              const updGiftTs = Number(msg.payload?.giftEventsUpdatedAtMs) || 0;
+              if (updGiftTs === 0 || updGiftTs >= giftEventsUpdatedAtMsRef.current) {
+                const incomingDel: string[] = Array.isArray(msg.payload?.deletedGiftEventIds)
+                  ? msg.payload.deletedGiftEventIds
+                  : [];
+                if (incomingDel.length > 0) {
+                  setDeletedGiftEventIds((prev) => Array.from(new Set([...prev, ...incomingDel])));
+                }
+                const deletedSet = new Set([...deletedGiftEventIdsRef.current, ...incomingDel]);
+                const nextGifts = sanitizeGiftEventsRemoveMiningRewards(
+                  (msg.payload.giftEvents as AdminGiftEventPackage[])
+                    .map(normalizeGiftEventPackage)
+                    .filter((ev) => !deletedSet.has(ev.id))
+                );
+                if (updGiftTs > giftEventsUpdatedAtMsRef.current) {
+                  giftEventsUpdatedAtMsRef.current = updGiftTs;
+                }
+                hasLoadedGiftRegistryRef.current = true;
+                setGiftEventsInitialized(true);
+                giftEventsRef.current = nextGifts;
+                setGiftEvents(nextGifts);
               }
-              const deletedSet = new Set([...deletedGiftEventIdsRef.current, ...incomingDel]);
-              setGiftEventsInitialized(true);
-              setGiftEvents(
-                (msg.payload.giftEvents as AdminGiftEventPackage[]).filter(
-                  (ev) => !deletedSet.has(ev.id)
-                )
-              );
             } else if (msg.type === 'presence' && msg.payload) {
               if (typeof msg.payload.connectedDevices === 'number') {
                 setConnectedDevicesCount(Math.max(1, msg.payload.connectedDevices));
@@ -12204,11 +12793,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setBudgetTxCategoryMap({});
     setDeletedAccountIds([...PURGED_BOT_ACCOUNT_IDS]);
     setBudgetAlertHistory([]);
-    setGiftEvents(DEFAULT_ADMIN_GIFT_EVENTS);
-    setDeletedGiftEventIds([]);
-    setGiftEventsInitialized(true);
     wipeLegacyBrowserStorage();
     void clearDeviceSnapshotStorage();
+    void persistGiftEventsRegistryImmediately(DEFAULT_ADMIN_GIFT_EVENTS, [], {
+      isAdminMutation: true,
+    });
     flushMasterStateToCloud({
       accounts: cleanInitialAccounts,
       deletedAccountIds: [],
@@ -17197,8 +17786,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (viewed.includes(currentAccount.id)) return ev;
           return { ...ev, viewedByAccountIds: [...viewed, currentAccount.id] };
         });
-        setGiftEvents(updated);
-        syncGiftEventsToServer(updated);
+        void persistGiftEventsRegistryImmediately(updated, deletedGiftEventIdsRef.current, {
+          isAdminMutation: false,
+        });
       }
     }
     setActiveGiftModal(null);
@@ -17221,9 +17811,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         letterOpenedByAccountIds: nextLetterOpened,
       };
     });
-    setGiftEvents(updated);
-    syncGiftEventsToServer(updated);
-    flushMasterStateToCloud({ giftEvents: updated });
+    void persistGiftEventsRegistryImmediately(updated, deletedGiftEventIdsRef.current, {
+      isAdminMutation: false,
+    });
     playAtmSound('beep');
   };
 
@@ -17356,9 +17946,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     });
 
-    setGiftEvents(updatedEvents);
-    syncGiftEventsToServer(updatedEvents);
-    flushMasterStateToCloud({ giftEvents: updatedEvents });
+    void persistGiftEventsRegistryImmediately(updatedEvents, deletedGiftEventIdsRef.current, {
+      isAdminMutation: false,
+    });
 
     addNotification(
       `🎁 Kotak Hadiah Ditransfer ke ${friend.fullName}`,
@@ -18442,8 +19032,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         gachaResultsByAccount: nextGachaMap,
       };
     });
-    setGiftEvents(updatedEvents);
-    syncGiftEventsToServer(updatedEvents);
+    void persistGiftEventsRegistryImmediately(updatedEvents, deletedGiftEventIdsRef.current, {
+      isAdminMutation: false,
+    });
 
     addNotification(
       `🎁 Kotak Hadiah Berhasil Diklaim`,
@@ -18512,7 +19103,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     attachmentFileName?: string;
     autoExpireHours?: number;
     allowTransferableGift?: boolean;
-  }): { success: boolean; message: string; event: AdminGiftEventPackage } => {
+  }): { success: boolean; message: string; event: AdminGiftEventPackage; cloudSyncPromise?: Promise<boolean> } => {
     const monthLabel = MONTHS_INDO.find((m) => m.value === input.scheduleMonth)?.label || `Bulan ${input.scheduleMonth}`;
     const freq = input.frequencyType || 'monthly';
     const scheduleLabel =
@@ -18622,9 +19213,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextList = existing
       ? giftEvents.map((e) => (e.id === existing.id ? savedEvent : e))
       : [savedEvent, ...giftEvents];
-    setGiftEvents(nextList);
-    syncGiftEventsToServer(nextList);
-    flushMasterStateToCloud({ giftEvents: nextList });
+    const cloudSyncPromise = persistGiftEventsRegistryImmediately(
+      nextList,
+      deletedGiftEventIdsRef.current,
+      { isAdminMutation: true }
+    );
     playAtmSound('success');
 
     const modeLabel =
@@ -18641,23 +19234,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       event: savedEvent,
+      cloudSyncPromise,
       message: existing
-        ? `Paket "${savedEvent.title}" [Mode: ${modeLabel} • Penerima: ${recipientSummary}] berhasil diperbarui!`
-        : `Paket baru "${savedEvent.title}" [Mode: ${modeLabel} • Penerima: ${recipientSummary}] dijadwalkan untuk ${scheduleLabel}!`,
+        ? `Paket "${savedEvent.title}" [Mode: ${modeLabel} • Penerima: ${recipientSummary}] berhasil diperbarui & tersimpan permanen di Cloud!`
+        : `Paket baru "${savedEvent.title}" [Mode: ${modeLabel} • Penerima: ${recipientSummary}] dijadwalkan untuk ${scheduleLabel} & tersimpan permanen di Cloud!`,
     };
   };
 
   const adminDeleteGiftEvent = (eventId: string) => {
     const nextList = giftEvents.filter((e) => e.id !== eventId);
     const nextDeletedGiftEventIds = Array.from(new Set([...deletedGiftEventIds, eventId]));
-    setDeletedGiftEventIds(nextDeletedGiftEventIds);
-    setGiftEventsInitialized(true);
-    setGiftEvents(nextList);
-    syncGiftEventsToServer(nextList, nextDeletedGiftEventIds);
-    flushMasterStateToCloud({
-      giftEvents: nextList,
-      deletedGiftEventIds: nextDeletedGiftEventIds,
-      giftEventsInitialized: true,
+    void persistGiftEventsRegistryImmediately(nextList, nextDeletedGiftEventIds, {
+      isAdminMutation: true,
     });
     playAtmSound('beep');
     return { success: true, message: 'Paket Hadiah & Surat berhasil dihapus permanen di semua perangkat & Cloud!' };
@@ -18667,9 +19255,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextList = giftEvents.map((e) =>
       e.id === eventId ? { ...e, isActive: !e.isActive, updatedAt: new Date().toISOString() } : e
     );
-    setGiftEvents(nextList);
-    syncGiftEventsToServer(nextList);
-    flushMasterStateToCloud({ giftEvents: nextList });
+    void persistGiftEventsRegistryImmediately(nextList, deletedGiftEventIdsRef.current, {
+      isAdminMutation: true,
+    });
     return { success: true, message: 'Status aktif paket Hadiah & Surat berhasil diubah.' };
   };
 
@@ -18692,15 +19280,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         : e
     );
-    setGiftEvents(nextList);
     Array.from(openingGiftBoxKeysRef.current).forEach((k) => {
       if (k.startsWith(`${eventId}:`)) {
         openingGiftBoxKeysRef.current.delete(k);
       }
     });
     setOpeningGiftBoxKeys(Array.from(openingGiftBoxKeysRef.current));
-    syncGiftEventsToServer(nextList);
-    flushMasterStateToCloud({ giftEvents: nextList });
+    void persistGiftEventsRegistryImmediately(nextList, deletedGiftEventIdsRef.current, {
+      isAdminMutation: true,
+    });
     playAtmSound('success');
     const modeLabel =
       target.deliveryContentMode === 'letter_only'
@@ -18781,9 +19369,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     });
 
-    setGiftEvents(nextList);
-    syncGiftEventsToServer(nextList);
-    flushMasterStateToCloud({ giftEvents: nextList });
+    void persistGiftEventsRegistryImmediately(nextList, deletedGiftEventIdsRef.current, {
+      isAdminMutation: true,
+    });
 
     // Aktifkan kembali fitur Transfer Hadiah ke Teman saat Admin mereset status klaim
     if (resetType === 'all' || resetType === 'claim_only') {
@@ -18845,9 +19433,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     });
 
-    setGiftEvents(nextList);
-    syncGiftEventsToServer(nextList);
-    flushMasterStateToCloud({ giftEvents: nextList });
+    void persistGiftEventsRegistryImmediately(nextList, deletedGiftEventIdsRef.current, {
+      isAdminMutation: true,
+    });
     if (
       !currentlyRevoked &&
       currentAccount?.id === accountId &&
@@ -18915,9 +19503,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const nextList = [duplicated, ...giftEvents];
-    setGiftEvents(nextList);
-    syncGiftEventsToServer(nextList);
-    flushMasterStateToCloud({ giftEvents: nextList });
+    void persistGiftEventsRegistryImmediately(nextList, deletedGiftEventIdsRef.current, {
+      isAdminMutation: true,
+    });
     playAtmSound('success');
 
     return {
@@ -18983,9 +19571,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     });
 
-    setGiftEvents(nextList);
-    syncGiftEventsToServer(nextList);
-    flushMasterStateToCloud({ giftEvents: nextList });
+    void persistGiftEventsRegistryImmediately(nextList, deletedGiftEventIdsRef.current, {
+      isAdminMutation: true,
+    });
     playAtmSound('success');
 
     return {
@@ -19886,8 +20474,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
 
       const nextEvents = [gachaPackage, ...giftEvents];
-      setGiftEvents(nextEvents);
-      syncGiftEventsToServer(nextEvents);
+      void persistGiftEventsRegistryImmediately(nextEvents, deletedGiftEventIdsRef.current, {
+        isAdminMutation: true,
+      });
       playAtmSound('success');
       return {
         success: true,
@@ -20454,10 +21043,30 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const adminUpdateDefaultLetterSealConfig = (
     config: LetterSignatureStampConfig
   ): { success: boolean; message: string } => {
-    setDefaultLetterSealConfig(config);
+    void persistLetterSealImmediately(config);
     return {
       success: true,
-      message: 'Desain Tanda Tangan & Stempel Default Global berhasil disimpan!',
+      message: 'Desain Tanda Tangan & Stempel Default Global langsung disinkronkan ke Cloud & Perangkat!',
+    };
+  };
+
+  const adminSaveDefaultLetterSealConfigNow = async (
+    config?: LetterSignatureStampConfig
+  ): Promise<{ success: boolean; message: string }> => {
+    const targetCfg = config || defaultLetterSealConfigRef.current;
+    const ok = await persistLetterSealImmediately(targetCfg);
+    if (ok) {
+      playAtmSound('success');
+      return {
+        success: true,
+        message:
+          '✅ Tanda Tangan & Stempel Resmi tersimpan PERMANEN ke Firebase Cloud & IndexedDB! Aman saat refresh dan lintas perangkat.',
+      };
+    }
+    return {
+      success: false,
+      message:
+        '⚠️ Tersimpan aman di perangkat (IndexedDB), namun sinkronisasi Cloud membutuhkan koneksi online atau akun Google Admin.',
     };
   };
 
@@ -20797,6 +21406,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         giftEvents,
         deletedGiftEventIds,
         giftEventsInitialized,
+        giftRegistryCloudStatus,
+        giftRegistryLastSavedAt,
+        giftRegistrySaveError,
         activeGiftModal,
         giftDateTestOverride,
         isGiftEventOpenableNow,
@@ -20842,7 +21454,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminResetDevRoles,
         adminAssignAccountDevRole,
         defaultLetterSealConfig,
+        letterSealCloudStatus,
+        letterSealLastSavedAt,
+        letterSealSaveError,
         adminUpdateDefaultLetterSealConfig,
+        adminSaveDefaultLetterSealConfigNow,
       }}
     >
       {children}

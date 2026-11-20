@@ -3,14 +3,6 @@ rules_version = '2';
 // ============================================================================
 // BANK NUSANTARA DIGITAL — ENTERPRISE ZERO-TRUST FIRESTORE SECURITY RULES
 // ============================================================================
-// Prinsip Defense-in-Depth:
-// 1. Default Deny mutlak untuk seluruh path yang tidak didefinisikan eksplisit
-// 2. Isolasi Tenant Berbasis UID (request.auth != null && request.auth.uid == userId)
-// 3. Validasi Skema, Tipe Data & Panjang String Maksimal (Anti-DoS / Payload Poisoning)
-// 4. Field Immutability: ownerUid & createdAt terkunci permanen setelah dibuat
-// 5. Immutable Append-Only Security Audit Logs (larangan update & delete)
-// 6. Server-Side Anti-Spam Rate Limiting (>= 500ms antar pembaruan menggunakan request.time)
-// ============================================================================
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -72,7 +64,7 @@ service cloud.firestore {
     function isValidUserProfile(data, userId) {
       return data.keys().hasAll(['uid'])
         && data.keys().hasOnly([
-          'uid', 'ownerUid', 'email', 'emailKey', 'displayName', 'photoURL',
+          'uid', 'ownerUid', 'email', 'emailKey', 'displayName', 'photoURL', 'photoUrl', 'role',
           'status', 'banReason', 'bannedAt', 'banExpiresAt', 'banDurationLabel',
           'appealStatus', 'appealNote', 'appealCategory', 'appealCount',
           'appealAdminNote', 'appealRequestedAt', 'banCustomConfig',
@@ -87,6 +79,8 @@ service cloud.firestore {
         && (!('email' in data) || (data.email is string && data.email.size() <= 254))
         && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 160))
         && (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000))
+        && (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() <= 1000))
+        && (!('role' in data) || (data.role is string && data.role == 'customer'))
         && (!('status' in data) || (data.status is string && data.status in ['active', 'banned']))
         && (!('banReason' in data) || (data.banReason is string && data.banReason.size() <= 1000))
         && (!('lastDeviceId' in data) || (data.lastDeviceId is string && data.lastDeviceId.size() <= 128))
@@ -110,6 +104,13 @@ service cloud.firestore {
         && (!('updatedAtIso' in data) || (data.updatedAtIso is string && data.updatedAtIso.size() <= 64))
         && (!('createdAtMs' in data) || data.createdAtMs is number)
         && (!('updatedAtMs' in data) || data.updatedAtMs is number);
+    }
+
+    function isValidLegacyVaultSubDoc(data, userId) {
+      return data.keys().hasAll(['ownerId'])
+        && data.ownerId is string
+        && data.ownerId == userId
+        && data.ownerId.size() <= 128;
     }
 
     function isValidSnapshot(data, userId) {
@@ -168,6 +169,72 @@ service cloud.firestore {
         && (!('userAgent' in data) || (data.userAgent is string && data.userAgent.size() <= 320));
     }
 
+    function isValidLetterSealRegistry(data) {
+      return data.keys().hasAll(['config', 'updatedAtMs'])
+        && data.keys().hasOnly([
+          'config', 'updatedAtMs', 'updatedAt', 'writerSessionId', 'updatedByUid', 'updatedByEmail'
+        ])
+        && data.updatedAtMs is number
+        && data.config is map
+        && data.config.keys().hasAll(['signatureMode', 'signatureName'])
+        && data.config.keys().hasOnly([
+          'signatureMode', 'signatureDrawingDataUrl', 'signatureTemplateId',
+          'signatureName', 'signatureColor', 'stampTemplateId',
+          'stampPrimaryName', 'stampSecondaryName', 'stampColor'
+        ])
+        && data.config.signatureMode is string
+        && data.config.signatureMode in ['draw', 'template']
+        && data.config.signatureName is string
+        && data.config.signatureName.size() <= 160
+        && (!('signatureDrawingDataUrl' in data.config) || (data.config.signatureDrawingDataUrl is string && data.config.signatureDrawingDataUrl.size() <= 66000))
+        && (!('signatureTemplateId' in data.config) || (data.config.signatureTemplateId is string && data.config.signatureTemplateId.size() <= 64))
+        && (!('signatureColor' in data.config) || (data.config.signatureColor is string && data.config.signatureColor.size() <= 32))
+        && (!('stampTemplateId' in data.config) || (data.config.stampTemplateId is string && data.config.stampTemplateId.size() <= 64))
+        && (!('stampPrimaryName' in data.config) || (data.config.stampPrimaryName is string && data.config.stampPrimaryName.size() <= 160))
+        && (!('stampSecondaryName' in data.config) || (data.config.stampSecondaryName is string && data.config.stampSecondaryName.size() <= 160))
+        && (!('stampColor' in data.config) || (data.config.stampColor is string && data.config.stampColor.size() <= 32))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && (!('writerSessionId' in data) || (data.writerSessionId is string && data.writerSessionId.size() <= 128))
+        && (!('updatedByUid' in data) || (data.updatedByUid is string && data.updatedByUid == request.auth.uid && data.updatedByUid.size() <= 128))
+        && (!('updatedByEmail' in data) || (data.updatedByEmail is string && data.updatedByEmail.size() <= 254));
+    }
+
+    function isValidGiftEventsRegistry(data) {
+      return data.keys().hasAll(['giftEventsInitialized', 'giftEventsUpdatedAtMs', 'updatedAtMs'])
+        && data.keys().hasOnly([
+          'giftEvents', 'deletedGiftEventIds', 'giftEventsInitialized',
+          'giftEventsUpdatedAtMs', 'updatedAtMs', 'updatedAt',
+          'writerSessionId', 'updatedByUid', 'updatedByEmail'
+        ])
+        && data.giftEventsInitialized is bool
+        && data.giftEventsUpdatedAtMs is number
+        && data.updatedAtMs is number
+        && (!('giftEvents' in data) || (data.giftEvents is list && data.giftEvents.size() <= 150 && (data.giftEvents.size() == 0 || data.giftEvents[0] is map)))
+        && (!('deletedGiftEventIds' in data) || (data.deletedGiftEventIds is list && data.deletedGiftEventIds.size() <= 500 && (data.deletedGiftEventIds.size() == 0 || data.deletedGiftEventIds[0] is string)))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64))
+        && (!('writerSessionId' in data) || (data.writerSessionId is string && data.writerSessionId.size() <= 128))
+        && (!('updatedByUid' in data) || (data.updatedByUid is string && data.updatedByUid == request.auth.uid && data.updatedByUid.size() <= 128))
+        && (!('updatedByEmail' in data) || (data.updatedByEmail is string && data.updatedByEmail.size() <= 254));
+    }
+
+    function isValidBugReport(data) {
+      return data.keys().hasAll(['id', 'authorId', 'reporterName', 'category', 'explanation', 'status'])
+        && data.keys().hasOnly([
+          'id', 'authorId', 'reporterName', 'reporterAccountNumber', 'reporterEmail',
+          'category', 'explanation', 'photoFileName', 'status', 'adminReply', 'createdAt', 'updatedAt'
+        ])
+        && data.id is string && isValidId(data.id)
+        && data.authorId is string && data.authorId.size() <= 128
+        && data.reporterName is string && data.reporterName.size() >= 1 && data.reporterName.size() <= 120
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 80
+        && data.explanation is string && data.explanation.size() >= 1 && data.explanation.size() <= 2000
+        && data.status is string && data.status in ['baru', 'diproses', 'selesai']
+        && (!('reporterAccountNumber' in data) || (data.reporterAccountNumber is string && data.reporterAccountNumber.size() <= 32))
+        && (!('reporterEmail' in data) || (data.reporterEmail is string && data.reporterEmail.size() <= 160))
+        && (!('photoFileName' in data) || (data.photoFileName is string && data.photoFileName.size() <= 180))
+        && (!('adminReply' in data) || (data.adminReply is string && data.adminReply.size() <= 2000));
+    }
+
     // ------------------------------------------------------------------------
     // ISOLASI TENANT MUTLAK BERBASIS UID: /users/{userId}/...
     // ------------------------------------------------------------------------
@@ -210,6 +277,21 @@ service cloud.firestore {
         allow delete: if isValidId(userId) && isValidId(stateId) && isOwner(userId);
       }
 
+      // 2.1b Legacy Split Vault Docs (/users/{userId}/vault/{core|ledger|extras})
+      match /vault/{vaultDocId} {
+        allow get: if isValidId(userId) && isValidId(vaultDocId) && isOwner(userId);
+        allow list: if isOwner(userId) && resource.data.ownerId == request.auth.uid;
+        allow create: if isValidId(userId) && isValidId(vaultDocId)
+          && isOwner(userId)
+          && exists(/databases/$(database)/documents/users/$(userId))
+          && isValidLegacyVaultSubDoc(incoming(), userId);
+        allow update: if isValidId(userId) && isValidId(vaultDocId)
+          && isOwner(userId)
+          && isValidLegacyVaultSubDoc(incoming(), userId)
+          && incoming().ownerId == existing().ownerId;
+        allow delete: if isValidId(userId) && isValidId(vaultDocId) && isOwner(userId);
+      }
+
       // 2.2 Time-Machine Cloud Snapshots (Rolling Max 5 Versions)
       match /snapshots/{snapshotId} {
         allow get: if isValidId(userId) && isValidId(snapshotId) && isOwner(userId);
@@ -217,7 +299,7 @@ service cloud.firestore {
         allow create: if isValidId(userId) && isValidId(snapshotId)
           && isOwner(userId)
           && isValidSnapshot(incoming(), userId);
-        allow update: if false; // Snapshot bersifat immutable setelah dibuat
+        allow update: if false;
         allow delete: if isValidId(userId) && isValidId(snapshotId) && isOwner(userId);
       }
 
@@ -228,8 +310,8 @@ service cloud.firestore {
         allow create: if isValidId(userId) && isValidId(logId)
           && isOwner(userId)
           && isValidSecurityLog(incoming(), userId);
-        allow update: if false; // Audit log tidak pernah boleh diubah
-        allow delete: if false; // Audit log tidak pernah boleh dihapus oleh klien
+        allow update: if false;
+        allow delete: if false;
       }
 
       // 2.4 Active Device Sessions Registry
@@ -253,7 +335,7 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------------
-    // ADMIN REGISTRY (Hanya bisa dibaca oleh pemilik UID sendiri / Verified Admin)
+    // ADMIN REGISTRY
     // ------------------------------------------------------------------------
     match /admins/{adminUid} {
       allow get: if isValidId(adminUid) && (isOwner(adminUid) || isVerifiedAdmin());
@@ -261,7 +343,33 @@ service cloud.firestore {
     }
 
     // ------------------------------------------------------------------------
-    // PROBE KONEKSI & BANK NUSANTARA SHARED OPERATIONAL STATE (AUTH REQUIRED)
+    // BUG REPORTS
+    // ------------------------------------------------------------------------
+    match /bug_reports/{reportId} {
+      allow get: if isValidId(reportId) && isSignedIn() && (isVerifiedAdmin() || existing().authorId == request.auth.uid);
+      allow list: if isVerifiedAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+      allow create: if isValidId(reportId)
+        && isSignedIn()
+        && isValidBugReport(incoming())
+        && incoming().authorId == request.auth.uid;
+      allow update: if isValidId(reportId)
+        && isSignedIn()
+        && isValidBugReport(incoming())
+        && (
+          isVerifiedAdmin()
+          || (
+            existing().authorId == request.auth.uid
+            && existing().status != 'selesai'
+            && incoming().authorId == existing().authorId
+            && incoming().status == existing().status
+            && incoming().diff(existing()).affectedKeys().hasOnly(['explanation', 'category', 'photoFileName', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(reportId) && isVerifiedAdmin();
+    }
+
+    // ------------------------------------------------------------------------
+    // PROBE KONEKSI & BANK NUSANTARA SHARED OPERATIONAL STATE
     // ------------------------------------------------------------------------
     match /test/connection {
       allow get: if isSignedIn();
@@ -283,10 +391,48 @@ service cloud.firestore {
       allow delete: if isValidId(emailKey) && isVerifiedAdmin();
     }
 
+    // Dedicated Admin Global Signature & Stamp Config (Strict Verified Admin Write)
+    match /bank_state_v1/letter_seal_config {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if isVerifiedAdmin() && isValidLetterSealRegistry(incoming());
+      allow update: if isVerifiedAdmin()
+        && isValidLetterSealRegistry(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'config', 'updatedAtMs', 'updatedAt', 'writerSessionId', 'updatedByUid', 'updatedByEmail'
+        ]);
+      allow delete: if isVerifiedAdmin();
+    }
+
+    // Dedicated Gift & Official Letter Registry (Verified Admin full control; customers interaction-only)
+    match /bank_state_v1/gift_events_registry {
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if isVerifiedAdmin() && isValidGiftEventsRegistry(incoming());
+      allow update: if isValidGiftEventsRegistry(incoming())
+        && (
+          isVerifiedAdmin()
+          || (
+            isSignedIn()
+            && incoming().giftEventsInitialized == existing().giftEventsInitialized
+            && incoming().giftEventsUpdatedAtMs == existing().giftEventsUpdatedAtMs
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'giftEvents', 'updatedAtMs', 'updatedAt', 'writerSessionId'
+            ])
+          )
+        );
+      allow delete: if isVerifiedAdmin();
+    }
+
     match /bank_state_v1/{docId} {
-      allow get: if isValidId(docId) && isSignedIn();
+      allow get: if isValidId(docId)
+        && docId != 'letter_seal_config'
+        && docId != 'gift_events_registry'
+        && isSignedIn();
       allow list: if false;
       allow create, update: if isValidId(docId)
+        && docId != 'letter_seal_config'
+        && docId != 'gift_events_registry'
         && isSignedIn()
         && incoming().updatedAtMs is number;
       allow delete: if isValidId(docId) && isVerifiedAdmin();

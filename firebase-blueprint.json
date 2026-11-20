@@ -116,6 +116,53 @@
         "giftEventsInitialized": { "type": "boolean" }
       },
       "required": ["updatedAtMs"]
+    },
+    "GiftEventsRegistry": {
+      "title": "GiftEventsRegistry",
+      "description": "Dedicated persistent registry of Admin-created Gift & Official Letter packages and permanently deleted package IDs",
+      "type": "object",
+      "properties": {
+        "giftEventsInitialized": { "type": "boolean" },
+        "giftEventsUpdatedAtMs": { "type": "number" },
+        "updatedAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "writerSessionId": { "type": "string", "maxLength": 128 },
+        "updatedByUid": { "type": "string", "maxLength": 128 },
+        "updatedByEmail": { "type": "string", "maxLength": 254 }
+      },
+      "required": ["giftEventsInitialized", "giftEventsUpdatedAtMs", "updatedAtMs"]
+    },
+    "LetterSealGlobalConfig": {
+      "title": "LetterSealGlobalConfig",
+      "description": "Dedicated persistent Admin global signature drawing/template and official stamp configuration",
+      "type": "object",
+      "properties": {
+        "updatedAtMs": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 64 },
+        "writerSessionId": { "type": "string", "maxLength": 128 },
+        "updatedByUid": { "type": "string", "maxLength": 128 },
+        "updatedByEmail": { "type": "string", "maxLength": 254 }
+      },
+      "required": ["updatedAtMs"]
+    },
+    "BugReport": {
+      "title": "BugReport",
+      "description": "Customer bug report submitted with author UID and lifecycle status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "authorId": { "type": "string", "maxLength": 128 },
+        "reporterName": { "type": "string", "maxLength": 120 },
+        "reporterAccountNumber": { "type": "string", "maxLength": 32 },
+        "reporterEmail": { "type": "string", "maxLength": 160 },
+        "category": { "type": "string", "maxLength": 80 },
+        "explanation": { "type": "string", "maxLength": 2000 },
+        "photoFileName": { "type": "string", "maxLength": 180 },
+        "status": { "type": "string", "enum": ["baru", "diproses", "selesai"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "authorId", "reporterName", "category", "explanation", "status"]
     }
   },
   "firestore": {
@@ -146,6 +193,18 @@
     "/bank_state_v1/{docId}": {
       "schema": { "$ref": "#/entities/MasterCloudState" },
       "description": "Shared Bank Nusantara operational state for inter-account transfers and OA accounts"
+    },
+    "/bank_state_v1/gift_events_registry": {
+      "schema": { "$ref": "#/entities/GiftEventsRegistry" },
+      "description": "Dedicated persistent registry for Admin Gift & Official Letter packages"
+    },
+    "/bank_state_v1/letter_seal_config": {
+      "schema": { "$ref": "#/entities/LetterSealGlobalConfig" },
+      "description": "Dedicated persistent Admin global signature and official stamp config"
+    },
+    "/bug_reports/{reportId}": {
+      "schema": { "$ref": "#/entities/BugReport" },
+      "description": "Customer bug reports with UID ownership and Admin moderation"
     }
   }
 }

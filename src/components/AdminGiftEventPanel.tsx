@@ -3,7 +3,7 @@
  * Pusat Kendali Hadiah & Surat (100 Macam Hadiah + Sub-Pilihan Varian, Trial Lengkap, Role Permanen/Trial, Gacha Min–Max %,
  * Date Lock Ketat, & Studio Tanda Tangan Gambar/Template + 5 Template Stempel)
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Gift,
   Calendar,
@@ -30,6 +30,9 @@ import {
   Ban,
   CheckCircle2,
   Sliders,
+  Cloud,
+  Save,
+  AlertTriangle,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { GIFT_REWARD_CATALOG, MONTHS_INDO, formatTrialDurationLabel } from '../data/giftRewardsCatalog';
@@ -76,6 +79,9 @@ export const AdminGiftEventPanel: React.FC = () => {
     accounts,
     giftEvents,
     giftDateTestOverride,
+    giftRegistryCloudStatus,
+    giftRegistryLastSavedAt,
+    giftRegistrySaveError,
     adminCreateOrUpdateGiftEvent,
     adminDeleteGiftEvent,
     adminToggleGiftEventActive,
@@ -88,7 +94,11 @@ export const AdminGiftEventPanel: React.FC = () => {
     openGiftEventModal,
     devRoles,
     defaultLetterSealConfig,
+    letterSealCloudStatus,
+    letterSealLastSavedAt,
+    letterSealSaveError,
     adminUpdateDefaultLetterSealConfig,
+    adminSaveDefaultLetterSealConfigNow,
     stageForceClearNonce,
   } = useBank();
 
@@ -119,6 +129,15 @@ export const AdminGiftEventPanel: React.FC = () => {
     defaultLetterSealConfig
   );
   const [showSealStudio, setShowSealStudio] = useState<boolean>(true);
+  const [isSavingPackage, setIsSavingPackage] = useState<boolean>(false);
+  const [isSavingSeal, setIsSavingSeal] = useState<boolean>(false);
+
+  // Sinkronkan draft saat defaultLetterSealConfig baru selesai di-hydrate dari Cloud/IndexedDB
+  useEffect(() => {
+    if (sealScope === 'global' && !editingEventId) {
+      setCustomSealDraft(defaultLetterSealConfig);
+    }
+  }, [defaultLetterSealConfig, sealScope, editingEventId]);
 
   // 20+ Advanced Admin Features State
   const [frequencyType, setFrequencyType] = useState<'once' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'custom_recurring'>('monthly');
@@ -370,7 +389,7 @@ export const AdminGiftEventPanel: React.FC = () => {
     );
   });
 
-  const handleSave = (alsoSendNow: boolean) => {
+  const handleSave = async (alsoSendNow: boolean) => {
     if (deliveryContentMode !== 'letter_only' && selectedRewards.length === 0) {
       setFeedback(`Pilih minimal 1 hadiah dari daftar ${GIFT_REWARD_CATALOG.length} macam hadiah (atau ubah Mode Isi Kiriman menjadi "Surat Saja")!`);
       return;
@@ -404,58 +423,77 @@ export const AdminGiftEventPanel: React.FC = () => {
         finalTargetAccountIds.length === 1 ? finalTargetAccountIds[0] : '__MULTI__';
     }
 
-    const res = adminCreateOrUpdateGiftEvent({
-      id: editingEventId || undefined,
-      title,
-      senderName,
-      letterMessage,
-      deliveryContentMode,
-      triggerMode,
-      autoPopupEnabled,
-      strictDateLock,
-      isGachaBox:
-        deliveryContentMode === 'letter_only'
-          ? false
-          : selectedRewards.some((r) => r.rewardMode === 'gacha'),
-      scheduleMonth,
-      scheduleDay,
-      isActive,
-      targetAccountId: finalTargetAccountId,
-      targetAccountIds: finalTargetAccountIds,
-      themeColor,
-      rewards: deliveryContentMode === 'letter_only' ? [] : selectedRewards,
-      customSealConfig: sealScope === 'custom' ? customSealDraft : null,
-      frequencyType,
-      recurringIntervalHours,
-      autoRotateRecurring,
-      maxRedeemsPerUser,
-      targetCardTier: targetCardTier as any,
-      targetDevRoleOnly,
-      celebrationEffect,
-      celebrationIntensity,
-      soundEffect,
-      requireAdminVerifiedAccessForNotif,
-      adminAuditLogTag,
-      customStampText,
-      watermarkText,
-      securityHashToken,
-      allowAnonymousClaim,
-      notifyOnlyAdminVerifiedUsers,
-      priorityLevel,
-      customCssTheme,
-      attachmentFileUrl,
-      attachmentFileName,
-      autoExpireHours,
-      allowTransferableGift,
-    });
-    if (alsoSendNow && res.success) {
-      const sendRes = adminTriggerGiftEventNow(res.event.id);
-      setFeedback(`${res.message} ${sendRes.message}`);
-    } else {
-      setFeedback(res.message);
-    }
-    if (!editingEventId) {
-      resetFormToNew();
+    setIsSavingPackage(true);
+    try {
+      const res = adminCreateOrUpdateGiftEvent({
+        id: editingEventId || undefined,
+        title,
+        senderName,
+        letterMessage,
+        deliveryContentMode,
+        triggerMode,
+        autoPopupEnabled,
+        strictDateLock,
+        isGachaBox:
+          deliveryContentMode === 'letter_only'
+            ? false
+            : selectedRewards.some((r) => r.rewardMode === 'gacha'),
+        scheduleMonth,
+        scheduleDay,
+        isActive,
+        targetAccountId: finalTargetAccountId,
+        targetAccountIds: finalTargetAccountIds,
+        themeColor,
+        rewards: deliveryContentMode === 'letter_only' ? [] : selectedRewards,
+        customSealConfig: sealScope === 'custom' ? customSealDraft : null,
+        frequencyType,
+        recurringIntervalHours,
+        autoRotateRecurring,
+        maxRedeemsPerUser,
+        targetCardTier: targetCardTier as any,
+        targetDevRoleOnly,
+        celebrationEffect,
+        celebrationIntensity,
+        soundEffect,
+        requireAdminVerifiedAccessForNotif,
+        adminAuditLogTag,
+        customStampText,
+        watermarkText,
+        securityHashToken,
+        allowAnonymousClaim,
+        notifyOnlyAdminVerifiedUsers,
+        priorityLevel,
+        customCssTheme,
+        attachmentFileUrl,
+        attachmentFileName,
+        autoExpireHours,
+        allowTransferableGift,
+      });
+
+      let sendNote = '';
+      if (alsoSendNow && res.success) {
+        const sendRes = adminTriggerGiftEventNow(res.event.id);
+        sendNote = ` ${sendRes.message}`;
+      }
+
+      let cloudOk = true;
+      if (res.cloudSyncPromise) {
+        cloudOk = await res.cloudSyncPromise;
+      }
+
+      if (cloudOk) {
+        setFeedback(`${res.message}${sendNote} ☁️ Tersimpan PERMANEN di Cloud & IndexedDB (aman saat refresh).`);
+      } else {
+        setFeedback(
+          `${res.message}${sendNote} ⚠️ Tersimpan di perangkat (IndexedDB), tetapi sinkronisasi Firebase Cloud gagal (${giftRegistrySaveError || 'pastikan login Google Admin & online'}).`
+        );
+      }
+
+      if (!editingEventId && res.success) {
+        resetFormToNew();
+      }
+    } finally {
+      setIsSavingPackage(false);
     }
   };
 
@@ -594,6 +632,34 @@ export const AdminGiftEventPanel: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`px-2.5 py-1 rounded-lg text-[10px] font-black flex items-center gap-1 border ${
+                letterSealCloudStatus === 'saving' || isSavingSeal
+                  ? 'bg-sky-950/80 border-sky-400/50 text-sky-300'
+                  : letterSealCloudStatus === 'error'
+                  ? 'bg-rose-950/80 border-rose-400/50 text-rose-300'
+                  : letterSealCloudStatus === 'saved'
+                  ? 'bg-emerald-950/80 border-emerald-400/50 text-emerald-300'
+                  : 'bg-slate-950 border-slate-700 text-slate-300'
+              }`}
+              title={letterSealSaveError || undefined}
+            >
+              {letterSealCloudStatus === 'error' ? (
+                <AlertTriangle className="w-3 h-3" />
+              ) : (
+                <Cloud className="w-3 h-3" />
+              )}
+              <span>
+                {letterSealCloudStatus === 'saving' || isSavingSeal
+                  ? 'Menyimpan ke Cloud...'
+                  : letterSealCloudStatus === 'error'
+                  ? 'Cloud Error (Tersimpan Lokal)'
+                  : letterSealCloudStatus === 'saved'
+                  ? `Tersimpan Cloud${letterSealLastSavedAt ? ` • ${new Date(letterSealLastSavedAt).toLocaleTimeString('id-ID')}` : ''}`
+                  : 'Siap Sinkron Cloud'}
+              </span>
+            </span>
+
             <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
               <button
                 type="button"
@@ -621,6 +687,34 @@ export const AdminGiftEventPanel: React.FC = () => {
 
             <button
               type="button"
+              disabled={isSavingSeal || isSavingPackage}
+              onClick={async () => {
+                if (sealScope === 'global') {
+                  setIsSavingSeal(true);
+                  try {
+                    const saveRes = await adminSaveDefaultLetterSealConfigNow(defaultLetterSealConfig);
+                    setFeedback(saveRes.message);
+                  } finally {
+                    setIsSavingSeal(false);
+                  }
+                } else {
+                  await handleSave(false);
+                }
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 text-slate-950 font-black text-[11px] cursor-pointer flex items-center gap-1.5 shadow"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>
+                {isSavingSeal || isSavingPackage
+                  ? 'Menyimpan...'
+                  : sealScope === 'global'
+                  ? 'Simpan TTD & Stempel Permanen ke Cloud'
+                  : 'Simpan Paket & TTD Khusus ke Cloud'}
+              </span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowSealStudio((v) => !v)}
               className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] cursor-pointer"
             >
@@ -628,6 +722,12 @@ export const AdminGiftEventPanel: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {letterSealCloudStatus === 'error' && letterSealSaveError && (
+          <div className="p-2.5 rounded-xl bg-rose-950/70 border border-rose-500/50 text-rose-200 text-[11px] font-bold">
+            ⚠️ Sinkronisasi Tanda Tangan ke Firebase Cloud tertunda: {letterSealSaveError}. Desain tetap aman tersimpan di penyimpanan lokal IndexedDB perangkat ini.
+          </div>
+        )}
 
         {showSealStudio && (
           <LetterSealStudioEditor
@@ -1563,23 +1663,59 @@ export const AdminGiftEventPanel: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-2 flex flex-col sm:flex-row gap-2">
-              <button
-                type="button"
-                onClick={() => handleSave(false)}
-                className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-400/50 text-amber-300 font-black cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
-              >
-                <Plus className="w-4 h-4" />
-                <span>{editingEventId ? 'Simpan Perubahan' : 'Simpan Jadwal Hadiah'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSave(true)}
-                className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shadow-lg"
-              >
-                <Send className="w-4 h-4" />
-                <span>Simpan &amp; Kirim Sekarang!</span>
-              </button>
+            <div className="pt-2 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
+                <span className="text-slate-400 font-bold flex items-center gap-1.5">
+                  <Cloud className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Status Cloud Daftar Hadiah &amp; Surat:</span>
+                </span>
+                <span
+                  className={`font-black ${
+                    giftRegistryCloudStatus === 'saving' || isSavingPackage
+                      ? 'text-sky-300'
+                      : giftRegistryCloudStatus === 'error'
+                      ? 'text-rose-300'
+                      : giftRegistryCloudStatus === 'saved'
+                      ? 'text-emerald-300'
+                      : 'text-slate-300'
+                  }`}
+                >
+                  {giftRegistryCloudStatus === 'saving' || isSavingPackage
+                    ? 'Menyimpan ke Cloud...'
+                    : giftRegistryCloudStatus === 'error'
+                    ? `⚠️ ${giftRegistrySaveError || 'Gagal Cloud (Tersimpan Lokal)'}`
+                    : giftRegistryCloudStatus === 'saved'
+                    ? `✅ Tersimpan Cloud${giftRegistryLastSavedAt ? ` • ${new Date(giftRegistryLastSavedAt).toLocaleTimeString('id-ID')}` : ''}`
+                    : `Total ${giftEvents.length} Paket Aktif/Terjadwal`}
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <button
+                  type="button"
+                  disabled={isSavingPackage}
+                  onClick={() => void handleSave(false)}
+                  className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-60 border border-amber-400/50 text-amber-300 font-black cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>
+                    {isSavingPackage
+                      ? 'Menyimpan ke Cloud...'
+                      : editingEventId
+                      ? 'Simpan Perubahan'
+                      : 'Simpan Jadwal Hadiah'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingPackage}
+                  onClick={() => void handleSave(true)}
+                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 disabled:opacity-60 text-slate-950 font-black cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shadow-lg"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>{isSavingPackage ? 'Menyimpan & Mengirim...' : 'Simpan & Kirim Sekarang!'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -27,10 +27,10 @@ function sanitizeValueForFirestore(value: unknown, depth = 0): unknown {
     return Number.isFinite(value) ? value : 0;
   }
   if (typeof value === 'string') {
-    if (value.startsWith('data:image/') && value.length > 2048) {
-      return '[local-image-stored-on-device]';
+    if (value.startsWith('data:image/')) {
+      return value.length <= 65536 ? value : '[image-too-large]';
     }
-    return value.length > 3000 ? value.slice(0, 3000) : value;
+    return value.length > 24000 ? value.slice(0, 24000) : value;
   }
   if (Array.isArray(value)) {
     return value

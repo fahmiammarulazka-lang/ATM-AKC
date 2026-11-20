@@ -78,6 +78,7 @@ interface PersistedGlobalState {
   giftEvents: unknown[];
   deletedGiftEventIds: string[];
   giftEventsInitialized: boolean;
+  giftEventsUpdatedAtMs: number;
   sharedBankData: Record<string, unknown>;
   userSnapshotsByScope: Record<string, Record<string, unknown>>;
   lastUpdated: number;
@@ -116,6 +117,7 @@ const DEFAULT_STATE: PersistedGlobalState = {
   giftEvents: [],
   deletedGiftEventIds: [],
   giftEventsInitialized: false,
+  giftEventsUpdatedAtMs: 0,
   lastUpdated: Date.now(),
 };
 
@@ -142,6 +144,7 @@ function loadPersistedState(): PersistedGlobalState {
           ? parsed.deletedGiftEventIds.map((x: unknown) => String(x))
           : [],
         giftEventsInitialized: Boolean(parsed.giftEventsInitialized),
+        giftEventsUpdatedAtMs: Number(parsed.giftEventsUpdatedAtMs) || 0,
         sharedBankData: parsed.sharedBankData || {},
         userSnapshotsByScope:
           parsed.userSnapshotsByScope && typeof parsed.userSnapshotsByScope === 'object'
@@ -209,6 +212,7 @@ async function startServer() {
             giftEvents: serverState.giftEvents,
             deletedGiftEventIds: serverState.deletedGiftEventIds,
             giftEventsInitialized: serverState.giftEventsInitialized,
+            giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs || 0,
             sharedBankData: serverState.sharedBankData,
             connectedDevices: clients.size,
             lastUpdated: serverState.lastUpdated,
@@ -236,6 +240,11 @@ async function startServer() {
         } else if (msg.type === 'push_alert:send' && msg.payload) {
           handleNewPushAlert(msg.payload);
         } else if (msg.type === 'gift_events:sync' && Array.isArray(msg.payload?.giftEvents)) {
+          const incomingGiftTs = Number(msg.payload?.giftEventsUpdatedAtMs) || 0;
+          const currentGiftTs = Number(serverState.giftEventsUpdatedAtMs) || 0;
+          if (incomingGiftTs > 0 && currentGiftTs > 0 && incomingGiftTs < currentGiftTs) {
+            return;
+          }
           if (Array.isArray(msg.payload?.deletedGiftEventIds)) {
             serverState.deletedGiftEventIds = Array.from(
               new Set([
@@ -248,6 +257,8 @@ async function startServer() {
             (e) => !e?.id || !serverState.deletedGiftEventIds.includes(String(e.id))
           );
           serverState.giftEventsInitialized = true;
+          serverState.giftEventsUpdatedAtMs =
+            incomingGiftTs > 0 ? incomingGiftTs : Math.max(Date.now(), currentGiftTs + 1);
           savePersistedState();
           broadcastToAll({
             type: 'gift_events:updated',
@@ -255,6 +266,7 @@ async function startServer() {
               giftEvents: serverState.giftEvents,
               deletedGiftEventIds: serverState.deletedGiftEventIds,
               giftEventsInitialized: serverState.giftEventsInitialized,
+              giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs,
               lastUpdated: serverState.lastUpdated,
             },
           });
@@ -457,6 +469,7 @@ async function startServer() {
       giftEvents: serverState.giftEvents,
       deletedGiftEventIds: serverState.deletedGiftEventIds,
       giftEventsInitialized: serverState.giftEventsInitialized,
+      giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs || 0,
       sharedBankData: serverState.sharedBankData,
       connectedDevices: Math.max(1, clients.size),
       lastUpdated: serverState.lastUpdated,
@@ -469,6 +482,7 @@ async function startServer() {
       giftEvents: serverState.giftEvents,
       deletedGiftEventIds: serverState.deletedGiftEventIds,
       giftEventsInitialized: serverState.giftEventsInitialized,
+      giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs || 0,
       lastUpdated: serverState.lastUpdated,
     });
   });
@@ -477,6 +491,20 @@ async function startServer() {
     const incoming = req.body?.giftEvents;
     if (!Array.isArray(incoming)) {
       res.status(400).json({ success: false, message: 'Daftar giftEvents tidak valid.' });
+      return;
+    }
+    const incomingGiftTs = Number(req.body?.giftEventsUpdatedAtMs) || 0;
+    const currentGiftTs = Number(serverState.giftEventsUpdatedAtMs) || 0;
+    if (incomingGiftTs > 0 && currentGiftTs > 0 && incomingGiftTs < currentGiftTs) {
+      res.json({
+        success: true,
+        ignoredStale: true,
+        giftEvents: serverState.giftEvents,
+        deletedGiftEventIds: serverState.deletedGiftEventIds,
+        giftEventsInitialized: serverState.giftEventsInitialized,
+        giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs,
+        lastUpdated: serverState.lastUpdated,
+      });
       return;
     }
     if (Array.isArray(req.body?.deletedGiftEventIds)) {
@@ -491,6 +519,8 @@ async function startServer() {
       (e) => !e?.id || !serverState.deletedGiftEventIds.includes(String(e.id))
     );
     serverState.giftEventsInitialized = true;
+    serverState.giftEventsUpdatedAtMs =
+      incomingGiftTs > 0 ? incomingGiftTs : Math.max(Date.now(), currentGiftTs + 1);
     savePersistedState();
     broadcastToAll({
       type: 'gift_events:updated',
@@ -498,6 +528,7 @@ async function startServer() {
         giftEvents: serverState.giftEvents,
         deletedGiftEventIds: serverState.deletedGiftEventIds,
         giftEventsInitialized: serverState.giftEventsInitialized,
+        giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs,
         lastUpdated: serverState.lastUpdated,
       },
     });
@@ -506,6 +537,7 @@ async function startServer() {
       giftEvents: serverState.giftEvents,
       deletedGiftEventIds: serverState.deletedGiftEventIds,
       giftEventsInitialized: serverState.giftEventsInitialized,
+      giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs,
       lastUpdated: serverState.lastUpdated,
     });
   });

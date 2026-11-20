@@ -178,6 +178,11 @@ export function isFirestoreActive(): boolean {
   return firestoreDualSyncEnabled && firestoreAvailabilityStatus === 'active';
 }
 
+export async function ensureFirestoreActiveNow(): Promise<boolean> {
+  if (firestoreDualSyncEnabled && firestoreAvailabilityStatus === 'active') return true;
+  return probeFirestoreInBackground();
+}
+
 export function getActiveCloudEngineLabel(): 'hybrid_rtdb_firestore' | 'rtdb_azkaakc_indexeddb' {
   return firestoreDualSyncEnabled && firestoreAvailabilityStatus === 'active'
     ? 'hybrid_rtdb_firestore'
@@ -310,10 +315,10 @@ export function sanitizeForRealtimeDb(value: unknown, depth = 0): unknown {
     return Number.isFinite(value) ? value : 0;
   }
   if (typeof value === 'string') {
-    if (value.startsWith('data:image/') && value.length > 8192) {
-      return '';
+    if (value.startsWith('data:image/')) {
+      return value.length <= 65536 ? value : '';
     }
-    return value.length > 16000 ? value.slice(0, 16000) : value;
+    return value.length > 24000 ? value.slice(0, 24000) : value;
   }
   if (Array.isArray(value)) {
     return value
@@ -331,6 +336,35 @@ export function sanitizeForRealtimeDb(value: unknown, depth = 0): unknown {
       if (sanitizedVal !== undefined) {
         out[safeKey] = sanitizedVal;
       }
+    }
+    return out;
+  }
+  return String(value);
+}
+
+export function sanitizeForFirestoreDoc(value: unknown, depth = 0): unknown {
+  if (depth > 9 || value === undefined) return null;
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+  if (typeof value === 'string') {
+    if (value.startsWith('data:image/')) {
+      return value.length <= 65536 ? value : '';
+    }
+    return value.length > 24000 ? value.slice(0, 24000) : value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 260)
+      .filter((item) => item !== undefined && item !== null)
+      .map((item) => sanitizeForFirestoreDoc(item, depth + 1));
+  }
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [rawKey, rawVal] of Object.entries(value as Record<string, unknown>)) {
+      if (rawVal === undefined || !rawKey || rawKey.length > 128) continue;
+      out[rawKey] = sanitizeForFirestoreDoc(rawVal, depth + 1);
     }
     return out;
   }
@@ -502,6 +536,205 @@ export function subscribeCloudDoc<T = Record<string, any>>(
       if (onError) onError(err);
     }
   );
+}
+
+export async function writeCloudDocDual(
+  collectionName: string,
+  docId: string,
+  data: Record<string, unknown>,
+  options?: { merge?: boolean }
+): Promise<{
+  ok: boolean;
+  rtdbOk: boolean;
+  firestoreOk: boolean;
+  errorMessage?: string;
+}> {
+  const safePath = buildSafePath([collectionName, docId]);
+  const shouldMerge = options?.merge !== false;
+  const rtdbPayload = sanitizeForRealtimeDb(data) as Record<string, unknown>;
+  const fsPayload = sanitizeForFirestoreDoc(data) as Record<string, unknown>;
+
+  const rtdbPromise = (async () => {
+    try {
+      const nodeRef = rtdbRef(rtdb, safePath);
+      if (shouldMerge) {
+        await rtdbUpdate(nodeRef, rtdbPayload);
+      } else {
+        await rtdbSet(nodeRef, rtdbPayload);
+      }
+      return { ok: true as const, err: undefined };
+    } catch (err) {
+      return {
+        ok: false as const,
+        err: err instanceof Error ? err.message : String(err),
+      };
+    }
+  })();
+
+  const firestorePromise = (async () => {
+    if (!auth.currentUser) {
+      return { ok: false as const, err: 'Belum login Firebase Auth' };
+    }
+    const activeFs = await ensureFirestoreActiveNow();
+    if (!activeFs) {
+      return { ok: false as const, err: 'Firestore belum aktif' };
+    }
+    try {
+      await setDoc(doc(db, collectionName, docId), fsPayload, { merge: shouldMerge });
+      firestoreAvailabilityStatus = 'active';
+      return { ok: true as const, err: undefined };
+    } catch (fsErr) {
+      markFirestoreUnavailableIfMissing(fsErr);
+      handleFirestoreError(fsErr, OperationType.WRITE, `${collectionName}/${docId}`, {
+        suppressThrow: true,
+      });
+      return {
+        ok: false as const,
+        err: fsErr instanceof Error ? fsErr.message : String(fsErr),
+      };
+    }
+  })();
+
+  const [rtdbRes, fsRes] = await Promise.all([rtdbPromise, firestorePromise]);
+  return {
+    ok: rtdbRes.ok || fsRes.ok,
+    rtdbOk: rtdbRes.ok,
+    firestoreOk: fsRes.ok,
+    errorMessage: !rtdbRes.ok && !fsRes.ok ? fsRes.err || rtdbRes.err : undefined,
+  };
+}
+
+function extractCloudDocTimestampMs(docVal: Record<string, any> | null): number {
+  if (!docVal || typeof docVal !== 'object') return 0;
+  return Math.max(
+    Number(docVal.giftEventsUpdatedAtMs) || 0,
+    Number(docVal.updatedAtMs) || 0
+  );
+}
+
+export async function readCloudDocDual<T extends Record<string, any>>(
+  collectionName: string,
+  docId: string,
+  options?: { timeoutMs?: number }
+): Promise<{ data: T | null; respondedCleanly: boolean; source?: 'rtdb' | 'firestore' }> {
+  const safePath = buildSafePath([collectionName, docId]);
+  const timeoutMs = options?.timeoutMs ?? 4500;
+
+  const rtdbTask = rtdbGet(rtdbRef(rtdb, safePath))
+    .then((snap) => ({
+      responded: true,
+      data: snap.exists() && typeof snap.val() === 'object' ? (snap.val() as T) : null,
+    }))
+    .catch(() => ({ responded: false, data: null as T | null }));
+
+  const fsTask = (async () => {
+    if (!auth.currentUser) {
+      return { responded: false, data: null as T | null };
+    }
+    const activeFs = await ensureFirestoreActiveNow();
+    if (!activeFs) {
+      return { responded: false, data: null as T | null };
+    }
+    try {
+      const snap = await getDoc(doc(db, collectionName, docId));
+      return {
+        responded: true,
+        data: snap.exists() ? (snap.data() as T) : null,
+      };
+    } catch (fsErr) {
+      markFirestoreUnavailableIfMissing(fsErr);
+      handleFirestoreError(fsErr, OperationType.GET, `${collectionName}/${docId}`, {
+        suppressThrow: true,
+      });
+      return { responded: false, data: null as T | null };
+    }
+  })();
+
+  const [rtdbRes, fsRes] = await Promise.all([
+    raceWithTimeout(rtdbTask, timeoutMs, { responded: false, data: null as T | null }),
+    raceWithTimeout(fsTask, timeoutMs, { responded: false, data: null as T | null }),
+  ]);
+
+  const respondedCleanly = rtdbRes.responded || fsRes.responded;
+  if (rtdbRes.data && fsRes.data) {
+    const rtdbTs = extractCloudDocTimestampMs(rtdbRes.data);
+    const fsTs = extractCloudDocTimestampMs(fsRes.data);
+    if (fsTs > rtdbTs) {
+      return { data: fsRes.data, respondedCleanly, source: 'firestore' };
+    }
+    return { data: rtdbRes.data, respondedCleanly, source: 'rtdb' };
+  }
+  if (fsRes.data) {
+    return { data: fsRes.data, respondedCleanly, source: 'firestore' };
+  }
+  if (rtdbRes.data) {
+    return { data: rtdbRes.data, respondedCleanly, source: 'rtdb' };
+  }
+  return { data: null, respondedCleanly };
+}
+
+export function subscribeCloudDocDual<T extends Record<string, any>>(
+  collectionName: string,
+  docId: string,
+  onData: (data: T | null, source: 'rtdb' | 'firestore') => void,
+  onError?: (err: unknown) => void
+): () => void {
+  const safePath = buildSafePath([collectionName, docId]);
+  const nodeRef = rtdbRef(rtdb, safePath);
+  const unsubRtdb = rtdbOnValue(
+    nodeRef,
+    (snap) => {
+      if (snap.exists()) {
+        const val = snap.val();
+        onData(val && typeof val === 'object' ? (val as T) : null, 'rtdb');
+      } else {
+        onData(null, 'rtdb');
+      }
+    },
+    (err) => {
+      if (onError) onError(err);
+    }
+  );
+
+  let unsubFs: (() => void) | null = null;
+  let cancelled = false;
+
+  const attachFsListener = () => {
+    if (cancelled || unsubFs || !auth.currentUser) return;
+    try {
+      unsubFs = onSnapshot(
+        doc(db, collectionName, docId),
+        { includeMetadataChanges: false },
+        (snap) => {
+          if (snap.exists()) {
+            onData(snap.data() as T, 'firestore');
+          }
+        },
+        (fsErr) => {
+          markFirestoreUnavailableIfMissing(fsErr);
+          handleFirestoreError(fsErr, OperationType.GET, `${collectionName}/${docId}`, {
+            suppressThrow: true,
+          });
+        }
+      );
+    } catch {
+      // RTDB tetap aktif 100%
+    }
+  };
+
+  if (isFirestoreActive()) {
+    attachFsListener();
+  } else if (auth.currentUser) {
+    void ensureFirestoreActiveNow().then((ok) => {
+      if (ok && !cancelled) attachFsListener();
+    });
+  }
+
+  return () => {
+    cancelled = true;
+    unsubRtdb();
+    if (unsubFs) unsubFs();
+  };
 }
 
 /**

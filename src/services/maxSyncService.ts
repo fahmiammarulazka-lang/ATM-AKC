@@ -227,6 +227,87 @@ export async function readFastBootSnapshot(): Promise<FastBootCacheSnapshot | nu
 }
 
 // ============================================================================
+// DEDICATED GIFT EVENTS & LETTER SEAL INDEXEDDB CACHE (SURVIVES REFRESH)
+// ============================================================================
+export interface GiftAndSealRegistryCache {
+  giftEvents?: any[];
+  deletedGiftEventIds?: string[];
+  giftEventsInitialized?: boolean;
+  giftEventsUpdatedAtMs?: number;
+  defaultLetterSealConfig?: any;
+  letterSealUpdatedAtMs?: number;
+  cachedAtMs: number;
+}
+
+const GIFT_SEAL_REGISTRY_CACHE_KEY = 'gift_and_seal_registry_v1';
+let registryIdbWriteChain: Promise<void> = Promise.resolve();
+
+export async function readGiftAndSealRegistryIdb(): Promise<GiftAndSealRegistryCache | null> {
+  try {
+    const cached = await idbGet<GiftAndSealRegistryCache>(
+      STORE_STAGING,
+      GIFT_SEAL_REGISTRY_CACHE_KEY
+    );
+    if (cached && typeof cached === 'object') {
+      return cached;
+    }
+  } catch {
+    // fallback ke Cloud
+  }
+  return null;
+}
+
+export function saveGiftAndSealRegistryIdb(
+  patch: Partial<GiftAndSealRegistryCache>
+): Promise<void> {
+  registryIdbWriteChain = registryIdbWriteChain
+    .then(async () => {
+      const existing =
+        (await idbGet<GiftAndSealRegistryCache>(STORE_STAGING, GIFT_SEAL_REGISTRY_CACHE_KEY)) ||
+        ({ cachedAtMs: 0 } as GiftAndSealRegistryCache);
+
+      const next: GiftAndSealRegistryCache = {
+        ...existing,
+        cachedAtMs: Date.now(),
+      };
+
+      if (patch.giftEvents !== undefined) {
+        const incomingGiftTs = Number(patch.giftEventsUpdatedAtMs) || 0;
+        const existingGiftTs = Number(existing.giftEventsUpdatedAtMs) || 0;
+        if (incomingGiftTs >= existingGiftTs) {
+          next.giftEvents = patch.giftEvents;
+          if (patch.deletedGiftEventIds !== undefined) {
+            next.deletedGiftEventIds = patch.deletedGiftEventIds;
+          }
+          if (patch.giftEventsInitialized !== undefined) {
+            next.giftEventsInitialized = patch.giftEventsInitialized;
+          }
+          if (incomingGiftTs > 0) {
+            next.giftEventsUpdatedAtMs = incomingGiftTs;
+          }
+        }
+      }
+
+      if (patch.defaultLetterSealConfig !== undefined) {
+        const incomingSealTs = Number(patch.letterSealUpdatedAtMs) || 0;
+        const existingSealTs = Number(existing.letterSealUpdatedAtMs) || 0;
+        if (incomingSealTs >= existingSealTs) {
+          next.defaultLetterSealConfig = patch.defaultLetterSealConfig;
+          if (incomingSealTs > 0) {
+            next.letterSealUpdatedAtMs = incomingSealTs;
+          }
+        }
+      }
+
+      await idbPut(STORE_STAGING, GIFT_SEAL_REGISTRY_CACHE_KEY, next);
+    })
+    .catch(() => {
+      // abaikan jika IndexedDB dibatasi browser privat
+    });
+  return registryIdbWriteChain;
+}
+
+// ============================================================================
 // ACTIVE BOOT SESSION ENVELOPE (INDEXEDDB — TAHAN REFRESH GOOGLE, OA & GUEST)
 // ============================================================================
 export interface FastBootSessionSnapshot {

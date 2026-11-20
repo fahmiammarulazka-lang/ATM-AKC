@@ -7,17 +7,20 @@
 4. **Native Maps & Lists Only (No JSON Strings)**: All structured financial arrays and maps are stored as bounded Firestore Lists/Maps (`accounts.size() <= 30`, `transactions.size() <= 150`, etc.), preventing Denial-of-Wallet oversized payloads.
 5. **Privilege Escalation Prevention**: Clients may only create `/users/{userId}` with `role == 'customer'` and may never write to `/admins/{userId}`. Admin privileges are verified strictly via `request.auth.token.email == 'fahmiammarulazka@gmail.com' && request.auth.token.email_verified == true` or existence in `/admins/$(request.auth.uid)`.
 6. **Bug Report Terminal State**: Once a `/bug_reports/{reportId}` reaches `status == 'selesai'`, the non-admin reporter cannot alter or reopen it; only an Admin may update or override it.
+7. **Admin Seal & Signature Registry Protection**: `/bank_state_v1/letter_seal_config` may only be created, updated, or deleted by an authenticated, email-verified Admin (`fahmiammarulazka@gmail.com` or `/admins/{uid}`), with compressed signature data URLs bounded to `<= 66,000` chars.
+8. **Gift & Letter Registry Integrity**: Creating, deleting, or altering `deletedGiftEventIds` / `giftEventsInitialized` / `giftEventsUpdatedAtMs` in `/bank_state_v1/gift_events_registry` is strictly restricted to verified Admins; non-admin signed-in users may only update `giftEvents` interaction states (`updatedAtMs`, `updatedAt`, `writerSessionId`).
 
 ## 2. The "Dirty Dozen" Attack Payloads (Expected: PERMISSION_DENIED)
 1. **Unauthenticated Vault Read**: `GET /users/uidA/vault/core` with `auth = null` -> DENIED.
 2. **Cross-User PII Read**: `GET /users/uidA` as verified user `uidB` -> DENIED.
 3. **Cross-User Vault Write**: `CREATE /users/uidA/vault/core` with `auth.uid = 'uidB'` -> DENIED.
 4. **Unverified Email Write**: `CREATE /users/uidB` with `auth.token.email_verified = false` -> DENIED.
-5. **Admin Email Spoof (Unverified)**: `GET /users/uidA` with `auth.token.email = 'fahmiammarulazka@gmail.com'` and `auth.token.email_verified = false` -> DENIED.
-6. **Self-Assigned Admin Role**: `CREATE /users/uidB` with `{ uid: 'uidB', role: 'admin', ... }` -> DENIED (`role` must equal `'customer'`).
-7. **Shadow Ghost Field Injection**: `UPDATE /users/uidB/vault/core` adding unexpected key `isSuperAdmin: true` -> DENIED (`affectedKeys().hasOnly(...)` + `isValidVaultCore`).
+5. **Admin Email Spoof (Unverified)**: `WRITE /bank_state_v1/letter_seal_config` with `auth.token.email = 'fahmiammarulazka@gmail.com'` and `auth.token.email_verified = false` -> DENIED.
+6. **Non-Admin Signature Hijack**: `UPDATE /bank_state_v1/letter_seal_config` by verified customer `uidB` -> DENIED (`isVerifiedAdmin()` required).
+7. **Shadow Ghost Field Injection**: `UPDATE /bank_state_v1/gift_events_registry` adding unexpected key `isSuperAdmin: true` -> DENIED (`affectedKeys().hasOnly(...)` + `isValidGiftEventsRegistry`).
 8. **ID Poisoning (>128 chars or invalid chars)**: `CREATE /users/uid_with_$$$_invalid_chars` or 500-char docId -> DENIED (`isValidId()`).
-9. **Timestamp Forgery**: `CREATE /users/uidB` with `createdAt: "2020-01-01T00:00:00Z"` instead of `request.time` -> DENIED.
-10. **Immutable Owner Swap**: `UPDATE /users/uidB/vault/core` changing `ownerId` from `'uidB'` to `'uidC'` -> DENIED.
-11. **Unbounded Array / Denial-of-Wallet**: `UPDATE /users/uidB/vault/core` with 100 `accounts` entries (`> 30`) or 10KB `displayName` -> DENIED.
+9. **Oversized Raw Signature Bomb (> 66KB)**: `WRITE /bank_state_v1/letter_seal_config` with a 500KB uncompressed `signatureDrawingDataUrl` -> DENIED (`size() <= 66000`).
+10. **Non-Admin Gift Registry Wipe**: `DELETE /bank_state_v1/gift_events_registry` or updating `deletedGiftEventIds` by non-admin `uidB` -> DENIED.
+11. **Unbounded Array / Denial-of-Wallet**: `WRITE /bank_state_v1/gift_events_registry` with `giftEvents.size() > 150` -> DENIED.
 12. **Blanket List Query Scraping**: `LIST /bug_reports` as non-admin querying all reports without `where('authorId', '==', uid)` -> DENIED (`allow list` evaluates `resource.data.authorId == request.auth.uid`).
+
