@@ -265,9 +265,13 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   });
 
   const activeDashboardEffectPkg = primaryDashEffectPkg;
-  const activeDashboardEffectProfile =
+  const resolvedDashEffectProf =
     activeDashboardEffectPkg && activeDashboardEffectPkg.decorateBalanceCard
       ? getCelebrationEffectProfile(activeDashboardEffectPkg.celebrationEffect)
+      : null;
+  const activeDashboardEffectProfile =
+    resolvedDashEffectProf && resolvedDashEffectProf.id !== 'none'
+      ? resolvedDashEffectProf
       : null;
 
   const balanceOverrideMap: Record<string, { border: string; bg: string; badge: string }> = {

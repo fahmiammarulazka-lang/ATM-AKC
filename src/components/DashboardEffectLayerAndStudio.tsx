@@ -214,6 +214,13 @@ export const DashboardActiveEffectBannerAndAura: React.FC = () => {
       const dismissedNonce = dismissedDashPackageNonces[pkg.id] || 0;
       const prevSeen = seenNoncesRef.current[pkg.id];
 
+      // Already cleared by Admin Force Clear Stage
+      if (stageForceClearNonce > 0 && currentNonce <= stageForceClearNonce) {
+        seenNoncesRef.current[pkg.id] = currentNonce;
+        markDashboardPackageDismissed(pkg.id, currentNonce);
+        continue;
+      }
+
       // Already dismissed at this exact nonce (e.g. user closed stage and switched tabs back)
       if (dismissedNonce >= currentNonce) {
         seenNoncesRef.current[pkg.id] = currentNonce;
@@ -240,6 +247,10 @@ export const DashboardActiveEffectBannerAndAura: React.FC = () => {
 
       const resolvedEff = pickBlastEffectId(pkg);
       const prof = getCelebrationEffectProfile(resolvedEff);
+      if (prof.id === 'none') {
+        markDashboardPackageDismissed(pkg.id, currentNonce);
+        continue;
+      }
       triggerCanvasConfettiForCelebration(
         prof.id,
         pkg.celebrationIntensity || '100000x'
@@ -257,6 +268,7 @@ export const DashboardActiveEffectBannerAndAura: React.FC = () => {
     currentAccount,
     dismissedDashPackageNonces,
     markDashboardPackageDismissed,
+    stageForceClearNonce,
   ]);
 
   // Scheduled HH:MM trigger watcher
@@ -385,6 +397,9 @@ export const DashboardActiveEffectBannerAndAura: React.FC = () => {
     playlistPool.length > 0 ? playlistPool[playlistIndex % playlistPool.length] : activePkg.celebrationEffect;
 
   const profile: CelebrationEffectProfile = getCelebrationEffectProfile(displayedEffectId);
+  if (profile.id === 'none') {
+    return null;
+  }
   const intensity = activePkg.celebrationIntensity || '100000x';
   const showAmbientParticles = activePkg.showAmbientParticles !== false;
   const bannerStyle = activePkg.bannerStyle || 'full_top_banner';

@@ -2203,6 +2203,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     return {};
   });
+  const DEFAULT_TEMPLATE_DASHBOARD_EFFECT_IDS = [
+    'dash-fx-default-sultan-100000x',
+    'dash-fx-default-cyberpunk-100000x',
+    'dash-fx-default-dirgahayu-100000x',
+  ];
   const [dashboardEffectEvents, setDashboardEffectEvents] = useState<AdminDashboardEffectPackage[]>(() => [
     {
       id: 'dash-fx-default-sultan-100000x',
@@ -2215,15 +2220,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       targetAccountId: '__ALL__',
       targetAccountIds: [],
       revokedAccountIds: [],
-      isActive: true,
+      isActive: false,
       autoBlastOnOpen: false,
       showPersistentDashboardAura: true,
       decorateBalanceCard: true,
       durationType: 'permanent',
       triggerNonce: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastTriggeredAt: new Date(0).toISOString(),
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+      lastTriggeredAt: '1970-01-01T00:00:00.000Z',
     },
     {
       id: 'dash-fx-default-cyberpunk-100000x',
@@ -2236,15 +2241,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       targetAccountId: '__ALL__',
       targetAccountIds: [],
       revokedAccountIds: [],
-      isActive: true,
+      isActive: false,
       autoBlastOnOpen: false,
       showPersistentDashboardAura: true,
       decorateBalanceCard: true,
       durationType: 'permanent',
       triggerNonce: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastTriggeredAt: new Date(0).toISOString(),
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+      lastTriggeredAt: '1970-01-01T00:00:00.000Z',
     },
     {
       id: 'dash-fx-default-dirgahayu-100000x',
@@ -2257,17 +2262,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       targetAccountId: '__ALL__',
       targetAccountIds: [],
       revokedAccountIds: [],
-      isActive: true,
+      isActive: false,
       autoBlastOnOpen: false,
       showPersistentDashboardAura: true,
       decorateBalanceCard: true,
       durationType: 'permanent',
       triggerNonce: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lastTriggeredAt: new Date(0).toISOString(),
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+      lastTriggeredAt: '1970-01-01T00:00:00.000Z',
     },
   ]);
+  const dashboardEffectEventsRef = useRef<AdminDashboardEffectPackage[]>(dashboardEffectEvents);
+  dashboardEffectEventsRef.current = dashboardEffectEvents;
+  const hasLoadedDashboardEffectsRef = useRef<boolean>(false);
+  const hasCleanedPhantomDefaultStagesRef = useRef<boolean>(false);
+  const stageForceClearNonceRef = useRef<number>(stageForceClearNonce);
+  stageForceClearNonceRef.current = stageForceClearNonce;
+
+  const isUntouchedAutoSeededDefaultStage = (pkg: AdminDashboardEffectPackage): boolean => {
+    if (!pkg || !pkg.isActive) return false;
+    if (!DEFAULT_TEMPLATE_DASHBOARD_EFFECT_IDS.includes(pkg.id)) return false;
+    if ((pkg.triggerNonce || 1) > 1) return false;
+    if (Array.isArray(pkg.blastLogHistory) && pkg.blastLogHistory.length > 0) return false;
+    const lastTrigMs = pkg.lastTriggeredAt ? new Date(pkg.lastTriggeredAt).getTime() : 0;
+    if (!Number.isNaN(lastTrigMs) && lastTrigMs > 86_400_000) return false;
+    const createdMs = pkg.createdAt ? new Date(pkg.createdAt).getTime() : 0;
+    const updatedMs = pkg.updatedAt ? new Date(pkg.updatedAt).getTime() : 0;
+    if (
+      !Number.isNaN(createdMs) &&
+      !Number.isNaN(updatedMs) &&
+      Math.abs(updatedMs - createdMs) > 2000
+    ) {
+      return false;
+    }
+    return true;
+  };
   const [activeDashboardEffectModal, setActiveDashboardEffectModal] = useState<{
     packageId: string;
     nonce: number;
@@ -2576,11 +2606,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     }
     if (Array.isArray(data.dashboardEffectEvents)) {
-      setDashboardEffectEvents(data.dashboardEffectEvents as AdminDashboardEffectPackage[]);
+      const incomingDashEvents = data.dashboardEffectEvents as AdminDashboardEffectPackage[];
+      let hadPhantomUntouchedDefault = false;
+      const sanitizedDashEvents = incomingDashEvents.map((pkg) => {
+        if (isUntouchedAutoSeededDefaultStage(pkg)) {
+          hadPhantomUntouchedDefault = true;
+          return {
+            ...pkg,
+            isActive: false,
+            autoBlastOnOpen: false,
+          };
+        }
+        return pkg;
+      });
+      hasLoadedDashboardEffectsRef.current = true;
+      dashboardEffectEventsRef.current = sanitizedDashEvents;
+      setDashboardEffectEvents(sanitizedDashEvents);
+      if (hadPhantomUntouchedDefault && !hasCleanedPhantomDefaultStagesRef.current) {
+        hasCleanedPhantomDefaultStagesRef.current = true;
+        window.setTimeout(() => {
+          void flushMasterStateToCloud({ dashboardEffectEvents: sanitizedDashEvents });
+        }, 350);
+      }
     }
     if (typeof data.stageForceClearNonce === 'number') {
+      const nextVal = data.stageForceClearNonce as number;
+      if (nextVal > stageForceClearNonceRef.current) {
+        stageForceClearNonceRef.current = nextVal;
+      }
       setStageForceClearNonce((prev) => {
-        const nextVal = data.stageForceClearNonce as number;
         if (nextVal > prev) {
           stopAllCelebrationEffectsAndAudio();
           setActiveDashboardEffectModal(null);
@@ -2785,6 +2839,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const shouldIncludeSealSlice =
       overrides?.defaultLetterSealConfig !== undefined || hasLoadedSealRegistryRef.current;
 
+    const shouldIncludeDashboardEffectsSlice =
+      overrides?.dashboardEffectEvents !== undefined || hasLoadedDashboardEffectsRef.current;
+    const resolvedForceClearNonce =
+      overrides?.stageForceClearNonce ?? stageForceClearNonceRef.current;
+
     const payload = sanitizeForFirestore({
       accounts: cloudSyncedAccounts,
       deletedAccountIds: mergedDeletedAccountIds,
@@ -2807,8 +2866,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             giftEventsUpdatedAtMs: giftEventsUpdatedAtMsRef.current || nowMs,
           }
         : {}),
-      dashboardEffectEvents: overrides?.dashboardEffectEvents ?? dashboardEffectEvents,
-      stageForceClearNonce: overrides?.stageForceClearNonce ?? stageForceClearNonce,
+      ...(shouldIncludeDashboardEffectsSlice
+        ? {
+            dashboardEffectEvents:
+              overrides?.dashboardEffectEvents ?? dashboardEffectEventsRef.current,
+          }
+        : {}),
+      ...(overrides?.stageForceClearNonce !== undefined || resolvedForceClearNonce > 0
+        ? {
+            stageForceClearNonce: resolvedForceClearNonce,
+          }
+        : {}),
       banSupportConfig: overrides?.banSupportConfig ?? banSupportConfig,
       pockets: (overrides?.pockets ?? pockets).filter((p) => isNotBotAccountId(p.accountId)),
       depositos: (overrides?.depositos ?? depositos).filter((d) => isNotBotAccountId(d.accountId)),
@@ -19706,17 +19774,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }): { success: boolean; message: string } => {
     const nextForceNonce = Date.now();
     stopAllCelebrationEffectsAndAudio();
+    stageForceClearNonceRef.current = nextForceNonce;
     setStageForceClearNonce(nextForceNonce);
     setActiveDashboardEffectModal(null);
 
     const nowIso = new Date().toISOString();
     const shouldDeactivateAll = options?.deactivateEffects !== false;
-    const nextDashList = dashboardEffectEvents.map((pkg) => ({
+    const nextDashList = dashboardEffectEventsRef.current.map((pkg) => ({
       ...pkg,
       autoBlastOnOpen: false,
       isActive: shouldDeactivateAll ? false : pkg.isActive,
       updatedAt: nowIso,
     }));
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextDashList;
     setDashboardEffectEvents(nextDashList);
 
     // Mark every current package nonce as dismissed locally too
@@ -20002,6 +20073,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ? dashboardEffectEvents.map((e) => (e.id === existing.id ? savedPkg : e))
       : [savedPkg, ...dashboardEffectEvents];
 
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('success');
@@ -20017,6 +20090,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const adminDeleteDashboardEffect = (packageId: string) => {
     const nextList = dashboardEffectEvents.filter((e) => e.id !== packageId);
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     if (activeDashboardEffectModal?.packageId === packageId) {
@@ -20030,10 +20105,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const adminToggleDashboardEffectActive = (packageId: string) => {
-    const nowIso = new Date().toISOString();
-    const nextList = dashboardEffectEvents.map((e) =>
-      e.id === packageId ? { ...e, isActive: !e.isActive, updatedAt: nowIso } : e
-    );
+    const nowMs = Math.max(Date.now(), stageForceClearNonceRef.current + 10);
+    const nowIso = new Date(nowMs).toISOString();
+    const nextList = dashboardEffectEvents.map((e) => {
+      if (e.id !== packageId) return e;
+      const nextIsActive = !e.isActive;
+      return {
+        ...e,
+        isActive: nextIsActive,
+        triggerNonce: nextIsActive ? Math.max((e.triggerNonce || 1) + 1, nowMs) : e.triggerNonce,
+        updatedAt: nowIso,
+      };
+    });
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     return {
@@ -20045,7 +20130,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const adminTriggerDashboardEffectBlastNow = (packageId: string) => {
     const target = dashboardEffectEvents.find((e) => e.id === packageId);
     if (!target) return { success: false, message: 'Paket Efek Dashboard tidak ditemukan.' };
-    const nowMs = Math.max(Date.now(), stageForceClearNonce + 10);
+    const nowMs = Math.max(Date.now(), stageForceClearNonceRef.current + 10);
     const nowIso = new Date(nowMs).toISOString();
     const nextList = dashboardEffectEvents.map((e) => {
       if (e.id !== packageId) return e;
@@ -20068,6 +20153,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         blastLogHistory: [logEntry, ...(e.blastLogHistory || [])].slice(0, 20),
       };
     });
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('success');
@@ -20245,6 +20332,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     });
 
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('success');
@@ -20295,6 +20384,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const nextList = [duplicated, ...dashboardEffectEvents];
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('success');
@@ -20331,6 +20422,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     });
 
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('beep');
@@ -20399,6 +20492,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     });
 
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('success');
@@ -20430,6 +20525,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updatedAt: nowIso,
       };
     });
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('beep');
@@ -20453,6 +20550,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       lastTriggeredAt: idx === 0 ? nowIso : e.lastTriggeredAt,
       updatedAt: nowIso,
     }));
+    hasLoadedDashboardEffectsRef.current = true;
+    dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
     flushMasterStateToCloud({ dashboardEffectEvents: nextList });
     playAtmSound('success');

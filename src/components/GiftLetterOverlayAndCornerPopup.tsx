@@ -754,8 +754,14 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                           className={`relative z-10 flex flex-wrap items-center justify-between gap-2 bg-gradient-to-r ${celebProfile.bannerGradientClass} border ${celebProfile.cardBorderAccentClass} rounded-2xl px-3.5 py-2`}
                         >
                           <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono font-black text-white uppercase tracking-wider">
-                            <span>{celebProfile.primaryEmoji}</span>
-                            <span>{celebProfile.shortBadge} • ROYAL DECREE</span>
+                            {celebProfile.id !== 'none' ? (
+                              <>
+                                <span>{celebProfile.primaryEmoji}</span>
+                                <span>{celebProfile.shortBadge} • ROYAL DECREE</span>
+                              </>
+                            ) : (
+                              <span>✉️ SURAT RESMI • BANK NUSANTARA</span>
+                            )}
                           </div>
                           <div className="flex items-center gap-2">
                             {celebProfile.id !== 'none' && (
@@ -929,7 +935,9 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                               </span>
                             )}
                             <p className="text-xs text-slate-300 leading-relaxed">
-                              Klik untuk membuka Kotak Hadiah, menyalakan ledakan perayaan, dan langsung masuk ke rekening!
+                              {celebProfile.id !== 'none'
+                                ? 'Klik untuk membuka Kotak Hadiah, menyalakan ledakan perayaan, dan langsung masuk ke rekening!'
+                                : 'Klik untuk membuka Kotak Hadiah dan memasukkan seluruh hadiah langsung ke rekening Anda.'}
                             </p>
                           </div>
 
@@ -952,8 +960,17 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                             }}
                             className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-400 via-teal-400 to-amber-400 hover:from-emerald-300 hover:to-amber-300 text-slate-950 font-black text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 cursor-pointer"
                           >
-                            <Sparkles className="w-4 h-4" />
-                            <span>Buka Kotak Hadiah &amp; Rayakan Sekarang</span>
+                            {celebProfile.id !== 'none' ? (
+                              <>
+                                <Sparkles className="w-4 h-4" />
+                                <span>Buka Kotak Hadiah &amp; Rayakan Sekarang</span>
+                              </>
+                            ) : (
+                              <>
+                                <Gift className="w-4 h-4" />
+                                <span>Buka Kotak Hadiah &amp; Klaim Sekarang</span>
+                              </>
+                            )}
                           </button>
                         </div>
                       )}
@@ -1347,7 +1364,9 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
 
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-[10px] text-amber-200 font-bold truncate">
-                          {getCelebrationEffectProfile(ev.celebrationEffect).shortBadge}
+                          {getCelebrationEffectProfile(ev.celebrationEffect).id === 'none'
+                            ? '✉️ Kiriman Resmi Bank Nusantara'
+                            : getCelebrationEffectProfile(ev.celebrationEffect).shortBadge}
                         </span>
                         <button
                           type="button"

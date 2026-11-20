@@ -147,6 +147,8 @@ export const AdminGiftEventPanel: React.FC = () => {
   const [targetCardTier, setTargetCardTier] = useState<string>('all');
   const [targetDevRoleOnly, setTargetDevRoleOnly] = useState<string>('');
   const [celebrationEffect, setCelebrationEffect] = useState<string>('ulang_tahun_meriah');
+  const [lastSelectedCelebrationEffect, setLastSelectedCelebrationEffect] =
+    useState<string>('ulang_tahun_meriah');
   const [celebrationIntensity, setCelebrationIntensity] =
     useState<CelebrationIntensityLevel>('100000x');
   const [celebCategoryFilter, setCelebCategoryFilter] = useState<CelebrationCategoryKey>('all');
@@ -519,6 +521,10 @@ export const AdminGiftEventPanel: React.FC = () => {
     effectId: string,
     intensity: CelebrationIntensityLevel = celebrationIntensity
   ) => {
+    if (!effectId || effectId === 'none') {
+      setFeedback('Mode Tanpa Efek sedang aktif sehingga tidak ada animasi panggung yang diputar.');
+      return;
+    }
     triggerCanvasConfettiForCelebration(effectId, intensity);
     setPreviewBurstState({
       effectId,
@@ -1317,225 +1323,314 @@ export const AdminGiftEventPanel: React.FC = () => {
                 <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-800 pb-2.5">
                   <div>
                     <span className="px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 font-black text-[9.5px] uppercase tracking-wider inline-block mb-1">
-                      💥 {CELEBRATION_EFFECTS_CATALOG.filter((c) => c.id !== 'none').length} EFEK PANGGUNG SINEMATIK HINGGA 1.000.000X (16 KATEGORI • 1 PILIHAN AKTIF)
+                      {celebrationEffect === 'none'
+                        ? '🚫 MODE TANPA EFEK PERAYAAN (TAMPILAN BERSIH)'
+                        : `💥 ${CELEBRATION_EFFECTS_CATALOG.filter((c) => c.id !== 'none').length} EFEK PANGGUNG SINEMATIK HINGGA 1.000.000X (16 KATEGORI • 1 PILIHAN AKTIF)`}
                     </span>
                     <h5 className="font-black text-white text-xs sm:text-sm">
-                      Pilih 1 Tema Perayaan untuk Hiasan Sebelum Diklaim &amp; Panggung Hingga 1.000.000x Saat Diklaim
+                      {celebrationEffect === 'none'
+                        ? 'Paket Hadiah & Surat Tanpa Efek Animasi Panggung'
+                        : 'Pilih 1 Tema Perayaan untuk Hiasan Sebelum Diklaim & Panggung Hingga 1.000.000x Saat Diklaim'}
                     </h5>
                     <p className="text-[10.5px] text-slate-300 mt-0.5 leading-snug">
-                      Dilengkapi <strong>Hitung Mundur 3-2-1 Dramatis, Portal 3D, 14 Sinar Laser, Parade Maskot Raksasa, Trofi Hologram 3D, Synthesizer Musik Fanfare, &amp; Kombo Klik Interaktif</strong>!
+                      {celebrationEffect === 'none'
+                        ? 'Nasabah langsung membuka surat atau mengklaim hadiah dengan tampilan standar yang bersih tanpa konfeti, partikel, maupun panggung animasi.'
+                        : 'Atau pilih tombol Tanpa Efek di sebelah kanan jika ingin membuat hadiah & surat formal tanpa animasi perayaan.'}
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleTestCelebrationEffect(
-                        activeCelebrationProfile.id,
-                        celebrationIntensity
-                      )
-                    }
-                    className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 hover:from-amber-200 hover:to-yellow-300 text-slate-950 font-black text-[11px] cursor-pointer flex items-center gap-1.5 shadow-lg shrink-0"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>
-                      💥 Tes Panggung {celebrationIntensity.toUpperCase()}:{' '}
-                      {activeCelebrationProfile.primaryEmoji} {activeCelebrationProfile.name}
-                    </span>
-                  </button>
-                </div>
-
-                {/* Intensity Multiplier Selector (1.000x / 10.000x / 100.000x Ultra Max Overdrive) */}
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-amber-400/40 space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[10.5px] font-black text-amber-300">
-                      ⚡ Tingkat Intensitas Panggung Selebrasi (Multiplier):
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-200 font-mono font-black text-[9.5px]">
-                      Mode Aktif: {celebrationIntensity.toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {CELEBRATION_INTENSITY_OPTIONS.map((opt) => {
-                      const isActiveInt = celebrationIntensity === opt.id;
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => setCelebrationIntensity(opt.id)}
-                          className={`p-2 rounded-xl border text-left transition cursor-pointer ${
-                            isActiveInt
-                              ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 text-slate-950 border-white font-black shadow-lg'
-                              : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-400/50'
-                          }`}
-                        >
-                          <div className="text-[11px] font-black">{opt.label}</div>
-                          <div
-                            className={`text-[9px] leading-tight mt-0.5 ${
-                              isActiveInt ? 'text-slate-900 font-semibold' : 'text-slate-400'
-                            }`}
-                          >
-                            {opt.badgeText} • {opt.particleCount} Partikel &amp; {opt.laserBeamCount} Laser
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Active Selected Single Celebration Summary Box */}
-                <div
-                  className={`p-3 rounded-xl bg-gradient-to-r ${activeCelebrationProfile.bannerGradientClass} border ${activeCelebrationProfile.cardBorderAccentClass} flex flex-wrap items-center justify-between gap-2`}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-slate-950/70 border border-white/25 flex items-center justify-center text-xl shrink-0">
-                      {activeCelebrationProfile.primaryEmoji}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="px-2 py-0.5 rounded-md bg-slate-950/85 text-amber-300 font-black text-[9.5px] uppercase tracking-wider">
-                          ✓ 1 EFEK TERPILIH • {celebrationIntensity.toUpperCase()}
-                        </span>
-                        <span className="text-[10px] font-bold text-white/90">
-                          {activeCelebrationProfile.categoryLabel}
-                        </span>
-                      </div>
-                      <h6 className="font-black text-white text-xs sm:text-sm truncate">
-                        {activeCelebrationProfile.name}
-                      </h6>
-                      <p className="text-[10px] text-white/85 truncate">
-                        {activeCelebrationProfile.description}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 bg-slate-950/65 px-2.5 py-1 rounded-lg border border-white/15">
-                    {activeCelebrationProfile.particleEmojis.map((em, idx) => (
-                      <span key={idx} className="text-sm select-none">
-                        {em}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Category Filter Buttons & Search Input */}
-                <div className="space-y-2">
-                  <div className="flex flex-wrap gap-1">
-                    {CELEBRATION_CATEGORIES.map((cat) => (
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {/* Sakelar Cepat: Tanpa Efek vs Pakai Efek Perayaan */}
+                    <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
                       <button
-                        key={cat.key}
                         type="button"
-                        onClick={() => setCelebCategoryFilter(cat.key)}
-                        className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer border transition ${
-                          celebCategoryFilter === cat.key
-                            ? 'bg-amber-400 text-slate-950 border-amber-200 shadow'
-                            : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-600'
+                        onClick={() => {
+                          if (celebrationEffect !== 'none') {
+                            setLastSelectedCelebrationEffect(celebrationEffect);
+                          }
+                          setCelebrationEffect('none');
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-black cursor-pointer transition ${
+                          celebrationEffect === 'none'
+                            ? 'bg-rose-500 text-white shadow'
+                            : 'text-slate-300 hover:text-white'
                         }`}
                       >
-                        {cat.emoji} {cat.label}
+                        🚫 Tanpa Efek
                       </button>
-                    ))}
-                  </div>
-
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      value={celebSearchQuery}
-                      onChange={(e) => setCelebSearchQuery(e.target.value)}
-                      placeholder={`Cari dari ${CELEBRATION_EFFECTS_CATALOG.length} perayaan (contoh: Ulang Tahun, 17 Agustus, Idul Fitri, Cyberpunk, Anime, Galaksi, Sultan...)`}
-                      className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-[11px]"
-                    />
-                  </div>
-                </div>
-
-                {/* Exclusive Single-Select Celebration Grid (Radio Cards) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
-                  {filteredCelebrations.map((item) => {
-                    const isSelected = activeCelebrationProfile.id === item.id;
-                    return (
-                      <div
-                        key={item.id}
+                      <button
+                        type="button"
                         onClick={() => {
-                          setCelebrationEffect(item.id);
-                          setThemeColor(item.recommendedThemeColor);
-                        }}
-                        role="radio"
-                        aria-checked={isSelected}
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            setCelebrationEffect(item.id);
-                            setThemeColor(item.recommendedThemeColor);
+                          if (celebrationEffect === 'none') {
+                            setCelebrationEffect(
+                              lastSelectedCelebrationEffect && lastSelectedCelebrationEffect !== 'none'
+                                ? lastSelectedCelebrationEffect
+                                : 'ulang_tahun_meriah'
+                            );
                           }
                         }}
-                        className={`p-2.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
-                          isSelected
-                            ? 'bg-gradient-to-br from-amber-500/25 via-slate-900 to-slate-950 border-amber-400 shadow-lg ring-1 ring-amber-300/50'
-                            : 'bg-slate-950/90 border-slate-800 hover:border-slate-600'
+                        className={`px-3 py-1.5 rounded-lg text-[11px] font-black cursor-pointer transition ${
+                          celebrationEffect !== 'none'
+                            ? 'bg-amber-400 text-slate-950 shadow'
+                            : 'text-slate-300 hover:text-white'
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-start gap-2 min-w-0">
-                            <div
-                              className={`w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0 border ${
-                                isSelected
-                                  ? 'bg-amber-400 text-slate-950 border-white font-black'
-                                  : 'bg-slate-900 border-slate-700'
+                        ✨ Pakai Efek
+                      </button>
+                    </div>
+
+                    {celebrationEffect !== 'none' && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleTestCelebrationEffect(
+                            activeCelebrationProfile.id,
+                            celebrationIntensity
+                          )
+                        }
+                        className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 hover:from-amber-200 hover:to-yellow-300 text-slate-950 font-black text-[11px] cursor-pointer flex items-center gap-1.5 shadow-lg shrink-0"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>
+                          💥 Tes Panggung {celebrationIntensity.toUpperCase()}:{' '}
+                          {activeCelebrationProfile.primaryEmoji} {activeCelebrationProfile.name}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {celebrationEffect === 'none' ? (
+                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-700 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-lg shrink-0">
+                        🚫
+                      </div>
+                      <div>
+                        <h6 className="font-black text-white text-xs sm:text-sm">
+                          Tanpa Efek Perayaan Aktif
+                        </h6>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Surat dan kotak hadiah akan tampil formal tanpa panggung sinematik, konfeti, aura berputar, maupun hiasan partikel.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCelebrationEffect(
+                          lastSelectedCelebrationEffect && lastSelectedCelebrationEffect !== 'none'
+                            ? lastSelectedCelebrationEffect
+                            : 'ulang_tahun_meriah'
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-xl bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-400/50 text-amber-200 font-black text-[11px] cursor-pointer transition"
+                    >
+                      ✨ Pilih Efek Perayaan
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Intensity Multiplier Selector (1.000x / 10.000x / 100.000x Ultra Max Overdrive) */}
+                    <div className="p-2.5 rounded-xl bg-slate-950 border border-amber-400/40 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[10.5px] font-black text-amber-300">
+                          ⚡ Tingkat Intensitas Panggung Selebrasi (Multiplier):
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-200 font-mono font-black text-[9.5px]">
+                          Mode Aktif: {celebrationIntensity.toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {CELEBRATION_INTENSITY_OPTIONS.map((opt) => {
+                          const isActiveInt = celebrationIntensity === opt.id;
+                          return (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              onClick={() => setCelebrationIntensity(opt.id)}
+                              className={`p-2 rounded-xl border text-left transition cursor-pointer ${
+                                isActiveInt
+                                  ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 text-slate-950 border-white font-black shadow-lg'
+                                  : 'bg-slate-900 text-slate-300 border-slate-800 hover:border-amber-400/50'
                               }`}
                             >
-                              {item.primaryEmoji}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1">
-                                <span className="font-black text-white text-[11px] truncate">
-                                  {item.name}
-                                </span>
+                              <div className="text-[11px] font-black">{opt.label}</div>
+                              <div
+                                className={`text-[9px] leading-tight mt-0.5 ${
+                                  isActiveInt ? 'text-slate-900 font-semibold' : 'text-slate-400'
+                                }`}
+                              >
+                                {opt.badgeText} • {opt.particleCount} Partikel &amp; {opt.laserBeamCount} Laser
                               </div>
-                              <span className="text-[9.5px] text-slate-400 block line-clamp-1">
-                                {item.description}
-                              </span>
-                            </div>
-                          </div>
-
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase shrink-0 ${
-                              isSelected
-                                ? 'bg-amber-400 text-slate-950'
-                                : 'bg-slate-900 text-slate-400 border border-slate-800'
-                            }`}
-                          >
-                            {isSelected ? '● Dipilih' : 'Pilih'}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800/80">
-                          <div className="flex items-center gap-1 text-xs">
-                            {item.particleEmojis.slice(0, 5).map((em, i) => (
-                              <span key={i} className="select-none">
-                                {em}
-                              </span>
-                            ))}
-                          </div>
-                          {item.id !== 'none' && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setCelebrationEffect(item.id);
-                                setThemeColor(item.recommendedThemeColor);
-                                handleTestCelebrationEffect(item.id);
-                              }}
-                              className="px-2 py-0.5 rounded-md bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-400/50 text-amber-200 font-black text-[9.5px] cursor-pointer transition"
-                            >
-                              ✨ Tes Efek
                             </button>
-                          )}
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Active Selected Single Celebration Summary Box */}
+                    <div
+                      className={`p-3 rounded-xl bg-gradient-to-r ${activeCelebrationProfile.bannerGradientClass} border ${activeCelebrationProfile.cardBorderAccentClass} flex flex-wrap items-center justify-between gap-2`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-slate-950/70 border border-white/25 flex items-center justify-center text-xl shrink-0">
+                          {activeCelebrationProfile.primaryEmoji}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="px-2 py-0.5 rounded-md bg-slate-950/85 text-amber-300 font-black text-[9.5px] uppercase tracking-wider">
+                              ✓ 1 EFEK TERPILIH • {celebrationIntensity.toUpperCase()}
+                            </span>
+                            <span className="text-[10px] font-bold text-white/90">
+                              {activeCelebrationProfile.categoryLabel}
+                            </span>
+                          </div>
+                          <h6 className="font-black text-white text-xs sm:text-sm truncate">
+                            {activeCelebrationProfile.name}
+                          </h6>
+                          <p className="text-[10px] text-white/85 truncate">
+                            {activeCelebrationProfile.description}
+                          </p>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
+                      <div className="flex items-center gap-1 bg-slate-950/65 px-2.5 py-1 rounded-lg border border-white/15">
+                        {activeCelebrationProfile.particleEmojis.map((em, idx) => (
+                          <span key={idx} className="text-sm select-none">
+                            {em}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Category Filter Buttons & Search Input */}
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap gap-1">
+                        {CELEBRATION_CATEGORIES.map((cat) => (
+                          <button
+                            key={cat.key}
+                            type="button"
+                            onClick={() => setCelebCategoryFilter(cat.key)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black cursor-pointer border transition ${
+                              celebCategoryFilter === cat.key
+                                ? 'bg-amber-400 text-slate-950 border-amber-200 shadow'
+                                : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-600'
+                            }`}
+                          >
+                            {cat.emoji} {cat.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={celebSearchQuery}
+                          onChange={(e) => setCelebSearchQuery(e.target.value)}
+                          placeholder={`Cari dari ${CELEBRATION_EFFECTS_CATALOG.length} perayaan (contoh: Tanpa Efek, Ulang Tahun, 17 Agustus, Idul Fitri, Cyberpunk, Sultan...)`}
+                          className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-[11px]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Exclusive Single-Select Celebration Grid (Radio Cards) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                      {filteredCelebrations.map((item) => {
+                        const isSelected = activeCelebrationProfile.id === item.id;
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() => {
+                              setCelebrationEffect(item.id);
+                              if (item.id !== 'none') {
+                                setLastSelectedCelebrationEffect(item.id);
+                                setThemeColor(item.recommendedThemeColor);
+                              }
+                            }}
+                            role="radio"
+                            aria-checked={isSelected}
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                setCelebrationEffect(item.id);
+                                if (item.id !== 'none') {
+                                  setLastSelectedCelebrationEffect(item.id);
+                                  setThemeColor(item.recommendedThemeColor);
+                                }
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                              isSelected
+                                ? 'bg-gradient-to-br from-amber-500/25 via-slate-900 to-slate-950 border-amber-400 shadow-lg ring-1 ring-amber-300/50'
+                                : 'bg-slate-950/90 border-slate-800 hover:border-slate-600'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-start gap-2 min-w-0">
+                                <div
+                                  className={`w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0 border ${
+                                    isSelected
+                                      ? 'bg-amber-400 text-slate-950 border-white font-black'
+                                      : 'bg-slate-900 border-slate-700'
+                                  }`}
+                                >
+                                  {item.primaryEmoji}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-black text-white text-[11px] truncate">
+                                      {item.name}
+                                    </span>
+                                  </div>
+                                  <span className="text-[9.5px] text-slate-400 block line-clamp-1">
+                                    {item.description}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase shrink-0 ${
+                                  isSelected
+                                    ? 'bg-amber-400 text-slate-950'
+                                    : 'bg-slate-900 text-slate-400 border border-slate-800'
+                                }`}
+                              >
+                                {isSelected ? '● Dipilih' : 'Pilih'}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800/80">
+                              <div className="flex items-center gap-1 text-xs">
+                                {item.particleEmojis.slice(0, 5).map((em, i) => (
+                                  <span key={i} className="select-none">
+                                    {em}
+                                  </span>
+                                ))}
+                              </div>
+                              {item.id !== 'none' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCelebrationEffect(item.id);
+                                    setLastSelectedCelebrationEffect(item.id);
+                                    setThemeColor(item.recommendedThemeColor);
+                                    handleTestCelebrationEffect(item.id);
+                                  }}
+                                  className="px-2 py-0.5 rounded-md bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-400/50 text-amber-200 font-black text-[9.5px] cursor-pointer transition"
+                                >
+                                  ✨ Tes Efek
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
 
                 {/* Sound Effect Selector */}
                 <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
@@ -2212,11 +2307,18 @@ export const AdminGiftEventPanel: React.FC = () => {
                       {(() => {
                         const evCeleb = getCelebrationEffectProfile(ev.celebrationEffect);
                         const evInt = ev.celebrationIntensity || '100000x';
+                        if (evCeleb.id === 'none') {
+                          return (
+                            <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-bold text-[10px]">
+                              🚫 Tanpa Efek
+                            </span>
+                          );
+                        }
                         return (
                           <button
                             type="button"
                             onClick={() => handleTestCelebrationEffect(evCeleb.id, evInt)}
-                            title="Klik untuk memutar pratinjau panggung perayaan 100.000x paket ini"
+                            title="Klik untuk memutar pratinjau panggung perayaan paket ini"
                             className="px-2.5 py-0.5 rounded-full bg-amber-400/20 hover:bg-amber-400 hover:text-slate-950 border border-amber-300/50 text-amber-200 font-black text-[10px] cursor-pointer transition flex items-center gap-1"
                           >
                             <span>{evCeleb.shortBadge}</span>
@@ -2422,73 +2524,105 @@ export const AdminGiftEventPanel: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Quick Celebration Effect Switcher (108 Celebrations + Intensity 100,000x, Live Sync to Cloud RTDB) */}
-                    <div className="p-3 rounded-xl bg-slate-950 border border-amber-400/40 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">
-                          {getCelebrationEffectProfile(ev.celebrationEffect).primaryEmoji}
-                        </span>
-                        <div>
-                          <span className="text-[11px] font-black text-amber-200 block">
-                            💥 Ganti Cepat Efek ({CELEBRATION_EFFECTS_CATALOG.length} Tema) &amp; Intensitas Panggung 100.000x:
-                          </span>
-                          <span className="text-[10px] text-slate-400 block">
-                            Langsung mengubah hiasan sebelum diklaim &amp; panggung sinematik saat diklaim secara real-time.
-                          </span>
+                    {/* Quick Celebration Effect Switcher (Termasuk 1-Klik Tanpa Efek, Live Sync to Cloud) */}
+                    {(() => {
+                      const currentEvEffect = getCelebrationEffectProfile(ev.celebrationEffect);
+                      const isNoneEffect = currentEvEffect.id === 'none';
+                      return (
+                        <div className="p-3 rounded-xl bg-slate-950 border border-amber-400/40 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">
+                              {isNoneEffect ? '🚫' : currentEvEffect.primaryEmoji}
+                            </span>
+                            <div>
+                              <span className="text-[11px] font-black text-amber-200 block">
+                                {isNoneEffect
+                                  ? '🚫 Mode Tanpa Efek Aktif (Tampilan Standar Bersih)'
+                                  : `💥 Ganti Cepat Efek (${CELEBRATION_EFFECTS_CATALOG.filter((c) => c.id !== 'none').length} Tema) atau Matikan Efek:`}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block">
+                                {isNoneEffect
+                                  ? 'Paket hadiah & surat ini tampil bersih tanpa animasi panggung, konfeti, maupun partikel.'
+                                  : 'Langsung mengubah hiasan sebelum diklaim & panggung sinematik saat diklaim secara real-time.'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const res = adminUpdateGiftEventQuickSettings(ev.id, {
+                                  celebrationEffect: 'none',
+                                  retriggerPopup: false,
+                                });
+                                setFeedback(res.message);
+                              }}
+                              className={`px-2.5 py-1.5 rounded-xl font-black text-[10.5px] cursor-pointer border transition ${
+                                isNoneEffect
+                                  ? 'bg-rose-500 text-white border-rose-400'
+                                  : 'bg-slate-900 hover:bg-rose-500/20 text-rose-300 border-rose-500/40'
+                              }`}
+                            >
+                              🚫 Tanpa Efek
+                            </button>
+                            <select
+                              value={currentEvEffect.id}
+                              onChange={(e) => {
+                                const nextId = e.target.value;
+                                const res = adminUpdateGiftEventQuickSettings(ev.id, {
+                                  celebrationEffect: nextId,
+                                  retriggerPopup: false,
+                                });
+                                setFeedback(res.message);
+                              }}
+                              className="px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-400/50 text-white font-bold text-[11px]"
+                            >
+                              <option value="none">🚫 Tanpa Efek (Tampilan Standar Bersih)</option>
+                              {CELEBRATION_EFFECTS_CATALOG.filter((cel) => cel.id !== 'none').map((cel) => (
+                                <option key={cel.id} value={cel.id}>
+                                  {cel.primaryEmoji} {cel.name} ({cel.categoryLabel})
+                                </option>
+                              ))}
+                            </select>
+                            {!isNoneEffect && (
+                              <>
+                                <select
+                                  value={ev.celebrationIntensity || '100000x'}
+                                  onChange={(e) => {
+                                    const nextInt = e.target.value as CelebrationIntensityLevel;
+                                    const res = adminUpdateGiftEventQuickSettings(ev.id, {
+                                      celebrationIntensity: nextInt,
+                                      retriggerPopup: false,
+                                    });
+                                    setFeedback(res.message);
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-cyan-400/50 text-cyan-200 font-black text-[11px]"
+                                >
+                                  {CELEBRATION_INTENSITY_OPTIONS.map((opt) => (
+                                    <option key={opt.id} value={opt.id}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleTestCelebrationEffect(
+                                      currentEvEffect.id,
+                                      ev.celebrationIntensity || '100000x'
+                                    )
+                                  }
+                                  className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[10.5px] cursor-pointer flex items-center gap-1"
+                                >
+                                  <Sparkles className="w-3 h-3" />
+                                  <span>Tes Panggung</span>
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <select
-                          value={getCelebrationEffectProfile(ev.celebrationEffect).id}
-                          onChange={(e) => {
-                            const nextId = e.target.value;
-                            const res = adminUpdateGiftEventQuickSettings(ev.id, {
-                              celebrationEffect: nextId,
-                              retriggerPopup: false,
-                            });
-                            setFeedback(res.message);
-                          }}
-                          className="px-3 py-1.5 rounded-xl bg-slate-900 border border-amber-400/50 text-white font-bold text-[11px]"
-                        >
-                          {CELEBRATION_EFFECTS_CATALOG.map((cel) => (
-                            <option key={cel.id} value={cel.id}>
-                              {cel.primaryEmoji} {cel.name} ({cel.categoryLabel})
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          value={ev.celebrationIntensity || '100000x'}
-                          onChange={(e) => {
-                            const nextInt = e.target.value as CelebrationIntensityLevel;
-                            const res = adminUpdateGiftEventQuickSettings(ev.id, {
-                              celebrationIntensity: nextInt,
-                              retriggerPopup: false,
-                            });
-                            setFeedback(res.message);
-                          }}
-                          className="px-2.5 py-1.5 rounded-xl bg-slate-900 border border-cyan-400/50 text-cyan-200 font-black text-[11px]"
-                        >
-                          {CELEBRATION_INTENSITY_OPTIONS.map((opt) => (
-                            <option key={opt.id} value={opt.id}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleTestCelebrationEffect(
-                              getCelebrationEffectProfile(ev.celebrationEffect).id,
-                              ev.celebrationIntensity || '100000x'
-                            )
-                          }
-                          className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[10.5px] cursor-pointer flex items-center gap-1"
-                        >
-                          <Sparkles className="w-3 h-3" />
-                          <span>Tes Panggung</span>
-                        </button>
-                      </div>
-                    </div>
+                      );
+                    })()}
 
                     {/* Bulk Reset Actions */}
                     <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-slate-950 border border-slate-800">
