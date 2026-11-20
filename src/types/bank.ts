@@ -477,6 +477,9 @@ export interface BugReportRecord {
   updatedAt?: string;
 }
 
+export type AppUpdateReleaseType = 'major' | 'bug' | 'small_bug';
+export type AppUpdateVisibilityMode = 'auto' | 'public' | 'admin_only';
+
 export interface AppUpdateRecord {
   id: string;
   version: string;
@@ -490,9 +493,11 @@ export interface AppUpdateRecord {
   categoryBadge?: string;
   author?: string;
   createdAt: string;
-  buildId?: string; // ID Build otomatis saat kompilasi/publish (mis. BLD-20261119-1949)
+  buildId?: string; // ID Build otomatis saat kompilasi/publish (mis. BLD-20261120-1230)
   isAutoDetected?: boolean; // true jika tercatat otomatis oleh detektor build/rilis
   editedByAdmin?: boolean; // true jika telah diedit manual oleh Admin agar tidak ditimpa ulang
+  releaseType?: AppUpdateReleaseType; // major (+p), bug (+w), small_bug (+g)
+  visibilityMode?: AppUpdateVisibilityMode; // auto = saring poin Admin otomatis, public = tampil penuh, admin_only = sembunyikan khusus Admin
 }
 
 export interface JobVacancyItem {

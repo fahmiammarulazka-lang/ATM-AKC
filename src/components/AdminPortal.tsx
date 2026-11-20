@@ -52,6 +52,9 @@ import {
   MessageCircle,
   Mail,
   ReceiptText,
+  Eye,
+  EyeOff,
+  AlertTriangle,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -62,7 +65,20 @@ import {
   formatBanRemainingTime,
   getFeatureUltraDetailedExplanation,
 } from '../utils/bankUtils';
-import { CardTier, FeatureSecurityConfig } from '../types/bank';
+import {
+  CardTier,
+  FeatureSecurityConfig,
+  AppUpdateReleaseType,
+  AppUpdateVisibilityMode,
+} from '../types/bank';
+import {
+  bumpStructuredVersion,
+  getLatestStructuredVersion,
+  validateVersionJump,
+  resolvePublicAppUpdate,
+  isAdminRelatedLine,
+  normalizeVersionInput,
+} from '../services/autoUpdateReleaseService';
 import { JOB_VACANCIES_CATALOG } from '../data/featuresCatalog';
 import {
   SPIN_WHEEL_PRIZES,
@@ -179,8 +195,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     approveAccountDeletionRequest,
     rejectAccountDeletionRequest,
     appUpdates,
+    publicCurrentUpdate,
     adminAddAppUpdate,
     adminEditAppUpdate,
+    adminSetAppUpdateVisibility,
     adminSetCurrentAppUpdate,
     adminDeleteAppUpdate,
     adminResetAppUpdates,
@@ -337,26 +355,73 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     return `${datePart} • Pukul ${timePart} WIB`;
   };
 
-  const [newUpdateVersion, setNewUpdateVersion] = useState<string>(`v${appUpdates.length + 1}.0`);
+  const latestStructuredVersion = getLatestStructuredVersion(appUpdates);
+  const [newUpdateReleaseType, setNewUpdateReleaseType] =
+    useState<AppUpdateReleaseType>('small_bug');
+  const [newUpdateVersion, setNewUpdateVersion] = useState<string>(() =>
+    bumpStructuredVersion(getLatestStructuredVersion(appUpdates), 'small_bug')
+  );
+  const [hasManuallyEditedVersion, setHasManuallyEditedVersion] = useState<boolean>(false);
+  const [newUpdateVisibilityMode, setNewUpdateVisibilityMode] =
+    useState<AppUpdateVisibilityMode>('auto');
+  const [adminUpdateVisibilityFilter, setAdminUpdateVisibilityFilter] = useState<
+    'all' | 'public' | 'admin_only'
+  >('all');
   const [newUpdateTitle, setNewUpdateTitle] = useState<string>(
     'Pembaruan Sistem & Penambahan Fitur Ekosistem Bank Nusantara'
   );
   const [newUpdateDateText, setNewUpdateDateText] = useState<string>(getTodayCompleteIndoDate());
   const [newUpdateDesc, setNewUpdateDesc] = useState<string>(
-    'Pembaruan resmi sistem Bank Nusantara mencakup penambahan panduan lengkap, fitur perbankan digital baru, serta peningkatan stabilitas dan sinkronisasi real-time di seluruh perangkat nasabah.'
+    'Pembaruan resmi sistem Bank Nusantara mencakup peningkatan layanan perbankan digital serta optimalisasi stabilitas dan sinkronisasi real-time di seluruh perangkat nasabah.'
   );
   const [newUpdateChangesText, setNewUpdateChangesText] = useState<string>(
-    'Penambahan fitur layanan digital perbankan terbaru\nSinkronisasi real-time lebih cepat di semua perangkat\nPembaruan dokumentasi buku panduan dan keamanan transaksi'
+    'Penambahan fitur layanan digital perbankan terbaru\nSinkronisasi real-time lebih cepat di semua perangkat\nPeningkatan stabilitas dan keamanan transaksi nasabah'
   );
-  const [newUpdateAuthor, setNewUpdateAuthor] = useState<string>('Admin Utama Bank Nusantara');
+  const [newUpdateAuthor, setNewUpdateAuthor] = useState<string>('Tim Pengembangan Bank Nusantara');
   const [newUpdateSetCurrent, setNewUpdateSetCurrent] = useState<boolean>(true);
   const [updateFeedback, setUpdateFeedback] = useState<string>('');
   const [editingUpdateId, setEditingUpdateId] = useState<string | null>(null);
   const [editUpdateVersion, setEditUpdateVersion] = useState<string>('');
+  const [editUpdateVisibilityMode, setEditUpdateVisibilityMode] =
+    useState<AppUpdateVisibilityMode>('auto');
   const [editUpdateTitle, setEditUpdateTitle] = useState<string>('');
   const [editUpdateDateText, setEditUpdateDateText] = useState<string>('');
   const [editUpdateDesc, setEditUpdateDesc] = useState<string>('');
   const [editUpdateChangesText, setEditUpdateChangesText] = useState<string>('');
+
+  useEffect(() => {
+    if (!hasManuallyEditedVersion) {
+      setNewUpdateVersion(bumpStructuredVersion(latestStructuredVersion, newUpdateReleaseType));
+    }
+  }, [latestStructuredVersion, newUpdateReleaseType, hasManuallyEditedVersion]);
+
+  const versionJumpCheck = validateVersionJump(latestStructuredVersion, newUpdateVersion);
+  const nextMajorPreview = bumpStructuredVersion(latestStructuredVersion, 'major');
+  const nextBugPreview = bumpStructuredVersion(latestStructuredVersion, 'bug');
+  const nextSmallBugPreview = bumpStructuredVersion(latestStructuredVersion, 'small_bug');
+
+  const adminUpdateCounts = React.useMemo(() => {
+    let pubCount = 0;
+    let adminOnlyCount = 0;
+    for (const upd of appUpdates) {
+      const resolved = resolvePublicAppUpdate(upd);
+      if (resolved.visible) {
+        pubCount += 1;
+      } else {
+        adminOnlyCount += 1;
+      }
+    }
+    return { all: appUpdates.length, pubCount, adminOnlyCount };
+  }, [appUpdates]);
+
+  const filteredAdminUpdates = React.useMemo(() => {
+    return appUpdates.filter((upd) => {
+      if (adminUpdateVisibilityFilter === 'all') return true;
+      const resolved = resolvePublicAppUpdate(upd);
+      if (adminUpdateVisibilityFilter === 'public') return resolved.visible;
+      return !resolved.visible || resolved.hasAdminContent;
+    });
+  }, [appUpdates, adminUpdateVisibilityFilter]);
 
   // State for Admin Custom Feature Creator
   const [showAddFeatureForm, setShowAddFeatureForm] = useState<boolean>(false);
@@ -1485,23 +1550,122 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   .split('\n')
                   .map((s) => s.trim())
                   .filter(Boolean);
+                const normalizedTarget = normalizeVersionInput(newUpdateVersion);
                 const res = adminAddAppUpdate({
-                  version: newUpdateVersion,
+                  version: normalizedTarget || newUpdateVersion,
                   title: newUpdateTitle,
                   dateText: newUpdateDateText,
                   description: newUpdateDesc,
                   changes: changesArr,
                   isCurrent: newUpdateSetCurrent,
                   author: newUpdateAuthor,
+                  releaseType: newUpdateReleaseType,
+                  visibilityMode: newUpdateVisibilityMode,
                 });
                 setUpdateFeedback(res.message);
                 if (res.success) {
-                  setNewUpdateVersion(`v${appUpdates.length + 2}.0`);
+                  const nextBase = normalizedTarget || latestStructuredVersion;
+                  setHasManuallyEditedVersion(false);
+                  setNewUpdateVersion(bumpStructuredVersion(nextBase, 'small_bug'));
+                  setNewUpdateReleaseType('small_bug');
                   setNewUpdateDateText(getTodayCompleteIndoDate());
                 }
               }}
               className="space-y-3.5"
             >
+              {/* Pemilih 3 Tipe Rilis Otomatis (vppp.ww.gg) */}
+              <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-200">
+                    Format Versi Terstruktur (vppp.ww.gg)
+                  </span>
+                  <span className="text-[11px] font-mono tabular-nums text-emerald-300">
+                    Versi Aktif: <strong>{latestStructuredVersion}</strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewUpdateReleaseType('major');
+                      setHasManuallyEditedVersion(false);
+                      setNewUpdateVersion(nextMajorPreview);
+                    }}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      newUpdateReleaseType === 'major' && !hasManuallyEditedVersion
+                        ? 'bg-emerald-500/20 border-emerald-400 text-white'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <span className="block text-[10px] font-bold text-emerald-300">
+                      Update Besar (+p)
+                    </span>
+                    <span className="block font-mono tabular-nums text-xs font-black text-white mt-0.5">
+                      {nextMajorPreview}
+                    </span>
+                    <span className="block text-[10px] text-slate-400 mt-0.5">
+                      Tambah / hapus fitur
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewUpdateReleaseType('bug');
+                      setHasManuallyEditedVersion(false);
+                      setNewUpdateVersion(nextBugPreview);
+                    }}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      newUpdateReleaseType === 'bug' && !hasManuallyEditedVersion
+                        ? 'bg-cyan-500/20 border-cyan-400 text-white'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <span className="block text-[10px] font-bold text-cyan-300">
+                      Update Bug (+w)
+                    </span>
+                    <span className="block font-mono tabular-nums text-xs font-black text-white mt-0.5">
+                      {nextBugPreview}
+                    </span>
+                    <span className="block text-[10px] text-slate-400 mt-0.5">
+                      Perbaikan bug utama
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewUpdateReleaseType('small_bug');
+                      setHasManuallyEditedVersion(false);
+                      setNewUpdateVersion(nextSmallBugPreview);
+                    }}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      newUpdateReleaseType === 'small_bug' && !hasManuallyEditedVersion
+                        ? 'bg-amber-500/20 border-amber-400 text-white'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <span className="block text-[10px] font-bold text-amber-300">
+                      Bug Kecil (+g)
+                    </span>
+                    <span className="block font-mono tabular-nums text-xs font-black text-white mt-0.5">
+                      {nextSmallBugPreview}
+                    </span>
+                    <span className="block text-[10px] text-slate-400 mt-0.5">
+                      Perbaikan ringan
+                    </span>
+                  </button>
+                </div>
+
+                {versionJumpCheck.hasWarning && versionJumpCheck.warningMessage && (
+                  <div className="p-2.5 rounded-xl bg-amber-950/60 border border-amber-500/50 text-amber-200 text-[11px] flex items-start gap-2 leading-relaxed">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span>{versionJumpCheck.warningMessage}</span>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="text-slate-300 font-bold block mb-1">
@@ -1511,9 +1675,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     type="text"
                     required
                     value={newUpdateVersion}
-                    onChange={(e) => setNewUpdateVersion(e.target.value)}
-                    placeholder="Contoh: v14.0"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-emerald-300 font-mono font-bold"
+                    onChange={(e) => {
+                      setHasManuallyEditedVersion(true);
+                      setNewUpdateVersion(e.target.value);
+                    }}
+                    placeholder="Contoh: v11.32.98"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-emerald-300 font-mono tabular-nums font-bold"
                   />
                 </div>
                 <div className="sm:col-span-2">
@@ -1524,9 +1691,51 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     type="text"
                     value={newUpdateAuthor}
                     onChange={(e) => setNewUpdateAuthor(e.target.value)}
-                    placeholder="Admin Utama Bank Nusantara"
+                    placeholder="Tim Pengembangan Bank Nusantara"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white"
                   />
+                </div>
+              </div>
+
+              {/* Visibilitas Update (Publik vs Khusus Admin) */}
+              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <span className="text-[11px] font-bold text-slate-200 block">
+                  Visibilitas di Tab Update Nasabah:
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setNewUpdateVisibilityMode('auto')}
+                    className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                      newUpdateVisibilityMode === 'auto'
+                        ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Otomatis Saring Admin
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewUpdateVisibilityMode('public')}
+                    className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                      newUpdateVisibilityMode === 'public'
+                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Tampil Penuh Publik
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewUpdateVisibilityMode('admin_only')}
+                    className={`px-2 py-2 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                      newUpdateVisibilityMode === 'admin_only'
+                        ? 'bg-rose-500/20 border-rose-400 text-rose-200'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Khusus Admin
+                  </button>
                 </div>
               </div>
 
@@ -1540,7 +1749,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     onClick={() => setNewUpdateDateText(getTodayCompleteIndoDate())}
                     className="text-[10px] font-bold text-amber-300 hover:text-amber-200 underline cursor-pointer"
                   >
-                    ⚡ Isi Tanggal & Jam Sekarang
+                    ⚡ Isi Tanggal &amp; Jam Sekarang
                   </button>
                 </div>
                 <input
@@ -1548,7 +1757,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   required
                   value={newUpdateDateText}
                   onChange={(e) => setNewUpdateDateText(e.target.value)}
-                  placeholder="Contoh: Rabu, 21 Oktober 2026 • Pukul 14:30 WIB"
+                  placeholder="Contoh: Jumat, 20 November 2026 • Pukul 12:30 WIB"
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-amber-300 font-mono font-bold"
                 />
               </div>
@@ -1603,10 +1812,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 />
                 <div>
                   <span className="font-bold text-emerald-300 block">
-                    Jadikan sebagai &quot;UPDATE SEKARANG (TERBARU)&quot;
+                    Jadikan sebagai &quot;Update Sekarang&quot;
                   </span>
                   <span className="text-[10px] text-slate-300 block">
-                    Jika dicentang, update sebelumnya otomatis berpindah ke daftar &quot;Update Sebelumnya&quot;.
+                    Jika mode Khusus Admin dipilih, nasabah tetap melihat versi publik terbaru ({publicCurrentUpdate?.version || latestStructuredVersion}).
                   </span>
                 </div>
               </label>
@@ -1616,7 +1825,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 className="w-full py-3 bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-500 hover:from-emerald-300 hover:to-cyan-400 text-slate-950 font-black rounded-xl shadow-lg shadow-emerald-500/25 cursor-pointer flex items-center justify-center gap-2 text-xs uppercase tracking-wider"
               >
                 <Plus className="w-4 h-4" />
-                <span>Simpan & Publikasikan ke Riwayat Update</span>
+                <span>Simpan &amp; Publikasikan ke Riwayat Update</span>
               </button>
             </form>
           </div>
@@ -1629,7 +1838,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   <span>Daftar Riwayat Update Website ({appUpdates.length} Versi)</span>
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Kelola, edit tanggal/nama/deskripsi, atau ubah mana yang tampil sebagai <strong>Update Sekarang</strong> dan <strong>Update Sebelumnya</strong>.
+                  Versi publik aktif nasabah: <strong className="font-mono text-emerald-300">{publicCurrentUpdate?.version || latestStructuredVersion}</strong> · Kelola visibilitas catatan khusus Admin dengan 1 klik.
                 </p>
               </div>
               <button
@@ -1647,14 +1856,60 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               </button>
             </div>
 
+            {/* Filter Tab: Semua / Publik / Khusus Admin */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAdminUpdateVisibilityFilter('all')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer ${
+                  adminUpdateVisibilityFilter === 'all'
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                Semua ({adminUpdateCounts.all})
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdminUpdateVisibilityFilter('public')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer ${
+                  adminUpdateVisibilityFilter === 'public'
+                    ? 'bg-cyan-500 text-slate-950 border-cyan-400'
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                Publik ({adminUpdateCounts.pubCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdminUpdateVisibilityFilter('admin_only')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer ${
+                  adminUpdateVisibilityFilter === 'admin_only'
+                    ? 'bg-rose-500 text-white border-rose-400'
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                Khusus Admin / Tersaring ({adminUpdateCounts.adminOnlyCount} tersembunyi)
+              </button>
+            </div>
+
             <div className="space-y-4 max-h-[680px] overflow-y-auto pr-1">
-              {appUpdates.map((upd) => {
+              {filteredAdminUpdates.map((upd) => {
                 const isEditing = editingUpdateId === upd.id;
+                const pubRes = resolvePublicAppUpdate(upd);
+                const isHiddenFromPublic = !pubRes.visible;
+                const points =
+                  upd.highlights && upd.highlights.length > 0
+                    ? upd.highlights
+                    : upd.changes || [];
+
                 return (
                   <div
                     key={upd.id}
                     className={`p-4 sm:p-5 rounded-2xl border transition-all space-y-3 ${
-                      upd.isCurrent
+                      isHiddenFromPublic
+                        ? 'bg-rose-950/20 border-rose-500/40'
+                        : upd.isCurrent
                         ? 'bg-gradient-to-br from-emerald-950/60 via-slate-950 to-slate-950 border-2 border-emerald-400/80 shadow-lg shadow-emerald-500/10'
                         : 'bg-slate-950 border-slate-800 hover:border-slate-700'
                     }`}
@@ -1664,18 +1919,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         <div className="flex items-center gap-2 flex-wrap">
                           {upd.isCurrent ? (
                             <span className="px-2.5 py-0.5 rounded-full bg-emerald-400 text-slate-950 font-black text-[10px] uppercase tracking-wider">
-                              ★ UPDATE SEKARANG (AKTIF)
+                              ★ UPDATE SEKARANG
                             </span>
                           ) : (
                             <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-bold text-[10px] uppercase">
                               UPDATE SEBELUMNYA
                             </span>
                           )}
-                          <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-300 font-mono font-bold text-xs">
+                          <span className="px-2.5 py-0.5 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-300 font-mono tabular-nums font-bold text-xs">
                             {upd.version}
                           </span>
+                          {isHiddenFromPublic ? (
+                            <span className="px-2 py-0.5 rounded-lg bg-rose-500/20 border border-rose-400/50 text-rose-300 font-bold text-[10px] inline-flex items-center gap-1">
+                              <EyeOff className="w-3 h-3" />
+                              <span>Khusus Admin</span>
+                            </span>
+                          ) : pubRes.effectiveStatus === 'filtered_mixed' ? (
+                            <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 font-bold text-[10px] inline-flex items-center gap-1">
+                              <Eye className="w-3 h-3" />
+                              <span>
+                                Publik · {pubRes.hiddenPointsCount} Poin Admin Tersaring
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 font-bold text-[10px] inline-flex items-center gap-1">
+                              <Eye className="w-3 h-3" />
+                              <span>Publik Penuh</span>
+                            </span>
+                          )}
                           <span className="text-[11px] font-mono text-cyan-300">
-                            📅 {upd.dateText}
+                            📅 {upd.dateText || upd.fullDate}
                           </span>
                         </div>
                         <h4 className="font-black text-white text-sm sm:text-base mt-1">
@@ -1683,7 +1956,47 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         </h4>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {/* Sakelar 1-Klik Tampilkan / Sembunyikan Khusus Admin */}
+                        {isHiddenFromPublic ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminSetAppUpdateVisibility(upd.id, 'public');
+                              setUpdateFeedback(res.message);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-bold text-[10px] cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Tampilkan ke Publik</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminSetAppUpdateVisibility(upd.id, 'admin_only');
+                              setUpdateFeedback(res.message);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold text-[10px] cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <EyeOff className="w-3 h-3" />
+                            <span>Sembunyikan</span>
+                          </button>
+                        )}
+
+                        {upd.visibilityMode === 'public' && pubRes.hasAdminContent && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminSetAppUpdateVisibility(upd.id, 'auto');
+                              setUpdateFeedback(res.message);
+                            }}
+                            className="px-2 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border border-amber-400/40 font-bold text-[10px] cursor-pointer"
+                          >
+                            Saring Poin Admin
+                          </button>
+                        )}
+
                         {!upd.isCurrent && (
                           <button
                             type="button"
@@ -1704,10 +2017,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                             } else {
                               setEditingUpdateId(upd.id);
                               setEditUpdateVersion(upd.version);
+                              setEditUpdateVisibilityMode(upd.visibilityMode || 'auto');
                               setEditUpdateTitle(upd.title);
                               setEditUpdateDateText(upd.dateText || upd.fullDate || '');
                               setEditUpdateDesc(upd.description);
-                              setEditUpdateChangesText((upd.changes || []).join('\n'));
+                              setEditUpdateChangesText(points.join('\n'));
                             }
                           }}
                           className="px-2.5 py-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 font-bold text-[10px] cursor-pointer"
@@ -1739,10 +2053,26 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                               type="text"
                               value={editUpdateVersion}
                               onChange={(e) => setEditUpdateVersion(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-amber-300 font-mono font-bold text-xs"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-amber-300 font-mono tabular-nums font-bold text-xs"
                             />
                           </div>
-                          <div className="sm:col-span-2">
+                          <div>
+                            <label className="text-[10px] text-slate-400 block mb-1">Visibilitas Publik:</label>
+                            <select
+                              value={editUpdateVisibilityMode}
+                              onChange={(e) =>
+                                setEditUpdateVisibilityMode(
+                                  e.target.value as AppUpdateVisibilityMode
+                                )
+                              }
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-emerald-300 font-bold text-xs"
+                            >
+                              <option value="auto">Otomatis Saring Poin Admin</option>
+                              <option value="public">Tampilkan Penuh ke Publik</option>
+                              <option value="admin_only">Khusus Admin (Sembunyikan)</option>
+                            </select>
+                          </div>
+                          <div>
                             <label className="text-[10px] text-slate-400 block mb-1">Tanggal Lengkap:</label>
                             <input
                               type="text"
@@ -1794,6 +2124,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                             onClick={() => {
                               const res = adminEditAppUpdate(upd.id, {
                                 version: editUpdateVersion,
+                                visibilityMode: editUpdateVisibilityMode,
                                 title: editUpdateTitle,
                                 dateText: editUpdateDateText,
                                 description: editUpdateDesc,
@@ -1816,17 +2147,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         <p className="text-slate-300 text-xs leading-relaxed">
                           {upd.description}
                         </p>
-                        {upd.changes && upd.changes.length > 0 && (
+                        {points.length > 0 && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
-                            {upd.changes.map((chg, idx) => (
-                              <div
-                                key={idx}
-                                className="px-2.5 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800/90 text-[11px] text-slate-300 flex items-start gap-1.5"
-                              >
-                                <span className="text-emerald-400 font-bold">✓</span>
-                                <span>{chg}</span>
-                              </div>
-                            ))}
+                            {points.map((chg, idx) => {
+                              const adminTagged = isAdminRelatedLine(chg);
+                              return (
+                                <div
+                                  key={idx}
+                                  className={`px-2.5 py-1.5 rounded-lg border text-[11px] flex items-start gap-1.5 ${
+                                    adminTagged
+                                      ? 'bg-rose-950/35 border-rose-500/40 text-rose-200'
+                                      : 'bg-slate-900/90 border-slate-800/90 text-slate-300'
+                                  }`}
+                                >
+                                  <span
+                                    className={`font-bold shrink-0 ${
+                                      adminTagged ? 'text-rose-400' : 'text-emerald-400'
+                                    }`}
+                                  >
+                                    {adminTagged ? '🔒' : '✓'}
+                                  </span>
+                                  <span>{chg}</span>
+                                </div>
+                              );
+                            })}
                           </div>
                         )}
                       </>

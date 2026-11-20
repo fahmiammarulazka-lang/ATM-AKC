@@ -54,6 +54,12 @@ import {
 import {
   getActiveAppBuildInfo,
   mergeAutoDetectedAppUpdates,
+  getPublicAppUpdates,
+  getPublicCurrentUpdate,
+  getLatestStructuredVersion,
+  bumpStructuredVersion,
+  normalizeVersionInput,
+  STRUCTURED_BASE_VERSION,
   type ActiveAppBuildInfo,
 } from '../services/autoUpdateReleaseService';
 import {
@@ -100,6 +106,8 @@ import {
   MobilePushBannerToast,
   BugReportRecord,
   AppUpdateRecord,
+  AppUpdateReleaseType,
+  AppUpdateVisibilityMode,
   SpinWheelAdminConfig,
   SpinHistoryRecord,
   SpinPrizeSegment,
@@ -858,6 +866,8 @@ interface BankContextType {
 
   // App Update History (Riwayat Update: Update Sekarang & Update Sebelumnya)
   appUpdates: AppUpdateRecord[];
+  publicAppUpdates: AppUpdateRecord[];
+  publicCurrentUpdate: AppUpdateRecord | null;
   adminAddAppUpdate: (input: {
     version: string;
     title: string;
@@ -869,10 +879,16 @@ interface BankContextType {
     isCurrent: boolean;
     categoryBadge?: string;
     author?: string;
+    releaseType?: AppUpdateReleaseType;
+    visibilityMode?: AppUpdateVisibilityMode;
   }) => { success: boolean; message: string };
   adminEditAppUpdate: (
     id: string,
     input: Partial<AppUpdateRecord>
+  ) => { success: boolean; message: string };
+  adminSetAppUpdateVisibility: (
+    id: string,
+    visibilityMode: AppUpdateVisibilityMode
   ) => { success: boolean; message: string };
   adminSetCurrentAppUpdate: (id: string) => { success: boolean; message: string };
   adminDeleteAppUpdate: (id: string) => { success: boolean; message: string };
@@ -2062,16 +2078,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
-  const latestActiveUpdateId =
-    appUpdates.find((u) => u.isCurrent)?.id || appUpdates[0]?.id || '';
+  const publicAppUpdates = React.useMemo(
+    () => getPublicAppUpdates(appUpdates),
+    [appUpdates]
+  );
+  const publicCurrentUpdate = React.useMemo(
+    () => getPublicCurrentUpdate(appUpdates),
+    [appUpdates]
+  );
+
+  // Penanda BARU di Navbar hanya menyala untuk rilis publik yang terlihat oleh nasabah
+  const latestActivePublicUpdateId = publicCurrentUpdate?.id || '';
   const hasUnreadAppUpdate = Boolean(
-    latestActiveUpdateId && lastSeenUpdateId !== latestActiveUpdateId
+    latestActivePublicUpdateId && lastSeenUpdateId !== latestActivePublicUpdateId
   );
 
   const markLatestAppUpdateSeen = () => {
-    if (!latestActiveUpdateId) return;
-    setLastSeenUpdateId(latestActiveUpdateId);
-    void saveLastSeenUpdateId(latestActiveUpdateId);
+    if (!latestActivePublicUpdateId) return;
+    setLastSeenUpdateId(latestActivePublicUpdateId);
+    void saveLastSeenUpdateId(latestActivePublicUpdateId);
   };
   const [spinWheelConfig, setSpinWheelConfig] = useState<SpinWheelAdminConfig>(INITIAL_SPIN_WHEEL_CONFIG);
   const [spinHistory, setSpinHistory] = useState<SpinHistoryRecord[]>([]);
@@ -12858,6 +12883,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     isCurrent: boolean;
     categoryBadge?: string;
     author?: string;
+    releaseType?: AppUpdateReleaseType;
+    visibilityMode?: AppUpdateVisibilityMode;
   }): { success: boolean; message: string } => {
     const cleanTitle = input.title.trim();
     const cleanDate = (input.fullDate || input.dateText || '').trim();
@@ -12873,9 +12900,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const filteredHighlights =
       rawHighlights.length > 0 ? rawHighlights.filter((h) => h.trim().length > 0) : undefined;
 
+    const latestStructured = getLatestStructuredVersion(appUpdates);
+    const normalizedVersion =
+      normalizeVersionInput(input.version) ||
+      bumpStructuredVersion(latestStructured || STRUCTURED_BASE_VERSION, input.releaseType || 'small_bug');
+
     const newUpdate: AppUpdateRecord = {
       id: `upd-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      version: input.version.trim() || `v${(appUpdates.length + 1).toFixed(1)}`,
+      version: normalizedVersion,
+      releaseType: input.releaseType || 'small_bug',
+      visibilityMode: input.visibilityMode || 'auto',
       title: cleanTitle,
       fullDate: cleanDate,
       dateText: cleanDate,
@@ -12885,9 +12919,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isCurrent: input.isCurrent,
       categoryBadge:
         input.categoryBadge?.trim() ||
-        (input.isCurrent ? 'UPDATE SEKARANG (TERBARU)' : 'Riwayat Update'),
-      author: input.author?.trim() || 'Admin Utama Bank Nusantara',
+        (input.isCurrent ? 'Update Sekarang' : 'Update Sebelumnya'),
+      author: input.author?.trim() || 'Tim Pengembangan Bank Nusantara',
       createdAt: new Date().toISOString(),
+      editedByAdmin: true,
     };
 
     setAppUpdates((prev) => {
@@ -12896,8 +12931,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ...u,
             isCurrent: false,
             categoryBadge:
-              u.categoryBadge === 'UPDATE SEKARANG (RILIS UTAMA)' ||
-              u.categoryBadge === 'UPDATE SEKARANG (TERBARU)'
+              u.categoryBadge && u.categoryBadge.toUpperCase().includes('UPDATE SEKARANG')
                 ? 'Update Sebelumnya'
                 : u.categoryBadge,
           }))
@@ -12908,9 +12942,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     playAtmSound('success');
+    const visText =
+      newUpdate.visibilityMode === 'admin_only'
+        ? 'disimpan sebagai Khusus Admin (tersembunyi dari nasabah)'
+        : newUpdate.visibilityMode === 'public'
+        ? 'ditampilkan penuh ke Publik'
+        : 'disinkronkan dengan filter otomatis poin Admin';
     return {
       success: true,
-      message: `Riwayat Update "${newUpdate.title}" (${newUpdate.fullDate}) berhasil disimpan dan langsung tampil di halaman Riwayat Update!`,
+      message: `Riwayat Update ${newUpdate.version} "${newUpdate.title}" berhasil disimpan dan ${visText}!`,
     };
   };
 
@@ -12923,9 +12963,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (u.id === id) {
           const mergedDate = input.fullDate || input.dateText || u.fullDate || u.dateText || '';
           const mergedHighlights = input.highlights || input.changes || u.highlights || u.changes;
+          const nextVersion =
+            input.version !== undefined
+              ? normalizeVersionInput(input.version) || u.version
+              : u.version;
           return {
             ...u,
             ...input,
+            version: nextVersion,
             fullDate: mergedDate,
             dateText: mergedDate,
             highlights: mergedHighlights,
@@ -12944,7 +12989,40 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     return {
       success: true,
-      message: 'Data Riwayat Update berhasil diperbarui oleh Admin.',
+      message: 'Data Riwayat Update berhasil diperbarui dan disinkronkan ke Cloud.',
+    };
+  };
+
+  const adminSetAppUpdateVisibility = (
+    id: string,
+    visibilityMode: AppUpdateVisibilityMode
+  ): { success: boolean; message: string } => {
+    let targetLabel = '';
+    setAppUpdates((prev) => {
+      const next = prev.map((u) => {
+        if (u.id === id) {
+          targetLabel = `${u.version} — ${u.title}`;
+          return {
+            ...u,
+            visibilityMode,
+            editedByAdmin: true,
+          };
+        }
+        return u;
+      });
+      syncUpdatesToServer(next);
+      return next;
+    });
+    playAtmSound('success');
+    const modeDesc =
+      visibilityMode === 'admin_only'
+        ? 'disembunyikan khusus di Panel Admin (tidak tampil di Tab Update nasabah)'
+        : visibilityMode === 'public'
+        ? 'ditampilkan penuh di Tab Update publik'
+        : 'diatur ke mode Otomatis (tampil publik dengan poin Admin tersaring)';
+    return {
+      success: true,
+      message: `Visibilitas "${targetLabel}" berhasil ${modeDesc}.`,
     };
   };
 
@@ -12957,14 +13035,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return {
             ...u,
             isCurrent: true,
-            categoryBadge: 'UPDATE SEKARANG (TERBARU)',
+            categoryBadge: 'Update Sekarang',
           };
         }
         return {
           ...u,
           isCurrent: false,
           categoryBadge:
-            u.categoryBadge?.includes('UPDATE SEKARANG') ? 'Update Sebelumnya' : u.categoryBadge,
+            u.categoryBadge?.toUpperCase().includes('UPDATE SEKARANG')
+              ? 'Update Sebelumnya'
+              : u.categoryBadge,
         };
       });
       syncUpdatesToServer(next);
@@ -12973,7 +13053,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     return {
       success: true,
-      message: `"${targetTitle}" kini ditetapkan sebagai Update Sekarang (Terbaru), dan update lainnya dipindahkan ke Update Sebelumnya!`,
+      message: `"${targetTitle}" kini ditetapkan sebagai Update Sekarang, dan update lainnya dipindahkan ke Update Sebelumnya!`,
     };
   };
 
@@ -21293,8 +21373,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminQuickToggleFreezeAccount,
         adminQuickFullEditAccount,
         appUpdates,
+        publicAppUpdates,
+        publicCurrentUpdate,
         adminAddAppUpdate,
         adminEditAppUpdate,
+        adminSetAppUpdateVisibility,
         adminSetCurrentAppUpdate,
         adminDeleteAppUpdate,
         adminResetAppUpdates,

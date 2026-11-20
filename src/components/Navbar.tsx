@@ -96,7 +96,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     requestAndEnableNotifications,
     sendTestNotificationNow,
     logoutGoogle,
-    appUpdates,
+    publicCurrentUpdate,
+    activeBuildInfo,
     hasUnreadAppUpdate,
     budgetCategories,
     transactions,
@@ -159,7 +160,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const activeDevStyle = activeDevRole ? getDevBadgeColorStyle(activeDevRole.badgeColor) : null;
 
   const currentUpdateVersion =
-    appUpdates.find((u) => u.isCurrent)?.version || appUpdates[0]?.version || 'v7.0';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v11.32.97';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -1141,20 +1142,33 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={(e) => handleSelectNavView('updates', e)}
-              className={`relative px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+              className={`group relative overflow-hidden px-3 py-1.5 rounded-lg transition-all duration-200 cursor-pointer flex items-center gap-2 whitespace-nowrap shrink-0 ${
                 activeView === 'updates'
-                  ? 'bg-emerald-600 text-white font-bold shadow-sm'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-emerald-500/30'
+                  ? 'bg-gradient-to-b from-emerald-500 to-emerald-600 text-slate-950 font-bold border border-emerald-300/60 shadow-[0_0_20px_rgba(16,185,129,0.28),inset_0_1px_0_rgba(255,255,255,0.45)]'
+                  : 'bg-gradient-to-b from-emerald-500/12 via-slate-900/80 to-slate-950/90 text-slate-200 hover:text-white border border-emerald-400/35 hover:border-emerald-400/70 shadow-[inset_0_1px_0_rgba(167,243,208,0.18)]'
               }`}
             >
-              <History className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>Update</span>
-              <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono tabular-nums text-[10px] font-bold">
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/60 to-transparent"
+              />
+              <History
+                className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 group-hover:scale-105 ${
+                  activeView === 'updates' ? 'text-slate-950' : 'text-emerald-400'
+                }`}
+              />
+              <span className="tracking-tight">Update</span>
+              <span
+                className={`font-mono tabular-nums text-[10px] font-bold tracking-tight ${
+                  activeView === 'updates'
+                    ? 'text-slate-950/90'
+                    : 'text-emerald-300'
+                }`}
+              >
                 {currentUpdateVersion}
               </span>
               {hasUnreadAppUpdate && activeView !== 'updates' && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-emerald-400 text-slate-950 font-mono text-[9px] font-black tracking-wide animate-pulse">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />
+                <span className="px-1.5 py-0.5 rounded bg-emerald-400 text-slate-950 font-mono text-[9px] font-black tracking-wider leading-none">
                   BARU
                 </span>
               )}

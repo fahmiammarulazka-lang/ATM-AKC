@@ -1,300 +1,426 @@
 /**
- * Bank Nusantara — Riwayat Update Resmi (Update Sekarang & Update Sebelumnya)
- * Sesuai permintaan user:
- * "Di sebelah panduan itu ada riwayat update yang menampilkan update sekarang dan juga update sebelumnya.
- *  Tanggalnya lengkap, namanya, deskripsinya, dan itu bisa diisi di panel admin."
+ * Bank Nusantara — Halaman Riwayat Update Editorial Gelap Mewah
+ * - Menampilkan rilis publik secara konsisten (catatan & poin khusus Admin otomatis disaring)
+ * - Nomor versi tampil bersih & ringkas tanpa lencana tipe rilis maupun kotak panduan format
+ * - Garis timeline vertikal terbuka penuh tanpa tombol "Lihat Detail" dan tanpa pemotongan teks
+ * - Dilengkapi pencarian real-time + filter segmen Semua, Era Baru, dan Arsip Lama
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  History,
-  Sparkles,
-  Calendar,
-  CheckCircle2,
-  BookOpen,
-  Search,
-  Layers,
-  Clock,
-  ShieldCheck,
   ArrowRight,
-  Wrench,
-  FileText,
+  BookOpen,
+  Calendar,
+  Check,
+  Search,
+  X,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
+import { isStructuredThreePartVersion } from '../services/autoUpdateReleaseService';
 
 interface UpdateHistoryViewProps {
   onNavigateToView: (view: 'dashboard' | 'atm' | 'admin' | 'guide' | 'chat' | 'updates') => void;
 }
 
+type EraFilter = 'all' | 'new_era' | 'legacy';
+
 export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({
   onNavigateToView,
 }) => {
-  const { appUpdates, featureConfigs, activeBuildInfo } = useBank();
+  const { publicAppUpdates, publicCurrentUpdate, activeBuildInfo } = useBank();
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [eraFilter, setEraFilter] = useState<EraFilter>('all');
 
-  // Separate Current Update ("Update Sekarang") and Previous Updates ("Update Sebelumnya")
-  const currentUpdate = appUpdates.find((u) => u.isCurrent) || appUpdates[0] || null;
-  const previousUpdates = appUpdates.filter((u) => u.id !== currentUpdate?.id);
-
-  const filteredPreviousUpdates = previousUpdates.filter(
-    (u) =>
-      u.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.fullDate.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.version.toLowerCase().includes(searchQuery.toLowerCase())
+  const currentUpdate = publicCurrentUpdate || publicAppUpdates[0] || null;
+  const previousUpdates = useMemo(
+    () => publicAppUpdates.filter((u) => u.id !== currentUpdate?.id),
+    [publicAppUpdates, currentUpdate?.id]
   );
 
+  const eraCounts = useMemo(() => {
+    let newEra = 0;
+    let legacy = 0;
+    for (const item of previousUpdates) {
+      if (isStructuredThreePartVersion(item.version)) {
+        newEra += 1;
+      } else {
+        legacy += 1;
+      }
+    }
+    return { all: previousUpdates.length, newEra, legacy };
+  }, [previousUpdates]);
+
+  const filteredPreviousUpdates = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return previousUpdates.filter((u) => {
+      if (eraFilter === 'new_era' && !isStructuredThreePartVersion(u.version)) return false;
+      if (eraFilter === 'legacy' && isStructuredThreePartVersion(u.version)) return false;
+      if (!q) return true;
+      const pointsText = (u.highlights || u.changes || []).join(' ').toLowerCase();
+      return (
+        u.title.toLowerCase().includes(q) ||
+        u.description.toLowerCase().includes(q) ||
+        (u.fullDate || u.dateText || '').toLowerCase().includes(q) ||
+        u.version.toLowerCase().includes(q) ||
+        pointsText.includes(q)
+      );
+    });
+  }, [previousUpdates, searchQuery, eraFilter]);
+
+  const currentPoints =
+    currentUpdate?.highlights && currentUpdate.highlights.length > 0
+      ? currentUpdate.highlights
+      : currentUpdate?.changes || [];
+
+  const activeVersionLabel =
+    currentUpdate?.version || activeBuildInfo.catalogVersion || 'v11.32.97';
+
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-6">
-      {/* Top Banner with Quick Switch to Panduan (Next to it) & Admin Portal */}
-      <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-indigo-950 rounded-3xl p-6 sm:p-7 border-2 border-emerald-500/50 shadow-2xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-mono font-black text-[10px] uppercase tracking-widest flex items-center gap-1.5">
-              <History className="w-3.5 h-3.5 text-emerald-400" />
-              <span>PUSAT CATATAN RILIS & RIWAYAT UPDATE RESMI</span>
-            </span>
-            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/40 font-mono font-bold text-[10px]">
-              Total {appUpdates.length} Catatan Update
-            </span>
-            <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-200 border border-cyan-400/40 font-mono font-bold text-[10px]">
-              Build Aktif: {activeBuildInfo.buildId} • {currentUpdate?.version || activeBuildInfo.catalogVersion}
-            </span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-            📜 Riwayat Update — Update Sekarang &amp; Update Sebelumnya
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-300 max-w-3xl leading-relaxed">
-            Halaman ini menampilkan <strong>Update Sekarang (Versi Terbaru)</strong> beserta daftar lengkap <strong>Update Sebelumnya</strong> dengan <strong>Tanggal Lengkap</strong>, <strong>Nama Update</strong>, dan <strong>Deskripsi Lengkap</strong>. Seluruh riwayat update ini dapat ditambahkan, diisi, atau diperbarui kapan saja melalui <strong>Panel Admin</strong>.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => onNavigateToView('guide')}
-            className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs cursor-pointer flex items-center gap-2 shadow-lg shadow-purple-600/25 transition-all"
-          >
-            <BookOpen className="w-4 h-4" />
-            <span>← Buku Panduan (60 Bab)</span>
-          </button>
-        </div>
-      </div>
-
-      {/* =====================================================================
-          BAGIAN 1: UPDATE SEKARANG (VERSI TERBARU SAAT INI)
-         ===================================================================== */}
-      {currentUpdate && (
-        <div className="bg-gradient-to-br from-slate-900 via-emerald-950/30 to-slate-950 border-2 border-emerald-400/70 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-5 relative overflow-hidden">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <span className="px-3.5 py-1 rounded-full bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-md">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>🌟 UPDATE SEKARANG (SAAT INI)</span>
-              </span>
-              <span className="px-3 py-1 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-300 font-mono font-black text-xs">
-                Versi {currentUpdate.version}
-              </span>
-              {currentUpdate.categoryBadge && (
-                <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-cyan-300 font-mono text-[11px] font-semibold">
-                  {currentUpdate.categoryBadge}
-                </span>
-              )}
-              {currentUpdate.buildId && (
-                <span className="px-2.5 py-1 rounded-lg bg-emerald-950/90 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-bold">
-                  ID Build: {currentUpdate.buildId}
-                </span>
-              )}
-              {currentUpdate.isAutoDetected && (
-                <span className="px-2 py-1 rounded-lg bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 font-mono text-[10px] font-bold">
-                  Auto-Sync Rilis
-                </span>
-              )}
+    <div className="w-full max-w-5xl mx-auto space-y-10 pb-12">
+      {/* Editorial Header */}
+      <header className="relative overflow-hidden rounded-2xl bg-slate-900/75 border border-slate-800 px-6 py-7 sm:px-9 sm:py-8">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-400/50 to-transparent"
+        />
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+          <div className="space-y-3 max-w-3xl">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs font-mono tabular-nums text-slate-400">
+              <span className="text-emerald-400 font-semibold">Catatan Rilis Resmi</span>
+              <span aria-hidden="true" className="text-slate-600">·</span>
+              <span className="text-amber-300 font-semibold">{activeVersionLabel}</span>
+              <span aria-hidden="true" className="text-slate-600">·</span>
+              <span>{publicAppUpdates.length} Rilis Publik</span>
+              <span aria-hidden="true" className="text-slate-600">·</span>
+              <span>Build {activeBuildInfo.buildId}</span>
             </div>
 
-            {/* Tanggal Lengkap */}
-            <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-950 border border-emerald-500/40 text-emerald-300 font-mono text-xs font-bold">
-              <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Tanggal Lengkap: {currentUpdate.fullDate}</span>
-            </div>
-          </div>
+            <h1 className="text-2xl sm:text-4xl font-bold tracking-tight text-white [text-wrap:balance]">
+              Riwayat Pembaruan Bank Nusantara
+            </h1>
 
-          {/* Nama Update & Deskripsi Lengkap */}
-          <div className="space-y-3">
-            <div>
-              <span className="text-[10px] font-mono uppercase tracking-widest text-emerald-400 font-bold block">
-                NAMA UPDATE SEKARANG:
-              </span>
-              <h2 className="text-xl sm:text-2xl font-black text-white mt-0.5 leading-snug">
-                {currentUpdate.title}
-              </h2>
-            </div>
-
-            <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
-              <span className="text-[10px] font-mono uppercase tracking-widest text-amber-300 font-bold flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5" />
-                <span>DESKRIPSI LENGKAP UPDATE SEKARANG:</span>
-              </span>
-              <p className="text-slate-200 text-xs sm:text-sm leading-relaxed whitespace-pre-wrap">
-                {currentUpdate.description}
-              </p>
-            </div>
-
-            {/* Poin Rincian Perubahan (Highlights) */}
-            {currentUpdate.highlights && currentUpdate.highlights.length > 0 && (
-              <div className="p-4 sm:p-5 rounded-2xl bg-emerald-950/25 border border-emerald-500/30 space-y-2.5">
-                <span className="text-[11px] font-mono uppercase tracking-wider text-emerald-300 font-bold block">
-                  ✓ Rincian Fitur &amp; Pembaruan pada {currentUpdate.version}:
-                </span>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                  {currentUpdate.highlights.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-start gap-2.5 text-xs text-slate-200"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      <span>{item}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Diterbitkan oleh: <strong className="text-white">{currentUpdate.author || 'Admin Utama Bank Nusantara'}</strong></span>
-            </span>
-            <button
-              type="button"
-              onClick={() => onNavigateToView('dashboard')}
-              className="text-amber-300 hover:text-amber-200 font-bold flex items-center gap-1 cursor-pointer"
-            >
-              <span>Coba Fitur Terbaru di Mobile Banking</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* =====================================================================
-          BAGIAN 2: RIWAYAT UPDATE SEBELUMNYA (LENGKAP DENGAN TANGGAL, NAMA & DESKRIPSI)
-         ===================================================================== */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-mono font-bold text-[10px] uppercase tracking-wider">
-                ARSIP KRONOLOGIS
-              </span>
-              <span className="text-xs font-mono text-amber-300 font-bold">
-                {previousUpdates.length} Update Sebelumnya
-              </span>
-            </div>
-            <h3 className="text-lg sm:text-xl font-black text-white mt-1 flex items-center gap-2">
-              <Clock className="w-5 h-5 text-blue-400" />
-              <span>Daftar Riwayat Update Sebelumnya</span>
-            </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Catatan lengkap seluruh update terdahulu beserta tanggal lengkap, nama versi, dan deskripsi perubahannya.
+            <p className="text-sm sm:text-[15px] text-slate-300 leading-relaxed max-w-2xl">
+              Seluruh pembaruan fitur, peningkatan kenyamanan transaksi, dan perbaikan stabilitas aplikasi tersusun rapi secara kronologis dari versi terbaru hingga arsip terdahulu.
             </p>
           </div>
 
-          {/* Search Previous Updates */}
-          <div className="relative w-full md:w-80">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari nama update, versi, atau tanggal..."
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white text-xs focus:outline-none focus:border-amber-400"
-            />
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => onNavigateToView('guide')}
+              className="px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/80 text-xs font-semibold cursor-pointer flex items-center gap-2 transition-colors whitespace-nowrap shrink-0"
+            >
+              <BookOpen className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Buku Panduan</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* BAGIAN 1: UPDATE SEKARANG (Focal Hero) */}
+      {currentUpdate ? (
+        <section
+          aria-label="Pembaruan Terbaru"
+          className="relative overflow-hidden rounded-2xl bg-gradient-to-b from-slate-900/95 via-slate-900/85 to-slate-950 border border-emerald-500/35 px-6 py-7 sm:px-9 sm:py-9 space-y-7"
+        >
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-emerald-500/10 via-emerald-400/80 to-amber-300/60"
+          />
+
+          {/* Top Editorial Meta Row */}
+          <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-4 border-b border-slate-800/90 pb-5">
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1.5">
+              <span className="font-mono tabular-nums text-2xl sm:text-3xl font-bold tracking-tight text-emerald-400">
+                {currentUpdate.version}
+              </span>
+              <span className="text-xs font-semibold text-amber-300 tracking-wide">
+                Update Sekarang
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs font-mono tabular-nums text-slate-300">
+              <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>{currentUpdate.fullDate || currentUpdate.dateText}</span>
+            </div>
+          </div>
+
+          {/* Full Headline & Full Description (Zero Truncation) */}
+          <div className="space-y-4">
+            <h2 className="text-xl sm:text-2xl font-bold text-white leading-snug [text-wrap:balance]">
+              {currentUpdate.title}
+            </h2>
+
+            <p className="text-sm sm:text-[15px] text-slate-300 leading-relaxed whitespace-pre-wrap">
+              {currentUpdate.description}
+            </p>
+          </div>
+
+          {/* Full List of Public Highlights */}
+          {currentPoints.length > 0 && (
+            <div className="pt-2 space-y-4 border-t border-slate-800/80">
+              <h3 className="text-xs font-semibold text-emerald-300 tracking-wide">
+                Rincian Pembaruan pada {currentUpdate.version}
+              </h3>
+              <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3.5">
+                {currentPoints.map((item, idx) => (
+                  <li
+                    key={idx}
+                    className="flex items-start gap-3 text-sm text-slate-200 leading-relaxed"
+                  >
+                    <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-1" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Footer Meta + Primary Action */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-5 border-t border-slate-800/80 text-xs text-slate-400">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <span>
+                Diterbitkan oleh{' '}
+                <strong className="text-slate-200 font-semibold">
+                  {currentUpdate.author || 'Tim Pengembangan Bank Nusantara'}
+                </strong>
+              </span>
+              {currentUpdate.buildId && (
+                <>
+                  <span aria-hidden="true" className="text-slate-600">·</span>
+                  <span className="font-mono tabular-nums text-slate-400">
+                    ID Build {currentUpdate.buildId}
+                  </span>
+                </>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onNavigateToView('dashboard')}
+              className="inline-flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 font-semibold cursor-pointer transition-colors whitespace-nowrap shrink-0"
+            >
+              <span>Buka Dashboard Mobile Banking</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section className="rounded-2xl bg-slate-900/70 border border-slate-800 px-6 py-12 text-center space-y-2">
+          <p className="text-sm font-semibold text-white">
+            Belum ada catatan pembaruan publik yang tersedia.
+          </p>
+          <p className="text-xs text-slate-400">
+            Catatan pembaruan terbaru akan muncul otomatis di halaman ini segera setelah diterbitkan.
+          </p>
+        </section>
+      )}
+
+      {/* BAGIAN 2: ARSIP TIMELINE VERTIKAL UPDATE SEBELUMNYA */}
+      <section aria-label="Riwayat Update Sebelumnya" className="space-y-6">
+        {/* Toolbar: Heading + Segmented Era Filter + Live Search */}
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-5 pb-5 border-b border-slate-800">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 text-xs font-mono tabular-nums text-slate-400">
+              <span>Arsip Kronologis</span>
+              <span aria-hidden="true" className="text-slate-600">·</span>
+              <span className="text-amber-300 font-semibold">
+                {filteredPreviousUpdates.length} dari {previousUpdates.length} Rilis Sebelumnya
+              </span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+              Riwayat Update Sebelumnya
+            </h2>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            {/* Segmented Filter Control: Semua / Era Baru / Arsip Lama */}
+            <div
+              role="tablist"
+              aria-label="Filter era riwayat update"
+              className="inline-flex items-center p-1 rounded-xl bg-slate-900 border border-slate-800 shrink-0"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={eraFilter === 'all'}
+                onClick={() => setEraFilter('all')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  eraFilter === 'all'
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Semua · {eraCounts.all}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={eraFilter === 'new_era'}
+                onClick={() => setEraFilter('new_era')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  eraFilter === 'new_era'
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Era Baru · {eraCounts.newEra}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={eraFilter === 'legacy'}
+                onClick={() => setEraFilter('legacy')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  eraFilter === 'legacy'
+                    ? 'bg-emerald-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Arsip Lama · {eraCounts.legacy}
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative w-full sm:w-72">
+              <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Cari versi, fitur, atau tanggal"
+                className="w-full bg-slate-900/90 border border-slate-800 focus:border-emerald-400/70 rounded-xl pl-10 pr-9 py-2 text-xs sm:text-sm text-white placeholder:text-slate-500 focus:outline-none transition-colors"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Hapus pencarian"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer p-0.5"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
+        {/* Vertical Editorial Timeline (Terbuka Penuh, Tanpa Tombol Lihat Detail & Tanpa Pemotongan) */}
         {filteredPreviousUpdates.length === 0 ? (
-          <div className="p-10 text-center bg-slate-950 rounded-2xl border border-slate-800 text-slate-400 text-xs">
-            Tidak ditemukan catatan update sebelumnya yang cocok dengan pencarian &ldquo;{searchQuery}&rdquo;.
+          <div className="rounded-2xl bg-slate-900/60 border border-slate-800 px-6 py-12 text-center space-y-3">
+            <p className="text-sm font-semibold text-slate-200">
+              Tidak ditemukan catatan update yang sesuai dengan filter saat ini.
+            </p>
+            <p className="text-xs text-slate-400">
+              Ubah kata kunci pencarian atau pilih kategori Semua untuk melihat seluruh arsip rilis.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setEraFilter('all');
+              }}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 text-xs font-semibold cursor-pointer transition-colors"
+            >
+              Reset Filter
+            </button>
           </div>
         ) : (
-          <div className="space-y-4">
-            {filteredPreviousUpdates.map((upd, idx) => (
-              <div
-                key={upd.id}
-                className="p-5 sm:p-6 rounded-2xl bg-slate-950 border border-slate-800 hover:border-slate-700 transition-all space-y-3.5"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-900 pb-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 font-mono font-bold text-[10px] uppercase">
-                      UPDATE SEBELUMNYA #{previousUpdates.length - idx}
-                    </span>
-                    <span className="px-3 py-1 rounded-lg bg-blue-500/20 border border-blue-500/40 text-blue-300 font-mono font-black text-xs">
-                      {upd.version}
-                    </span>
-                    {upd.categoryBadge && (
-                      <span className="px-2.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-mono text-[10px] font-semibold">
-                        {upd.categoryBadge}
-                      </span>
-                    )}
-                    {upd.buildId && (
-                      <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-[10px] font-semibold">
-                        Build: {upd.buildId}
-                      </span>
-                    )}
-                  </div>
+          <div className="relative pl-6 sm:pl-9">
+            {/* Garis Timeline Vertikal */}
+            <div
+              aria-hidden="true"
+              className="absolute left-2 sm:left-3 top-2 bottom-2 w-px bg-gradient-to-b from-emerald-500/60 via-slate-800 to-slate-900"
+            />
 
-                  {/* Tanggal Lengkap */}
-                  <div className="flex items-center gap-1.5 text-xs font-mono text-amber-300 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
-                    <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span>{upd.fullDate}</span>
-                  </div>
-                </div>
+            <div className="space-y-8">
+              {filteredPreviousUpdates.map((upd) => {
+                const isNewEra = isStructuredThreePartVersion(upd.version);
+                const points =
+                  upd.highlights && upd.highlights.length > 0
+                    ? upd.highlights
+                    : upd.changes || [];
 
-                {/* Nama Update */}
-                <div>
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 block">
-                    Nama Update:
-                  </span>
-                  <h4 className="text-base sm:text-lg font-black text-white mt-0.5">
-                    {upd.title}
-                  </h4>
-                </div>
+                return (
+                  <article
+                    key={upd.id}
+                    className="relative rounded-2xl bg-slate-900/60 border border-slate-800/90 hover:border-slate-700 transition-colors px-5 py-6 sm:px-7 sm:py-7 space-y-4"
+                  >
+                    {/* Simpul Garis Timeline */}
+                    <span
+                      aria-hidden="true"
+                      className={`absolute -left-[22px] sm:-left-[30px] top-7 w-3 h-3 rounded-full border-2 ${
+                        isNewEra
+                          ? 'bg-emerald-400 border-slate-950 shadow-[0_0_0_3px_rgba(16,185,129,0.2)]'
+                          : 'bg-slate-600 border-slate-950'
+                      }`}
+                    />
 
-                {/* Deskripsi Lengkap */}
-                <div className="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800/90 space-y-1">
-                  <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-300 font-bold block">
-                    Deskripsi Lengkap:
-                  </span>
-                  <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
-                    {upd.description}
-                  </p>
-                </div>
-
-                {/* Highlights if available */}
-                {upd.highlights && upd.highlights.length > 0 && (
-                  <div className="pt-1 space-y-1.5">
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold block">
-                      Daftar Perubahan ({upd.highlights.length} Poin):
-                    </span>
-                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-slate-300">
-                      {upd.highlights.map((h, i) => (
-                        <li
-                          key={i}
-                          className="p-2.5 rounded-xl bg-slate-900/50 border border-slate-800/60 flex items-start gap-2"
+                    {/* Baris Metadata Editorial Tanpa Kapsul */}
+                    <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2 pb-3.5 border-b border-slate-800/80">
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        <span
+                          className={`font-mono tabular-nums text-base sm:text-lg font-bold tracking-tight ${
+                            isNewEra ? 'text-emerald-400' : 'text-amber-300'
+                          }`}
                         >
-                          <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                          <span>{h}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            ))}
+                          {upd.version}
+                        </span>
+                        {upd.buildId && (
+                          <>
+                            <span aria-hidden="true" className="text-slate-600">·</span>
+                            <span className="font-mono tabular-nums text-[11px] text-slate-400">
+                              Build {upd.buildId}
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-xs font-mono tabular-nums text-slate-400">
+                        <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        <span>{upd.fullDate || upd.dateText}</span>
+                      </div>
+                    </div>
+
+                    {/* Judul & Deskripsi Lengkap Tanpa Pemotongan */}
+                    <div className="space-y-3">
+                      <h3 className="text-base sm:text-lg font-bold text-white leading-snug">
+                        {upd.title}
+                      </h3>
+
+                      <p className="text-xs sm:text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">
+                        {upd.description}
+                      </p>
+                    </div>
+
+                    {/* Daftar Poin Perubahan Terbuka Penuh */}
+                    {points.length > 0 && (
+                      <div className="pt-3 border-t border-slate-800/70 space-y-2.5">
+                        <span className="text-[11px] font-semibold text-slate-400 block">
+                          Rincian Perubahan
+                        </span>
+                        <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-7 gap-y-2.5">
+                          {points.map((point, pIdx) => (
+                            <li
+                              key={pIdx}
+                              className="flex items-start gap-2.5 text-xs sm:text-[13px] text-slate-300 leading-relaxed"
+                            >
+                              <span
+                                aria-hidden="true"
+                                className="mt-2 w-1.5 h-1.5 rounded-full bg-slate-500 shrink-0"
+                              />
+                              <span>{point}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 };

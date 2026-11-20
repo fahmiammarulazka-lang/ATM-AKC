@@ -3091,6 +3091,37 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v11-32-97',
+    version: 'v11.32.97',
+    releaseType: 'bug',
+    visibilityMode: 'auto',
+    title:
+      'Penyimpanan Permanen Hadiah, Surat & Tanda Tangan Digital, Sistem Versi Baru v11.32.97 serta Tampilan Editorial Tab Update',
+    fullDate: 'Jumat, 20 November 2026 • Pukul 12:30 WIB',
+    dateText: 'Jumat, 20 November 2026 • Pukul 12:30 WIB',
+    description:
+      'Pembaruan menyeluruh versi v11.32.97 menghadirkan penyimpanan permanen lintas perangkat untuk seluruh paket hadiah, surat resmi, serta tanda tangan digital agar selalu terjaga saat halaman di-refresh, disertai peresmian format penomoran versi terstruktur vppp.ww.gg yang presisi dan tampilan editorial baru pada halaman Riwayat Update. Pada Panel Admin tersedia kalkulator 3 tipe rilis serta sakelar visibilitas untuk mengelola catatan khusus Admin.',
+    highlights: [
+      'Penyimpanan Permanen Hadiah & Surat Resmi: Seluruh paket hadiah dan surat kini tersimpan ganda di Cloud dan penyimpanan perangkat sehingga tetap aman utuh saat halaman dimuat ulang maupun dibuka dari perangkat lain.',
+      'Persistensi Penuh 4 Mode Tanda Tangan & Stempel Digital: Tanda tangan kanvas bebas, unggahan foto tanda tangan terkompresi otomatis, desain bawaan global, dan segel khusus per surat tersimpan permanen tanpa terpotong.',
+      'Standar Penomoran Versi Terstruktur v11.32.97: Mengganti penomoran lama dengan sistem tiga angka berurutan yang konsisten di seluruh layar sehingga kenaikan versi selalu rapi dan terukur.',
+      'Tampilan Editorial Baru Halaman Riwayat Update: Desain gelap berkelas dengan garis waktu vertikal terbuka penuh, pencarian cepat, dan filter Era Baru serta Arsip Lama.',
+      'Kalkulator 3 Tipe Rilis & Kontrol Visibilitas di Panel Admin: Admin dapat memilih Update Besar, Update Bug, atau Bug Kecil otomatis dengan peringatan anti-lompat jauh serta menyembunyikan atau menampilkan catatan khusus Admin dengan satu klik.',
+    ],
+    changes: [
+      'Penyimpanan Permanen Hadiah & Surat Resmi: Seluruh paket hadiah dan surat kini tersimpan ganda di Cloud dan penyimpanan perangkat sehingga tetap aman utuh saat halaman dimuat ulang maupun dibuka dari perangkat lain.',
+      'Persistensi Penuh 4 Mode Tanda Tangan & Stempel Digital: Tanda tangan kanvas bebas, unggahan foto tanda tangan terkompresi otomatis, desain bawaan global, dan segel khusus per surat tersimpan permanen tanpa terpotong.',
+      'Standar Penomoran Versi Terstruktur v11.32.97: Mengganti penomoran lama dengan sistem tiga angka berurutan yang konsisten di seluruh layar sehingga kenaikan versi selalu rapi dan terukur.',
+      'Tampilan Editorial Baru Halaman Riwayat Update: Desain gelap berkelas dengan garis waktu vertikal terbuka penuh, pencarian cepat, dan filter Era Baru serta Arsip Lama.',
+      'Kalkulator 3 Tipe Rilis & Kontrol Visibilitas di Panel Admin: Admin dapat memilih Update Besar, Update Bug, atau Bug Kecil otomatis dengan peringatan anti-lompat jauh serta menyembunyikan atau menampilkan catatan khusus Admin dengan satu klik.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-20T05:30:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v19-0',
     version: 'v19.0',
     title:
@@ -3112,8 +3143,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Banner hitung mundur jatuh tempo real-time, pop-up peringatan hutang instan, dan mesin Auto-Ban 1 Hari (24 Jam) otomatis.',
       'Tab Kelola Hutang & Risiko Kerugian lengkap di Panel Admin (tambah, kurangi, lunasi, ubah tenggat, cabut ban, atur risiko & bunga denda).',
     ],
-    isCurrent: true,
-    categoryBadge: 'UPDATE SEKARANG (v19.0)',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Sistem Deteksi Rilis Otomatis & Core-Banking Bank Nusantara',
     createdAt: '2026-11-19T13:05:00.000Z',
     isAutoDetected: true,
