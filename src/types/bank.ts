@@ -192,7 +192,7 @@ export interface CloudUserRecord {
   lastAccountId?: string;
   hasCompletedOnboarding?: boolean;
   savedAccounts?: BankAccount[];
-  authMode?: 'email_direct' | 'google' | 'oa_account' | 'guest';
+  authMode?: 'email_direct' | 'google' | 'oa_account' | 'guest' | 'standard_account';
   emailKey?: string;
   emailVerified?: boolean;
   notificationCategoryPermissions?: Record<NotificationCategory10Key, boolean>;
@@ -284,8 +284,14 @@ export interface BankAccount {
   // Akun OA Resmi buatan Panel Admin (Bisa login lewat tombol "Login Dengan Akun OA" di Lobi Awal)
   isOfficialAdminAccount?: boolean;
   oaAdminPin?: string; // Default '159357' atau PIN Admin khusus per Akun OA
-  // Akun Guest (Tamu - Hanya tersimpan di LocalStorage sampai disambungkan ke Google lewat tombol Sync)
+  // Akun Guest (Tamu - Maks 1 jika dibuat dari Lobby, tanpa batas jika dibuat dari Panel Admin)
   isGuestAccount?: boolean;
+  // Akun Biasa Tanpa Sambungan Google (Dibuat dari Panel Admin, login via "Login Ke Akun")
+  isRegularNoGoogleAccount?: boolean;
+  // Penanda akun yang dibuat langsung oleh Panel Admin (tidak menghitung kuota 1 Guest Lobby)
+  createdByAdmin?: boolean;
+  // Alamat wilayah administratif Indonesia terstruktur (Provinsi -> Kab/Kota -> Kec -> Desa -> Kode Pos -> RT/RW -> Jalan opsional)
+  structuredAddress?: StructuredIndonesiaAddress;
   // Sistem Hutang & Kerugian Mining/Lelang VIP (Auto-Ban 1 Hari saat Jatuh Tempo)
   debtAmount?: number; // Total hutang aktif saat ini (Rp)
   debtDueAt?: string; // Batas waktu kesepakatan bayar (ISO string, default +24 jam)
@@ -395,7 +401,7 @@ export interface GoogleUserSession {
   name: string;
   picture?: string;
   firebaseUid?: string;
-  authMode?: 'email_direct' | 'google' | 'oa_account' | 'guest';
+  authMode?: 'email_direct' | 'google' | 'oa_account' | 'guest' | 'standard_account';
   emailKey?: string;
   loggedInAt: string;
   hasCompletedOnboarding: boolean;
@@ -1536,6 +1542,7 @@ export interface AdminFullCustomAccountInput {
   phone?: string;
   email?: string;
   address?: string;
+  structuredAddress?: StructuredIndonesiaAddress;
   cardTier: CardTier;
   balance: number;
   isUnlimitedBalance?: boolean;
@@ -1558,4 +1565,56 @@ export interface AdminFullCustomAccountInput {
   grantAllSultanBusinesses?: boolean;
   sultanBusinessUnitsEach?: number;
   isOfficialAdminAccount?: boolean;
+  accountCategory?: 'guest' | 'regular_no_google' | 'oa';
 }
+
+export interface StructuredIndonesiaAddress {
+  provinceCode: string;
+  provinceName: string;
+  regencyCode: string;
+  regencyName: string;
+  districtCode: string;
+  districtName: string;
+  villageCode: string;
+  villageName: string;
+  postalCode: string;
+  rt: string;
+  rw: string;
+  streetAddress?: string;
+}
+
+export type SupportFaqCategory =
+  | 'akun'
+  | 'kartu'
+  | 'atm'
+  | 'pinjaman'
+  | 'keamanan'
+  | 'umum';
+
+export interface SupportFaqItem {
+  id: string;
+  category: SupportFaqCategory;
+  question: string;
+  answer: string;
+  steps: string[];
+  tip?: string;
+  keywords?: string[];
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SupportContactConfig {
+  serviceName: string;
+  whatsappNumber: string;
+  whatsappEnabled: boolean;
+  whatsappAutoMessage: string;
+  emailAddress: string;
+  emailEnabled: boolean;
+  emailAutoSubject: string;
+  emailAutoBody: string;
+  operatingHours: string;
+  responseEstimate: string;
+  updatedAt?: string;
+}
+

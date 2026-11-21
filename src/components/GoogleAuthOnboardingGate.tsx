@@ -5,7 +5,7 @@
  *   2) "Login Dengan Akun OA" (Wajib isi: No. Rekening, ID 16 Digit, PIN Kartu & PIN Admin — khusus Akun OA buatan Panel Admin)
  *   3) "Login Lewat Guest" (Tersimpan di LocalStorage perangkat ini, 1-Klik Buat Kartu Reguler Guest Baru dengan PIN Cepat 6 Digit atau lanjutkan akun Guest tersimpan dengan PIN Kartu, dan bisa disambungkan ke Google lewat tombol "Sign in with Google" di tombol Sync atas Navbar)
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Landmark,
   ShieldCheck,
@@ -16,7 +16,6 @@ import {
   AlertCircle,
   User,
   Phone,
-  MapPin,
   Wallet,
   KeyRound,
   LogOut,
@@ -31,6 +30,7 @@ import {
   Zap,
   Shuffle,
   ChevronDown,
+  LogIn,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -40,6 +40,12 @@ import {
   isUnlimitedNumber,
   generateRandomPin6,
 } from '../utils/bankUtils';
+import { StructuredIndonesiaAddress } from '../types/bank';
+import {
+  createEmptyStructuredAddress,
+  validateStructuredAddress,
+} from '../data/indonesiaRegionsOffline';
+import { IndonesiaAddressPicker } from './IndonesiaAddressPicker';
 import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
 
 export const GoogleAuthOnboardingGate: React.FC = () => {
@@ -50,10 +56,13 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     cloudAccountVerificationState,
     retryCloudAccountCheck,
     loginWithGooglePopup,
+    loginWithStandardAccount,
     loginWithOaAccount,
     logoutGoogle,
     registerCard,
     guestLocalAccounts,
+    deviceLobbyGuestAccount,
+    canCreateLobbyGuestOnThisDevice,
     registerGuestRegularCard,
     loginToGuestAccountWithPin,
     linkedUserAccount,
@@ -63,8 +72,18 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     pinResetRequests,
   } = useBank();
 
-  // Mode Tab Utama yang SELALU tampil di semua layar masuk: 'google' | 'oa_login' | 'guest_login'
-  const [lobbyMode, setLobbyMode] = useState<'google' | 'oa_login' | 'guest_login'>('google');
+  // Mode Tab Utama yang SELALU tampil di semua layar masuk:
+  // 'google' | 'standard_login' (Login Ke Akun — tepat di atas Akun OA) | 'oa_login' | 'guest_login'
+  const [lobbyMode, setLobbyMode] = useState<
+    'google' | 'standard_login' | 'oa_login' | 'guest_login'
+  >('google');
+
+  // State Login Ke Akun (Wajib 3 Kolom: No. Rek, User ID 16 Digit, PIN Kartu — semua akun KECUALI Akun OA)
+  const [stdAccountNumber, setStdAccountNumber] = useState('');
+  const [stdUserId16, setStdUserId16] = useState('');
+  const [stdCardPin, setStdCardPin] = useState('');
+  const [showStdCardPin, setShowStdCardPin] = useState(false);
+  const [isStdSubmitting, setIsStdSubmitting] = useState(false);
 
   // State Login Dengan Akun OA (Wajib 4 Kolom: No. Rek, ID 16 Digit, PIN Kartu, PIN Admin)
   const [oaAccountNumber, setOaAccountNumber] = useState('');
@@ -75,15 +94,17 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   const [showOaAdminPin, setShowOaAdminPin] = useState(false);
   const [isOaSubmitting, setIsOaSubmitting] = useState(false);
 
-  // State Login Lewat Guest (LocalStorage - 1-Klik Kartu Reguler dengan PIN Cepat atau Masuk Guest Lama)
+  // State Login Lewat Guest (Maks 1 pembuatan Guest per perangkat di Lobi, Tanpa Alamat, Saldo Rp 0)
   const [guestSubMode, setGuestSubMode] = useState<'choose_existing' | 'create_new'>(() =>
-    guestLocalAccounts.length > 0 ? 'choose_existing' : 'create_new'
+    guestLocalAccounts.length > 0 || !canCreateLobbyGuestOnThisDevice
+      ? 'choose_existing'
+      : 'create_new'
   );
   const [selectedGuestId, setSelectedGuestId] = useState<string>('');
   const [guestPinInput, setGuestPinInput] = useState('');
   const [showGuestPin, setShowGuestPin] = useState(false);
 
-  // 1-Klik Buat Kartu Reguler Guest Baru dengan PIN Cepat
+  // Buat Kartu Reguler Guest Baru dengan PIN Cepat (Tanpa Alamat & Saldo Awal Rp 0)
   const [guestFullName, setGuestFullName] = useState('Nasabah Guest Nusantara');
   const [guestQuickPin, setGuestQuickPin] = useState(() => generateRandomPin6());
   const [showGuestNewPin, setShowGuestNewPin] = useState(true);
@@ -96,8 +117,6 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     const rand8 = Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('');
     return `0812${rand8}`;
   });
-  const [guestAddress, setGuestAddress] = useState('Jl. Jend. Sudirman Kav. 1, Jakarta Pusat');
-  const [guestInitialDeposit, setGuestInitialDeposit] = useState<number>(500_000);
 
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isRetryingCloudCheck, setIsRetryingCloudCheck] = useState(false);
@@ -114,29 +133,32 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   const [showForgotPinBox, setShowForgotPinBox] = useState(false);
   const [forgotPinStatusMsg, setForgotPinStatusMsg] = useState<string | null>(null);
 
-  // Stage 2B: New Google User -> Create Card (Otomatis Kartu Reguler)
+  // Stage 2B: New Google User -> Create Card (Otomatis Kartu Reguler, Saldo Awal Rp 0, Alamat Wilayah Indonesia Berjenjang)
   const [fullName, setFullName] = useState('');
   const [nik, setNik] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [structuredAddress, setStructuredAddress] = useState<StructuredIndonesiaAddress>(() =>
+    createEmptyStructuredAddress()
+  );
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [showNewPin, setShowNewPin] = useState(false);
-  const [initialDeposit, setInitialDeposit] = useState<number>(500_000);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const addressInputRef = useRef<HTMLInputElement | null>(null);
-  const [mapsAutocompleteReady, setMapsAutocompleteReady] = useState(false);
 
-  // Sync default selected guest account
+  // Sync default selected guest account & enforce 1-guest limit submode
   useEffect(() => {
     if (guestLocalAccounts.length > 0) {
       if (!selectedGuestId || !guestLocalAccounts.some((g) => g.id === selectedGuestId)) {
-        setSelectedGuestId(guestLocalAccounts[0].id);
+        setSelectedGuestId(deviceLobbyGuestAccount?.id || guestLocalAccounts[0].id);
       }
-    } else {
+      if (!canCreateLobbyGuestOnThisDevice && guestSubMode === 'create_new') {
+        setGuestSubMode('choose_existing');
+      }
+    } else if (canCreateLobbyGuestOnThisDevice) {
       setGuestSubMode('create_new');
     }
-  }, [guestLocalAccounts, selectedGuestId]);
+  }, [guestLocalAccounts, selectedGuestId, canCreateLobbyGuestOnThisDevice, deviceLobbyGuestAccount, guestSubMode]);
 
   // Sync default selected linked account for Stage 2A
   useEffect(() => {
@@ -167,49 +189,9 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
         const rand8 = Array.from({ length: 8 }, () => Math.floor(Math.random() * 10)).join('');
         setPhone(`0812${rand8}`);
       }
-      if (!address) {
-        setAddress('Jl. Jend. Sudirman Kav. 1, Jakarta Pusat');
-      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [googleUser]);
-
-  // Integrasi Google Maps Places Autocomplete untuk kolom alamat saat buat kartu baru
-  useEffect(() => {
-    if (!googleUser || linkedUserAccounts.length > 0 || lobbyMode !== 'google') return;
-    let autocompleteInstance: any = null;
-    let listenerHandle: any = null;
-
-    const initPlaces = () => {
-      const g = (window as any).google;
-      if (g?.maps?.places && addressInputRef.current) {
-        try {
-          autocompleteInstance = new g.maps.places.Autocomplete(addressInputRef.current, {
-            fields: ['formatted_address', 'name', 'geometry'],
-          });
-          setMapsAutocompleteReady(true);
-          listenerHandle = autocompleteInstance.addListener('place_changed', () => {
-            const place = autocompleteInstance.getPlace();
-            const chosen = place?.formatted_address || place?.name;
-            if (chosen) {
-              setAddress(chosen);
-            }
-          });
-        } catch {
-          // Fallback manual input tetap berjalan lancar
-        }
-      }
-    };
-
-    initPlaces();
-    const timer = window.setTimeout(initPlaces, 1200);
-    return () => {
-      window.clearTimeout(timer);
-      if (listenerHandle && typeof listenerHandle.remove === 'function') {
-        listenerHandle.remove();
-      }
-    };
-  }, [googleUser, linkedUserAccounts.length, lobbyMode]);
 
   useEffect(() => {
     if (activeTargetAccount) {
@@ -228,6 +210,24 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
       }
     } finally {
       setIsSigningIn(false);
+    }
+  };
+
+  const handleStandardLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setIsStdSubmitting(true);
+    try {
+      const res = await loginWithStandardAccount({
+        accountNumber: stdAccountNumber,
+        userId16: stdUserId16,
+        cardPin: stdCardPin,
+      });
+      if (!res.success) {
+        setAuthError({ message: res.message });
+      }
+    } finally {
+      setIsStdSubmitting(false);
     }
   };
 
@@ -268,6 +268,14 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     if (e) e.preventDefault();
     setAuthError(null);
 
+    if (!canCreateLobbyGuestOnThisDevice) {
+      setAuthError({
+        message:
+          'Batas maksimal 1 Akun Guest per perangkat di Lobi awal sudah digunakan. Silakan masuk ke Akun Guest tersimpan Anda.',
+      });
+      return;
+    }
+
     const cleanName = guestFullName.trim() || 'Nasabah Guest Nusantara';
     const cleanNik = /^\d{16}$/.test(guestNik.trim())
       ? guestNik.trim()
@@ -283,9 +291,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
       fullName: cleanName,
       nik: cleanNik,
       phone: cleanPhone,
-      address: guestAddress.trim() || 'Jl. Jend. Sudirman Kav. 1, Jakarta Pusat',
       pin: cleanPin,
-      initialDeposit: Math.max(50_000, Number(guestInitialDeposit) || 500_000),
+      initialDeposit: 0,
     });
 
     if (!res.success) {
@@ -331,8 +338,17 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
       setErrorMsg('Nomor HP tidak valid.');
       return;
     }
-    if (!address.trim()) {
-      setErrorMsg('Alamat tempat tinggal wajib diisi.');
+    const addrCheck = validateStructuredAddress(structuredAddress);
+    if (!addrCheck.valid && !address.trim()) {
+      setErrorMsg(
+        addrCheck.message || 'Alamat domisili wajib diisi berurutan dari Provinsi hingga RT/RW.'
+      );
+      return;
+    }
+    if (structuredAddress.provinceName && !addrCheck.valid) {
+      setErrorMsg(
+        addrCheck.message || 'Alamat domisili wajib diisi berurutan dari Provinsi hingga RT/RW.'
+      );
       return;
     }
     const pinValidation = validateStrongPin(pin.trim());
@@ -344,10 +360,6 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
       setErrorMsg('Konfirmasi PIN tidak cocok dengan PIN yang Anda masukkan.');
       return;
     }
-    if (initialDeposit < 50_000) {
-      setErrorMsg('Setoran awal minimal Rp 50.000.');
-      return;
-    }
 
     const res = registerCard({
       fullName: fullName.trim(),
@@ -355,9 +367,10 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
       phone: phone.trim(),
       email: googleUser?.email || 'nasabah@gmail.com',
       address: address.trim(),
+      structuredAddress: structuredAddress.provinceName ? structuredAddress : undefined,
       pin: pin.trim(),
       cardTier: 'regular',
-      initialDeposit,
+      initialDeposit: 0,
     });
 
     if (!res.success) {
@@ -382,25 +395,25 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     );
   }
 
-  // KOMPONEN BAR 3 TAB LOGIN YANG SELALU TAMPIL DI SEMUA LAYAR MASUK (STAGE 1, STAGE 2A, STAGE 2B)
+  // KOMPONEN BAR 4 TAB LOGIN YANG SELALU TAMPIL DI SEMUA LAYAR MASUK (STAGE 1, STAGE 2A, STAGE 2B)
   const renderPersistentThreeLoginTabs = () => (
     <div className="mb-5 space-y-2">
       <div className="flex items-center justify-between px-1">
-        <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-300">
-          Pilih Metode Masuk (3 Jalur Resmi):
+        <span className="text-[11px] font-bold text-slate-300">
+          Pilih Metode Masuk (4 Jalur Resmi)
         </span>
-        <span className="text-[10px] font-mono text-emerald-300">
-          Guest Local: {guestLocalAccounts.length} Akun
+        <span className="text-[10px] font-mono tabular-nums text-emerald-300">
+          Guest: {guestLocalAccounts.length} Akun
         </span>
       </div>
-      <div className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl bg-slate-950/95 border border-slate-700/90 shadow-inner">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1.5 rounded-2xl bg-slate-950/95 border border-slate-700/90 shadow-inner">
         <button
           type="button"
           onClick={() => {
             setLobbyMode('google');
             setAuthError(null);
           }}
-          className={`py-2.5 px-2 rounded-xl text-[11px] sm:text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+          className={`py-2 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
             lobbyMode === 'google'
               ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-lg shadow-cyan-600/25'
               : 'text-slate-300 hover:text-white hover:bg-slate-900'
@@ -413,41 +426,65 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
         <button
           type="button"
           onClick={() => {
+            setLobbyMode('standard_login');
+            setAuthError(null);
+          }}
+          className={`py-2 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+            lobbyMode === 'standard_login'
+              ? 'bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-400 text-slate-950 shadow-lg shadow-sky-500/25'
+              : 'text-sky-300 hover:text-sky-200 hover:bg-slate-900'
+          }`}
+        >
+          <LogIn className="w-3.5 h-3.5 shrink-0" />
+          <span className="truncate">2. Login Ke Akun</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
             setLobbyMode('oa_login');
             setAuthError(null);
           }}
-          className={`py-2.5 px-2 rounded-xl text-[11px] sm:text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+          className={`py-2 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
             lobbyMode === 'oa_login'
               ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-emerald-500 text-slate-950 shadow-lg shadow-amber-500/25'
               : 'text-amber-300 hover:text-amber-200 hover:bg-slate-900'
           }`}
         >
           <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">2. Akun OA</span>
+          <span className="truncate">3. Akun OA</span>
         </button>
 
         <button
           type="button"
           onClick={() => {
             setLobbyMode('guest_login');
-            setGuestSubMode(guestLocalAccounts.length > 0 ? 'choose_existing' : 'create_new');
+            setGuestSubMode(
+              guestLocalAccounts.length > 0 || !canCreateLobbyGuestOnThisDevice
+                ? 'choose_existing'
+                : 'create_new'
+            );
             setAuthError(null);
           }}
-          className={`py-2.5 px-2 rounded-xl text-[11px] sm:text-xs font-extrabold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+          className={`py-2 px-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
             lobbyMode === 'guest_login'
               ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-slate-950 shadow-lg shadow-emerald-500/25'
               : 'text-emerald-300 hover:text-emerald-200 hover:bg-slate-900'
           }`}
         >
           <HardDrive className="w-3.5 h-3.5 shrink-0" />
-          <span className="truncate">3. Login Guest</span>
+          <span className="truncate">4. Guest</span>
         </button>
       </div>
     </div>
   );
 
-  // JIKA PENGGUNA MEMILIH TAB "2. AKUN OA" ATAU "3. LOGIN GUEST" (MESKIPUN SESI GOOGLE SEDANG AKTIF)
-  if (lobbyMode === 'oa_login' || lobbyMode === 'guest_login') {
+  // JIKA PENGGUNA MEMILIH TAB "2. LOGIN KE AKUN", "3. AKUN OA", ATAU "4. GUEST"
+  if (
+    lobbyMode === 'standard_login' ||
+    lobbyMode === 'oa_login' ||
+    lobbyMode === 'guest_login'
+  ) {
     const selectedGuestAccount =
       guestLocalAccounts.find((g) => g.id === selectedGuestId) || guestLocalAccounts[0] || null;
 
@@ -466,13 +503,113 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               Bank Nusantara Digital
             </h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              Gerbang Masuk Resmi: Google Cloud • Akun OA Panel Admin • Guest Cloud (Firebase Real-Time)
+              Google · Login Ke Akun · Akun OA · Guest
             </p>
           </div>
 
           {renderPersistentThreeLoginTabs()}
 
-          {lobbyMode === 'oa_login' ? (
+          {lobbyMode === 'standard_login' ? (
+            /* FORM LOGIN KE AKUN (NO. REK + USER ID 16 DIGIT + PIN KARTU — SEMUA AKUN KECUALI AKUN OA) */
+            <form onSubmit={handleStandardLoginSubmit} className="space-y-4">
+              <div className="bg-sky-500/10 border border-sky-500/35 rounded-2xl p-3.5">
+                <div className="flex items-center gap-2 mb-1">
+                  <LogIn className="w-4 h-4 text-sky-400 shrink-0" />
+                  <span className="text-xs font-extrabold text-sky-200">
+                    Login Ke Akun (Semua Akun Kecuali Akun OA)
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  Masukkan <strong>Nomor Rekening</strong>, <strong>User ID 16 Digit</strong>, dan{' '}
+                  <strong>PIN Kartu 6 Digit</strong> untuk masuk ke Akun Biasa Tanpa Google, Akun Guest, maupun Akun Google. Khusus Akun OA wajib lewat tab <strong>Akun OA</strong>.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+                  1. Nomor Rekening *
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={stdAccountNumber}
+                  onChange={(e) => setStdAccountNumber(e.target.value.replace(/\D/g, '').slice(0, 16))}
+                  placeholder="Masukkan Nomor Rekening (10 Digit)"
+                  required
+                  className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono tabular-nums font-bold text-white focus:border-sky-400 focus:outline-none tracking-wider"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Fingerprint className="w-3.5 h-3.5 text-sky-400" />
+                    2. User ID 16 Digit *
+                  </span>
+                  <span className="text-[10px] font-mono tabular-nums text-sky-300">
+                    {stdUserId16.replace(/\D/g, '').length}/16 Digit
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={stdUserId16
+                    .replace(/\D/g, '')
+                    .slice(0, 16)
+                    .replace(/(\d{4})(?=\d)/g, '$1 ')}
+                  onChange={(e) => setStdUserId16(e.target.value.replace(/\D/g, '').slice(0, 16))}
+                  placeholder="XXXX XXXX XXXX XXXX (16 Digit)"
+                  required
+                  className="w-full px-4 py-3 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono tabular-nums font-bold text-sky-300 focus:border-sky-400 focus:outline-none tracking-widest"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5 text-emerald-400" />
+                  3. PIN Kartu (6 Digit) *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showStdCardPin ? 'text' : 'password'}
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={stdCardPin}
+                    onChange={(e) => setStdCardPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="••••••"
+                    required
+                    className="w-full pl-4 pr-10 py-3 rounded-xl bg-slate-950 border border-slate-700 text-sm font-mono tabular-nums font-bold text-white focus:border-emerald-400 focus:outline-none tracking-[0.35em]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowStdCardPin((p) => !p)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    {showStdCardPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isStdSubmitting}
+                className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-400 hover:from-indigo-400 hover:to-cyan-300 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-xl shadow-sky-500/20 transition cursor-pointer disabled:opacity-60"
+              >
+                {isStdSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Memverifikasi Rekening &amp; PIN...</span>
+                  </>
+                ) : (
+                  <>
+                    <LogIn className="w-5 h-5" />
+                    <span>Masuk Ke Akun Sekarang</span>
+                  </>
+                )}
+              </button>
+            </form>
+          ) : lobbyMode === 'oa_login' ? (
             /* FORM LOGIN DENGAN AKUN OA (WAJIB 4 KOLOM) */
             <form onSubmit={handleOaLoginSubmit} className="space-y-4">
               <div className="bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-emerald-500/15 border border-amber-500/40 rounded-2xl p-3.5">
@@ -604,15 +741,15 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               </button>
             </form>
           ) : (
-            /* MODE 3: LOGIN LEWAT GUEST (LOCALSTORAGE - 1-KLIK KARTU REGULER DENGAN PIN CEPAT) */
+            /* MODE 4: LOGIN LEWAT GUEST (MAKS 1 PER PERANGKAT DI LOBI, TANPA ALAMAT, SALDO AWAL Rp 0) */
             <div className="space-y-4">
-              <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-cyan-500/15 border border-emerald-500/40 rounded-2xl p-3.5">
+              <div className="bg-emerald-500/10 border border-emerald-500/35 rounded-2xl p-3.5">
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <span className="text-xs font-extrabold text-emerald-300 flex items-center gap-1.5">
                     <HardDrive className="w-4 h-4" />
-                    <span>Login Lewat Guest (Tersinkron Real-Time di Firebase Firestore)</span>
+                    <span>Login Lewat Guest (Maks. 1 Akun Guest di Lobi Awal)</span>
                   </span>
-                  {guestLocalAccounts.length > 0 && (
+                  {guestLocalAccounts.length > 0 && canCreateLobbyGuestOnThisDevice && (
                     <button
                       type="button"
                       onClick={() => {
@@ -624,17 +761,30 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                       className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 text-emerald-200 text-[10px] font-black cursor-pointer"
                     >
                       {guestSubMode === 'choose_existing'
-                        ? '+ Buat Guest Baru (1-Klik)'
+                        ? '+ Buat 1 Guest Baru'
                         : `Pilih Guest Tersimpan (${guestLocalAccounts.length})`}
                     </button>
                   )}
                 </div>
                 <p className="text-[11px] text-slate-300 leading-relaxed">
-                  Akun Guest langsung disimpan secara real-time di <strong>Firebase Cloud Firestore (azkaakc)</strong> tanpa localStorage (otomatis mendapatkan <strong>Kartu Reguler</strong> &amp; <strong>ID 16 Digit</strong>). Kapan saja Anda ingin menyambungkannya ke akun Google, klik tombol <strong>"Sign in with Google"</strong> di bagian atas Navbar.
+                  Akun Guest dibuat cepat <strong>tanpa perlu mengisi alamat</strong> dengan saldo awal otomatis{' '}
+                  <strong className="text-emerald-300">Rp 0</strong>. Setiap perangkat hanya dapat membuat maksimal{' '}
+                  <strong>1 Akun Guest</strong> di Lobi awal (sedangkan pembuatan dari Panel Admin tidak dibatasi).
                 </p>
               </div>
 
-              {guestSubMode === 'choose_existing' && guestLocalAccounts.length > 0 ? (
+              {!canCreateLobbyGuestOnThisDevice && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/35 text-[11px] text-amber-200 flex items-start gap-2">
+                  <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <span>
+                    Kuota pembuatan <strong>1 Akun Guest</strong> di Lobi awal untuk perangkat ini sudah terpakai
+                    {deviceLobbyGuestAccount ? ` (${deviceLobbyGuestAccount.fullName})` : ''}. Silakan masuk ke Akun Guest Anda di bawah ini atau gunakan <strong>Login Ke Akun</strong>.
+                  </span>
+                </div>
+              )}
+
+              {(guestSubMode === 'choose_existing' || !canCreateLobbyGuestOnThisDevice) &&
+              guestLocalAccounts.length > 0 ? (
                 <form onSubmit={handleGuestPinLoginSubmit} className="space-y-3.5">
                   <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                     {guestLocalAccounts.map((gAcc) => {
@@ -660,12 +810,12 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                             <div>
                               <p className="text-xs font-black text-white flex items-center gap-1.5">
                                 <span>{gAcc.fullName}</span>
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-mono">
-                                  GUEST LOCAL
+                                <span className="text-[10px] font-mono text-emerald-300">
+                                  · {gAcc.createdByAdmin ? 'Guest Admin' : 'Guest Lobi'}
                                 </span>
                               </p>
-                              <p className="text-[11px] font-mono text-slate-400 mt-0.5">
-                                No. Rek: <strong className="text-amber-300">{gAcc.accountNumber}</strong> • Saldo:{' '}
+                              <p className="text-[11px] font-mono tabular-nums text-slate-400 mt-0.5">
+                                No. Rek: <strong className="text-amber-300">{gAcc.accountNumber}</strong> · Saldo:{' '}
                                 <strong className="text-emerald-300">{formatRupiah(gAcc.balance)}</strong>
                               </p>
                             </div>
@@ -702,7 +852,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                         }
                         placeholder="••••••"
                         required
-                        className="w-full pl-4 pr-10 py-3 rounded-xl bg-slate-950 border border-slate-700 text-center text-base font-mono font-bold tracking-[0.4em] text-white focus:border-emerald-400 focus:outline-none"
+                        className="w-full pl-4 pr-10 py-3 rounded-xl bg-slate-950 border border-slate-700 text-center text-base font-mono tabular-nums font-bold tracking-[0.4em] text-white focus:border-emerald-400 focus:outline-none"
                       />
                       <button
                         type="button"
@@ -723,29 +873,31 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                     <span>Lanjutkan Masuk ke Akun Guest Ini</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setGuestSubMode('create_new');
-                      setAuthError(null);
-                    }}
-                    className="w-full py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" />
-                    <span>+ Buat Kartu Reguler Guest Baru (1-Klik PIN Cepat)</span>
-                  </button>
+                  {canCreateLobbyGuestOnThisDevice && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGuestSubMode('create_new');
+                        setAuthError(null);
+                      }}
+                      className="w-full py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-emerald-500/30 text-emerald-300 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" />
+                      <span>Buat 1 Kartu Reguler Guest Baru</span>
+                    </button>
+                  )}
                 </form>
               ) : (
-                /* 1-KLIK BUAT KARTU REGULER GUEST BARU DENGAN PIN CEPAT */
+                /* BUAT 1 KARTU REGULER GUEST BARU (TANPA ALAMAT, SALDO AWAL Rp 0) */
                 <form onSubmit={handleQuickCreateGuestCardSubmit} className="space-y-3.5">
                   <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-emerald-500/40 space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-black text-white flex items-center gap-1.5">
                         <Zap className="w-4 h-4 text-amber-400" />
-                        <span>1-Klik Kartu Reguler Guest Baru (Cloud Firestore)</span>
+                        <span>Buat Akun Guest Baru (Tanpa Alamat)</span>
                       </span>
-                      <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-black uppercase">
-                        Otomatis Reguler
+                      <span className="text-[10px] font-mono text-cyan-300">
+                        Kartu Reguler · Maks 1
                       </span>
                     </div>
 
@@ -766,7 +918,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                       <div>
                         <div className="flex items-center justify-between mb-1">
                           <label className="block text-[11px] font-bold text-emerald-300">
-                            PIN Cepat Kartu Guest (6 Digit) *
+                            PIN Kartu Guest (6 Digit) *
                           </label>
                           <button
                             type="button"
@@ -786,7 +938,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                               setGuestQuickPin(e.target.value.replace(/\D/g, '').slice(0, 6))
                             }
                             required
-                            className="w-full pl-3 pr-9 py-2.5 rounded-xl bg-slate-900 border border-emerald-500/50 text-xs font-mono font-black tracking-widest text-emerald-300 focus:border-emerald-400 focus:outline-none"
+                            className="w-full pl-3 pr-9 py-2.5 rounded-xl bg-slate-900 border border-emerald-500/50 text-xs font-mono tabular-nums font-black tracking-widest text-emerald-300 focus:border-emerald-400 focus:outline-none"
                           />
                           <button
                             type="button"
@@ -803,6 +955,13 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                       </div>
                     </div>
 
+                    <div className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">Saldo Awal Pembukaan</span>
+                      <span className="font-mono tabular-nums font-black text-emerald-400">
+                        Rp 0 (Otomatis)
+                      </span>
+                    </div>
+
                     <button
                       type="button"
                       onClick={() => setShowGuestExtraFields((p) => !p)}
@@ -815,8 +974,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                       />
                       <span>
                         {showGuestExtraFields
-                          ? 'Sembunyikan Detail Tambahan (NIK, No. HP, Setoran Awal)'
-                          : 'Atur Detail Tambahan (Opsional — Otomatis Terisi)'}
+                          ? 'Sembunyikan Detail Identitas Opsional (NIK & No. HP)'
+                          : 'Atur NIK & No. HP (Opsional — Otomatis Terisi)'}
                       </span>
                     </button>
 
@@ -833,20 +992,21 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                             onChange={(e) =>
                               setGuestNik(e.target.value.replace(/\D/g, '').slice(0, 16))
                             }
-                            className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-white"
+                            className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono tabular-nums text-white"
                           />
                         </div>
                         <div>
                           <label className="block text-[10px] font-bold text-slate-400 mb-1">
-                            Setoran Awal (Rp)
+                            No. HP
                           </label>
                           <input
-                            type="number"
-                            min={50000}
-                            step={50000}
-                            value={guestInitialDeposit}
-                            onChange={(e) => setGuestInitialDeposit(Number(e.target.value))}
-                            className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-emerald-300"
+                            type="text"
+                            maxLength={15}
+                            value={guestPhone}
+                            onChange={(e) =>
+                              setGuestPhone(e.target.value.replace(/\D/g, '').slice(0, 15))
+                            }
+                            className="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono tabular-nums text-white"
                           />
                         </div>
                       </div>
@@ -855,10 +1015,10 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
 
                   <button
                     type="submit"
-                    className="w-full py-4 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/25 transition cursor-pointer"
+                    className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/25 transition cursor-pointer"
                   >
                     <Zap className="w-5 h-5" />
-                    <span>⚡ Buka Kartu Reguler Guest &amp; Masuk Sekarang (1-Klik)</span>
+                    <span>Buka Kartu Reguler Guest &amp; Masuk Sekarang</span>
                   </button>
                 </form>
               )}
@@ -908,19 +1068,19 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               Bank Nusantara Digital
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-md">
-              Pilih salah satu dari <strong>3 tombol login resmi</strong> di bawah ini:
+              Pilih salah satu dari <strong>4 jalur login resmi</strong> di bawah ini:
             </p>
           </div>
 
           {renderPersistentThreeLoginTabs()}
 
-          <div className="space-y-3.5">
+          <div className="space-y-3">
             {/* Tombol Utama 1: Sign in with Google */}
             <button
               type="button"
               onClick={handleGooglePopupSignIn}
               disabled={isSigningIn}
-              className="w-full py-4 px-5 rounded-2xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm flex items-center justify-center gap-3 shadow-xl transition cursor-pointer disabled:opacity-60"
+              className="w-full py-3.5 px-5 rounded-2xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-sm flex items-center justify-center gap-3 shadow-xl transition cursor-pointer disabled:opacity-60"
             >
               {isSigningIn ? (
                 <>
@@ -952,7 +1112,20 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               )}
             </button>
 
-            {/* Tombol Utama 2: Login Dengan Akun OA */}
+            {/* Tombol Utama 2 (TEPAT DI ATAS AKUN OA): Login Ke Akun */}
+            <button
+              type="button"
+              onClick={() => {
+                setLobbyMode('standard_login');
+                setAuthError(null);
+              }}
+              className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-400 hover:from-indigo-400 hover:to-cyan-300 text-slate-950 font-black text-sm flex items-center justify-center gap-2.5 shadow-xl shadow-sky-500/20 transition cursor-pointer"
+            >
+              <LogIn className="w-5 h-5 text-slate-950" />
+              <span>2. Login Ke Akun (No. Rek, User ID &amp; PIN Kartu)</span>
+            </button>
+
+            {/* Tombol Utama 3: Login Dengan Akun OA */}
             <button
               type="button"
               onClick={() => {
@@ -962,23 +1135,29 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2.5 shadow-xl shadow-amber-500/20 transition cursor-pointer"
             >
               <ShieldCheck className="w-5 h-5 text-slate-950" />
-              <span>2. Login Dengan Akun OA (Buatan Panel Admin)</span>
+              <span>3. Login Dengan Akun OA (Buatan Panel Admin)</span>
             </button>
 
-            {/* Tombol Utama 3: Login Lewat Guest (Cloud Firestore) */}
+            {/* Tombol Utama 4: Login Lewat Guest */}
             <button
               type="button"
               onClick={() => {
                 setLobbyMode('guest_login');
-                setGuestSubMode(guestLocalAccounts.length > 0 ? 'choose_existing' : 'create_new');
+                setGuestSubMode(
+                  guestLocalAccounts.length > 0 || !canCreateLobbyGuestOnThisDevice
+                    ? 'choose_existing'
+                    : 'create_new'
+                );
                 setAuthError(null);
               }}
               className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2.5 shadow-xl shadow-emerald-500/20 transition cursor-pointer"
             >
               <HardDrive className="w-5 h-5 text-slate-950" />
               <span>
-                3. Login Lewat Guest (Firebase Cloud
-                {guestLocalAccounts.length > 0 ? ` · ${guestLocalAccounts.length} Tersimpan` : ' · 1-Klik'}
+                4. Login Lewat Guest (
+                {canCreateLobbyGuestOnThisDevice
+                  ? 'Maks. 1 Akun · Tanpa Alamat'
+                  : `${guestLocalAccounts.length} Tersimpan`}
                 )
               </span>
             </button>
@@ -988,19 +1167,25 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               <div className="flex items-start gap-2.5 text-xs text-slate-300">
                 <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong className="text-white">Sign in with Google:</strong> Akun baru otomatis mendapatkan <strong className="text-cyan-300">Kartu Reguler</strong>. Jika email Anda terhubung ke beberapa akun (termasuk Akun OA / Guest yang sudah di-sync), Anda bebas memilih akun mana yang ingin dimasuki.
+                  <strong className="text-white">Sign in with Google:</strong> Pendaftaran baru otomatis Kartu Reguler dengan saldo awal <strong>Rp 0</strong> dan alamat resmi wilayah Indonesia.
+                </span>
+              </div>
+              <div className="flex items-start gap-2.5 text-xs text-slate-300">
+                <LogIn className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+                <span>
+                  <strong className="text-sky-300">Login Ke Akun:</strong> Masuk dengan <strong>No. Rekening, User ID 16 Digit &amp; PIN Kartu</strong> untuk semua akun (Akun Biasa Tanpa Google, Guest, Google) kecuali Akun OA.
                 </span>
               </div>
               <div className="flex items-start gap-2.5 text-xs text-slate-300">
                 <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong className="text-amber-300">Login Dengan Akun OA:</strong> Khusus untuk akun yang dibuat di Panel Admin menggunakan <strong>No. Rekening, ID 16 Digit, PIN Kartu &amp; PIN Admin</strong>.
+                  <strong className="text-amber-300">Login Dengan Akun OA:</strong> Khusus Akun OA buatan Panel Admin (4 kredensial termasuk PIN Admin OA).
                 </span>
               </div>
               <div className="flex items-start gap-2.5 text-xs text-slate-300">
                 <HardDrive className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <span>
-                  <strong className="text-emerald-300">Login Lewat Guest:</strong> Langsung tersimpan secara real-time di <strong>Firebase Cloud Firestore (azkaakc)</strong> dan bisa disambungkan ke akun Google lewat tombol <strong>"Sign in with Google"</strong> di bagian atas Navbar.
+                  <strong className="text-emerald-300">Login Lewat Guest:</strong> Maksimal 1 Akun Guest per perangkat di Lobi awal, tanpa perlu alamat, saldo awal Rp 0.
                 </span>
               </div>
             </div>
@@ -1215,19 +1400,18 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
             </button>
           </form>
 
-          {/* Tombol Pintas Langsung ke Login Lewat Guest & Login Dengan Akun OA di Bawah Form PIN */}
-          <div className="mt-4 pt-3.5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {/* Tombol Pintas Langsung ke Login Ke Akun, Akun OA & Guest di Bawah Form PIN */}
+          <div className="mt-4 pt-3.5 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-2">
             <button
               type="button"
               onClick={() => {
-                setLobbyMode('guest_login');
-                setGuestSubMode(guestLocalAccounts.length > 0 ? 'choose_existing' : 'create_new');
+                setLobbyMode('standard_login');
                 setAuthError(null);
               }}
-              className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+              className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-indigo-500 to-sky-400 hover:from-indigo-400 hover:to-sky-300 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
             >
-              <HardDrive className="w-4 h-4" />
-              <span>Login Lewat Guest (Local)</span>
+              <LogIn className="w-4 h-4" />
+              <span>Login Ke Akun</span>
             </button>
             <button
               type="button"
@@ -1238,7 +1422,23 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
             >
               <ShieldCheck className="w-4 h-4" />
-              <span>Login Dengan Akun OA</span>
+              <span>Akun OA</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLobbyMode('guest_login');
+                setGuestSubMode(
+                  guestLocalAccounts.length > 0 || !canCreateLobbyGuestOnThisDevice
+                    ? 'choose_existing'
+                    : 'create_new'
+                );
+                setAuthError(null);
+              }}
+              className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer"
+            >
+              <HardDrive className="w-4 h-4" />
+              <span>Login Guest</span>
             </button>
           </div>
 
@@ -1530,47 +1730,33 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
 
             <div>
               <label className="block text-xs font-bold text-slate-300 mb-1">
-                Setoran Awal (Min. Rp 50.000) *
+                Saldo Awal Pembukaan
               </label>
-              <div className="relative">
-                <Wallet className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="number"
-                  min={50000}
-                  step={50000}
-                  value={initialDeposit}
-                  onChange={(e) => setInitialDeposit(Number(e.target.value))}
-                  required
-                  className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white focus:border-cyan-400 focus:outline-none"
-                />
+              <div className="px-3.5 py-2.5 rounded-xl bg-slate-950/80 border border-emerald-500/35 flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2 text-xs text-slate-300">
+                  <Wallet className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Otomatis</span>
+                </span>
+                <span className="text-sm font-mono tabular-nums font-black text-emerald-400">
+                  Rp 0
+                </span>
               </div>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Saldo didapat setelah kartu aktif lewat Kerja, Transfer masuk, atau Admin.
+              </p>
             </div>
           </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-bold text-slate-300">
-                Alamat Domisili Lengkap (Terintegrasi Google Maps) *
-              </label>
-              {mapsAutocompleteReady && (
-                <span className="text-[10px] text-emerald-400 font-semibold">
-                  📍 Google Maps Autocomplete Aktif
-                </span>
-              )}
-            </div>
-            <div className="relative">
-              <MapPin className="w-4 h-4 text-emerald-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                ref={addressInputRef}
-                type="text"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                placeholder="Ketik alamat atau pilih dari saran Google Maps..."
-                required
-                className="w-full pl-10 pr-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-sm text-white focus:border-cyan-400 focus:outline-none"
-              />
-            </div>
-          </div>
+          <IndonesiaAddressPicker
+            value={structuredAddress}
+            formattedAddress={address}
+            onChange={(formatted, struct) => {
+              setAddress(formatted);
+              setStructuredAddress(struct);
+            }}
+            enableGoogleMapsTab={true}
+            label="Alamat Domisili Resmi (Provinsi → Desa → Kode Pos → RT/RW)"
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
             <div>

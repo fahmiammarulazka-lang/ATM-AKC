@@ -311,7 +311,7 @@ export function saveGiftAndSealRegistryIdb(
 // ACTIVE BOOT SESSION ENVELOPE (INDEXEDDB — TAHAN REFRESH GOOGLE, OA & GUEST)
 // ============================================================================
 export interface FastBootSessionSnapshot {
-  authMode: 'google' | 'oa_account' | 'guest';
+  authMode: 'google' | 'oa_account' | 'guest' | 'standard_account';
   firebaseUid?: string;
   email: string;
   emailKey?: string;
@@ -325,7 +325,35 @@ export interface FastBootSessionSnapshot {
 }
 
 const ACTIVE_BOOT_SESSION_KEY = 'active_boot_session_v1';
+const DEVICE_LOBBY_GUEST_ID_KEY = 'device_lobby_guest_account_id_v1';
 let memoryActiveBootSession: FastBootSessionSnapshot | null = null;
+let memoryDeviceLobbyGuestId: string | null = null;
+
+export async function saveDeviceLobbyGuestId(accountId: string): Promise<void> {
+  memoryDeviceLobbyGuestId = accountId;
+  try {
+    await idbPut(STORE_STAGING, DEVICE_LOBBY_GUEST_ID_KEY, {
+      accountId,
+      savedAtMs: Date.now(),
+    });
+  } catch {
+    // abaikan jika IndexedDB dibatasi browser privat
+  }
+}
+
+export async function readDeviceLobbyGuestId(): Promise<string | null> {
+  if (memoryDeviceLobbyGuestId) return memoryDeviceLobbyGuestId;
+  try {
+    const stored = await idbGet<{ accountId?: string }>(STORE_STAGING, DEVICE_LOBBY_GUEST_ID_KEY);
+    if (stored && typeof stored.accountId === 'string' && stored.accountId.trim()) {
+      memoryDeviceLobbyGuestId = stored.accountId.trim();
+      return memoryDeviceLobbyGuestId;
+    }
+  } catch {
+    // abaikan jika IndexedDB dibatasi browser privat
+  }
+  return null;
+}
 
 export async function saveActiveBootSession(session: FastBootSessionSnapshot): Promise<void> {
   memoryActiveBootSession = session;

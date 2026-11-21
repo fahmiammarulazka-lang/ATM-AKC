@@ -390,14 +390,47 @@ export const generateBanCaseId = (): string => {
   return `BN-CASE-${num}`;
 };
 
+export const BAN_TEMPLATE_VARIABLES: Array<{
+  token: string;
+  label: string;
+  sample: string;
+}> = [
+  { token: '{nama}', label: 'Nama Nasabah', sample: 'Budi Santoso' },
+  { token: '{email}', label: 'Email Akun', sample: 'budi.santoso@gmail.com' },
+  { token: '{rekening}', label: 'No. Rekening', sample: '8829104421' },
+  { token: '{alasan}', label: 'Alasan Banned', sample: 'Salah Memasukkan PIN Kartu 5x Berturut-turut' },
+  { token: '{caseId}', label: 'Kode Kasus', sample: 'BN-CASE-481920' },
+  { token: '{durasi}', label: 'Durasi Banned', sample: '1 Hari (24 Jam)' },
+];
+
 export const DEFAULT_BAN_MESSAGE_TEMPLATE = [
-  'Halo Admin Bank Nusantara,',
-  'Saya ingin mengajukan peninjauan pembukaan status Banned pada akun saya:',
-  '- Kode Kasus: {caseId}',
-  '- Durasi Banned: {durasi}',
-  '- Alasan Tercatat: {alasan}',
+  'Yth. Tim Kepatuhan & Admin Resmi PT Bank Nusantara (Persero) Tbk,',
   '',
-  'Mohon bantuannya untuk meninjau akun saya kembali. Terima kasih.',
+  'Dengan hormat,',
+  'Melalui pesan ini saya bermaksud mengajukan permohonan peninjauan resmi (banding) atas penangguhan/pembekuan (Banned) yang saat ini berlaku pada rekening Bank Nusantara saya.',
+  '',
+  '====================================',
+  'DATA PERMOHONAN PENINJAUAN BANNED',
+  '====================================',
+  '• Kode Referensi Kasus : {caseId}',
+  '• Nama Pemilik Akun    : {nama}',
+  '• Nomor Rekening       : {rekening}',
+  '• Alamat Email Akun    : {email}',
+  '• Status & Durasi Ban  : {durasi}',
+  '• Alasan Tercatat      : {alasan}',
+  '',
+  'KLARIFIKASI & KRONOLOGI SINGKAT',
+  '1. Penjelasan kejadian dari pihak saya:',
+  '   (Tuliskan kronologi atau klarifikasi Anda dengan jujur dan jelas)',
+  '2. Pernyataan komitmen keamanan:',
+  '   Saya menyatakan bersedia mengikuti seluruh prosedur verifikasi identitas serta mematuhi Syarat & Ketentuan Layanan PT Bank Nusantara (Persero) Tbk ke depannya.',
+  '',
+  'Besar harapan saya agar Tim Admin Bank Nusantara berkenan meninjau kembali status akun saya dan memulihkan akses rekening jika seluruh persyaratan verifikasi telah terpenuhi.',
+  '',
+  'Atas perhatian, kebijakan, dan bantuannya saya ucapkan terima kasih.',
+  '',
+  'Hormat saya,',
+  '{nama} ({rekening})',
 ].join('\n');
 
 export const DEFAULT_BAN_SCREEN_CONFIG: BanScreenCustomizationConfig = {
@@ -643,11 +676,8 @@ export function formatBanAppealPrefillMessage(
   }
 ): string {
   const isStringTemplate = typeof paramsOrTemplate === 'string' || paramsOrTemplate === undefined;
-  const raw = (
-    isStringTemplate
-      ? paramsOrTemplate || DEFAULT_BAN_MESSAGE_TEMPLATE
-      : paramsOrTemplate.template || DEFAULT_BAN_MESSAGE_TEMPLATE
-  ).trim();
+  const rawCandidate = isStringTemplate ? paramsOrTemplate : paramsOrTemplate.template;
+  const raw = (rawCandidate !== undefined ? rawCandidate : DEFAULT_BAN_MESSAGE_TEMPLATE).trim();
   const resolvedName = isStringTemplate ? varsArg?.nama : paramsOrTemplate.name;
   const resolvedEmail = isStringTemplate ? varsArg?.email : paramsOrTemplate.email;
   const resolvedAcc = isStringTemplate ? varsArg?.rekening : paramsOrTemplate.accountNumber;

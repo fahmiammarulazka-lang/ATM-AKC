@@ -46,7 +46,7 @@ import {
   Infinity as InfinityIcon,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
-import { BankAccount, CardStatus, CardTier } from '../types/bank';
+import { BankAccount, CardStatus, CardTier, StructuredIndonesiaAddress } from '../types/bank';
 import {
   formatRupiah,
   isUnlimitedNumber,
@@ -62,6 +62,11 @@ import {
   generateRandomPin6,
 } from '../utils/bankUtils';
 import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
+import { IndonesiaAddressPicker } from './IndonesiaAddressPicker';
+import {
+  createEmptyStructuredAddress,
+  validateStructuredAddress,
+} from '../data/indonesiaRegionsOffline';
 
 interface AdminQuickAccountControlPanelProps {
   onQuickSwitchToDashboard?: () => void;
@@ -108,8 +113,9 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
     text: string;
   } | null>(null);
 
-  // State Studio Buat Akun Bebas (Akun OA - Semua Bisa Diatur)
+  // State Studio Buat Akun 3 Mode Terpisah (Tanpa Batas di Panel Admin): Guest | Biasa Tanpa Google | Akun OA
   const [showCreateStudio, setShowCreateStudio] = useState<boolean>(true);
+  const [cAccountCategory, setCAccountCategory] = useState<'guest' | 'regular_no_google' | 'oa'>('oa');
   const [lastCreatedOaAccount, setLastCreatedOaAccount] = useState<BankAccount | null>(null);
   const [copiedOaPackageId, setCopiedOaPackageId] = useState<string | null>(null);
 
@@ -124,9 +130,12 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
   const [cNik, setCNik] = useState(() => `3171${Math.floor(100000000000 + Math.random() * 899999999999)}`);
   const [cPhone, setCPhone] = useState(() => `0812${Math.floor(10000000 + Math.random() * 89999999)}`);
   const [cEmail, setCEmail] = useState('');
-  const [cAddress, setCAddress] = useState('Menara Otoritas Bank Nusantara Digital');
+  const [cAddress, setCAddress] = useState('');
+  const [cStructuredAddress, setCStructuredAddress] = useState<StructuredIndonesiaAddress>(() =>
+    createEmptyStructuredAddress()
+  );
   const [cCardTier, setCCardTier] = useState<CardTier>('platinum');
-  const [cBalance, setCBalance] = useState('100000000');
+  const [cBalance, setCBalance] = useState('0');
   const [cIsUnlimited, setCIsUnlimited] = useState(false);
   const [cGoldGrams, setCGoldGrams] = useState('50');
   const [cSpinCoins, setCSpinCoins] = useState('1000');
@@ -166,6 +175,8 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
     email: string;
     nik: string;
     address: string;
+    structuredAddress?: StructuredIndonesiaAddress;
+    isGuestAccount?: boolean;
     balance: string;
     isUnlimited: boolean;
     cardTier: CardTier;
@@ -306,6 +317,21 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
 
   const handleCreateCustomAccountSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const isGuest = cAccountCategory === 'guest';
+    const isOa = cAccountCategory === 'oa';
+
+    if (!isGuest) {
+      const addrCheck = validateStructuredAddress(cStructuredAddress);
+      if (!addrCheck.valid && !cAddress.trim()) {
+        showNotice(
+          'error',
+          addrCheck.message ||
+            'Alamat wilayah Indonesia (Provinsi hingga RT/RW) wajib dipilih secara manual untuk Akun Biasa dan Akun OA.'
+        );
+        return;
+      }
+    }
+
     const res = adminCreateFullCustomAccount({
       fullName: cFullName,
       userId16: cUserId16,
@@ -314,11 +340,12 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
       cvv: cCvv,
       expiryDate: cExpiryDate,
       pin: cPin,
-      oaAdminPin: cOaAdminPin,
+      oaAdminPin: isOa ? cOaAdminPin : undefined,
       nik: cNik,
       phone: cPhone,
-      email: cEmail,
-      address: cAddress,
+      email: isOa ? cEmail : '',
+      address: isGuest ? '' : cAddress,
+      structuredAddress: isGuest ? undefined : cStructuredAddress,
       cardTier: cCardTier,
       balance: Number(cBalance) || 0,
       isUnlimitedBalance: cIsUnlimited,
@@ -340,33 +367,49 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
       devRoleId: cDevRoleId || null,
       grantAllSultanBusinesses: cGrantAllBusinesses,
       sultanBusinessUnitsEach: Number(cBusinessUnits) || 5,
-      isOfficialAdminAccount: true,
+      isOfficialAdminAccount: isOa,
+      accountCategory: cAccountCategory,
     });
 
     showNotice(res.success ? 'success' : 'error', res.message);
     if (res.success && res.account) {
       setLastCreatedOaAccount(res.account);
       setCFullName('');
+      setCAddress('');
+      setCStructuredAddress(createEmptyStructuredAddress());
       handleRandomizeAllCreatorFields();
     }
   };
 
   const copyOaCredentialsPackage = (acc: BankAccount) => {
     const id16 = ensureAccountUserId16(acc);
+    const isOa = Boolean(acc.isOfficialAdminAccount || acc.id === 'acc-admin');
+    const isGuest = Boolean(acc.isGuestAccount);
     const oaPin = acc.oaAdminPin || '159357';
-    const text = [
-      `=== KREDENSIAL LOGIN AKUN OA BANK NUSANTARA ===`,
+    const headerTitle = isOa
+      ? '=== KREDENSIAL LOGIN AKUN OA BANK NUSANTARA ==='
+      : isGuest
+      ? '=== KREDENSIAL LOGIN AKUN GUEST (VIA "LOGIN KE AKUN") ==='
+      : '=== KREDENSIAL LOGIN AKUN BIASA TANPA GOOGLE (VIA "LOGIN KE AKUN") ===';
+    const lines = [
+      headerTitle,
       `Nama Pemilik : ${acc.fullName}`,
       `No. Rekening : ${acc.accountNumber}`,
       `ID 16 Digit  : ${formatUserId16(id16)} (${id16})`,
       `PIN Kartu    : ${acc.pin}`,
-      `PIN Admin OA : ${oaPin}`,
-      `Jenis Kartu  : ${CARD_TIER_CONFIGS[acc.cardTier]?.nameIndo || acc.cardTier}`,
-    ].join('\n');
+    ];
+    if (isOa) {
+      lines.push(`PIN Admin OA : ${oaPin}`);
+      lines.push('Jalur Masuk  : Lobi Awal -> Login Dengan Akun OA');
+    } else {
+      lines.push('Jalur Masuk  : Lobi Awal -> Login Ke Akun');
+    }
+    lines.push(`Jenis Kartu  : ${CARD_TIER_CONFIGS[acc.cardTier]?.nameIndo || acc.cardTier}`);
+    const text = lines.join('\n');
     navigator.clipboard.writeText(text);
     setCopiedOaPackageId(acc.id);
     setTimeout(() => setCopiedOaPackageId(null), 2200);
-    showNotice('success', `📋 Paket Kredensial Login OA untuk "${acc.fullName}" berhasil disalin!`);
+    showNotice('success', `Paket Kredensial Login untuk "${acc.fullName}" berhasil disalin!`);
   };
 
   const startInlineEdit = (acc: BankAccount) => {
@@ -383,6 +426,8 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
       email: acc.email || '',
       nik: acc.nik || '',
       address: acc.address || '',
+      structuredAddress: acc.structuredAddress || createEmptyStructuredAddress(),
+      isGuestAccount: Boolean(acc.isGuestAccount),
       balance: unlim ? '999999999999999' : String(Math.round(acc.balance || 0)),
       isUnlimited: unlim,
       cardTier: acc.cardTier,
@@ -444,7 +489,8 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
       phone: editDraft.phone.trim(),
       email: editDraft.email.trim(),
       nik: editDraft.nik.trim(),
-      address: editDraft.address.trim(),
+      address: editDraft.isGuestAccount ? '' : editDraft.address.trim(),
+      structuredAddress: editDraft.isGuestAccount ? undefined : editDraft.structuredAddress,
       balance: finalBalance,
       cardTier: editDraft.cardTier,
       cardStatus: editDraft.cardStatus,
@@ -532,12 +578,12 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base sm:text-lg font-black text-white">
-                  Studio Buat Akun Bebas / Akun OA (Semua Bisa Diatur 100%)
+                  Studio Buat Akun 3 Mode (Guest · Biasa Tanpa Google · Akun OA)
                 </h3>
                 <OaAccountBadge size="sm" />
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Buat akun baru dengan mengatur seluruh identitas, ID 16 Digit, No. Rekening, No. Kartu, PIN Kartu, PIN Admin OA, Saldo/Unlimited, Emas, Koin, Bisnis, Level, Role & Centang Biru. Akun yang dibuat di sini otomatis berstatus <strong className="text-amber-300">Akun OA</strong> dan langsung bisa login lewat tombol <strong className="text-emerald-300">"Login Dengan Akun OA"</strong> di lobi awal!
+                Admin bebas membuat tanpa batas untuk <strong>3 jenis akun terpisah</strong> dengan saldo awal bebas (Rp 0 hingga Unlimited ∞). <strong>Akun Guest</strong> tanpa alamat, sedangkan <strong>Akun Biasa Tanpa Google</strong> dan <strong>Akun OA</strong> menggunakan pemilih wilayah Indonesia 38 provinsi manual.
               </p>
             </div>
           </div>
@@ -569,16 +615,74 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
           </div>
         </div>
 
-        {/* Kartu Ringkasan Kredensial Akun OA yang Baru Saja Dibuat */}
+        {/* Pemilih 3 Mode Pembuatan Akun Terpisah di Panel Admin (Tanpa Batas) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+          {(
+            [
+              {
+                id: 'guest' as const,
+                title: '1. Buat Akun Guest',
+                subtitle: 'Tanpa batas di Admin · Tanpa alamat · Login via "Login Ke Akun"',
+                activeCls: 'bg-emerald-500/15 border-emerald-400 text-white',
+                titleCls: 'text-emerald-300',
+              },
+              {
+                id: 'regular_no_google' as const,
+                title: '2. Buat Akun Biasa Tanpa Google',
+                subtitle: 'Tanpa Google · Alamat 38 Provinsi Manual · Login via "Login Ke Akun"',
+                activeCls: 'bg-sky-500/15 border-sky-400 text-white',
+                titleCls: 'text-sky-300',
+              },
+              {
+                id: 'oa' as const,
+                title: '3. Buat Akun OA (Official Admin)',
+                subtitle: 'Akun Otoritas Admin · Alamat 38 Provinsi Manual · Login via "Akun OA"',
+                activeCls: 'bg-amber-500/15 border-amber-400 text-white',
+                titleCls: 'text-amber-300',
+              },
+            ]
+          ).map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              onClick={() => {
+                setCAccountCategory(mode.id);
+                if (mode.id === 'guest') {
+                  setCCardTier('regular');
+                  setCIsUnlimited(false);
+                  setCAddress('');
+                  setCStructuredAddress(createEmptyStructuredAddress());
+                  setCEmail('');
+                } else if (mode.id === 'regular_no_google') {
+                  setCEmail('');
+                }
+              }}
+              className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer ${
+                cAccountCategory === mode.id
+                  ? mode.activeCls
+                  : 'bg-slate-950/75 border-slate-800 text-slate-300 hover:border-slate-700'
+              }`}
+            >
+              <div className={`text-xs font-black ${mode.titleCls}`}>{mode.title}</div>
+              <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">{mode.subtitle}</div>
+            </button>
+          ))}
+        </div>
+
+        {/* Kartu Ringkasan Kredensial Akun yang Baru Saja Dibuat */}
         {lastCreatedOaAccount && (
           <div className="p-4 rounded-2xl bg-emerald-950/80 border-2 border-emerald-400/70 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                 <span className="font-black text-sm text-white">
-                  Akun OA Berhasil Dibuat & Langsung Aktif! Siap Dipakai di "Login Dengan Akun OA"
+                  {lastCreatedOaAccount.isOfficialAdminAccount
+                    ? 'Akun OA Berhasil Dibuat & Langsung Aktif! Login via "Login Dengan Akun OA"'
+                    : lastCreatedOaAccount.isGuestAccount
+                    ? 'Akun Guest Berhasil Dibuat & Langsung Aktif! Login via "Login Ke Akun"'
+                    : 'Akun Biasa Tanpa Google Berhasil Dibuat! Login via "Login Ke Akun"'}
                 </span>
-                <OaAccountBadge size="xs" />
+                {lastCreatedOaAccount.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -590,7 +694,7 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                   <span>
                     {copiedOaPackageId === lastCreatedOaAccount.id
                       ? 'Paket Tersalin!'
-                      : 'Salin Paket Kredensial OA'}
+                      : 'Salin Paket Kredensial'}
                   </span>
                 </button>
                 <button
@@ -626,23 +730,33 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                   {lastCreatedOaAccount.pin}
                 </span>
               </div>
-              <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
-                <span className="text-[10px] text-slate-400 block">4. PIN Admin OA</span>
-                <span className="font-mono font-black text-rose-300 text-sm">
-                  {lastCreatedOaAccount.oaAdminPin || '159357'}
-                </span>
-              </div>
+              {lastCreatedOaAccount.isOfficialAdminAccount && (
+                <div className="p-2.5 rounded-xl bg-slate-950/90 border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block">4. PIN Admin OA</span>
+                  <span className="font-mono font-black text-rose-300 text-sm">
+                    {lastCreatedOaAccount.oaAdminPin || '159357'}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {showCreateStudio && (
           <form onSubmit={handleCreateCustomAccountSubmit} className="space-y-4 text-xs">
-            {/* Baris 1: Identitas & 4 Kredensial Utama Login OA */}
+            {/* Baris 1: Identitas & Kredensial Utama */}
             <div className="p-4 rounded-2xl bg-slate-950/85 border border-amber-500/30 space-y-3">
               <div className="text-xs font-extrabold text-amber-300 uppercase tracking-wider flex items-center gap-2">
                 <Fingerprint className="w-4 h-4" />
-                <span>A. Identitas, ID 16 Digit Permanen & Kredensial Login Akun OA</span>
+                <span>
+                  A. Identitas, ID 16 Digit Permanen &amp; Kredensial Login (
+                  {cAccountCategory === 'guest'
+                    ? 'Mode Akun Guest — Tanpa Alamat'
+                    : cAccountCategory === 'regular_no_google'
+                    ? 'Mode Akun Biasa Tanpa Google'
+                    : 'Mode Akun OA Resmi'}
+                  )
+                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -741,28 +855,30 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                   />
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[10px] text-rose-300 font-bold">
-                      PIN Admin OA (6 Digit) *
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setCOaAdminPin('159357')}
-                      className="text-[10px] font-bold text-rose-300 hover:underline cursor-pointer"
-                    >
-                      Default 159357
-                    </button>
+                {cAccountCategory === 'oa' && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] text-rose-300 font-bold">
+                        PIN Admin OA (6 Digit) *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setCOaAdminPin('159357')}
+                        className="text-[10px] font-bold text-rose-300 hover:underline cursor-pointer"
+                      >
+                        Default 159357
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={cOaAdminPin}
+                      onChange={(e) => setCOaAdminPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-rose-500/50 text-rose-300 font-mono font-black tracking-widest"
+                    />
                   </div>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={cOaAdminPin}
-                    onChange={(e) => setCOaAdminPin(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-rose-500/50 text-rose-300 font-mono font-black tracking-widest"
-                  />
-                </div>
+                )}
 
                 <div>
                   <div className="flex items-center justify-between mb-1">
@@ -849,27 +965,40 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                   />
                 </div>
 
-                <div className="sm:col-span-2">
-                  <label className="text-[10px] text-slate-300 font-bold block mb-1">
-                    Email & Alamat Domisili
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {cAccountCategory === 'oa' && (
+                  <div className="sm:col-span-2">
+                    <label className="text-[10px] text-slate-300 font-bold block mb-1">
+                      Email Akun OA (Opsional)
+                    </label>
                     <input
                       type="text"
                       value={cEmail}
                       onChange={(e) => setCEmail(e.target.value)}
-                      placeholder="Email (opsional)"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white"
-                    />
-                    <input
-                      type="text"
-                      value={cAddress}
-                      onChange={(e) => setCAddress(e.target.value)}
-                      placeholder="Alamat lengkap"
+                      placeholder="Email OA (opsional)"
                       className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white"
                     />
                   </div>
-                </div>
+                )}
+
+                {cAccountCategory === 'guest' ? (
+                  <div className="sm:col-span-2 lg:col-span-4 p-3 rounded-xl bg-emerald-950/35 border border-emerald-500/35 text-[11px] text-emerald-200">
+                    <strong>Mode Akun Guest:</strong> Sesuai kebijakan, Akun Guest dibuat <strong>tanpa kolom alamat domisili</strong> dan tanpa sambungan email Google.
+                  </div>
+                ) : (
+                  <div className="sm:col-span-2 lg:col-span-4 pt-1">
+                    <IndonesiaAddressPicker
+                      value={cStructuredAddress}
+                      formattedAddress={cAddress}
+                      onChange={(formatted, structured) => {
+                        setCAddress(formatted);
+                        setCStructuredAddress(structured);
+                      }}
+                      enableGoogleMapsTab
+                      compact
+                      label="Alamat Wilayah Indonesia Lengkap (Manual 38 Provinsi hingga Desa & RT/RW — Wajib Urut dari Atas)"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -906,16 +1035,28 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center justify-between gap-2 mb-1">
                     <label className="text-[10px] text-slate-300 font-bold">Saldo Rekening (Rp)</label>
-                    <label className="inline-flex items-center gap-1 text-[10px] text-amber-300 font-bold cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={cIsUnlimited}
-                        onChange={(e) => setCIsUnlimited(e.target.checked)}
-                      />
-                      <span>Unlimited ∞</span>
-                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCIsUnlimited(false);
+                          setCBalance('0');
+                        }}
+                        className="text-[10px] font-bold text-cyan-300 hover:underline cursor-pointer"
+                      >
+                        Set Rp 0
+                      </button>
+                      <label className="inline-flex items-center gap-1 text-[10px] text-amber-300 font-bold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={cIsUnlimited}
+                          onChange={(e) => setCIsUnlimited(e.target.checked)}
+                        />
+                        <span>Unlimited ∞</span>
+                      </label>
+                    </div>
                   </div>
                   <input
                     type="number"
@@ -2714,18 +2855,27 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                         />
                       </div>
 
-                      <div className="sm:col-span-2">
-                        <label className="text-[10px] text-slate-400 font-bold block mb-1">
-                          Alamat Lengkap
-                        </label>
-                        <input
-                          type="text"
-                          value={editDraft.address}
-                          onChange={(e) =>
-                            setEditDraft({ ...editDraft, address: e.target.value })
-                          }
-                          className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"
-                        />
+                      <div className="sm:col-span-2 lg:col-span-3">
+                        {editDraft.isGuestAccount ? (
+                          <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-400">
+                            Akun Guest tidak menggunakan alamat domisili.
+                          </div>
+                        ) : (
+                          <IndonesiaAddressPicker
+                            value={editDraft.structuredAddress || createEmptyStructuredAddress()}
+                            formattedAddress={editDraft.address}
+                            onChange={(formatted, structured) =>
+                              setEditDraft({
+                                ...editDraft,
+                                address: formatted,
+                                structuredAddress: structured,
+                              })
+                            }
+                            enableGoogleMapsTab
+                            compact
+                            label="Edit Alamat Wilayah Indonesia Lengkap (38 Provinsi hingga RT/RW)"
+                          />
+                        )}
                       </div>
 
                       <div>

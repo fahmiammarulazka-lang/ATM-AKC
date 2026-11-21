@@ -50,6 +50,7 @@ import {
   PreClaimCelebrationAmbientBackdrop,
   PreClaimMagicRingSealAura,
 } from './CelebrationSpectacleOverlay';
+import { HelpCenterAndWhatsappDock } from './HelpCenterAndWhatsappDock';
 
 const isCurrencyRewardType = (type: AdminGiftRewardItem['type']): boolean =>
   type === 'cash_balance' ||
@@ -1284,179 +1285,184 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
         </div>
       )}
 
-      {/* PERSISTENT CORNER POPUP WIDGET (BOTTOM-RIGHT) */}
-      {displayCornerEvents.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 max-w-[calc(100vw-2rem)]">
-          {cornerExpanded && (
-            <div className="w-80 sm:w-96 rounded-2xl bg-slate-900/95 backdrop-blur-xl border-2 border-amber-400/60 shadow-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-amber-400/20 border border-amber-400/50 flex items-center justify-center text-amber-300">
-                    <Gift className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="font-black text-white text-xs">
-                      Arsip Hadiah &amp; Surat Royal Admin
-                    </h4>
-                    <span className="text-[10px] text-slate-400 block">
-                      Amplop surat &amp; kotak hadiah tersimpan rapi
-                    </span>
-                  </div>
+      {/* PERSISTENT CORNER DOCK (BOTTOM-RIGHT): SURAT & HADIAH (KIRI) + LOGO WHATSAPP BANTUAN (KANAN) */}
+      <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 max-w-[calc(100vw-2rem)]">
+        {displayCornerEvents.length > 0 && cornerExpanded && (
+          <div className="w-80 sm:w-96 rounded-2xl bg-slate-900/95 backdrop-blur-xl border-2 border-amber-400/60 shadow-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-400/20 border border-amber-400/50 flex items-center justify-center text-amber-300">
+                  <Gift className="w-4 h-4" />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setCornerExpanded(false)}
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <div>
+                  <h4 className="font-black text-white text-xs">
+                    Arsip Hadiah &amp; Surat Royal Admin
+                  </h4>
+                  <span className="text-[10px] text-slate-400 block">
+                    Amplop surat &amp; kotak hadiah tersimpan rapi
+                  </span>
+                </div>
               </div>
-
-              <div className="max-h-72 overflow-y-auto space-y-2 pr-0.5">
-                {displayCornerEvents.map((ev) => {
-                  const isViewed = (ev.viewedByAccountIds || []).includes(currentAccount.id);
-                  const isClaimed = (ev.claimedByAccountIds || []).includes(currentAccount.id);
-                  const openable = isGiftEventOpenableNow(ev, currentAccount.id);
-                  const evMode = ev.deliveryContentMode || 'both';
-                  const isLetterOnly = evMode === 'letter_only';
-                  const isGiftOnly = evMode === 'gift_only';
-                  const isCompletedForMe = isLetterOnly ? isViewed : isClaimed;
-                  return (
-                    <div
-                      key={ev.id}
-                      className={`p-3 rounded-xl border transition-all space-y-2 ${
-                        !openable
-                          ? 'bg-slate-950/75 border-rose-500/40'
-                          : !isCompletedForMe
-                          ? 'bg-amber-950/50 border-amber-400/70'
-                          : 'bg-slate-950/90 border-slate-800 hover:border-slate-600'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <span className="text-[10px] font-mono text-amber-300 block tabular-nums">
-                            {ev.scheduleLabel} • Dari: {ev.senderName}
-                          </span>
-                          <h5 className="font-bold text-white text-xs truncate">
-                            {isLetterOnly ? `✉️ ${ev.title}` : `🎁 ${ev.title}`}
-                          </h5>
-                        </div>
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
-                            !openable
-                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                              : isCompletedForMe
-                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                              : 'bg-amber-400 text-slate-950'
-                          }`}
-                        >
-                          {!openable
-                            ? `🔒 Buka ${ev.scheduleLabel}`
-                            : isLetterOnly
-                            ? isViewed
-                              ? '✓ Surat Dibaca'
-                              : '✉️ Surat Baru!'
-                            : isClaimed
-                            ? '✓ Sudah Diklaim'
-                            : 'Belum Dibuka!'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] text-amber-200 font-bold truncate">
-                          {getCelebrationEffectProfile(ev.celebrationEffect).id === 'none'
-                            ? '✉️ Kiriman Resmi Bank Nusantara'
-                            : getCelebrationEffectProfile(ev.celebrationEffect).shortBadge}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCornerExpanded(false);
-                            openGiftEventModal(ev.id, isViewed);
-                          }}
-                          className={`px-3 py-1.5 rounded-lg font-black text-[10px] flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 ${
-                            !openable
-                              ? 'bg-rose-500/20 text-rose-200 border border-rose-400/40'
-                              : 'bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950'
-                          }`}
-                        >
-                          {!openable ? (
-                            <>
-                              <Lock className="w-3 h-3" />
-                              <span>Terkunci</span>
-                            </>
-                          ) : isLetterOnly ? (
-                            <>
-                              <MailOpen className="w-3 h-3" />
-                              <span>{isViewed ? 'Baca Ulang Surat' : 'Buka Amplop Surat'}</span>
-                            </>
-                          ) : isGiftOnly ? (
-                            <>
-                              <Gift className="w-3 h-3" />
-                              <span>{isClaimed ? 'Lihat Kotak Hadiah' : 'Buka Kotak Hadiah'}</span>
-                            </>
-                          ) : isClaimed ? (
-                            <>
-                              <RotateCcw className="w-3 h-3" />
-                              <span>Lihat Surat &amp; Kotak Hadiah</span>
-                            </>
-                          ) : (
-                            <>
-                              <Gift className="w-3 h-3" />
-                              <span>Buka Amplop / Kotak Hadiah</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <button
+                type="button"
+                onClick={() => setCornerExpanded(false)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
+
+            <div className="max-h-72 overflow-y-auto space-y-2 pr-0.5">
+              {displayCornerEvents.map((ev) => {
+                const isViewed = (ev.viewedByAccountIds || []).includes(currentAccount.id);
+                const isClaimed = (ev.claimedByAccountIds || []).includes(currentAccount.id);
+                const openable = isGiftEventOpenableNow(ev, currentAccount.id);
+                const evMode = ev.deliveryContentMode || 'both';
+                const isLetterOnly = evMode === 'letter_only';
+                const isGiftOnly = evMode === 'gift_only';
+                const isCompletedForMe = isLetterOnly ? isViewed : isClaimed;
+                return (
+                  <div
+                    key={ev.id}
+                    className={`p-3 rounded-xl border transition-all space-y-2 ${
+                      !openable
+                        ? 'bg-slate-950/75 border-rose-500/40'
+                        : !isCompletedForMe
+                        ? 'bg-amber-950/50 border-amber-400/70'
+                        : 'bg-slate-950/90 border-slate-800 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-mono text-amber-300 block tabular-nums">
+                          {ev.scheduleLabel} • Dari: {ev.senderName}
+                        </span>
+                        <h5 className="font-bold text-white text-xs truncate">
+                          {isLetterOnly ? `✉️ ${ev.title}` : `🎁 ${ev.title}`}
+                        </h5>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
+                          !openable
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                            : isCompletedForMe
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                            : 'bg-amber-400 text-slate-950'
+                        }`}
+                      >
+                        {!openable
+                          ? `🔒 Buka ${ev.scheduleLabel}`
+                          : isLetterOnly
+                          ? isViewed
+                            ? '✓ Surat Dibaca'
+                            : '✉️ Surat Baru!'
+                          : isClaimed
+                          ? '✓ Sudah Diklaim'
+                          : 'Belum Dibuka!'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-amber-200 font-bold truncate">
+                        {getCelebrationEffectProfile(ev.celebrationEffect).id === 'none'
+                          ? '✉️ Kiriman Resmi Bank Nusantara'
+                          : getCelebrationEffectProfile(ev.celebrationEffect).shortBadge}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCornerExpanded(false);
+                          openGiftEventModal(ev.id, isViewed);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg font-black text-[10px] flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 ${
+                          !openable
+                            ? 'bg-rose-500/20 text-rose-200 border border-rose-400/40'
+                            : 'bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950'
+                        }`}
+                      >
+                        {!openable ? (
+                          <>
+                            <Lock className="w-3 h-3" />
+                            <span>Terkunci</span>
+                          </>
+                        ) : isLetterOnly ? (
+                          <>
+                            <MailOpen className="w-3 h-3" />
+                            <span>{isViewed ? 'Baca Ulang Surat' : 'Buka Amplop Surat'}</span>
+                          </>
+                        ) : isGiftOnly ? (
+                          <>
+                            <Gift className="w-3 h-3" />
+                            <span>{isClaimed ? 'Lihat Kotak Hadiah' : 'Buka Kotak Hadiah'}</span>
+                          </>
+                        ) : isClaimed ? (
+                          <>
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Lihat Surat &amp; Kotak Hadiah</span>
+                          </>
+                        ) : (
+                          <>
+                            <Gift className="w-3 h-3" />
+                            <span>Buka Amplop / Kotak Hadiah</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Baris Bawah: Tombol Surat & Hadiah Admin (kiri) + Tombol Bulat Hijau Logo WhatsApp (kanan) */}
+        <div className="flex items-end gap-2.5">
+          {displayCornerEvents.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setCornerExpanded((prev) => !prev)}
+              className={`px-3.5 py-2.5 rounded-2xl border-2 shadow-2xl flex items-center gap-2.5 transition-all cursor-pointer whitespace-nowrap ${
+                openableUnviewedCount > 0
+                  ? 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 border-amber-200 text-slate-950 font-black animate-pulse'
+                  : 'bg-slate-900/95 hover:bg-slate-800 border-amber-400/60 text-white font-bold backdrop-blur-md'
+              }`}
+            >
+              <div className="relative flex items-center justify-center">
+                <Gift className={`w-4 h-4 ${openableUnviewedCount > 0 ? 'text-slate-950' : 'text-amber-400'}`} />
+                {openableUnviewedCount > 0 && (
+                  <span className="absolute -top-2 -right-2 px-1.5 rounded-full bg-rose-600 text-white text-[9px] font-black tabular-nums">
+                    {openableUnviewedCount}
+                  </span>
+                )}
+              </div>
+              <div className="text-left leading-tight">
+                <span className="text-xs block">
+                  {openableUnviewedCount > 0
+                    ? 'Hadiah & Surat Baru!'
+                    : lockedCount > 0
+                    ? `Surat & Hadiah (${lockedCount} Terkunci)`
+                    : 'Surat & Hadiah Admin'}
+                </span>
+                <span
+                  className={`text-[10px] font-mono block tabular-nums ${
+                    openableUnviewedCount > 0 ? 'text-slate-900' : 'text-amber-300'
+                  }`}
+                >
+                  {displayCornerEvents.length} Paket Tersedia
+                </span>
+              </div>
+              {cornerExpanded ? (
+                <ChevronDown className="w-4 h-4 shrink-0" />
+              ) : (
+                <ChevronUp className="w-4 h-4 shrink-0" />
+              )}
+            </button>
           )}
 
-          {/* Floating Corner Pill Button */}
-          <button
-            type="button"
-            onClick={() => setCornerExpanded((prev) => !prev)}
-            className={`px-3.5 py-2.5 rounded-2xl border-2 shadow-2xl flex items-center gap-2.5 transition-all cursor-pointer whitespace-nowrap ${
-              openableUnviewedCount > 0
-                ? 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 border-amber-200 text-slate-950 font-black animate-pulse'
-                : 'bg-slate-900/95 hover:bg-slate-800 border-amber-400/60 text-white font-bold backdrop-blur-md'
-            }`}
-          >
-            <div className="relative flex items-center justify-center">
-              <Gift className={`w-4 h-4 ${openableUnviewedCount > 0 ? 'text-slate-950' : 'text-amber-400'}`} />
-              {openableUnviewedCount > 0 && (
-                <span className="absolute -top-2 -right-2 px-1.5 rounded-full bg-rose-600 text-white text-[9px] font-black tabular-nums">
-                  {openableUnviewedCount}
-                </span>
-              )}
-            </div>
-            <div className="text-left leading-tight">
-              <span className="text-xs block">
-                {openableUnviewedCount > 0
-                  ? 'Hadiah & Surat Baru!'
-                  : lockedCount > 0
-                  ? `Surat & Hadiah (${lockedCount} Terkunci)`
-                  : 'Surat & Hadiah Admin'}
-              </span>
-              <span
-                className={`text-[10px] font-mono block tabular-nums ${
-                  openableUnviewedCount > 0 ? 'text-slate-900' : 'text-amber-300'
-                }`}
-              >
-                {displayCornerEvents.length} Paket Tersedia
-              </span>
-            </div>
-            {cornerExpanded ? (
-              <ChevronDown className="w-4 h-4 shrink-0" />
-            ) : (
-              <ChevronUp className="w-4 h-4 shrink-0" />
-            )}
-          </button>
+          {/* Tombol Bulat Hijau Logo WhatsApp (Pusat Bantuan & Contact Us) — Selalu Tampil di Sebelah Kanan */}
+          <HelpCenterAndWhatsappDock onMenuOpening={() => setCornerExpanded(false)} />
         </div>
-      )}
+      </div>
     </>
   );
 };

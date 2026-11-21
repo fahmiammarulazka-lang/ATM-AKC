@@ -105,6 +105,7 @@ import { AdminJobCoinBonusCard } from './AdminJobCoinBonusCard';
 import { AccountDeletion10StepModal } from './AccountDeletion10StepModal';
 import { AdminBanStudioView } from './AdminBanStudioView';
 import { AdminDebtManagementTab } from './AdminDebtManagementTab';
+import { AdminHelpCenterPanel } from './AdminHelpCenterPanel';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -255,10 +256,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     sendTestNotificationNow,
     giftEvents,
     dashboardEffectEvents,
+    supportFaqs,
   } = useBank();
 
   const [activeAdminTab, setActiveAdminTab] = useState<
     | 'super_tools'
+    | 'help_center'
     | 'gift_letters'
     | 'dashboard_effects'
     | 'dev_roles'
@@ -1011,6 +1014,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         </button>
 
         <button
+          onClick={() => setActiveAdminTab('help_center')}
+          className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'help_center'
+              ? 'bg-emerald-500 text-slate-950 font-bold shadow-lg shadow-emerald-500/25'
+              : 'text-emerald-300 hover:text-white hover:bg-emerald-950/60 border border-emerald-500/30'
+          }`}
+        >
+          <HelpCircle className="w-4 h-4" />
+          <span>Pusat Bantuan ({supportFaqs.length} FAQ &amp; WA)</span>
+        </button>
+
+        <button
           onClick={() => setActiveAdminTab('features')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
             activeAdminTab === 'features'
@@ -1106,6 +1121,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <span>Brankas & SOP 100x</span>
         </button>
       </div>
+
+      {/* ================= ADMIN TAB: PUSAT BANTUAN (50+ FAQ & CONTACT US WA/EMAIL) ================= */}
+      {activeAdminTab === 'help_center' && <AdminHelpCenterPanel />}
 
       {/* ================= ADMIN TAB: HADIAH & SURAT SPESIAL (100 HADIAH + 108 EFEK 100.000X) ================= */}
       {activeAdminTab === 'gift_letters' && <AdminGiftEventPanel />}

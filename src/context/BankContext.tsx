@@ -46,6 +46,8 @@ import {
   saveActiveBootSession,
   readActiveBootSession,
   clearActiveBootSession,
+  saveDeviceLobbyGuestId,
+  readDeviceLobbyGuestId,
   readLastSeenUpdateId,
   saveLastSeenUpdateId,
   type FastBootSessionSnapshot,
@@ -152,7 +154,15 @@ import {
   CloudSyncStatus,
   NotificationCategory10Key,
   AdminFullCustomAccountInput,
+  StructuredIndonesiaAddress,
+  SupportFaqCategory,
+  SupportFaqItem,
+  SupportContactConfig,
 } from '../types/bank';
+import {
+  DEFAULT_SUPPORT_FAQS_50,
+  DEFAULT_SUPPORT_CONTACT_CONFIG,
+} from '../data/supportFaqCatalog';
 import {
   DEFAULT_NOTIFICATION_CATEGORY_PERMISSIONS,
   sanitizeNotificationCategoryPermissions,
@@ -261,6 +271,7 @@ interface RegisterCardInput {
   phone: string;
   email: string;
   address: string;
+  structuredAddress?: StructuredIndonesiaAddress;
   pin: string;
   cardTier?: CardTier;
   initialDeposit: number;
@@ -337,6 +348,11 @@ interface BankContextType {
     displayName?: string;
   }) => Promise<{ success: boolean; isNewUser?: boolean; message: string }>;
   loginWithGooglePopup: () => Promise<{ success: boolean; errorCode?: string; message: string }>;
+  loginWithStandardAccount: (input: {
+    accountNumber: string;
+    userId16: string;
+    cardPin: string;
+  }) => Promise<{ success: boolean; message: string }>;
   loginWithOaAccount: (input: {
     accountNumber: string;
     userId16: string;
@@ -344,8 +360,13 @@ interface BankContextType {
     adminPin: string;
   }) => Promise<{ success: boolean; message: string }>;
   guestLocalAccounts: BankAccount[];
+  deviceLobbyGuestAccount: BankAccount | null;
+  canCreateLobbyGuestOnThisDevice: boolean;
   registerGuestRegularCard: (
-    input: Omit<RegisterCardInput, 'cardTier' | 'email'>
+    input: Omit<RegisterCardInput, 'cardTier' | 'email' | 'initialDeposit' | 'address' | 'structuredAddress'> & {
+      address?: string;
+      initialDeposit?: number;
+    }
   ) => { success: boolean; message: string; account?: BankAccount };
   loginToGuestAccountWithPin: (
     accountId: string,
@@ -652,14 +673,46 @@ interface BankContextType {
     isEditExisting?: boolean;
   }) => { success: boolean; message: string; count: number };
   adminSaveDefaultBanTemplate: (
-    config: BanScreenCustomizationConfig
-  ) => { success: boolean; message: string };
+    config: BanScreenCustomizationConfig,
+    options?: { applyToAllBanned?: boolean }
+  ) => { success: boolean; message: string; updatedBannedCount?: number };
   adminSaveBanPreset: (input: {
     name: string;
     description?: string;
     config: BanScreenCustomizationConfig;
-  }) => { success: boolean; message: string };
+  }) => { success: boolean; message: string; preset?: BanConfigPreset };
+  adminUpdateBanPreset: (
+    presetId: string,
+    updates: {
+      name?: string;
+      description?: string;
+      config?: BanScreenCustomizationConfig;
+    }
+  ) => { success: boolean; message: string };
+  adminDuplicateBanPreset: (
+    presetId: string
+  ) => { success: boolean; message: string; preset?: BanConfigPreset };
   adminDeleteBanPreset: (presetId: string) => { success: boolean; message: string };
+  // Pusat Bantuan (50+ FAQ) & Contact Us (WhatsApp + Email)
+  supportFaqs: SupportFaqItem[];
+  supportContactConfig: SupportContactConfig;
+  adminUpdateSupportContactConfig: (
+    updates: Partial<SupportContactConfig>
+  ) => { success: boolean; message: string };
+  adminAddSupportFaq: (input: {
+    category: SupportFaqCategory;
+    question: string;
+    answer: string;
+    steps: string[];
+    tip?: string;
+    keywords?: string[];
+  }) => { success: boolean; message: string; item?: SupportFaqItem };
+  adminUpdateSupportFaq: (
+    id: string,
+    updates: Partial<Omit<SupportFaqItem, 'id'>>
+  ) => { success: boolean; message: string };
+  adminDeleteSupportFaq: (id: string) => { success: boolean; message: string };
+  adminResetSupportFaqs: () => { success: boolean; message: string };
   adminUnbanCard: (accountId: string) => { success: boolean; message: string };
   adminUnbanAllCards: () => { success: boolean; message: string; count: number };
   submitCardBanAppeal: (accountId: string, appealNote?: string) => { success: boolean; message: string };
@@ -829,6 +882,7 @@ interface BankContextType {
       phone?: string;
       email?: string;
       address?: string;
+      structuredAddress?: StructuredIndonesiaAddress;
     }
   ) => { success: boolean; message: string };
   adminMultiplyAccountBalance: (accountId: string, multiplier: number) => { success: boolean; message: string };
@@ -1951,10 +2005,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const activeCloudEmailRef = useRef<string | null>(null);
   activeCloudEmailRef.current = activeCloudEmail;
   const [cloudUserStatus, setCloudUserStatus] = useState<CloudUserRecord | null>(null);
+  const [lobbyCreatedGuestAccountId, setLobbyCreatedGuestAccountId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void readDeviceLobbyGuestId().then((storedId) => {
+      if (active && storedId) {
+        setLobbyCreatedGuestAccountId(storedId);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Helper Write-Through Instan ke IndexedDB (Zero localStorage) agar refresh mendadak tidak pernah kehilangan sesi / kartu baru
   const persistActiveSessionToIdb = (params: {
-    authMode: 'google' | 'oa_account' | 'guest';
+    authMode: 'google' | 'oa_account' | 'guest' | 'standard_account';
     firebaseUid?: string;
     email?: string;
     emailKey?: string;
@@ -2007,10 +2074,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [banSupportConfig, setBanSupportConfig] = useState<BanSupportConfig>({
     whatsappNumber: '6281234567890',
     emailAddress: 'support@banknusantara.id',
+    defaultTemplate: { ...DEFAULT_BAN_SCREEN_CONFIG },
     defaultTemplateConfig: { ...DEFAULT_BAN_SCREEN_CONFIG },
+    savedPresets: [...DEFAULT_BAN_CONFIG_PRESETS],
     presets: [...DEFAULT_BAN_CONFIG_PRESETS],
     auditLogs: [],
   });
+
+  const [supportFaqs, setSupportFaqs] = useState<SupportFaqItem[]>(() =>
+    DEFAULT_SUPPORT_FAQS_50.map((f) => ({ ...f, steps: [...f.steps] }))
+  );
+  const [supportContactConfig, setSupportContactConfig] = useState<SupportContactConfig>(() => ({
+    ...DEFAULT_SUPPORT_CONTACT_CONFIG,
+  }));
 
   const [deletedAccountIds, setDeletedAccountIds] = useState<string[]>(() => [
     ...PURGED_BOT_ACCOUNT_IDS,
@@ -2644,9 +2720,34 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     if (data.banSupportConfig && typeof data.banSupportConfig === 'object') {
+      const incomingBan = data.banSupportConfig as BanSupportConfig;
+      const resolvedTemplate =
+        incomingBan.defaultTemplate ||
+        incomingBan.defaultTemplateConfig ||
+        DEFAULT_BAN_SCREEN_CONFIG;
+      const resolvedPresets =
+        Array.isArray(incomingBan.savedPresets) && incomingBan.savedPresets.length > 0
+          ? incomingBan.savedPresets
+          : Array.isArray(incomingBan.presets) && incomingBan.presets.length > 0
+          ? incomingBan.presets
+          : undefined;
       setBanSupportConfig((prev) => ({
         ...prev,
-        ...(data.banSupportConfig as BanSupportConfig),
+        ...incomingBan,
+        defaultTemplate: resolvedTemplate,
+        defaultTemplateConfig: resolvedTemplate,
+        ...(resolvedPresets
+          ? { savedPresets: resolvedPresets, presets: resolvedPresets }
+          : {}),
+      }));
+    }
+    if (Array.isArray(data.supportFaqs)) {
+      setSupportFaqs(data.supportFaqs as SupportFaqItem[]);
+    }
+    if (data.supportContactConfig && typeof data.supportContactConfig === 'object') {
+      setSupportContactConfig((prev) => ({
+        ...prev,
+        ...(data.supportContactConfig as SupportContactConfig),
       }));
     }
     const incomingSealTs = Number(data.letterSealUpdatedAtMs || data.updatedAtMs || 0);
@@ -2766,6 +2867,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     pockets?: PocketSaving[];
     depositos?: DepositoRecord[];
     banSupportConfig?: BanSupportConfig;
+    supportFaqs?: SupportFaqItem[];
+    supportContactConfig?: SupportContactConfig;
     loans?: LoanApplication[];
     scheduledPayments?: ScheduledPayment[];
     favorites?: FavoriteAccount[];
@@ -2878,6 +2981,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         : {}),
       banSupportConfig: overrides?.banSupportConfig ?? banSupportConfig,
+      supportFaqs: overrides?.supportFaqs ?? supportFaqs,
+      supportContactConfig: overrides?.supportContactConfig ?? supportContactConfig,
       pockets: (overrides?.pockets ?? pockets).filter((p) => isNotBotAccountId(p.accountId)),
       depositos: (overrides?.depositos ?? depositos).filter((d) => isNotBotAccountId(d.accountId)),
       loans: (overrides?.loans ?? loans).filter((l) => isNotBotAccountId(l.accountId)),
@@ -3336,9 +3441,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setAccounts(mergedCached);
         }
         if (cachedBoot?.banSupportConfig && typeof cachedBoot.banSupportConfig === 'object') {
+          const cachedBan = cachedBoot.banSupportConfig as BanSupportConfig;
+          const resolvedTemplate =
+            cachedBan.defaultTemplate ||
+            cachedBan.defaultTemplateConfig ||
+            DEFAULT_BAN_SCREEN_CONFIG;
           setBanSupportConfig((prev) => ({
             ...prev,
-            ...(cachedBoot.banSupportConfig as BanSupportConfig),
+            ...cachedBan,
+            defaultTemplate: resolvedTemplate,
+            defaultTemplateConfig: resolvedTemplate,
           }));
         }
       }
@@ -3372,7 +3484,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const applyGuestMatch = (accs: BankAccount[]): BankAccount | null => {
           const preferredId =
-            savedSession && (savedSession.authMode === 'guest' || savedSession.authMode === 'oa_account')
+            savedSession &&
+            (savedSession.authMode === 'guest' ||
+              savedSession.authMode === 'oa_account' ||
+              savedSession.authMode === 'standard_account')
               ? savedSession.activeAccountId
               : undefined;
           const matchedGuest =
@@ -3381,6 +3496,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             accs.find((a) => a.firebaseUid === fbUser.uid) ||
             null;
           if (matchedGuest && active) {
+            const resolvedAuthMode: 'oa_account' | 'standard_account' | 'guest' =
+              savedSession?.authMode === 'oa_account'
+                ? 'oa_account'
+                : savedSession?.authMode === 'standard_account'
+                ? 'standard_account'
+                : 'guest';
             setCurrentAccountIdState(matchedGuest.id);
             setActiveCloudEmail('');
             setCloudAccountVerificationState('confirmed_has_accounts');
@@ -3388,7 +3509,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               email: '',
               name: matchedGuest.fullName,
               firebaseUid: fbUser.uid,
-              authMode: savedSession?.authMode === 'oa_account' ? 'oa_account' : 'guest',
+              authMode: resolvedAuthMode,
               loggedInAt: new Date().toISOString(),
               hasCompletedOnboarding: true,
               isPinVerified: true,
@@ -3459,7 +3580,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const finalGuest = applyGuestMatch(cloudAccountsLoaded);
         if (finalGuest) {
           persistActiveSessionToIdb({
-            authMode: savedSession?.authMode === 'oa_account' ? 'oa_account' : 'guest',
+            authMode:
+              savedSession?.authMode === 'oa_account'
+                ? 'oa_account'
+                : savedSession?.authMode === 'standard_account'
+                ? 'standard_account'
+                : 'guest',
             firebaseUid: fbUser.uid,
             email: '',
             name: finalGuest.fullName,
@@ -3765,12 +3891,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       // =========================================================================
-      // MODE C: Tanpa Sesi Firebase Google (Cek Sesi Aktif OA Murni / Guest di IndexedDB)
+      // MODE C: Tanpa Sesi Firebase Google (Cek Sesi Aktif OA Murni / Guest / Login Ke Akun di IndexedDB)
       // =========================================================================
       if (
         active &&
         savedSession &&
-        (savedSession.authMode === 'oa_account' || savedSession.authMode === 'guest') &&
+        (savedSession.authMode === 'oa_account' ||
+          savedSession.authMode === 'guest' ||
+          savedSession.authMode === 'standard_account') &&
         savedSession.activeAccountId
       ) {
         const restoredAcc = workingAccounts.find((a) => a.id === savedSession.activeAccountId);
@@ -4176,6 +4304,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     giftEventsInitialized,
     dashboardEffectEvents,
     banSupportConfig,
+    supportFaqs,
+    supportContactConfig,
     pockets,
     depositos,
     loans,
@@ -4867,13 +4997,41 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('beep');
   };
 
-  // Daftar seluruh akun Guest yang tersimpan di LocalStorage perangkat ini
+  // Daftar seluruh akun Guest yang tersedia
   const guestLocalAccounts: BankAccount[] = accounts.filter((a) => Boolean(a.isGuestAccount));
 
-  // Buat Kartu Reguler Guest Baru (Hanya Tersimpan di LocalStorage sampai disambungkan ke Google)
+  // Cek kuota maksimal 1 Akun Guest per perangkat di Lobby awal (Akun Guest buatan Panel Admin tidak menghabiskan kuota ini)
+  const deviceLobbyGuestAccount: BankAccount | null =
+    (lobbyCreatedGuestAccountId
+      ? accounts.find((a) => a.id === lobbyCreatedGuestAccountId && Boolean(a.isGuestAccount)) || null
+      : null) ||
+    (auth.currentUser?.isAnonymous && auth.currentUser?.uid
+      ? accounts.find(
+          (a) =>
+            Boolean(a.isGuestAccount) &&
+            !a.createdByAdmin &&
+            a.firebaseUid === auth.currentUser?.uid
+        ) || null
+      : null);
+
+  const canCreateLobbyGuestOnThisDevice = !deviceLobbyGuestAccount;
+
+  // Buat Kartu Reguler Guest Baru di Lobby Awal (Maksimal 1 per perangkat, Tanpa Alamat, Saldo Awal otomatis Rp 0)
   const registerGuestRegularCard = (
-    input: Omit<RegisterCardInput, 'cardTier' | 'email'>
+    input: Omit<RegisterCardInput, 'cardTier' | 'email' | 'initialDeposit' | 'address' | 'structuredAddress'> & {
+      address?: string;
+      initialDeposit?: number;
+    }
   ): { success: boolean; message: string; account?: BankAccount } => {
+    if (!canCreateLobbyGuestOnThisDevice) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message:
+          'Batas maksimal 1 Akun Guest per perangkat di Lobby awal telah tercapai. Silakan masuk ke Akun Guest Anda atau gunakan tombol "Login Ke Akun".',
+      };
+    }
+
     const cleanName = (input.fullName || '').trim() || 'Tamu Nusantara';
     const cleanPin = (input.pin || '').replace(/\D/g, '').slice(0, 6);
     if (cleanPin.length !== 6) {
@@ -4886,20 +5044,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const newAccNum = generateRandomAccountNumber(existingNums);
     const newId16 = generateRandomUserId16(existingIds);
     const nowIso = new Date().toISOString();
-    const deposit = Math.max(50_000, Number(input.initialDeposit) || 500_000);
 
     const newGuestAcc: BankAccount = {
       id: `acc-guest-${Date.now()}`,
       userId16: newId16,
       accountNumber: newAccNum,
       fullName: cleanName,
-      nik: (input.nik || '').replace(/\D/g, '').slice(0, 16) || `3171${Math.floor(100000000000 + Math.random() * 899999999999)}`,
+      nik:
+        (input.nik || '').replace(/\D/g, '').slice(0, 16) ||
+        `3171${Math.floor(100000000000 + Math.random() * 899999999999)}`,
       phone: (input.phone || '').trim() || `0812${Math.floor(10000000 + Math.random() * 89999999)}`,
       email: '',
       googleEmail: '',
-      address: (input.address || '').trim() || 'Domisili Tamu Bank Nusantara Digital',
+      address: '',
+      structuredAddress: undefined,
       pin: cleanPin,
-      balance: deposit,
+      balance: 0,
       cardTier: 'regular',
       cardNumber: generateRandomCardNumber(),
       cvv: generateRandomCVV(),
@@ -4909,9 +5069,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       banReason: '',
       dailyWithdrawnToday: 0,
       lastWithdrawalDate: '',
-      initialDeposit: deposit,
+      initialDeposit: 0,
       createdAt: nowIso,
-      rewardPoints: 250,
+      rewardPoints: 0,
       allowInternational: false,
       customSpendingLimit: CARD_TIER_CONFIGS.regular.dailyWithdrawalLimit,
       jobLevel: 1,
@@ -4925,12 +5085,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       hasCompletedTutorial: true,
       tutorialApprovedByAdmin: true,
       isGuestAccount: true,
+      isRegularNoGoogleAccount: false,
+      createdByAdmin: false,
       failedPinAttempts: 0,
     };
 
     const nextAccounts = [newGuestAcc, ...accounts];
     accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
+    setLobbyCreatedGuestAccountId(newGuestAcc.id);
+    void saveDeviceLobbyGuestId(newGuestAcc.id);
     setCloudAccountVerificationState('confirmed_has_accounts');
     // Simpan instan ke IndexedDB sebelum tulis Cloud selesai agar refresh mendadak aman
     persistActiveSessionToIdb({
@@ -4985,7 +5149,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       account: newGuestAcc,
-      message: `Kartu Reguler Guest "${cleanName}" berhasil dibuat di Anonymous Vault Firebase (Project: azkaakc)! Hubungkan ke Google kapan saja tanpa kehilangan data.`,
+      message: `Kartu Reguler Guest "${cleanName}" berhasil dibuat dengan saldo awal Rp 0! Dapatkan uang melalui Kerja, Transfer masuk, atau Pemberian Admin.`,
     };
   };
 
@@ -5736,7 +5900,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
       // Simpan sesi terverifikasi ke IndexedDB agar refresh langsung kembali ke Dashboard rekening ini
       persistActiveSessionToIdb({
-        authMode: googleUser?.authMode === 'oa_account' ? 'oa_account' : googleUser?.authMode === 'guest' ? 'guest' : 'google',
+        authMode:
+          googleUser?.authMode === 'oa_account'
+            ? 'oa_account'
+            : googleUser?.authMode === 'standard_account'
+            ? 'standard_account'
+            : googleUser?.authMode === 'guest'
+            ? 'guest'
+            : 'google',
         firebaseUid: targetUid,
         email: activeEmailSession,
         name: targetAcc.fullName,
@@ -7415,6 +7586,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         authMode:
           googleUser.authMode === 'oa_account'
             ? 'oa_account'
+            : googleUser.authMode === 'standard_account'
+            ? 'standard_account'
             : googleUser.authMode === 'guest'
             ? 'guest'
             : 'google',
@@ -8797,6 +8970,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       phone: data.phone.trim(),
       email: linkedEmail,
       address: data.address.trim(),
+      structuredAddress: data.structuredAddress,
       pin: data.pin.trim(),
       balance: 0,
       cardTier: finalTier,
@@ -8808,13 +8982,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       banReason: '',
       dailyWithdrawnToday: 0,
       lastWithdrawalDate: '',
-      initialDeposit: data.initialDeposit,
+      initialDeposit: 0,
       createdAt: new Date().toISOString(),
       rewardPoints: 100,
       allowInternational: false,
       firebaseUid: resolvedUid,
       googleEmail: linkedEmail,
       isGuestAccount: false,
+      isRegularNoGoogleAccount: false,
+      createdByAdmin: false,
       hasCompletedTutorial: false,
       tutorialApprovedByAdmin: false,
       failedPinAttempts: 0,
@@ -8838,6 +9014,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       authMode:
         googleUser?.authMode === 'oa_account'
           ? 'oa_account'
+          : googleUser?.authMode === 'standard_account'
+          ? 'standard_account'
           : googleUser?.authMode === 'guest'
           ? 'guest'
           : 'google',
@@ -8890,14 +9068,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ? target.accountNumber
       : generateRandomAccountNumber(existingNumbers);
 
+    const approvedStartingBalance =
+      target.cardTier === 'admin' ? UNLIMITED_BALANCE : Math.max(0, target.balance || 0);
+
     const nextAccounts: BankAccount[] = accounts.map((acc) => {
       if (acc.id === accountId) {
         const nextBalance =
-          acc.cardTier === 'admin'
-            ? UNLIMITED_BALANCE
-            : acc.balance > 0
-            ? acc.balance
-            : acc.initialDeposit || 500_000;
+          acc.cardTier === 'admin' ? UNLIMITED_BALANCE : Math.max(0, acc.balance || 0);
         return {
           ...acc,
           accountNumber: finalAccountNumber,
@@ -8932,13 +9109,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       id: `tx-init-${Date.now()}`,
       accountId: accountId,
       type: 'setor',
-      title: 'Aktivasi & Setoran Awal Rekening',
-      amount: target.balance > 0 ? target.balance : target.initialDeposit || 500_000,
+      title:
+        approvedStartingBalance > 0
+          ? 'Aktivasi Permanen Rekening'
+          : 'Aktivasi Permanen Rekening (Saldo Awal Rp 0)',
+      amount: approvedStartingBalance === UNLIMITED_BALANCE ? 0 : approvedStartingBalance,
       recipientAccount: finalAccountNumber,
       recipientName: target.fullName,
-      description: `Aktivasi permanen ${CARD_TIER_CONFIGS[target.cardTier].nameIndo}`,
+      description: `Aktivasi permanen ${CARD_TIER_CONFIGS[target.cardTier].nameIndo}. Dapatkan saldo lewat Kerja, Transfer masuk, atau Pemberian Admin.`,
       status: 'success',
-      referenceNo: `SET${Date.now()}`,
+      referenceNo: `ACT${Date.now()}`,
       timestamp: new Date().toISOString(),
       category: 'setor_tunai',
     };
@@ -9709,19 +9889,102 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const adminSaveDefaultBanTemplate = (
-    template: BanScreenCustomizationConfig
-  ): { success: boolean; message: string } => {
+    template: BanScreenCustomizationConfig,
+    options?: { applyToAllBanned?: boolean }
+  ): { success: boolean; message: string; updatedBannedCount?: number } => {
+    const applyToAllBanned = options?.applyToAllBanned !== false;
+    const normalizedTemplate: BanScreenCustomizationConfig = {
+      ...template,
+      appealMessageTemplate:
+        template.appealMessageTemplate !== undefined
+          ? template.appealMessageTemplate
+          : template.messageTemplate ?? '',
+      messageTemplate:
+        template.appealMessageTemplate !== undefined
+          ? template.appealMessageTemplate
+          : template.messageTemplate ?? '',
+    };
+
     const nextConfig: BanSupportConfig = {
       ...banSupportConfig,
-      defaultTemplate: { ...template },
+      defaultTemplate: { ...normalizedTemplate },
+      defaultTemplateConfig: { ...normalizedTemplate },
       updatedAt: new Date().toISOString(),
     };
     setBanSupportConfig(nextConfig);
-    flushMasterStateToCloud({ banSupportConfig: nextConfig });
+
+    let updatedBannedCount = 0;
+    let nextAccounts = accounts;
+    if (applyToAllBanned) {
+      nextAccounts = accounts.map((acc) => {
+        if (acc.cardStatus !== 'banned' && acc.status !== 'banned') return acc;
+        updatedBannedCount += 1;
+        const existingCfg = acc.banInfo?.customConfig;
+        const mergedCustomCfg: BanScreenCustomizationConfig = {
+          ...normalizedTemplate,
+          ...(existingCfg
+            ? {
+                durationType: existingCfg.durationType,
+                durationValue: existingCfg.durationValue,
+                durationUnit: existingCfg.durationUnit,
+                durationMinutes: existingCfg.durationMinutes,
+                durationLabel: existingCfg.durationLabel,
+                specificEndDate: existingCfg.specificEndDate,
+                expiresAt: existingCfg.expiresAt,
+                reasonMode: existingCfg.reasonMode,
+                systemReasonId: existingCfg.systemReasonId,
+                selectedSystemReasonId: existingCfg.selectedSystemReasonId,
+                presetReasonId: existingCfg.presetReasonId,
+                selectedPresetReasonId: existingCfg.selectedPresetReasonId,
+                reasonText: existingCfg.reasonText,
+                reason: existingCfg.reason,
+                showReasonBox: existingCfg.showReasonBox,
+                caseId: existingCfg.caseId,
+                bannedAt: existingCfg.bannedAt,
+              }
+            : {}),
+          // Selalu perbarui template pesan WA/Email & konfigurasi kontak/banding secara otomatis
+          appealMessageTemplate: normalizedTemplate.appealMessageTemplate,
+          messageTemplate: normalizedTemplate.messageTemplate,
+          overrideWhatsAppNumber: normalizedTemplate.overrideWhatsAppNumber,
+          overrideWhatsappNumber: normalizedTemplate.overrideWhatsappNumber,
+          overrideEmailAddress: normalizedTemplate.overrideEmailAddress,
+        };
+        return {
+          ...acc,
+          banInfo: {
+            ...(acc.banInfo || {
+              isBanned: true,
+              reason: acc.banReason || '',
+              bannedAt: new Date().toISOString(),
+              durationType: 'permanent' as const,
+              durationLabel: 'PERMANEN',
+            }),
+            isBanned: true,
+            customConfig: mergedCustomCfg,
+          },
+        };
+      });
+
+      if (updatedBannedCount > 0) {
+        latestServerAccountsRef.current = nextAccounts;
+        accountsRef.current = nextAccounts;
+        setAccounts(nextAccounts);
+      }
+    }
+
+    flushMasterStateToCloud({
+      banSupportConfig: nextConfig,
+      ...(updatedBannedCount > 0 ? { accounts: nextAccounts } : {}),
+    });
     playAtmSound('success');
     return {
       success: true,
-      message: 'Template Global Default Layar Banned berhasil disimpan ke Cloud Firestore!',
+      updatedBannedCount,
+      message:
+        updatedBannedCount > 0
+          ? `Template Banned berhasil disimpan ke Cloud & otomatis diperbarui di ${updatedBannedCount} akun yang sedang dibanned!`
+          : 'Template Global Default Layar Banned berhasil disimpan ke Cloud Firestore!',
     };
   };
 
@@ -9729,22 +9992,41 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     name: string;
     description?: string;
     config: BanScreenCustomizationConfig;
-  }): { success: boolean; message: string } => {
+  }): { success: boolean; message: string; preset?: BanConfigPreset } => {
     const cleanName = input.name.trim();
     if (!cleanName) {
       return { success: false, message: 'Nama preset konfigurasi tidak boleh kosong.' };
     }
+    const basePresets =
+      banSupportConfig.savedPresets && banSupportConfig.savedPresets.length > 0
+        ? banSupportConfig.savedPresets
+        : banSupportConfig.presets && banSupportConfig.presets.length > 0
+        ? banSupportConfig.presets
+        : DEFAULT_BAN_CONFIG_PRESETS;
+    const normalizedCfg: BanScreenCustomizationConfig = {
+      ...input.config,
+      appealMessageTemplate:
+        input.config.appealMessageTemplate !== undefined
+          ? input.config.appealMessageTemplate
+          : input.config.messageTemplate ?? '',
+      messageTemplate:
+        input.config.appealMessageTemplate !== undefined
+          ? input.config.appealMessageTemplate
+          : input.config.messageTemplate ?? '',
+    };
     const newPreset: BanConfigPreset = {
       id: `preset-custom-${Date.now()}`,
       name: cleanName,
-      description: input.description?.trim() || `${input.config.durationLabel} • Tema ${input.config.theme}`,
+      description:
+        input.description?.trim() || `${normalizedCfg.durationLabel} • Tema ${normalizedCfg.theme}`,
       createdAt: new Date().toISOString(),
-      config: { ...input.config },
+      config: normalizedCfg,
     };
-    const nextPresets = [newPreset, ...(banSupportConfig.savedPresets || DEFAULT_BAN_CONFIG_PRESETS)];
+    const nextPresets = [newPreset, ...basePresets];
     const nextConfig: BanSupportConfig = {
       ...banSupportConfig,
       savedPresets: nextPresets,
+      presets: nextPresets,
       updatedAt: new Date().toISOString(),
     };
     setBanSupportConfig(nextConfig);
@@ -9752,17 +10034,127 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     return {
       success: true,
+      preset: newPreset,
       message: `Preset Konfigurasi Banned "${cleanName}" berhasil disimpan ke Cloud!`,
     };
   };
 
-  const adminDeleteBanPreset = (presetId: string): { success: boolean; message: string } => {
-    const nextPresets = (banSupportConfig.savedPresets || DEFAULT_BAN_CONFIG_PRESETS).filter(
-      (p) => p.id !== presetId
+  const adminUpdateBanPreset = (
+    presetId: string,
+    updates: {
+      name?: string;
+      description?: string;
+      config?: BanScreenCustomizationConfig;
+    }
+  ): { success: boolean; message: string } => {
+    if (!presetId.startsWith('preset-custom-')) {
+      return {
+        success: false,
+        message: 'Preset bawaan sistem tetap dijaga asli. Gunakan tombol "Duplikasi & Edit" untuk mengubah salinannya.',
+      };
+    }
+    const basePresets =
+      banSupportConfig.savedPresets && banSupportConfig.savedPresets.length > 0
+        ? banSupportConfig.savedPresets
+        : banSupportConfig.presets && banSupportConfig.presets.length > 0
+        ? banSupportConfig.presets
+        : DEFAULT_BAN_CONFIG_PRESETS;
+    const target = basePresets.find((p) => p.id === presetId);
+    if (!target) {
+      return { success: false, message: 'Preset konfigurasi tidak ditemukan.' };
+    }
+    const cleanName = (updates.name ?? target.name).trim();
+    if (!cleanName) {
+      return { success: false, message: 'Nama preset tidak boleh kosong.' };
+    }
+    const mergedCfg = updates.config
+      ? {
+          ...updates.config,
+          appealMessageTemplate:
+            updates.config.appealMessageTemplate !== undefined
+              ? updates.config.appealMessageTemplate
+              : updates.config.messageTemplate ?? '',
+          messageTemplate:
+            updates.config.appealMessageTemplate !== undefined
+              ? updates.config.appealMessageTemplate
+              : updates.config.messageTemplate ?? '',
+        }
+      : target.config;
+    const nextPresets = basePresets.map((p) =>
+      p.id === presetId
+        ? {
+            ...p,
+            name: cleanName,
+            description:
+              updates.description !== undefined ? updates.description.trim() : p.description,
+            config: mergedCfg,
+          }
+        : p
     );
     const nextConfig: BanSupportConfig = {
       ...banSupportConfig,
       savedPresets: nextPresets,
+      presets: nextPresets,
+      updatedAt: new Date().toISOString(),
+    };
+    setBanSupportConfig(nextConfig);
+    flushMasterStateToCloud({ banSupportConfig: nextConfig });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Perubahan preset "${cleanName}" berhasil disimpan ke Cloud!`,
+    };
+  };
+
+  const adminDuplicateBanPreset = (
+    presetId: string
+  ): { success: boolean; message: string; preset?: BanConfigPreset } => {
+    const basePresets =
+      banSupportConfig.savedPresets && banSupportConfig.savedPresets.length > 0
+        ? banSupportConfig.savedPresets
+        : banSupportConfig.presets && banSupportConfig.presets.length > 0
+        ? banSupportConfig.presets
+        : DEFAULT_BAN_CONFIG_PRESETS;
+    const source = basePresets.find((p) => p.id === presetId);
+    if (!source) {
+      return { success: false, message: 'Preset sumber tidak ditemukan.' };
+    }
+    const clonedPreset: BanConfigPreset = {
+      id: `preset-custom-${Date.now()}`,
+      name: `${source.name} (Salinan)`,
+      description: source.description,
+      createdAt: new Date().toISOString(),
+      config: { ...source.config },
+    };
+    const nextPresets = [clonedPreset, ...basePresets];
+    const nextConfig: BanSupportConfig = {
+      ...banSupportConfig,
+      savedPresets: nextPresets,
+      presets: nextPresets,
+      updatedAt: new Date().toISOString(),
+    };
+    setBanSupportConfig(nextConfig);
+    flushMasterStateToCloud({ banSupportConfig: nextConfig });
+    playAtmSound('success');
+    return {
+      success: true,
+      preset: clonedPreset,
+      message: `Preset "${source.name}" berhasil diduplikasi menjadi preset custom yang siap diedit!`,
+    };
+  };
+
+  const adminDeleteBanPreset = (presetId: string): { success: boolean; message: string } => {
+    const basePresets =
+      banSupportConfig.savedPresets && banSupportConfig.savedPresets.length > 0
+        ? banSupportConfig.savedPresets
+        : banSupportConfig.presets && banSupportConfig.presets.length > 0
+        ? banSupportConfig.presets
+        : DEFAULT_BAN_CONFIG_PRESETS;
+    const nextPresets = basePresets.filter((p) => p.id !== presetId);
+    const nextConfig: BanSupportConfig = {
+      ...banSupportConfig,
+      savedPresets: nextPresets,
+      presets: nextPresets,
       updatedAt: new Date().toISOString(),
     };
     setBanSupportConfig(nextConfig);
@@ -9770,6 +10162,119 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       message: 'Preset konfigurasi Banned berhasil dihapus.',
+    };
+  };
+
+  // ============================================================================
+  // PUSAT BANTUAN (50+ FAQ) & CONTACT US (WHATSAPP + EMAIL) CRUD ADMIN
+  // ============================================================================
+  const adminUpdateSupportContactConfig = (
+    updates: Partial<SupportContactConfig>
+  ): { success: boolean; message: string } => {
+    const nextConfig: SupportContactConfig = {
+      ...supportContactConfig,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+    setSupportContactConfig(nextConfig);
+    flushMasterStateToCloud({ supportContactConfig: nextConfig });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Pengaturan Contact Us (WhatsApp, Email & Template Pesan Otomatis) berhasil disimpan ke Cloud!',
+    };
+  };
+
+  const adminAddSupportFaq = (input: {
+    category: SupportFaqCategory;
+    question: string;
+    answer: string;
+    steps: string[];
+    tip?: string;
+    keywords?: string[];
+  }): { success: boolean; message: string; item?: SupportFaqItem } => {
+    const cleanQuestion = input.question.trim();
+    const cleanAnswer = input.answer.trim();
+    if (!cleanQuestion || !cleanAnswer) {
+      return { success: false, message: 'Pertanyaan dan penjelasan jawaban FAQ wajib diisi.' };
+    }
+    const cleanSteps = (input.steps || []).map((s) => s.trim()).filter(Boolean);
+    const nowIso = new Date().toISOString();
+    const newItem: SupportFaqItem = {
+      id: `faq-custom-${Date.now()}`,
+      category: input.category || 'akun',
+      question: cleanQuestion,
+      answer: cleanAnswer,
+      steps: cleanSteps,
+      tip: input.tip?.trim() || undefined,
+      keywords: (input.keywords || []).map((k) => k.trim()).filter(Boolean),
+      isActive: true,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    const nextFaqs = [newItem, ...supportFaqs];
+    setSupportFaqs(nextFaqs);
+    flushMasterStateToCloud({ supportFaqs: nextFaqs });
+    playAtmSound('success');
+    return {
+      success: true,
+      item: newItem,
+      message: `FAQ baru "${cleanQuestion.slice(0, 48)}..." berhasil ditambahkan (${nextFaqs.length} total FAQ).`,
+    };
+  };
+
+  const adminUpdateSupportFaq = (
+    id: string,
+    updates: Partial<Omit<SupportFaqItem, 'id'>>
+  ): { success: boolean; message: string } => {
+    const target = supportFaqs.find((f) => f.id === id);
+    if (!target) {
+      return { success: false, message: 'Item FAQ tidak ditemukan.' };
+    }
+    const nextFaqs = supportFaqs.map((f) =>
+      f.id === id
+        ? {
+            ...f,
+            ...updates,
+            question: updates.question !== undefined ? updates.question.trim() : f.question,
+            answer: updates.answer !== undefined ? updates.answer.trim() : f.answer,
+            steps:
+              updates.steps !== undefined
+                ? updates.steps.map((s) => s.trim()).filter(Boolean)
+                : f.steps,
+            tip: updates.tip !== undefined ? updates.tip.trim() || undefined : f.tip,
+            updatedAt: new Date().toISOString(),
+          }
+        : f
+    );
+    setSupportFaqs(nextFaqs);
+    flushMasterStateToCloud({ supportFaqs: nextFaqs });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Perubahan FAQ berhasil disimpan ke Cloud Firestore!',
+    };
+  };
+
+  const adminDeleteSupportFaq = (id: string): { success: boolean; message: string } => {
+    const nextFaqs = supportFaqs.filter((f) => f.id !== id);
+    setSupportFaqs(nextFaqs);
+    flushMasterStateToCloud({ supportFaqs: nextFaqs });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Item FAQ berhasil dihapus. Sisa ${nextFaqs.length} bantuan FAQ aktif.`,
+    };
+  };
+
+  const adminResetSupportFaqs = (): { success: boolean; message: string } => {
+    const fresh50 = DEFAULT_SUPPORT_FAQS_50.map((f) => ({ ...f, steps: [...f.steps] }));
+    setSupportFaqs(fresh50);
+    flushMasterStateToCloud({ supportFaqs: fresh50 });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Daftar Pusat Bantuan berhasil direset kembali ke 50 FAQ komprehensif bawaan!',
     };
   };
 
@@ -10626,6 +11131,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Nama lengkap pemilik akun wajib diisi!' };
     }
 
+    const accountCategory: 'guest' | 'regular_no_google' | 'oa' =
+      input.accountCategory ||
+      (input.isOfficialAdminAccount === false ? 'regular_no_google' : 'oa');
+    const isOaMode = accountCategory === 'oa';
+    const isGuestMode = accountCategory === 'guest';
+    const isRegularNoGoogleMode = accountCategory === 'regular_no_google';
+
     const existingNums = accounts.map((a) => a.accountNumber);
     const existingIds = accounts.map((a) => ensureAccountUserId16(a));
 
@@ -10657,7 +11169,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const finalPin = rawPin.length === 6 ? rawPin : generateRandomPin6();
 
     const rawOaPin = (input.oaAdminPin || '').replace(/\D/g, '');
-    const finalOaAdminPin = rawOaPin.length === 6 ? rawOaPin : '159357';
+    const finalOaAdminPin = isOaMode ? (rawOaPin.length === 6 ? rawOaPin : '159357') : undefined;
 
     const rawCardDigits = (input.cardNumber || '').replace(/\D/g, '');
     const finalCardNumber =
@@ -10686,15 +11198,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? input.phone.trim()
         : `0812${Math.floor(10000000 + Math.random() * 89999999)}`;
 
+    // Akun Biasa Tanpa Sambungan Google dan Akun Guest tidak otomatis dihubungkan ke Google
     const finalEmail =
-      input.email && input.email.trim()
+      isRegularNoGoogleMode || isGuestMode
+        ? ''
+        : input.email && input.email.trim()
         ? normalizeEmailKey(input.email.trim())
         : '';
 
-    const finalAddress =
-      input.address && input.address.trim()
-        ? input.address.trim()
-        : 'Menara Otoritas Bank Nusantara Digital';
+    const finalAddress = isGuestMode
+      ? ''
+      : input.address && input.address.trim()
+      ? input.address.trim()
+      : '';
+
+    const finalStructuredAddress = isGuestMode ? undefined : input.structuredAddress;
 
     const finalBalance =
       input.isUnlimitedBalance || input.cardTier === 'admin'
@@ -10708,7 +11226,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       goldGrams > 0
         ? [
             {
-              id: `gold-oa-${Date.now()}`,
+              id: `gold-adm-${Date.now()}`,
               purchasedAt: nowIso,
               purchaseDateKey: nowIso.split('T')[0],
               grams: goldGrams,
@@ -10716,7 +11234,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               pricePerGramAtBuy: goldPrice,
               goldForm: 'batangan',
               motif: 'nusantara',
-              note: 'Modal Emas Awal Akun OA Panel Admin',
+              note: 'Modal Emas Awal Buatan Panel Admin',
             },
           ]
         : [];
@@ -10729,8 +11247,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     }
 
+    const idPrefix = isGuestMode
+      ? 'acc-admin-guest'
+      : isRegularNoGoogleMode
+      ? 'acc-reg'
+      : 'acc-oa';
+
     const newAcc: BankAccount = {
-      id: `acc-oa-${Date.now()}`,
+      id: `${idPrefix}-${Date.now()}`,
       userId16: finalUserId16,
       accountNumber: finalAccountNumber,
       fullName: cleanName,
@@ -10739,6 +11263,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       email: finalEmail,
       googleEmail: finalEmail || undefined,
       address: finalAddress,
+      structuredAddress: finalStructuredAddress,
       pin: finalPin,
       balance: finalBalance,
       cardTier: input.cardTier,
@@ -10753,12 +11278,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       initialDeposit: finalBalance === UNLIMITED_BALANCE ? UNLIMITED_BALANCE : finalBalance,
       createdAt: nowIso,
       rewardPoints:
-        input.rewardPoints !== undefined ? Math.max(0, Number(input.rewardPoints)) : 5000,
+        input.rewardPoints !== undefined
+          ? Math.max(0, Number(input.rewardPoints))
+          : isOaMode
+          ? 5000
+          : 0,
       pulsaBalance:
         input.pulsaBalance !== undefined ? Math.max(0, Number(input.pulsaBalance)) : 0,
       plnKwhBalance:
         input.plnKwhBalance !== undefined ? Math.max(0, Number(input.plnKwhBalance)) : 0,
-      allowInternational: input.allowInternational !== undefined ? input.allowInternational : true,
+      allowInternational:
+        input.allowInternational !== undefined ? input.allowInternational : isOaMode,
       customSpendingLimit:
         input.customSpendingLimit !== undefined
           ? Math.max(0, Number(input.customSpendingLimit))
@@ -10766,7 +11296,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isVerified: Boolean(input.isVerified),
       verifiedAt: input.isVerified ? nowIso : undefined,
       verifiedLabel: input.isVerified
-        ? input.verifiedLabel?.trim() || 'Akun OA Resmi Terverifikasi Admin'
+        ? input.verifiedLabel?.trim() ||
+          (isOaMode
+            ? 'Akun OA Resmi Terverifikasi Admin'
+            : 'Nasabah Terverifikasi Resmi Admin')
         : undefined,
       jobLevel: Math.min(50, Math.max(1, Number(input.jobLevel) || 1)),
       levelVouchers: Math.max(0, Number(input.levelVouchers) || 0),
@@ -10781,7 +11314,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       devRoleId: input.devRoleId || null,
       hasCompletedTutorial: true,
       tutorialApprovedByAdmin: true,
-      isOfficialAdminAccount: input.isOfficialAdminAccount !== false,
+      isGuestAccount: isGuestMode,
+      isRegularNoGoogleAccount: isRegularNoGoogleMode,
+      isOfficialAdminAccount: isOaMode,
+      createdByAdmin: true,
       oaAdminPin: finalOaAdminPin,
       failedPinAttempts: 0,
     };
@@ -10795,7 +11331,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
     void flushMasterStateToCloud({ accounts: nextAccounts });
-    if (finalEmail && isRealGoogleLinkedEmail(finalEmail)) {
+    if (isOaMode && finalEmail && isRealGoogleLinkedEmail(finalEmail)) {
       void syncCloudUserProfile(
         { email: finalEmail },
         {
@@ -10808,12 +11344,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     playAtmSound('cash');
 
+    const accountTypeLabel = isGuestMode
+      ? 'Akun Guest'
+      : isRegularNoGoogleMode
+      ? 'Akun Biasa Tanpa Google'
+      : 'Akun OA';
+    const loginHint = isOaMode
+      ? `PIN Admin OA: ${finalOaAdminPin} (Masuk lewat "Login Dengan Akun OA")`
+      : isGuestMode
+      ? 'Masuk lewat "Login Lewat Guest" atau "Login Ke Akun"'
+      : 'Masuk lewat "Login Ke Akun"';
+
     return {
       success: true,
       account: newAcc,
-      message: `🎉 Akun OA "${cleanName}" berhasil dibuat, langsung AKTIF & tersimpan ke Firebase Cloud azkaakc! (No. Rek: ${finalAccountNumber} • ID 16 Digit: ${formatUserId16(
+      message: `${accountTypeLabel} "${cleanName}" berhasil dibuat, langsung AKTIF & tersimpan ke Cloud! (No. Rek: ${finalAccountNumber} • ID 16 Digit: ${formatUserId16(
         finalUserId16
-      )} • PIN Kartu: ${finalPin} • PIN Admin OA: ${finalOaAdminPin})`,
+      )} • PIN Kartu: ${finalPin} • ${loginHint})`,
     };
   };
 
@@ -10998,6 +11545,210 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       message: `Selamat datang kembali di Akun OA Resmi: ${byAccountNum.fullName}!`,
+    };
+  };
+
+  // Login Ke Akun (Wajib 3 Kredensial: No. Rekening, ID User 16 Digit, PIN Kartu 6 Digit)
+  // Bisa login SEMUA jenis akun (Akun Biasa Tanpa Google, Akun Guest, maupun Akun Google) KECUALI Akun OA!
+  const loginWithStandardAccount = async (input: {
+    accountNumber: string;
+    userId16: string;
+    cardPin: string;
+  }): Promise<{ success: boolean; message: string }> => {
+    const cleanAccNum = (input.accountNumber || '').replace(/\D/g, '').trim();
+    const cleanUserId16 = (input.userId16 || '').replace(/\D/g, '').trim();
+    const cleanCardPin = (input.cardPin || '').replace(/\D/g, '').trim();
+
+    if (!cleanAccNum || !cleanUserId16 || !cleanCardPin) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'Wajib mengisi ketiga kolom: Nomor Rekening, User ID 16 Digit, dan PIN Kartu 6 Digit!',
+      };
+    }
+
+    if (cleanUserId16.length !== 16) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `User ID harus tepat 16 digit angka (saat ini ${cleanUserId16.length} digit).`,
+      };
+    }
+
+    if (cleanCardPin.length !== 6) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'PIN Kartu harus tepat 6 digit angka.',
+      };
+    }
+
+    // Ambil state terbaru dari Cloud agar akun yang baru dibuat Admin di perangkat lain langsung terbaca
+    let latestAccounts: BankAccount[] = accountsRef.current;
+    try {
+      const masterData = await readCloudDoc<Record<string, any>>('bank_state_v1', 'master_state');
+      if (masterData) {
+        const fetchedAccounts = toArraySafe<BankAccount>(masterData.accounts);
+        if (fetchedAccounts.length > 0) {
+          latestAccounts = unionMergeAccountsList(
+            fetchedAccounts,
+            [latestServerAccountsRef.current, accountsRef.current],
+            deletedAccountIdsRef.current
+          );
+          latestServerAccountsRef.current = latestAccounts;
+          accountsRef.current = latestAccounts;
+          setAccounts(latestAccounts);
+        }
+      }
+    } catch {
+      // Gunakan state lokal jika offline
+    }
+
+    const byAccountNum = latestAccounts.find((a) => a.accountNumber === cleanAccNum);
+    if (!byAccountNum) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Nomor Rekening "${cleanAccNum}" tidak ditemukan di database Bank Nusantara.`,
+      };
+    }
+
+    const accountId16 = ensureAccountUserId16(byAccountNum);
+    if (accountId16 !== cleanUserId16) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message:
+          'User ID 16 Digit tidak cocok dengan Nomor Rekening tersebut! Periksa kembali ID 16 Digit akun Anda.',
+      };
+    }
+
+    // Tolak Akun OA: Akun OA wajib lewat tombol "Login Dengan Akun OA"
+    if (byAccountNum.isOfficialAdminAccount || byAccountNum.id === 'acc-admin') {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message:
+          'Akses Ditolak: Akun ini adalah Akun OA. Silakan masuk melalui tombol "Login Dengan Akun OA" di bawah tombol ini.',
+      };
+    }
+
+    if (byAccountNum.status === 'banned' || byAccountNum.cardStatus === 'banned') {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Akun "${byAccountNum.fullName}" sedang dalam status BANNED: ${
+          byAccountNum.banReason || 'Silakan hubungi Admin Bank Nusantara.'
+        }`,
+      };
+    }
+
+    if (byAccountNum.pin !== cleanCardPin) {
+      const prevFails = byAccountNum.failedPinAttempts || 0;
+      const nextFails = prevFails + 1;
+      const reachedLimit = nextFails >= 5;
+      const banExpiresIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const updatedAccounts = latestAccounts.map((acc) =>
+        acc.id === byAccountNum.id
+          ? {
+              ...acc,
+              failedPinAttempts: nextFails,
+              ...(reachedLimit
+                ? {
+                    cardStatus: 'banned' as const,
+                    status: 'banned' as const,
+                    banReason: 'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login Ke Akun (Banned 1 Hari).',
+                    banInfo: {
+                      isBanned: true,
+                      reason:
+                        'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login Ke Akun (Banned 1 Hari).',
+                      bannedAt: new Date().toISOString(),
+                      durationType: 'custom' as const,
+                      durationLabel: '1 Hari (24 Jam)',
+                      durationMinutes: 1440,
+                      expiresAt: banExpiresIso,
+                      customConfig: {
+                        ...(banSupportConfig.defaultTemplate || DEFAULT_BAN_SCREEN_CONFIG),
+                        durationType: 'custom' as const,
+                        durationMinutes: 1440,
+                        durationLabel: '1 Hari (24 Jam)',
+                        expiresAt: banExpiresIso,
+                        reason:
+                          'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login Ke Akun (Banned 1 Hari).',
+                        reasonText:
+                          'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login Ke Akun (Banned 1 Hari).',
+                        caseId: generateBanCaseId(),
+                        bannedAt: new Date().toISOString(),
+                      },
+                    },
+                  }
+                : {}),
+            }
+          : acc
+      );
+      latestServerAccountsRef.current = updatedAccounts;
+      accountsRef.current = updatedAccounts;
+      setAccounts(updatedAccounts);
+      void flushMasterStateToCloud({ accounts: updatedAccounts });
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: reachedLimit
+          ? 'Salah PIN 5 kali! Akun otomatis dibanned 1 hari demi keamanan.'
+          : `PIN Kartu 6 digit salah! Sisa percobaan: ${Math.max(0, 5 - nextFails)} dari 5.`,
+      };
+    }
+
+    // Reset failedPinAttempts jika sebelumnya > 0
+    let finalAccounts = latestAccounts;
+    if ((byAccountNum.failedPinAttempts || 0) > 0) {
+      finalAccounts = latestAccounts.map((acc) =>
+        acc.id === byAccountNum.id ? { ...acc, failedPinAttempts: 0 } : acc
+      );
+      latestServerAccountsRef.current = finalAccounts;
+      accountsRef.current = finalAccounts;
+      setAccounts(finalAccounts);
+      void flushMasterStateToCloud({ accounts: finalAccounts });
+    }
+
+    const rawLinkedEmail = (byAccountNum.googleEmail || byAccountNum.email || '').trim().toLowerCase();
+    const hasRealGoogleEmail =
+      Boolean(rawLinkedEmail) &&
+      !rawLinkedEmail.endsWith('@nusantara.id') &&
+      !rawLinkedEmail.endsWith('@banknusantara.id') &&
+      !rawLinkedEmail.startsWith('oa.');
+    const sessionEmail = hasRealGoogleEmail ? rawLinkedEmail : '';
+    const resolvedMode: 'guest' | 'standard_account' = byAccountNum.isGuestAccount
+      ? 'guest'
+      : 'standard_account';
+
+    setCurrentAccountIdState(byAccountNum.id);
+    setActiveCloudEmail(sessionEmail);
+    setCloudAccountVerificationState('confirmed_has_accounts');
+    setGoogleUser({
+      email: sessionEmail,
+      name: byAccountNum.fullName,
+      firebaseUid: byAccountNum.firebaseUid,
+      authMode: resolvedMode,
+      emailKey: sessionEmail ? emailToFirestoreDocId(normalizeEmailKey(sessionEmail)) : undefined,
+      loggedInAt: new Date().toISOString(),
+      hasCompletedOnboarding: true,
+      isPinVerified: true,
+    });
+    persistActiveSessionToIdb({
+      authMode: resolvedMode,
+      firebaseUid: byAccountNum.firebaseUid,
+      email: sessionEmail,
+      name: byAccountNum.fullName,
+      activeAccountId: byAccountNum.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: finalAccounts,
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Selamat datang kembali, ${byAccountNum.fullName}!`,
     };
   };
 
@@ -11378,24 +12129,31 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       phone?: string;
       email?: string;
       address?: string;
+      structuredAddress?: StructuredIndonesiaAddress;
     }
   ) => {
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan!' };
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === accountId
-          ? {
-              ...acc,
-              fullName: input.fullName?.trim() || acc.fullName,
-              nik: input.nik?.trim() || acc.nik,
-              phone: input.phone?.trim() || acc.phone,
-              email: input.email?.trim() || acc.email,
-              address: input.address?.trim() || acc.address,
-            }
-          : acc
-      )
+    const nextAccounts = accounts.map((acc) =>
+      acc.id === accountId
+        ? {
+            ...acc,
+            fullName: input.fullName?.trim() || acc.fullName,
+            nik: input.nik?.trim() || acc.nik,
+            phone: input.phone?.trim() || acc.phone,
+            email: input.email?.trim() || acc.email,
+            address: input.address !== undefined ? input.address.trim() : acc.address,
+            structuredAddress:
+              input.structuredAddress !== undefined
+                ? input.structuredAddress
+                : acc.structuredAddress,
+          }
+        : acc
     );
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
     playAtmSound('success');
     return {
       success: true,
@@ -11722,13 +12480,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'PIN baru harus terdiri dari tepat 6 digit angka!' };
     }
 
-    setAccounts((prev) =>
-      prev.map((acc) => (acc.id === accountId ? { ...acc, pin: newPin } : acc))
+    const nextAccounts = accounts.map((acc) =>
+      acc.id === accountId ? { ...acc, pin: newPin } : acc
     );
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
 
     addNotification(
       'PIN Kartu Berhasil Diubah 🛡️',
-      'Kode PIN kartu ATM Anda telah berhasil diperbarui.',
+      'Kode PIN kartu ATM Anda telah berhasil diperbarui dan disimpan ke Cloud.',
       'success',
       {
         category: 'security',
@@ -21277,8 +22039,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         cloudUserStatus,
         loginOrRegisterWithEmail,
         loginWithGooglePopup,
+        loginWithStandardAccount,
         loginWithOaAccount,
         guestLocalAccounts,
+        deviceLobbyGuestAccount,
+        canCreateLobbyGuestOnThisDevice,
         registerGuestRegularCard,
         loginToGuestAccountWithPin,
         linkCurrentAccountWithGooglePopup,
@@ -21416,7 +22181,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminApplyCustomBanConfig,
         adminSaveDefaultBanTemplate,
         adminSaveBanPreset,
+        adminUpdateBanPreset,
+        adminDuplicateBanPreset,
         adminDeleteBanPreset,
+        supportFaqs,
+        supportContactConfig,
+        adminUpdateSupportContactConfig,
+        adminAddSupportFaq,
+        adminUpdateSupportFaq,
+        adminDeleteSupportFaq,
+        adminResetSupportFaqs,
         adminUnbanCard,
         adminUnbanAllCards,
         submitCardBanAppeal,

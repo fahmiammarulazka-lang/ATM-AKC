@@ -13,8 +13,12 @@ import {
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CARD_TIER_CONFIGS, formatRupiah, validateStrongPin } from '../utils/bankUtils';
-import { CardTier } from '../types/bank';
-import { GoogleMapsAddressPicker } from './GoogleMapsAddressPicker';
+import { CardTier, StructuredIndonesiaAddress } from '../types/bank';
+import { IndonesiaAddressPicker } from './IndonesiaAddressPicker';
+import {
+  createEmptyStructuredAddress,
+  validateStructuredAddress,
+} from '../data/indonesiaRegionsOffline';
 
 interface CardRegistrationModalProps {
   isOpen: boolean;
@@ -36,7 +40,9 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
   const [phone, setPhone] = useState<string>('');
   const [email, setEmail] = useState<string>('');
   const [address, setAddress] = useState<string>('');
-  const [initialDeposit, setInitialDeposit] = useState<number>(500_000);
+  const [structuredAddress, setStructuredAddress] = useState<StructuredIndonesiaAddress>(() =>
+    createEmptyStructuredAddress()
+  );
   const [pin, setPin] = useState<string>('');
   const [confirmPin, setConfirmPin] = useState<string>('');
   const [selectedTier, setSelectedTier] = useState<CardTier>('regular');
@@ -51,12 +57,21 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
 
   const handleStep1Submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName || !nik || !phone || !address) {
-      setErrorMsg('Harap lengkapi seluruh formulir identitas.');
+    if (!fullName || !nik || !phone) {
+      setErrorMsg('Harap lengkapi nama lengkap, NIK 16 digit, dan nomor HP.');
       return;
     }
     if (!/^\d{16}$/.test(nik.trim())) {
       setErrorMsg('Nomor Identitas KTP (NIK) harus terdiri dari tepat 16 digit angka.');
+      return;
+    }
+    const addrCheck = validateStructuredAddress(structuredAddress);
+    if (!addrCheck.valid && !address.trim()) {
+      setErrorMsg(addrCheck.message || 'Harap lengkapi pilihan alamat wilayah Indonesia hingga RT/RW.');
+      return;
+    }
+    if (structuredAddress.provinceName && !addrCheck.valid) {
+      setErrorMsg(addrCheck.message || 'Harap lengkapi pilihan alamat wilayah Indonesia hingga RT/RW.');
       return;
     }
     setErrorMsg('');
@@ -89,9 +104,10 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
       phone,
       email: email || `${fullName.toLowerCase().replace(/\s+/g, '.')}@gmail.com`,
       address,
+      structuredAddress: structuredAddress.provinceName ? structuredAddress : undefined,
       pin,
       cardTier: selectedTier,
-      initialDeposit,
+      initialDeposit: 0,
     });
 
     if (res.success && res.accountId) {
@@ -106,6 +122,7 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
     setPhone('');
     setEmail('');
     setAddress('');
+    setStructuredAddress(createEmptyStructuredAddress());
     setPin('');
     setConfirmPin('');
     setSelectedTier('regular');
@@ -171,7 +188,7 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
                 Langkah 1 — Formulir Data Identitas
               </span>
               <p className="text-slate-400 text-xs">
-                Isi formulir pendaftaran dengan nama lengkap, nomor identitas (KTP), alamat, dan setoran awal.
+                Isi formulir pendaftaran dengan nama lengkap, nomor identitas (KTP), nomor HP, dan alamat domisili. Saldo awal otomatis Rp 0.
               </p>
             </div>
 
@@ -216,26 +233,24 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
                 </div>
               </div>
 
-              <GoogleMapsAddressPicker
-                value={address}
-                onChange={(newAddr) => setAddress(newAddr)}
-                required={true}
-                label="Alamat Tempat Tinggal Lengkap (Ambil Langsung dari Google Maps):"
-                placeholder="Klik titik lokasi di Peta Google Maps di atas atau klik Ambil Lokasi GPS Saya Otomatis..."
+              <IndonesiaAddressPicker
+                value={structuredAddress}
+                formattedAddress={address}
+                onChange={(formatted, struct) => {
+                  setAddress(formatted);
+                  setStructuredAddress(struct);
+                }}
+                enableGoogleMapsTab={true}
+                label="Alamat Tempat Tinggal Resmi (Provinsi → Desa → Kode Pos → RT/RW)"
               />
 
-              <div>
-                <label className="text-slate-300 font-semibold block mb-1">Saldo Setoran Awal (Rp):</label>
-                <input
-                  type="number"
-                  min={100_000}
-                  step={50_000}
-                  value={initialDeposit}
-                  onChange={(e) => setInitialDeposit(parseInt(e.target.value, 10) || 0)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-amber-400"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Saldo awal akan langsung masuk ke rekening begitu pendaftaran selesai diproses.
+              <div className="p-3 rounded-xl bg-slate-950/90 border border-emerald-500/30 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-300 font-semibold">Saldo Awal Rekening:</span>
+                  <span className="font-mono font-black text-emerald-400">Rp 0 (Otomatis)</span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-relaxed">
+                  Saldo tidak dapat diketik sendiri saat pendaftaran. Setelah kartu disetujui Admin &amp; aktif, Anda bisa mendapatkan uang melalui Kerja/Gajian, Transfer masuk, atau Pemberian Admin.
                 </p>
               </div>
             </div>
@@ -415,8 +430,8 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
                 <span className="font-bold text-amber-300">{activeTierConfig.nameIndo} ({activeTierConfig.colorName})</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Setoran Awal:</span>
-                <span className="font-mono font-bold text-emerald-400">{formatRupiah(initialDeposit)}</span>
+                <span className="text-slate-400">Saldo Awal Pembukaan:</span>
+                <span className="font-mono font-bold text-emerald-400">Rp 0 (Otomatis)</span>
               </div>
               <div className="flex justify-between border-t border-slate-800 pt-2">
                 <span className="text-slate-400">Sistem Nomor Rekening:</span>

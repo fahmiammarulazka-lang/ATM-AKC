@@ -7,7 +7,7 @@
  *         4 Tema Warna, 4 Ikon, Aturan Banding, Preset Konfigurasi, Catatan Rahasia Admin, & Log Audit Cloud)
  * - Kanan: Live Preview Real-Time Interaktif (Bisa diklik langsung, mode layar HP / Laptop, & Simulasi Status Banding)
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   ShieldBan,
   Eye,
@@ -40,6 +40,8 @@ import {
   XCircle,
   KeyRound,
   Sliders,
+  Edit3,
+  X,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -56,6 +58,8 @@ import {
   QUICK_BAN_PRESETS_20,
   DEFAULT_BAN_SCREEN_CONFIG,
   DEFAULT_BAN_CONFIG_PRESETS,
+  DEFAULT_BAN_MESSAGE_TEMPLATE,
+  BAN_TEMPLATE_VARIABLES,
   generateBanCaseId,
   computeDurationMinutesAndLabel,
 } from '../data/banStudioCatalog';
@@ -69,6 +73,8 @@ export const AdminBanStudioView: React.FC = () => {
     adminApplyCustomBanConfig,
     adminSaveDefaultBanTemplate,
     adminSaveBanPreset,
+    adminUpdateBanPreset,
+    adminDuplicateBanPreset,
     adminDeleteBanPreset,
     adminUnbanCard,
     adminUnbanAllCards,
@@ -84,11 +90,58 @@ export const AdminBanStudioView: React.FC = () => {
   const [selectedMultiAccountIds, setSelectedMultiAccountIds] = useState<string[]>([]);
 
   // Live Preview Config State
+  const initialBaseTemplate =
+    banSupportConfig.defaultTemplate ||
+    banSupportConfig.defaultTemplateConfig ||
+    DEFAULT_BAN_SCREEN_CONFIG;
   const [draftConfig, setDraftConfig] = useState<BanScreenCustomizationConfig>(() => ({
-    ...(banSupportConfig.defaultTemplate || DEFAULT_BAN_SCREEN_CONFIG),
+    ...DEFAULT_BAN_SCREEN_CONFIG,
+    ...initialBaseTemplate,
+    appealMessageTemplate:
+      initialBaseTemplate.appealMessageTemplate !== undefined
+        ? initialBaseTemplate.appealMessageTemplate
+        : initialBaseTemplate.messageTemplate ?? DEFAULT_BAN_MESSAGE_TEMPLATE,
+    messageTemplate:
+      initialBaseTemplate.appealMessageTemplate !== undefined
+        ? initialBaseTemplate.appealMessageTemplate
+        : initialBaseTemplate.messageTemplate ?? DEFAULT_BAN_MESSAGE_TEMPLATE,
     caseId: generateBanCaseId(),
     bannedAt: new Date().toISOString(),
   }));
+
+  const isDraftDirtyRef = useRef<boolean>(false);
+  const templateTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Sync draftConfig & global contact inputs when banSupportConfig hydrates from Cloud (only if user hasn't typed locally)
+  useEffect(() => {
+    setGlobalWa(banSupportConfig.whatsappNumber || '');
+    setGlobalEmail(banSupportConfig.emailAddress || '');
+    if (!isDraftDirtyRef.current) {
+      const hydratedBase =
+        banSupportConfig.defaultTemplate ||
+        banSupportConfig.defaultTemplateConfig ||
+        DEFAULT_BAN_SCREEN_CONFIG;
+      setDraftConfig((prev) => ({
+        ...DEFAULT_BAN_SCREEN_CONFIG,
+        ...hydratedBase,
+        appealMessageTemplate:
+          hydratedBase.appealMessageTemplate !== undefined
+            ? hydratedBase.appealMessageTemplate
+            : hydratedBase.messageTemplate ?? DEFAULT_BAN_MESSAGE_TEMPLATE,
+        messageTemplate:
+          hydratedBase.appealMessageTemplate !== undefined
+            ? hydratedBase.appealMessageTemplate
+            : hydratedBase.messageTemplate ?? DEFAULT_BAN_MESSAGE_TEMPLATE,
+        caseId: prev.caseId || generateBanCaseId(),
+        bannedAt: prev.bannedAt || new Date().toISOString(),
+      }));
+    }
+  }, [
+    banSupportConfig.whatsappNumber,
+    banSupportConfig.emailAddress,
+    banSupportConfig.defaultTemplate,
+    banSupportConfig.defaultTemplateConfig,
+  ]);
 
   // Live Preview Device & Appeal Simulator State (Q41 & Q42)
   const [previewDevice, setPreviewDevice] = useState<'mobile' | 'desktop'>('desktop');
@@ -99,9 +152,12 @@ export const AdminBanStudioView: React.FC = () => {
   // Schedule mode (Q45: Langsung atau Terjadwal)
   const [useScheduledStart, setUseScheduledStart] = useState<boolean>(false);
 
-  // Preset Save Form
+  // Preset Save & Edit Form
   const [newPresetName, setNewPresetName] = useState<string>('');
   const [newPresetDesc, setNewPresetDesc] = useState<string>('');
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
+  const [editingPresetName, setEditingPresetName] = useState<string>('');
+  const [editingPresetDesc, setEditingPresetDesc] = useState<string>('');
 
   // Global WA & Email Support inputs
   const [globalWa, setGlobalWa] = useState<string>(banSupportConfig.whatsappNumber || '');
@@ -139,6 +195,7 @@ export const AdminBanStudioView: React.FC = () => {
 
   // Helper to update draftConfig and recompute durationLabel & expiresAt live
   const updateDraft = (patch: Partial<BanScreenCustomizationConfig>) => {
+    isDraftDirtyRef.current = true;
     setDraftConfig((prev) => {
       const merged: BanScreenCustomizationConfig = { ...prev, ...patch };
       const computed = computeDurationMinutesAndLabel(merged);
@@ -153,6 +210,60 @@ export const AdminBanStudioView: React.FC = () => {
         durationLabel: computed.durationLabel,
         expiresAt: nextExpiresAt,
       };
+    });
+  };
+
+  // Sisip 1-klik variabel ke kotak Template Pesan Banned tepat di posisi kursor
+  const handleInsertBanTemplateVariable = (token: string) => {
+    isDraftDirtyRef.current = true;
+    const el = templateTextareaRef.current;
+    setDraftConfig((prev) => {
+      const currentVal = prev.appealMessageTemplate ?? '';
+      if (el && typeof el.selectionStart === 'number') {
+        const start = el.selectionStart;
+        const end = el.selectionEnd ?? start;
+        const nextVal = `${currentVal.slice(0, start)}${token}${currentVal.slice(end)}`;
+        window.requestAnimationFrame(() => {
+          el.focus();
+          const pos = start + token.length;
+          el.setSelectionRange(pos, pos);
+        });
+        return {
+          ...prev,
+          appealMessageTemplate: nextVal,
+          messageTemplate: nextVal,
+        };
+      }
+      const nextVal = `${currentVal}${currentVal.endsWith(' ') || !currentVal ? '' : ' '}${token}`;
+      return {
+        ...prev,
+        appealMessageTemplate: nextVal,
+        messageTemplate: nextVal,
+      };
+    });
+  };
+
+  // Simpan Template Pesan Banned & Otomatis Terapkan ke Semua Akun yang Sedang Dibanned
+  const handleSaveBanMessageTemplateNow = () => {
+    const res = adminSaveDefaultBanTemplate(draftConfig, { applyToAllBanned: true });
+    if (res.success) {
+      isDraftDirtyRef.current = false;
+    }
+    setStudioFeedback({
+      type: res.success ? 'success' : 'error',
+      text: res.message,
+    });
+  };
+
+  // Reset Template Pesan Banned ke Template Panjang Bawaan Sistem
+  const handleResetBanMessageTemplateToDefault = () => {
+    updateDraft({
+      appealMessageTemplate: DEFAULT_BAN_MESSAGE_TEMPLATE,
+      messageTemplate: DEFAULT_BAN_MESSAGE_TEMPLATE,
+    });
+    setStudioFeedback({
+      type: 'info',
+      text: 'Template pesan banding dikembalikan ke format lengkap bawaan sistem. Klik "Simpan Template" untuk menyimpan ke Cloud & menerapkan ke semua akun banned.',
     });
   };
 
@@ -1389,27 +1500,77 @@ export const AdminBanStudioView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Template Pesan Otomatis WA & Email (Q22) */}
-                <div className="pt-3 border-t border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold text-slate-300">
-                      Template Pesan Otomatis Saat Klik WA / Email:
-                    </label>
-                    <span className="text-[10px] font-mono text-amber-300">
-                      Variabel: {'{nama}'} {'{email}'} {'{rekening}'} {'{alasan}'} {'{caseId}'}
-                    </span>
+                {/* Template Pesan Otomatis WA & Email (Bebas Edit + 1-Klik Variabel + Simpan Langsung + Reset) */}
+                <div className="pt-3 border-t border-slate-800 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-white block">
+                        Template Pesan Otomatis Saat Nasabah Klik WA / Email (Bebas Diedit Penuh):
+                      </label>
+                      <span className="text-[10.5px] text-slate-400">
+                        Klik tombol variabel di bawah untuk menyisipkan otomatis, lalu klik Simpan Template agar langsung aktif di semua akun banned.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResetBanMessageTemplateToDefault}
+                      className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset Template Bawaan</span>
+                    </button>
                   </div>
+
+                  {/* Tombol 1-Klik Sisip Variabel */}
+                  <div className="flex flex-wrap items-center gap-1.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                    <span className="text-[10px] font-bold text-cyan-300 mr-1">
+                      Sisip Variabel:
+                    </span>
+                    {BAN_TEMPLATE_VARIABLES.map((v) => (
+                      <button
+                        key={v.token}
+                        type="button"
+                        onClick={() => handleInsertBanTemplateVariable(v.token)}
+                        className="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-amber-400/60 text-[10.5px] font-mono text-amber-300 cursor-pointer transition-colors"
+                        title={`Sisipkan ${v.label} (Contoh: ${v.sample})`}
+                      >
+                        {v.token} <span className="text-slate-400 font-sans">({v.label})</span>
+                      </button>
+                    ))}
+                  </div>
+
                   <textarea
-                    rows={3}
-                    value={draftConfig.appealMessageTemplate || draftConfig.messageTemplate || ''}
+                    ref={templateTextareaRef}
+                    rows={10}
+                    value={draftConfig.appealMessageTemplate ?? ''}
                     onChange={(e) =>
                       updateDraft({
                         appealMessageTemplate: e.target.value,
                         messageTemplate: e.target.value,
                       })
                     }
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono text-[11px]"
+                    placeholder="Ketik bebas template pesan banding WhatsApp & Email di sini..."
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-amber-400 rounded-xl p-3 text-white font-mono text-[11.5px] leading-relaxed outline-none"
                   />
+
+                  {/* Tombol Simpan Template Langsung di Bawah Kotak Teks */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <span className="text-[10.5px] text-slate-400">
+                      Menyimpan akan memperbarui Template Global Default &amp; otomatis menerapkan ke{' '}
+                      <strong className="text-amber-300 font-mono tabular-nums">
+                        {bannedAccounts.length}
+                      </strong>{' '}
+                      akun yang sedang dibanned.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleSaveBanMessageTemplateNow}
+                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow-md"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Simpan Template &amp; Terapkan ke Semua Akun Banned</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Aturan Form "Tinjau di Sini" & Kotak Status Banding (Q24, Q25, Q26, Q27) */}
@@ -1705,7 +1866,8 @@ export const AdminBanStudioView: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      const r = adminSaveDefaultBanTemplate(draftConfig);
+                      const r = adminSaveDefaultBanTemplate(draftConfig, { applyToAllBanned: true });
+                      if (r.success) isDraftDirtyRef.current = false;
                       setStudioFeedback({
                         type: r.success ? 'success' : 'error',
                         text: r.message,
@@ -1714,9 +1876,68 @@ export const AdminBanStudioView: React.FC = () => {
                     className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer"
                   >
                     <Bookmark className="w-3.5 h-3.5" />
-                    <span>Jadikan Template Global Default</span>
+                    <span>Simpan Template Global &amp; Terapkan Semua Banned</span>
                   </button>
                 </div>
+
+                {/* Panel Edit Preset Custom yang Sedang Dipilih */}
+                {editingPresetId && (
+                  <div className="p-3.5 rounded-xl bg-cyan-950/35 border border-cyan-500/60 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-cyan-300 text-xs flex items-center gap-1.5">
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Mode Edit Preset Custom (Nama, Keterangan &amp; Isi Template Live Preview)</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEditingPresetId(null)}
+                        className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-300">
+                      Ubah nama/keterangan di bawah atau ubah isi template pesan/tema di tab Studio sebelah kiri, lalu klik <strong>Simpan Perubahan Preset</strong>.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                      <input
+                        type="text"
+                        value={editingPresetName}
+                        onChange={(e) => setEditingPresetName(e.target.value)}
+                        placeholder="Nama Preset..."
+                        className="sm:col-span-5 bg-slate-950 border border-cyan-500/40 rounded-xl p-2 text-white text-xs"
+                      />
+                      <input
+                        type="text"
+                        value={editingPresetDesc}
+                        onChange={(e) => setEditingPresetDesc(e.target.value)}
+                        placeholder="Keterangan preset..."
+                        className="sm:col-span-4 bg-slate-950 border border-cyan-500/40 rounded-xl p-2 text-white text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const r = adminUpdateBanPreset(editingPresetId, {
+                            name: editingPresetName,
+                            description: editingPresetDesc,
+                            config: draftConfig,
+                          });
+                          setStudioFeedback({
+                            type: r.success ? 'success' : 'error',
+                            text: r.message,
+                          });
+                          if (r.success) {
+                            setEditingPresetId(null);
+                          }
+                        }}
+                        className="sm:col-span-3 py-2 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Simpan Perubahan</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Form Simpan Preset Baru */}
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-2 border-t border-slate-800">
@@ -1758,49 +1979,153 @@ export const AdminBanStudioView: React.FC = () => {
                   </button>
                 </div>
 
-                {/* Daftar Preset Tersimpan */}
+                {/* Daftar Preset Tersimpan (Bawaan: Duplikasi & Edit | Custom: Edit & Hapus) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {savedPresets.map((preset) => (
-                    <div
-                      key={preset.id}
-                      className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <span className="font-bold text-white block truncate">{preset.name}</span>
-                        <span className="text-[10px] text-slate-400 block truncate">
-                          {preset.description}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDraftConfig({
-                              ...preset.config,
-                              caseId: generateBanCaseId(),
-                              bannedAt: new Date().toISOString(),
-                            });
-                            setStudioFeedback({
-                              type: 'info',
-                              text: `Preset "${preset.name}" berhasil dimuat ke Live Preview!`,
-                            });
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] cursor-pointer"
-                        >
-                          Pakai
-                        </button>
-                        {preset.id.startsWith('preset-custom-') && (
+                  {savedPresets.map((preset) => {
+                    const isCustom = preset.id.startsWith('preset-custom-');
+                    const isBeingEdited = editingPresetId === preset.id;
+                    return (
+                      <div
+                        key={preset.id}
+                        className={`p-3 rounded-xl bg-slate-950 border flex flex-col justify-between gap-2.5 ${
+                          isBeingEdited ? 'border-cyan-400' : 'border-slate-800'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-white block truncate">
+                              {preset.name}
+                            </span>
+                            <span className="text-[9.5px] font-mono text-slate-400 shrink-0">
+                              {isCustom ? '· Custom' : '· Bawaan'}
+                            </span>
+                          </div>
+                          <span className="text-[10.5px] text-slate-400 block truncate mt-0.5">
+                            {preset.description}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <button
                             type="button"
-                            onClick={() => adminDeleteBanPreset(preset.id)}
-                            className="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-950 text-rose-400 cursor-pointer"
+                            onClick={() => {
+                              isDraftDirtyRef.current = true;
+                              setDraftConfig({
+                                ...DEFAULT_BAN_SCREEN_CONFIG,
+                                ...preset.config,
+                                appealMessageTemplate:
+                                  preset.config.appealMessageTemplate !== undefined
+                                    ? preset.config.appealMessageTemplate
+                                    : preset.config.messageTemplate ?? DEFAULT_BAN_MESSAGE_TEMPLATE,
+                                messageTemplate:
+                                  preset.config.appealMessageTemplate !== undefined
+                                    ? preset.config.appealMessageTemplate
+                                    : preset.config.messageTemplate ?? DEFAULT_BAN_MESSAGE_TEMPLATE,
+                                caseId: generateBanCaseId(),
+                                bannedAt: new Date().toISOString(),
+                              });
+                              setStudioFeedback({
+                                type: 'info',
+                                text: `Preset "${preset.name}" berhasil dimuat ke Live Preview!`,
+                              });
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] cursor-pointer"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            Pakai
                           </button>
-                        )}
+
+                          {!isCustom ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const res = adminDuplicateBanPreset(preset.id);
+                                setStudioFeedback({
+                                  type: res.success ? 'success' : 'error',
+                                  text: res.message,
+                                });
+                                if (res.success && res.preset) {
+                                  isDraftDirtyRef.current = true;
+                                  setDraftConfig({
+                                    ...DEFAULT_BAN_SCREEN_CONFIG,
+                                    ...res.preset.config,
+                                    appealMessageTemplate:
+                                      res.preset.config.appealMessageTemplate !== undefined
+                                        ? res.preset.config.appealMessageTemplate
+                                        : res.preset.config.messageTemplate ??
+                                          DEFAULT_BAN_MESSAGE_TEMPLATE,
+                                    messageTemplate:
+                                      res.preset.config.appealMessageTemplate !== undefined
+                                        ? res.preset.config.appealMessageTemplate
+                                        : res.preset.config.messageTemplate ??
+                                          DEFAULT_BAN_MESSAGE_TEMPLATE,
+                                    caseId: generateBanCaseId(),
+                                    bannedAt: new Date().toISOString(),
+                                  });
+                                  setEditingPresetId(res.preset.id);
+                                  setEditingPresetName(res.preset.name);
+                                  setEditingPresetDesc(res.preset.description || '');
+                                }
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                            >
+                              <Copy className="w-3 h-3" />
+                              <span>Duplikasi &amp; Edit</span>
+                            </button>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  isDraftDirtyRef.current = true;
+                                  setDraftConfig({
+                                    ...DEFAULT_BAN_SCREEN_CONFIG,
+                                    ...preset.config,
+                                    appealMessageTemplate:
+                                      preset.config.appealMessageTemplate !== undefined
+                                        ? preset.config.appealMessageTemplate
+                                        : preset.config.messageTemplate ??
+                                          DEFAULT_BAN_MESSAGE_TEMPLATE,
+                                    messageTemplate:
+                                      preset.config.appealMessageTemplate !== undefined
+                                        ? preset.config.appealMessageTemplate
+                                        : preset.config.messageTemplate ??
+                                          DEFAULT_BAN_MESSAGE_TEMPLATE,
+                                    caseId: generateBanCaseId(),
+                                    bannedAt: new Date().toISOString(),
+                                  });
+                                  setEditingPresetId(preset.id);
+                                  setEditingPresetName(preset.name);
+                                  setEditingPresetDesc(preset.description || '');
+                                  setStudioFeedback({
+                                    type: 'info',
+                                    text: `Sedang mengedit preset "${preset.name}". Ubah nama/keterangan atau isi template di Studio, lalu klik "Simpan Perubahan".`,
+                                  });
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (editingPresetId === preset.id) setEditingPresetId(null);
+                                  const r = adminDeleteBanPreset(preset.id);
+                                  setStudioFeedback({
+                                    type: r.success ? 'success' : 'error',
+                                    text: r.message,
+                                  });
+                                }}
+                                className="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-950 text-rose-400 cursor-pointer"
+                                title="Hapus Preset Custom"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 

@@ -174,17 +174,22 @@ export const BanLockScreen: React.FC<{ previewState?: BanLockPreviewProps }> = (
 
   const shouldShowReasonBox = cfg.showReasonBox && cfg.reasonMode !== 'none' && Boolean(resolvedReason);
 
-  const prefilledText = formatBanAppealPrefillMessage(
-    cfg.appealMessageTemplate || cfg.messageTemplate,
-    {
-      nama: identityName,
-      email: identityEmail,
-      rekening: identityAcc,
-      alasan: resolvedReason,
-      caseId: cfg.caseId,
-      durasi: cfg.durationLabel,
-    }
-  );
+  const resolvedAppealTemplate =
+    cfg.appealMessageTemplate !== undefined
+      ? cfg.appealMessageTemplate
+      : cfg.messageTemplate !== undefined
+      ? cfg.messageTemplate
+      : banSupportConfig.defaultTemplate?.appealMessageTemplate ??
+        banSupportConfig.defaultTemplateConfig?.appealMessageTemplate;
+
+  const prefilledText = formatBanAppealPrefillMessage(resolvedAppealTemplate, {
+    nama: identityName,
+    email: identityEmail,
+    rekening: identityAcc,
+    alasan: resolvedReason,
+    caseId: cfg.caseId,
+    durasi: cfg.durationLabel,
+  });
 
   const waHref = waFormatted
     ? `https://wa.me/${waFormatted}?text=${encodeURIComponent(prefilledText)}`

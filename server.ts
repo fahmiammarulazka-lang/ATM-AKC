@@ -964,6 +964,241 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
     }
   });
 
+  // ==================== INDONESIAN 38-PROVINCE REGIONS & POSTAL CODE PROXY ====================
+  const regionProxyCache = new Map<string, { data: unknown; expiresAt: number }>();
+  const REGION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+  async function fetchFirstValidJson(urls: string[]): Promise<any | null> {
+    for (const url of urls) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        const resp = await fetch(url, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json', 'User-Agent': 'BankNusantaraApp/1.0' },
+        });
+        if (!resp.ok) continue;
+        const json = await resp.json();
+        const arr = Array.isArray(json) ? json : Array.isArray(json?.data) ? json.data : null;
+        if (arr && arr.length > 0) {
+          return arr;
+        }
+      } catch {
+        // try next upstream
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return null;
+  }
+
+  function normalizeRegionList(arr: any[]) {
+    return arr
+      .map((item) => {
+        const code = String(item?.code ?? item?.id ?? '').trim();
+        const name = String(item?.name ?? item?.nama ?? '').trim();
+        const postalRaw = item?.postal_code ?? item?.postalCode ?? item?.kodepos;
+        const postalCode =
+          typeof postalRaw === 'string' || typeof postalRaw === 'number'
+            ? String(postalRaw).replace(/\D/g, '').slice(0, 5)
+            : undefined;
+        return {
+          code,
+          name,
+          ...(postalCode && postalCode.length === 5 ? { postalCode } : {}),
+        };
+      })
+      .filter((x) => x.code && x.name);
+  }
+
+  app.get('/api/regions/provinces', async (_req, res) => {
+    const cacheKey = 'provinces';
+    const hit = regionProxyCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) {
+      res.json({ success: true, cached: true, data: hit.data });
+      return;
+    }
+    const raw = await fetchFirstValidJson([
+      'https://wilayah.id/api/provinces.json',
+      'https://www.emsifa.com/api-wilayah-indonesia/v2/provinces.json',
+      'https://www.emsifa.com/api-wilayah-indonesia/api/provinces.json',
+    ]);
+    if (raw) {
+      const data = normalizeRegionList(raw);
+      regionProxyCache.set(cacheKey, { data, expiresAt: Date.now() + REGION_CACHE_TTL_MS });
+      res.json({ success: true, data });
+      return;
+    }
+    res.json({ success: false, data: [] });
+  });
+
+  app.get('/api/regions/regencies/:provinceCode', async (req, res) => {
+    const rawCode = String(req.params.provinceCode || '').replace(/[^0-9.]/g, '');
+    if (!rawCode) {
+      res.status(400).json({ success: false, data: [] });
+      return;
+    }
+    const flatCode = rawCode.replace(/\./g, '');
+    const cacheKey = `regencies:${flatCode}`;
+    const hit = regionProxyCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) {
+      res.json({ success: true, cached: true, data: hit.data });
+      return;
+    }
+    const raw = await fetchFirstValidJson([
+      `https://wilayah.id/api/regencies/${flatCode}.json`,
+      `https://www.emsifa.com/api-wilayah-indonesia/v2/regencies/${flatCode}.json`,
+      `https://www.emsifa.com/api-wilayah-indonesia/api/regencies/${flatCode}.json`,
+    ]);
+    if (raw) {
+      const data = normalizeRegionList(raw);
+      regionProxyCache.set(cacheKey, { data, expiresAt: Date.now() + REGION_CACHE_TTL_MS });
+      res.json({ success: true, data });
+      return;
+    }
+    res.json({ success: false, data: [] });
+  });
+
+  app.get('/api/regions/districts/:regencyCode', async (req, res) => {
+    const rawCode = String(req.params.regencyCode || '').replace(/[^0-9.]/g, '');
+    if (!rawCode) {
+      res.status(400).json({ success: false, data: [] });
+      return;
+    }
+    const flatCode = rawCode.replace(/\./g, '');
+    const dottedCode =
+      rawCode.includes('.') || flatCode.length !== 4
+        ? rawCode
+        : `${flatCode.slice(0, 2)}.${flatCode.slice(2, 4)}`;
+    const cacheKey = `districts:${flatCode}`;
+    const hit = regionProxyCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) {
+      res.json({ success: true, cached: true, data: hit.data });
+      return;
+    }
+    const raw = await fetchFirstValidJson([
+      `https://wilayah.id/api/districts/${dottedCode}.json`,
+      `https://www.emsifa.com/api-wilayah-indonesia/v2/districts/${flatCode}.json`,
+      `https://www.emsifa.com/api-wilayah-indonesia/api/districts/${flatCode}.json`,
+    ]);
+    if (raw) {
+      const data = normalizeRegionList(raw);
+      regionProxyCache.set(cacheKey, { data, expiresAt: Date.now() + REGION_CACHE_TTL_MS });
+      res.json({ success: true, data });
+      return;
+    }
+    res.json({ success: false, data: [] });
+  });
+
+  app.get('/api/regions/villages/:districtCode', async (req, res) => {
+    const rawCode = String(req.params.districtCode || '').replace(/[^0-9.]/g, '');
+    if (!rawCode) {
+      res.status(400).json({ success: false, data: [] });
+      return;
+    }
+    const flatCode = rawCode.replace(/\./g, '');
+    const dottedCode =
+      rawCode.includes('.') || flatCode.length !== 6
+        ? rawCode
+        : `${flatCode.slice(0, 2)}.${flatCode.slice(2, 4)}.${flatCode.slice(4, 6)}`;
+    const cacheKey = `villages:${flatCode}`;
+    const hit = regionProxyCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) {
+      res.json({ success: true, cached: true, data: hit.data });
+      return;
+    }
+    const raw = await fetchFirstValidJson([
+      `https://wilayah.id/api/villages/${dottedCode}.json`,
+      `https://www.emsifa.com/api-wilayah-indonesia/v2/villages/${flatCode}.json`,
+      `https://www.emsifa.com/api-wilayah-indonesia/api/villages/${flatCode}.json`,
+    ]);
+    if (raw) {
+      const data = normalizeRegionList(raw);
+      regionProxyCache.set(cacheKey, { data, expiresAt: Date.now() + REGION_CACHE_TTL_MS });
+      res.json({ success: true, data });
+      return;
+    }
+    res.json({ success: false, data: [] });
+  });
+
+  app.get('/api/regions/postal-code', async (req, res) => {
+    const village = String(req.query.village || '').trim();
+    const district = String(req.query.district || '').trim();
+    const regency = String(req.query.regency || '').trim();
+    const province = String(req.query.province || '').trim();
+    const cleanRegency = regency.replace(/^(kabupaten|kota|kab\.|kota administrasi|kabupaten administrasi)\s+/i, '').trim();
+    const queries = [
+      [village, district, cleanRegency].filter(Boolean).join(' '),
+      [district, cleanRegency].filter(Boolean).join(' '),
+      cleanRegency || regency,
+    ].filter((q) => q.length >= 2);
+
+    const cacheKey = `postal:${queries.join('|').toLowerCase()}`;
+    const hit = regionProxyCache.get(cacheKey);
+    if (hit && hit.expiresAt > Date.now()) {
+      res.json({ success: true, cached: true, postalCode: hit.data });
+      return;
+    }
+
+    for (const q of queries) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
+      try {
+        const resp = await fetch(`https://kodepos.vercel.app/search?q=${encodeURIComponent(q)}`, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json', 'User-Agent': 'BankNusantaraApp/1.0' },
+        });
+        if (!resp.ok) continue;
+        const json = (await resp.json()) as { data?: Array<Record<string, any>> };
+        const rows = Array.isArray(json?.data) ? json.data : [];
+        if (rows.length === 0) continue;
+
+        const norm = (s: string) =>
+          String(s || '')
+            .toLowerCase()
+            .replace(/^(kabupaten|kota|kecamatan|desa|kelurahan|provinsi)\s+/i, '')
+            .trim();
+
+        const targetVillage = norm(village);
+        const targetDistrict = norm(district);
+        const targetRegency = norm(cleanRegency || regency);
+        const targetProvince = norm(province);
+
+        let bestRow = rows[0];
+        let bestScore = -1;
+        for (const r of rows) {
+          let score = 0;
+          const rVillage = norm(r.village || r.urban || '');
+          const rDistrict = norm(r.district || r.subdistrict || '');
+          const rRegency = norm(r.regency || r.city || '');
+          const rProvince = norm(r.province || '');
+          if (targetVillage && rVillage.includes(targetVillage)) score += 6;
+          if (targetDistrict && rDistrict.includes(targetDistrict)) score += 4;
+          if (targetRegency && rRegency.includes(targetRegency)) score += 3;
+          if (targetProvince && rProvince.includes(targetProvince)) score += 1;
+          if (score > bestScore) {
+            bestScore = score;
+            bestRow = r;
+          }
+        }
+        const foundCode = String(bestRow?.code ?? bestRow?.postalcode ?? '')
+          .replace(/\D/g, '')
+          .slice(0, 5);
+        if (foundCode.length === 5) {
+          regionProxyCache.set(cacheKey, { data: foundCode, expiresAt: Date.now() + REGION_CACHE_TTL_MS });
+          res.json({ success: true, postalCode: foundCode });
+          return;
+        }
+      } catch {
+        // try narrower query
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    res.json({ success: false, postalCode: '' });
+  });
+
   // ==================== VITE MIDDLEWARE / STATIC ASSETS ====================
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
