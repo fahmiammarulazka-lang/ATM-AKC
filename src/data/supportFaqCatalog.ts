@@ -1,4 +1,24 @@
 import { SupportContactConfig, SupportFaqCategory, SupportFaqItem } from '../types/bank';
+import {
+  DEFAULT_SUPPORT_PRESET_CATEGORIES,
+  cloneDefaultPresetCategories,
+  getResolvedPresetCategories,
+  combineSubOptionExplanations,
+} from './supportPresetCatalog';
+import {
+  buildRandomized350SupportFaqs,
+  shuffleSupportFaqsList,
+  ensureUpgraded350SupportFaqs,
+} from './supportFaq350Generator';
+
+export {
+  DEFAULT_SUPPORT_PRESET_CATEGORIES,
+  cloneDefaultPresetCategories,
+  getResolvedPresetCategories,
+  combineSubOptionExplanations,
+  shuffleSupportFaqsList,
+  ensureUpgraded350SupportFaqs,
+};
 
 export interface SupportFaqCategoryMeta {
   id: SupportFaqCategory;
@@ -12,43 +32,71 @@ export const SUPPORT_FAQ_CATEGORIES: SupportFaqCategoryMeta[] = [
   {
     id: 'akun',
     label: 'Pengelolaan Akun & Profil',
-    shortLabel: 'Pengelolaan Akun',
-    description: 'Pendaftaran, login Google/Biasa/OA/Guest, alamat 38 provinsi, sinkronisasi cloud, dan profil.',
+    shortLabel: 'Akun & Profil',
+    description: 'Pendaftaran, login Google/Buat Akun/OA/Guest, alamat 38 provinsi, sinkronisasi cloud, dan profil.',
     accentClass: 'text-cyan-300 bg-cyan-500/15 border-cyan-500/40',
   },
   {
     id: 'kartu',
-    label: 'Penggunaan Kartu ATM',
-    shortLabel: 'Penggunaan Kartu',
+    label: 'Penggunaan Kartu ATM & Tier',
+    shortLabel: 'Kartu & Tier',
     description: 'Aktivasi kartu, saldo awal Rp 0, tier kartu, ubah/reset PIN, bekukan kartu, dan banding blokir.',
     accentClass: 'text-amber-300 bg-amber-500/15 border-amber-500/40',
   },
   {
     id: 'atm',
-    label: 'Operasional ATM & Transaksi',
-    shortLabel: 'Operasional ATM',
-    description: 'Simulator ATM, tarik/setor tunai, transfer, token tanpa kartu, mutasi, dan pembayaran tagihan.',
+    label: 'Operasional Mesin ATM & Tunai',
+    shortLabel: 'Mesin ATM',
+    description: 'Simulator ATM, tarik/setor tunai, token tanpa kartu, ganti PIN di ATM, dan struk digital.',
     accentClass: 'text-emerald-300 bg-emerald-500/15 border-emerald-500/40',
   },
   {
     id: 'pinjaman',
-    label: 'Pinjaman Daring, Hutang & Tabungan',
-    shortLabel: 'Pinjaman & Tabungan',
-    description: 'Pengajuan pinjaman daring, cicilan, kotak hutang, kantong tabungan, deposito, dan emas 24K.',
+    label: 'Pinjaman Daring & Kotak Hutang',
+    shortLabel: 'Pinjaman & Hutang',
+    description: 'Pengajuan pinjaman daring, cicilan bulanan, pelunasan dipercepat, dan hitung mundur Kotak Hutang.',
     accentClass: 'text-violet-300 bg-violet-500/15 border-violet-500/40',
   },
   {
     id: 'keamanan',
-    label: 'Keamanan & Praktik Terbaik',
-    shortLabel: 'Keamanan Akun',
-    description: 'Proteksi PIN/CVV, anti-phishing, VIP Shield, laporan bug, verifikasi resmi, dan darurat akun.',
+    label: 'Keamanan, PIN & Privasi',
+    shortLabel: 'Keamanan & PIN',
+    description: 'Proteksi PIN/CVV, anti-phishing, VIP Shield, laporan bug, 10 notifikasi, dan darurat akun.',
     accentClass: 'text-rose-300 bg-rose-500/15 border-rose-500/40',
   },
   {
+    id: 'transfer',
+    label: 'Transfer Dana & Mutasi Rekening',
+    shortLabel: 'Transfer & Mutasi',
+    description: 'Transfer antar rekening, multi-kartu, nomor referensi mutasi, kantong tabungan, dan deposito.',
+    accentClass: 'text-sky-300 bg-sky-500/15 border-sky-500/40',
+  },
+  {
+    id: 'emas',
+    label: 'Investasi Emas 24K & Buyback',
+    shortLabel: 'Emas 24K',
+    description: 'Beli gramasi Emas 24K, jual/buyback ke Rupiah, transfer emas antar nasabah, dan cetak fisik.',
+    accentClass: 'text-yellow-300 bg-yellow-500/15 border-yellow-500/40',
+  },
+  {
+    id: 'spin',
+    label: 'Spin Wheel, Koin & Surat Hadiah',
+    shortLabel: 'Spin & Hadiah',
+    description: 'Putaran Spin the Wheel, Coin Nusantara, Kode Redeem, serta Amplop Surat & Kotak Hadiah Admin.',
+    accentClass: 'text-fuchsia-300 bg-fuchsia-500/15 border-fuchsia-500/40',
+  },
+  {
+    id: 'oa_guest',
+    label: 'Akun OA, Guest & Buat Akun Lobi',
+    shortLabel: 'OA, Guest & Lobi',
+    description: 'Panduan khusus Login Akun OA, Akun Guest Tanpa Alamat, dan Tab Buat Akun Tanpa Wajib Google.',
+    accentClass: 'text-teal-300 bg-teal-500/15 border-teal-500/40',
+  },
+  {
     id: 'umum',
-    label: 'Bantuan Umum & Layanan Lainnya',
-    shortLabel: 'Umum',
-    description: 'Informasi tambahan seputar layanan dan bantuan khusus dari Admin Bank Nusantara.',
+    label: 'Layanan Nasabah, Banned & Umum',
+    shortLabel: 'Umum & Layanan',
+    description: 'Contact Us 24 Jam, banding akun Banned, tabungan berjangka, dan informasi umum Bank Nusantara.',
     accentClass: 'text-slate-300 bg-slate-500/15 border-slate-500/40',
   },
 ];
@@ -60,44 +108,13 @@ export interface SupportContactTopicOption {
   description: string;
 }
 
-export const SUPPORT_CONTACT_TOPICS: SupportContactTopicOption[] = [
-  {
-    id: 'akun',
-    label: 'Pengelolaan Akun, Login & Profil',
-    shortLabel: 'Kendala Akun',
-    description: 'Pendaftaran, login Google/Biasa/OA/Guest, alamat domisili, atau sinkronisasi Cloud.',
-  },
-  {
-    id: 'kartu',
-    label: 'Penggunaan Kartu ATM, PIN & Aktivasi',
-    shortLabel: 'Kartu & PIN',
-    description: 'Persetujuan kartu baru, ubah/reset PIN, kartu dibekukan, atau upgrade tier.',
-  },
-  {
-    id: 'atm',
-    label: 'Operasional ATM, Transfer & Transaksi',
-    shortLabel: 'ATM & Transaksi',
-    description: 'Tarik/setor tunai, transfer, mutasi saldo, token tanpa kartu, atau tagihan.',
-  },
-  {
-    id: 'pinjaman',
-    label: 'Pinjaman Daring, Cicilan & Tabungan',
-    shortLabel: 'Pinjaman & Tabungan',
-    description: 'Pengajuan pinjaman, pembayaran cicilan, deposito, kantong tabungan, atau Emas 24K.',
-  },
-  {
-    id: 'keamanan',
-    label: 'Keamanan Akun, Darurat & Pembukaan Banned',
-    shortLabel: 'Keamanan & Banned',
-    description: 'Indikasi akses ilegal, laporan bug, verifikasi resmi, atau peninjauan status akun.',
-  },
-  {
-    id: 'umum',
-    label: 'Pertanyaan Umum & Bantuan Layanan Lainnya',
-    shortLabel: 'Layanan Lainnya',
-    description: 'Pertanyaan seputar kode redeem, surat hadiah Admin, atau masukan fitur aplikasi.',
-  },
-];
+export const SUPPORT_CONTACT_TOPICS: SupportContactTopicOption[] =
+  DEFAULT_SUPPORT_PRESET_CATEGORIES.map((cat) => ({
+    id: cat.id,
+    label: cat.label,
+    shortLabel: cat.shortLabel,
+    description: cat.description,
+  }));
 
 export const SUPPORT_TEMPLATE_VARIABLES: Array<{
   token: string;
@@ -109,10 +126,21 @@ export const SUPPORT_TEMPLATE_VARIABLES: Array<{
   { token: '{user_id}', label: 'ID User 16 Digit', sample: '4029-8812-3301-9942' },
   { token: '{tier}', label: 'Tier Kartu', sample: 'GOLD' },
   { token: '{email}', label: 'Email Akun', sample: 'budi.santoso@gmail.com' },
-  { token: '{domisili}', label: 'Alamat Domisili', sample: 'RT 003/RW 005, Kel. Menteng, Kec. Menteng, Jakarta Pusat, DKI Jakarta 10310' },
+  {
+    token: '{domisili}',
+    label: 'Alamat Domisili',
+    sample: 'RT 003/RW 005, Kel. Menteng, Kec. Menteng, Jakarta Pusat, DKI Jakarta 10310',
+  },
   { token: '{status_kartu}', label: 'Status Kartu', sample: 'AKTIF' },
-  { token: '{topik}', label: 'Topik Kendala', sample: 'Penggunaan Kartu ATM, PIN & Aktivasi' },
-  { token: '{waktu}', label: 'Tanggal & Waktu', sample: '20 Nov 2026, 17:30 WIB' },
+  { token: '{topik}', label: 'Kategori Topik', sample: '2. Penggunaan Kartu ATM, Aktivasi & Upgrade Tier' },
+  { token: '{sub_topik}', label: 'Sub-Pilihan Kendala', sample: 'Permohonan Persetujuan (Approval) Kartu Baru yang Masih Pending' },
+  {
+    token: '{penjelasan}',
+    label: 'Penjelasan Kendala (Preset/Edit)',
+    sample:
+      'Kartu Bank Nusantara saya saat ini masih berstatus "Menunggu Persetujuan Admin" (Pending Approval). Seluruh data identitas dan alamat KTP sudah saya isi dengan benar. Mohon bantuan Tim Admin untuk meninjau dan menyetujui aktivasi kartu saya.',
+  },
+  { token: '{waktu}', label: 'Tanggal & Waktu', sample: '21 Nov 2026, 09:30 WIB' },
 ];
 
 export const DEFAULT_SUPPORT_CONTACT_CONFIG: SupportContactConfig = {
@@ -128,6 +156,7 @@ export const DEFAULT_SUPPORT_CONTACT_CONFIG: SupportContactConfig = {
     'RINGKASAN TIKET LAYANAN NASABAH',
     '====================================',
     '• Kategori Topik   : {topik}',
+    '• Sub-Pilihan      : {sub_topik}',
     '• Waktu Pengajuan  : {waktu}',
     '',
     'DATA LENGKAP AKUN & REKENING',
@@ -139,20 +168,15 @@ export const DEFAULT_SUPPORT_CONTACT_CONFIG: SupportContactConfig = {
     '• Alamat Email     : {email}',
     '• Alamat Domisili  : {domisili}',
     '',
-    'KRONOLOGI KENDALA / PERTANYAAN',
-    '1. Uraian kendala yang dialami:',
-    '   (Tuliskan detail kejadian, nominal transaksi, atau pesan error yang muncul)',
-    '2. Langkah yang sudah saya coba:',
-    '   (Misalnya: muat ulang halaman, cek koneksi, cek riwayat mutasi, dll.)',
-    '3. Harapan penyelesaian yang dibutuhkan:',
-    '   (Misalnya: pengecekan status rekening, bantuan aktivasi, atau panduan langkah lanjut)',
+    'PENJELASAN & KRONOLOGI KENDALA',
+    '{penjelasan}',
     '',
     'Demikian laporan bantuan ini saya sampaikan dengan data yang sebenar-benarnya agar dapat segera ditindaklanjuti oleh Tim Admin Bank Nusantara.',
     'Atas perhatian, waktu, dan bantuannya saya ucapkan terima kasih.',
   ].join('\n'),
   emailAddress: 'cs@banknusantara.id',
   emailEnabled: true,
-  emailAutoSubject: '[Tiket Bantuan Resmi Bank Nusantara] {topik} — {nama} (Rek. {no_rek})',
+  emailAutoSubject: '[Tiket Bantuan Resmi Bank Nusantara] {topik} ({sub_topik}) — {nama} (Rek. {no_rek})',
   emailAutoBody: [
     'Yth. Tim Layanan Nasabah & Admin Resmi PT Bank Nusantara (Persero) Tbk,',
     '',
@@ -163,6 +187,7 @@ export const DEFAULT_SUPPORT_CONTACT_CONFIG: SupportContactConfig = {
     '1. RINGKASAN TIKET LAYANAN',
     '----------------------------------------------------------------',
     '- Kategori Topik Kendala : {topik}',
+    '- Sub-Pilihan Spesifik   : {sub_topik}',
     '- Tanggal & Waktu Kirim  : {waktu}',
     '',
     '----------------------------------------------------------------',
@@ -177,16 +202,9 @@ export const DEFAULT_SUPPORT_CONTACT_CONFIG: SupportContactConfig = {
     '- Alamat Domisili        : {domisili}',
     '',
     '----------------------------------------------------------------',
-    '3. KRONOLOGI LENGKAP & KEBUTUHAN BANTUAN',
+    '3. PENJELASAN & KRONOLOGI LENGKAP KENDALA',
     '----------------------------------------------------------------',
-    'a) Penjelasan detail kendala yang terjadi:',
-    '   (Silakan jelaskan kronologi kendala, waktu kejadian, dan fitur yang diakses)',
-    '',
-    'b) Langkah awal yang sudah dicoba oleh nasabah:',
-    '   (Silakan sebutkan langkah pengecekan awal yang telah dilakukan)',
-    '',
-    'c) Solusi / tindak lanjut yang diharapkan:',
-    '   (Silakan sebutkan bantuan spesifik yang Anda harapkan dari Tim Admin)',
+    '{penjelasan}',
     '',
     'Catatan Keamanan: Saya memahami bahwa pihak Bank Nusantara tidak pernah meminta kode PIN 6 Digit maupun kode CVV kartu.',
     '',
@@ -198,6 +216,7 @@ export const DEFAULT_SUPPORT_CONTACT_CONFIG: SupportContactConfig = {
   ].join('\n'),
   operatingHours: '24 Jam Nonstop (Senin – Minggu)',
   responseEstimate: 'Rata-rata balas 1–5 menit',
+  presetCategories: cloneDefaultPresetCategories(),
 };
 
 export function normalizeWhatsappNumber(raw: string): string {
@@ -231,6 +250,8 @@ export interface SupportTemplateVars {
   domisili?: string;
   status_kartu?: string;
   topik: string;
+  sub_topik?: string;
+  penjelasan?: string;
   waktu: string;
 }
 
@@ -238,7 +259,11 @@ export function interpolateSupportTemplate(
   template: string,
   vars: SupportTemplateVars
 ): string {
-  return String(template || '')
+  const raw = String(template || '');
+  const hasPenjelasanToken = /\{penjelasan\}/i.test(raw);
+  const hasSubTopikToken = /\{sub_topik\}/i.test(raw);
+
+  let result = raw
     .replace(/\{nama\}/gi, vars.nama || '-')
     .replace(/\{no_rek\}/gi, vars.no_rek || '-')
     .replace(/\{user_id\}/gi, vars.user_id || '-')
@@ -247,7 +272,24 @@ export function interpolateSupportTemplate(
     .replace(/\{domisili\}/gi, vars.domisili?.trim() || 'Belum diisi / Akun Guest Tanpa Alamat')
     .replace(/\{status_kartu\}/gi, vars.status_kartu || 'AKTIF')
     .replace(/\{topik\}/gi, vars.topik || 'Bantuan Layanan')
+    .replace(/\{sub_topik\}/gi, vars.sub_topik?.trim() || vars.topik || 'Bantuan Layanan')
+    .replace(
+      /\{penjelasan\}/gi,
+      vars.penjelasan?.trim() ||
+        'Saya ingin mengajukan permohonan bantuan dan pengecekan resmi pada rekening Bank Nusantara milik saya.'
+    )
     .replace(/\{waktu\}/gi, vars.waktu || '-');
+
+  // Jika template lama belum memiliki token {penjelasan} dan tidak sedang merender baris subjek pendek,
+  // sisipkan sub-topik & penjelasan yang telah dipilih/diatur secara otomatis agar selalu muncul lengkap.
+  if (!hasPenjelasanToken && raw.includes('\n') && vars.penjelasan?.trim()) {
+    const subLine = !hasSubTopikToken && vars.sub_topik?.trim()
+      ? `SUB-PILIHAN KENDALA:\n• ${vars.sub_topik.trim()}\n\n`
+      : '';
+    result = `${result}\n\n${subLine}PENJELASAN & KRONOLOGI KENDALA:\n${vars.penjelasan.trim()}`;
+  }
+
+  return result;
 }
 
 export function buildWhatsAppSupportUrl(
@@ -281,7 +323,7 @@ export function buildEmailSupportUrl(
   )}&body=${encodeURIComponent(fullBody)}`;
 }
 
-export const DEFAULT_SUPPORT_FAQS_50: SupportFaqItem[] = [
+export const BASE_50_SUPPORT_FAQS: SupportFaqItem[] = [
   // ============================================================================
   // KATEGORI 1: PENGELOLAAN AKUN & PROFIL (FAQ #01 - #10)
   // ============================================================================
@@ -1089,3 +1131,9 @@ export const DEFAULT_SUPPORT_FAQS_50: SupportFaqItem[] = [
     isActive: true,
   },
 ];
+
+export const DEFAULT_SUPPORT_FAQS_350: SupportFaqItem[] =
+  buildRandomized350SupportFaqs(BASE_50_SUPPORT_FAQS);
+
+export const DEFAULT_SUPPORT_FAQS_50: SupportFaqItem[] = DEFAULT_SUPPORT_FAQS_350;
+

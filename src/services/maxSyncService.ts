@@ -326,8 +326,114 @@ export interface FastBootSessionSnapshot {
 
 const ACTIVE_BOOT_SESSION_KEY = 'active_boot_session_v1';
 const DEVICE_LOBBY_GUEST_ID_KEY = 'device_lobby_guest_account_id_v1';
+const DEVICE_LOBBY_CREATED_ACCOUNT_ID_KEY = 'device_lobby_created_account_id_v1';
+const ADMIN_PERSISTENT_DATA_CACHE_KEY = 'admin_persistent_data_cache_v1';
+
 let memoryActiveBootSession: FastBootSessionSnapshot | null = null;
 let memoryDeviceLobbyGuestId: string | null = null;
+let memoryDeviceLobbyCreatedAccountId: string | null = null;
+let adminPersistentIdbChain: Promise<void> = Promise.resolve();
+
+export interface AdminPersistentDataCache {
+  supportFaqs?: any[];
+  supportFaqsUpdatedAtMs?: number;
+  supportContactConfig?: any;
+  supportContactUpdatedAtMs?: number;
+  banSupportConfig?: any;
+  banSupportUpdatedAtMs?: number;
+  banPresets?: any[];
+  banPresetsUpdatedAtMs?: number;
+  bankSettings?: any;
+  bankSettingsUpdatedAtMs?: number;
+  lastAdminSavedAtIso?: string;
+  cachedAtMs: number;
+}
+
+export async function readAdminPersistentDataIdb(): Promise<AdminPersistentDataCache | null> {
+  try {
+    const cached = await idbGet<AdminPersistentDataCache>(
+      STORE_STAGING,
+      ADMIN_PERSISTENT_DATA_CACHE_KEY
+    );
+    if (cached && typeof cached === 'object') {
+      return cached;
+    }
+  } catch {
+    // fallback ke Cloud
+  }
+  return null;
+}
+
+export function saveAdminPersistentDataIdb(
+  patch: Partial<AdminPersistentDataCache>
+): Promise<void> {
+  adminPersistentIdbChain = adminPersistentIdbChain
+    .then(async () => {
+      const existing =
+        (await idbGet<AdminPersistentDataCache>(
+          STORE_STAGING,
+          ADMIN_PERSISTENT_DATA_CACHE_KEY
+        )) || ({ cachedAtMs: 0 } as AdminPersistentDataCache);
+
+      const nowMs = Date.now();
+      const next: AdminPersistentDataCache = {
+        ...existing,
+        cachedAtMs: nowMs,
+        lastAdminSavedAtIso: patch.lastAdminSavedAtIso || new Date(nowMs).toISOString(),
+      };
+
+      if (patch.supportFaqs !== undefined) {
+        const incomingTs = Number(patch.supportFaqsUpdatedAtMs) || nowMs;
+        const existingTs = Number(existing.supportFaqsUpdatedAtMs) || 0;
+        if (incomingTs >= existingTs) {
+          next.supportFaqs = patch.supportFaqs;
+          next.supportFaqsUpdatedAtMs = incomingTs;
+        }
+      }
+
+      if (patch.supportContactConfig !== undefined) {
+        const incomingTs = Number(patch.supportContactUpdatedAtMs) || nowMs;
+        const existingTs = Number(existing.supportContactUpdatedAtMs) || 0;
+        if (incomingTs >= existingTs) {
+          next.supportContactConfig = patch.supportContactConfig;
+          next.supportContactUpdatedAtMs = incomingTs;
+        }
+      }
+
+      if (patch.banSupportConfig !== undefined) {
+        const incomingTs = Number(patch.banSupportUpdatedAtMs) || nowMs;
+        const existingTs = Number(existing.banSupportUpdatedAtMs) || 0;
+        if (incomingTs >= existingTs) {
+          next.banSupportConfig = patch.banSupportConfig;
+          next.banSupportUpdatedAtMs = incomingTs;
+        }
+      }
+
+      if (patch.banPresets !== undefined) {
+        const incomingTs = Number(patch.banPresetsUpdatedAtMs) || nowMs;
+        const existingTs = Number(existing.banPresetsUpdatedAtMs) || 0;
+        if (incomingTs >= existingTs) {
+          next.banPresets = patch.banPresets;
+          next.banPresetsUpdatedAtMs = incomingTs;
+        }
+      }
+
+      if (patch.bankSettings !== undefined) {
+        const incomingTs = Number(patch.bankSettingsUpdatedAtMs) || nowMs;
+        const existingTs = Number(existing.bankSettingsUpdatedAtMs) || 0;
+        if (incomingTs >= existingTs) {
+          next.bankSettings = patch.bankSettings;
+          next.bankSettingsUpdatedAtMs = incomingTs;
+        }
+      }
+
+      await idbPut(STORE_STAGING, ADMIN_PERSISTENT_DATA_CACHE_KEY, next);
+    })
+    .catch(() => {
+      // abaikan jika IndexedDB dibatasi browser privat
+    });
+  return adminPersistentIdbChain;
+}
 
 export async function saveDeviceLobbyGuestId(accountId: string): Promise<void> {
   memoryDeviceLobbyGuestId = accountId;
@@ -348,6 +454,35 @@ export async function readDeviceLobbyGuestId(): Promise<string | null> {
     if (stored && typeof stored.accountId === 'string' && stored.accountId.trim()) {
       memoryDeviceLobbyGuestId = stored.accountId.trim();
       return memoryDeviceLobbyGuestId;
+    }
+  } catch {
+    // abaikan jika IndexedDB dibatasi browser privat
+  }
+  return null;
+}
+
+export async function saveDeviceLobbyCreatedAccountId(accountId: string): Promise<void> {
+  memoryDeviceLobbyCreatedAccountId = accountId;
+  try {
+    await idbPut(STORE_STAGING, DEVICE_LOBBY_CREATED_ACCOUNT_ID_KEY, {
+      accountId,
+      savedAtMs: Date.now(),
+    });
+  } catch {
+    // abaikan jika IndexedDB dibatasi browser privat
+  }
+}
+
+export async function readDeviceLobbyCreatedAccountId(): Promise<string | null> {
+  if (memoryDeviceLobbyCreatedAccountId) return memoryDeviceLobbyCreatedAccountId;
+  try {
+    const stored = await idbGet<{ accountId?: string }>(
+      STORE_STAGING,
+      DEVICE_LOBBY_CREATED_ACCOUNT_ID_KEY
+    );
+    if (stored && typeof stored.accountId === 'string' && stored.accountId.trim()) {
+      memoryDeviceLobbyCreatedAccountId = stored.accountId.trim();
+      return memoryDeviceLobbyCreatedAccountId;
     }
   } catch {
     // abaikan jika IndexedDB dibatasi browser privat

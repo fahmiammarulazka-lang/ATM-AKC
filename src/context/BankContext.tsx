@@ -48,6 +48,10 @@ import {
   clearActiveBootSession,
   saveDeviceLobbyGuestId,
   readDeviceLobbyGuestId,
+  saveDeviceLobbyCreatedAccountId,
+  readDeviceLobbyCreatedAccountId,
+  readAdminPersistentDataIdb,
+  saveAdminPersistentDataIdb,
   readLastSeenUpdateId,
   saveLastSeenUpdateId,
   type FastBootSessionSnapshot,
@@ -161,7 +165,12 @@ import {
 } from '../types/bank';
 import {
   DEFAULT_SUPPORT_FAQS_50,
+  DEFAULT_SUPPORT_FAQS_350,
   DEFAULT_SUPPORT_CONTACT_CONFIG,
+  ensureUpgraded350SupportFaqs,
+  shuffleSupportFaqsList,
+  cloneDefaultPresetCategories,
+  getResolvedPresetCategories,
 } from '../data/supportFaqCatalog';
 import {
   DEFAULT_NOTIFICATION_CATEGORY_PERMISSIONS,
@@ -362,6 +371,22 @@ interface BankContextType {
   guestLocalAccounts: BankAccount[];
   deviceLobbyGuestAccount: BankAccount | null;
   canCreateLobbyGuestOnThisDevice: boolean;
+  deviceLobbyCreatedAccount: BankAccount | null;
+  canCreateLobbyRegularAccountOnThisDevice: boolean;
+  registerLobbyStandaloneAccount: (input: {
+    fullName: string;
+    nik: string;
+    phone: string;
+    pin: string;
+    address: string;
+    structuredAddress?: StructuredIndonesiaAddress;
+    optionalGoogleEmail?: string;
+    optionalGoogleUid?: string;
+    optionalGoogleName?: string;
+    optionalGooglePicture?: string;
+    enterDashboardImmediately?: boolean;
+  }) => { success: boolean; message: string; account?: BankAccount };
+  enterLobbyCreatedAccountSession: (accountId: string) => { success: boolean; message: string };
   registerGuestRegularCard: (
     input: Omit<RegisterCardInput, 'cardTier' | 'email' | 'initialDeposit' | 'address' | 'structuredAddress'> & {
       address?: string;
@@ -693,9 +718,10 @@ interface BankContextType {
     presetId: string
   ) => { success: boolean; message: string; preset?: BanConfigPreset };
   adminDeleteBanPreset: (presetId: string) => { success: boolean; message: string };
-  // Pusat Bantuan (50+ FAQ) & Contact Us (WhatsApp + Email)
+  // Pusat Bantuan (350+ FAQ Acak) & Contact Us (WhatsApp + Email + 10 Kategori Preset)
   supportFaqs: SupportFaqItem[];
   supportContactConfig: SupportContactConfig;
+  lastAdminSavedAtIso: string | null;
   adminUpdateSupportContactConfig: (
     updates: Partial<SupportContactConfig>
   ) => { success: boolean; message: string };
@@ -713,6 +739,7 @@ interface BankContextType {
   ) => { success: boolean; message: string };
   adminDeleteSupportFaq: (id: string) => { success: boolean; message: string };
   adminResetSupportFaqs: () => { success: boolean; message: string };
+  adminShuffleSupportFaqs: () => { success: boolean; message: string };
   adminUnbanCard: (accountId: string) => { success: boolean; message: string };
   adminUnbanAllCards: () => { success: boolean; message: string; count: number };
   submitCardBanAppeal: (accountId: string, appealNote?: string) => { success: boolean; message: string };
@@ -2006,12 +2033,76 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   activeCloudEmailRef.current = activeCloudEmail;
   const [cloudUserStatus, setCloudUserStatus] = useState<CloudUserRecord | null>(null);
   const [lobbyCreatedGuestAccountId, setLobbyCreatedGuestAccountId] = useState<string | null>(null);
+  const [lobbyCreatedRegularAccountId, setLobbyCreatedRegularAccountId] = useState<string | null>(
+    null
+  );
+  const [lastAdminSavedAtIso, setLastAdminSavedAtIso] = useState<string | null>(null);
+  const supportFaqsUpdatedAtMsRef = useRef<number>(0);
+  const supportContactUpdatedAtMsRef = useRef<number>(0);
+  const banSupportUpdatedAtMsRef = useRef<number>(0);
 
   useEffect(() => {
     let active = true;
     void readDeviceLobbyGuestId().then((storedId) => {
       if (active && storedId) {
         setLobbyCreatedGuestAccountId(storedId);
+      }
+    });
+    void readDeviceLobbyCreatedAccountId().then((storedRegId) => {
+      if (active && storedRegId) {
+        setLobbyCreatedRegularAccountId(storedRegId);
+      }
+    });
+    void readAdminPersistentDataIdb().then((adminCache) => {
+      if (!active || !adminCache) return;
+      if (adminCache.lastAdminSavedAtIso) {
+        setLastAdminSavedAtIso(adminCache.lastAdminSavedAtIso);
+      }
+      if (Array.isArray(adminCache.supportFaqs) && adminCache.supportFaqs.length > 0) {
+        const upgradedFaqs = ensureUpgraded350SupportFaqs(
+          adminCache.supportFaqs as SupportFaqItem[],
+          DEFAULT_SUPPORT_FAQS_350
+        );
+        supportFaqsUpdatedAtMsRef.current =
+          Number(adminCache.supportFaqsUpdatedAtMs) || adminCache.cachedAtMs || Date.now();
+        setSupportFaqs(upgradedFaqs);
+      }
+      if (
+        adminCache.supportContactConfig &&
+        typeof adminCache.supportContactConfig === 'object'
+      ) {
+        const cachedContact = adminCache.supportContactConfig as SupportContactConfig;
+        supportContactUpdatedAtMsRef.current =
+          Number(adminCache.supportContactUpdatedAtMs) || adminCache.cachedAtMs || Date.now();
+        setSupportContactConfig((prev) => ({
+          ...prev,
+          ...cachedContact,
+          presetCategories: getResolvedPresetCategories(cachedContact.presetCategories),
+        }));
+      }
+      if (adminCache.banSupportConfig && typeof adminCache.banSupportConfig === 'object') {
+        const cachedBan = adminCache.banSupportConfig as BanSupportConfig;
+        banSupportUpdatedAtMsRef.current =
+          Number(adminCache.banSupportUpdatedAtMs) || adminCache.cachedAtMs || Date.now();
+        const resolvedTemplate =
+          cachedBan.defaultTemplate ||
+          cachedBan.defaultTemplateConfig ||
+          DEFAULT_BAN_SCREEN_CONFIG;
+        const resolvedPresets =
+          Array.isArray(cachedBan.savedPresets) && cachedBan.savedPresets.length > 0
+            ? cachedBan.savedPresets
+            : Array.isArray(cachedBan.presets) && cachedBan.presets.length > 0
+            ? cachedBan.presets
+            : undefined;
+        setBanSupportConfig((prev) => ({
+          ...prev,
+          ...cachedBan,
+          defaultTemplate: resolvedTemplate,
+          defaultTemplateConfig: resolvedTemplate,
+          ...(resolvedPresets
+            ? { savedPresets: resolvedPresets, presets: resolvedPresets }
+            : {}),
+        }));
       }
     });
     return () => {
@@ -2082,10 +2173,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const [supportFaqs, setSupportFaqs] = useState<SupportFaqItem[]>(() =>
-    DEFAULT_SUPPORT_FAQS_50.map((f) => ({ ...f, steps: [...f.steps] }))
+    DEFAULT_SUPPORT_FAQS_350.map((f) => ({ ...f, steps: [...f.steps] }))
   );
   const [supportContactConfig, setSupportContactConfig] = useState<SupportContactConfig>(() => ({
     ...DEFAULT_SUPPORT_CONTACT_CONFIG,
+    presetCategories: cloneDefaultPresetCategories(),
   }));
 
   const [deletedAccountIds, setDeletedAccountIds] = useState<string[]>(() => [
@@ -2721,34 +2813,87 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (data.banSupportConfig && typeof data.banSupportConfig === 'object') {
       const incomingBan = data.banSupportConfig as BanSupportConfig;
-      const resolvedTemplate =
-        incomingBan.defaultTemplate ||
-        incomingBan.defaultTemplateConfig ||
-        DEFAULT_BAN_SCREEN_CONFIG;
-      const resolvedPresets =
-        Array.isArray(incomingBan.savedPresets) && incomingBan.savedPresets.length > 0
-          ? incomingBan.savedPresets
-          : Array.isArray(incomingBan.presets) && incomingBan.presets.length > 0
-          ? incomingBan.presets
-          : undefined;
-      setBanSupportConfig((prev) => ({
-        ...prev,
-        ...incomingBan,
-        defaultTemplate: resolvedTemplate,
-        defaultTemplateConfig: resolvedTemplate,
-        ...(resolvedPresets
-          ? { savedPresets: resolvedPresets, presets: resolvedPresets }
-          : {}),
-      }));
+      const incomingBanTs =
+        Number((data as any).banSupportUpdatedAtMs) ||
+        (incomingBan.updatedAt ? Date.parse(incomingBan.updatedAt) : 0) ||
+        Number(data.updatedAtMs) ||
+        0;
+      if (incomingBanTs >= banSupportUpdatedAtMsRef.current || banSupportUpdatedAtMsRef.current === 0) {
+        if (incomingBanTs > 0) {
+          banSupportUpdatedAtMsRef.current = incomingBanTs;
+        }
+        const resolvedTemplate =
+          incomingBan.defaultTemplate ||
+          incomingBan.defaultTemplateConfig ||
+          DEFAULT_BAN_SCREEN_CONFIG;
+        const resolvedPresets =
+          Array.isArray(incomingBan.savedPresets) && incomingBan.savedPresets.length > 0
+            ? incomingBan.savedPresets
+            : Array.isArray(incomingBan.presets) && incomingBan.presets.length > 0
+            ? incomingBan.presets
+            : undefined;
+        const mergedBan: BanSupportConfig = {
+          ...banSupportConfig,
+          ...incomingBan,
+          defaultTemplate: resolvedTemplate,
+          defaultTemplateConfig: resolvedTemplate,
+          ...(resolvedPresets
+            ? { savedPresets: resolvedPresets, presets: resolvedPresets }
+            : {}),
+        };
+        setBanSupportConfig(mergedBan);
+        void saveAdminPersistentDataIdb({
+          banSupportConfig: mergedBan,
+          banSupportUpdatedAtMs: banSupportUpdatedAtMsRef.current || Date.now(),
+        });
+      }
     }
     if (Array.isArray(data.supportFaqs)) {
-      setSupportFaqs(data.supportFaqs as SupportFaqItem[]);
+      const incomingFaqsTs =
+        Number((data as any).supportFaqsUpdatedAtMs) || Number(data.updatedAtMs) || 0;
+      if (
+        incomingFaqsTs >= supportFaqsUpdatedAtMsRef.current ||
+        supportFaqsUpdatedAtMsRef.current === 0
+      ) {
+        if (incomingFaqsTs > 0) {
+          supportFaqsUpdatedAtMsRef.current = incomingFaqsTs;
+        }
+        const upgradedFaqs = ensureUpgraded350SupportFaqs(
+          data.supportFaqs as SupportFaqItem[],
+          DEFAULT_SUPPORT_FAQS_350
+        );
+        setSupportFaqs(upgradedFaqs);
+        void saveAdminPersistentDataIdb({
+          supportFaqs: upgradedFaqs,
+          supportFaqsUpdatedAtMs: supportFaqsUpdatedAtMsRef.current || Date.now(),
+        });
+      }
     }
     if (data.supportContactConfig && typeof data.supportContactConfig === 'object') {
-      setSupportContactConfig((prev) => ({
-        ...prev,
-        ...(data.supportContactConfig as SupportContactConfig),
-      }));
+      const incomingContact = data.supportContactConfig as SupportContactConfig;
+      const incomingContactTs =
+        Number((data as any).supportContactUpdatedAtMs) ||
+        (incomingContact.updatedAt ? Date.parse(incomingContact.updatedAt) : 0) ||
+        Number(data.updatedAtMs) ||
+        0;
+      if (
+        incomingContactTs >= supportContactUpdatedAtMsRef.current ||
+        supportContactUpdatedAtMsRef.current === 0
+      ) {
+        if (incomingContactTs > 0) {
+          supportContactUpdatedAtMsRef.current = incomingContactTs;
+        }
+        const mergedContact: SupportContactConfig = {
+          ...DEFAULT_SUPPORT_CONTACT_CONFIG,
+          ...incomingContact,
+          presetCategories: getResolvedPresetCategories(incomingContact.presetCategories),
+        };
+        setSupportContactConfig(mergedContact);
+        void saveAdminPersistentDataIdb({
+          supportContactConfig: mergedContact,
+          supportContactUpdatedAtMs: supportContactUpdatedAtMsRef.current || Date.now(),
+        });
+      }
     }
     const incomingSealTs = Number(data.letterSealUpdatedAtMs || data.updatedAtMs || 0);
     if (
@@ -2981,8 +3126,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         : {}),
       banSupportConfig: overrides?.banSupportConfig ?? banSupportConfig,
+      banSupportUpdatedAtMs: banSupportUpdatedAtMsRef.current || nowMs,
       supportFaqs: overrides?.supportFaqs ?? supportFaqs,
+      supportFaqsUpdatedAtMs: supportFaqsUpdatedAtMsRef.current || nowMs,
       supportContactConfig: overrides?.supportContactConfig ?? supportContactConfig,
+      supportContactUpdatedAtMs: supportContactUpdatedAtMsRef.current || nowMs,
       pockets: (overrides?.pockets ?? pockets).filter((p) => isNotBotAccountId(p.accountId)),
       depositos: (overrides?.depositos ?? depositos).filter((d) => isNotBotAccountId(d.accountId)),
       loans: (overrides?.loans ?? loans).filter((l) => isNotBotAccountId(l.accountId)),
@@ -5016,6 +5164,238 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const canCreateLobbyGuestOnThisDevice = !deviceLobbyGuestAccount;
 
+  // Cek kuota maksimal 1 Akun "Buat Akun" (Reguler Tanpa Wajib Google) per perangkat di Lobi Awal
+  const deviceLobbyCreatedAccount: BankAccount | null = lobbyCreatedRegularAccountId
+    ? accounts.find(
+        (a) =>
+          a.id === lobbyCreatedRegularAccountId &&
+          !a.isGuestAccount &&
+          !a.isOfficialAdminAccount
+      ) || null
+    : null;
+
+  const canCreateLobbyRegularAccountOnThisDevice = !deviceLobbyCreatedAccount;
+
+  // Buat Akun Reguler Baru di Lobi Awal (Tanpa Wajib Google + Opsional Sambung Google, Saldo Awal Rp 0, Status Menunggu Persetujuan Admin, Maks 1 per perangkat)
+  const registerLobbyStandaloneAccount = (input: {
+    fullName: string;
+    nik: string;
+    phone: string;
+    pin: string;
+    address: string;
+    structuredAddress?: StructuredIndonesiaAddress;
+    optionalGoogleEmail?: string;
+    optionalGoogleUid?: string;
+    optionalGoogleName?: string;
+    optionalGooglePicture?: string;
+    enterDashboardImmediately?: boolean;
+  }): { success: boolean; message: string; account?: BankAccount } => {
+    if (!canCreateLobbyRegularAccountOnThisDevice) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message:
+          'Batas maksimal 1 pembuatan akun melalui tab "Buat Akun" di Lobi Awal pada perangkat ini telah tercapai. Silakan masuk menggunakan akun perangkat Anda atau melalui tab "Login Ke Akun".',
+      };
+    }
+
+    const cleanName = (input.fullName || '').trim();
+    const cleanNik = (input.nik || '').replace(/\D/g, '').slice(0, 16);
+    const cleanPhone = (input.phone || '').trim();
+    const cleanPin = (input.pin || '').replace(/\D/g, '').slice(0, 6);
+    const cleanAddress = (input.address || '').trim();
+
+    if (!cleanName || cleanName.length < 3) {
+      playAtmSound('alert');
+      return { success: false, message: 'Nama Lengkap sesuai KTP wajib diisi minimal 3 karakter.' };
+    }
+    if (cleanNik.length !== 16) {
+      playAtmSound('alert');
+      return { success: false, message: 'NIK KTP wajib terdiri dari tepat 16 digit angka.' };
+    }
+    if (!cleanPhone || cleanPhone.replace(/\D/g, '').length < 9) {
+      playAtmSound('alert');
+      return { success: false, message: 'Nomor HP / WhatsApp aktif wajib diisi dengan benar.' };
+    }
+    if (cleanPin.length !== 6) {
+      playAtmSound('alert');
+      return { success: false, message: 'PIN Kartu wajib terdiri dari tepat 6 digit angka.' };
+    }
+    if (!cleanAddress || cleanAddress.length < 10) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message:
+          'Alamat Domisili Wilayah Indonesia (Provinsi, Kabupaten/Kota, Kecamatan, Desa/Kelurahan, Kode Pos, dan RT/RW) wajib dilengkapi secara berurutan.',
+      };
+    }
+
+    const existingNums = accounts.map((a) => a.accountNumber);
+    const existingIds = accounts.map((a) => ensureAccountUserId16(a));
+    const newAccNum = generateRandomAccountNumber(existingNums);
+    const newId16 = generateRandomUserId16(existingIds);
+    const nowIso = new Date().toISOString();
+    const cleanGoogleEmail = input.optionalGoogleEmail
+      ? normalizeEmailKey(input.optionalGoogleEmail)
+      : '';
+    const hasGoogle = isRealGoogleLinkedEmail(cleanGoogleEmail);
+
+    const newStandaloneAcc: BankAccount = {
+      id: `acc-lobby-reg-${Date.now()}`,
+      userId16: newId16,
+      accountNumber: newAccNum,
+      fullName: cleanName,
+      nik: cleanNik,
+      phone: cleanPhone,
+      email: hasGoogle ? cleanGoogleEmail : '',
+      googleEmail: hasGoogle ? cleanGoogleEmail : '',
+      firebaseUid: input.optionalGoogleUid || auth.currentUser?.uid,
+      address: cleanAddress,
+      structuredAddress: input.structuredAddress,
+      pin: cleanPin,
+      balance: 0,
+      cardTier: 'regular',
+      cardNumber: generateRandomCardNumber(),
+      cvv: generateRandomCVV(),
+      expiryDate: generateExpiryDate(CARD_TIER_CONFIGS.regular.validityYears),
+      cardStatus: 'pending',
+      status: 'active',
+      banReason: '',
+      dailyWithdrawnToday: 0,
+      lastWithdrawalDate: '',
+      initialDeposit: 0,
+      createdAt: nowIso,
+      rewardPoints: 0,
+      allowInternational: false,
+      customSpendingLimit: CARD_TIER_CONFIGS.regular.dailyWithdrawalLimit,
+      jobLevel: 1,
+      levelVouchers: 0,
+      clickPower: 1,
+      salaryMultiplier: 1,
+      cashbackPercent: 0,
+      spinCoins: 0,
+      goldGrams: 0,
+      goldBatches: [],
+      hasCompletedTutorial: true,
+      tutorialApprovedByAdmin: true,
+      isGuestAccount: false,
+      isOfficialAdminAccount: false,
+      isRegularNoGoogleAccount: !hasGoogle,
+      createdByAdmin: false,
+      failedPinAttempts: 0,
+    };
+
+    const nextAccounts = [newStandaloneAcc, ...accounts];
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    setLobbyCreatedRegularAccountId(newStandaloneAcc.id);
+    void saveDeviceLobbyCreatedAccountId(newStandaloneAcc.id);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
+
+    // Jika nasabah menyambungkan Google langsung di form Buat Akun, gabungkan zero-loss ke brankas Google
+    if (hasGoogle) {
+      const emailDocId = emailToFirestoreDocId(cleanGoogleEmail);
+      const userAccountsForEmail = nextAccounts.filter(
+        (a) =>
+          (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanGoogleEmail) ||
+          (a.email && normalizeEmailKey(a.email) === cleanGoogleEmail)
+      );
+      void writeCloudDocDual('users_by_email', emailDocId, {
+        email: cleanGoogleEmail,
+        name: input.optionalGoogleName || cleanName,
+        picture: input.optionalGooglePicture || '',
+        activeAccountId: newStandaloneAcc.id,
+        savedAccounts: userAccountsForEmail,
+        updatedAt: nowIso,
+      });
+      if (input.optionalGoogleUid) {
+        void writeVaultStateAtomic(
+          input.optionalGoogleUid,
+          { accounts: userAccountsForEmail, updatedAtMs: Date.now() },
+          userAccountsForEmail.length
+        );
+      }
+    }
+
+    if (input.enterDashboardImmediately) {
+      setCurrentAccountIdState(newStandaloneAcc.id);
+      setActiveCloudEmail(hasGoogle ? cleanGoogleEmail : '');
+      setCloudAccountVerificationState('confirmed_has_accounts');
+      setGoogleUser({
+        email: hasGoogle ? cleanGoogleEmail : '',
+        name: newStandaloneAcc.fullName,
+        picture: input.optionalGooglePicture,
+        firebaseUid: newStandaloneAcc.firebaseUid,
+        authMode: hasGoogle ? 'google' : 'standard_account',
+        loggedInAt: nowIso,
+        hasCompletedOnboarding: true,
+        isPinVerified: true,
+      });
+      persistActiveSessionToIdb({
+        authMode: hasGoogle ? 'google' : 'standard_account',
+        firebaseUid: newStandaloneAcc.firebaseUid,
+        email: hasGoogle ? cleanGoogleEmail : '',
+        name: newStandaloneAcc.fullName,
+        picture: input.optionalGooglePicture,
+        activeAccountId: newStandaloneAcc.id,
+        isPinVerified: true,
+        hasCompletedOnboarding: true,
+        accountsPool: nextAccounts,
+      });
+    }
+
+    playAtmSound('success');
+    return {
+      success: true,
+      account: newStandaloneAcc,
+      message: `Akun Kartu Reguler "${cleanName}" berhasil dibuat dengan Saldo Awal Rp 0 (Status: Menunggu Persetujuan Admin). Simpan Nomor Rekening & ID 16 Digit Anda!`,
+    };
+  };
+
+  const enterLobbyCreatedAccountSession = (
+    accountId: string
+  ): { success: boolean; message: string } => {
+    const target =
+      accountsRef.current.find((a) => a.id === accountId) ||
+      accounts.find((a) => a.id === accountId);
+    if (!target) {
+      playAtmSound('alert');
+      return { success: false, message: 'Data akun baru tidak ditemukan.' };
+    }
+    const nowIso = new Date().toISOString();
+    const linkedEmail = (target.googleEmail || target.email || '').trim();
+    const hasGoogle = isRealGoogleLinkedEmail(linkedEmail);
+
+    setCurrentAccountIdState(target.id);
+    setActiveCloudEmail(hasGoogle ? linkedEmail : '');
+    setCloudAccountVerificationState('confirmed_has_accounts');
+    setGoogleUser({
+      email: hasGoogle ? linkedEmail : '',
+      name: target.fullName,
+      firebaseUid: target.firebaseUid || auth.currentUser?.uid,
+      authMode: hasGoogle ? 'google' : 'standard_account',
+      loggedInAt: nowIso,
+      hasCompletedOnboarding: true,
+      isPinVerified: true,
+    });
+    persistActiveSessionToIdb({
+      authMode: hasGoogle ? 'google' : 'standard_account',
+      firebaseUid: target.firebaseUid || auth.currentUser?.uid,
+      email: hasGoogle ? linkedEmail : '',
+      name: target.fullName,
+      activeAccountId: target.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: accountsRef.current,
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Selamat datang di Dashboard Bank Nusantara, ${target.fullName}!`,
+    };
+  };
+
   // Buat Kartu Reguler Guest Baru di Lobby Awal (Maksimal 1 per perangkat, Tanpa Alamat, Saldo Awal otomatis Rp 0)
   const registerGuestRegularCard = (
     input: Omit<RegisterCardInput, 'cardTier' | 'email' | 'initialDeposit' | 'address' | 'structuredAddress'> & {
@@ -6223,6 +6603,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const adminUpdateBanSupportConfig = async (
     config: BanSupportConfig
   ): Promise<{ success: boolean; message: string }> => {
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const cleanWa = config.whatsappNumber.replace(/[^\d+]/g, '').trim();
     const cleanEmail = config.emailAddress.trim();
     const nextConfig: BanSupportConfig = {
@@ -6230,14 +6612,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...config,
       whatsappNumber: cleanWa,
       emailAddress: cleanEmail,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     };
+    banSupportUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
     setBanSupportConfig(nextConfig);
+    void saveAdminPersistentDataIdb({
+      banSupportConfig: nextConfig,
+      banSupportUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({ banSupportConfig: nextConfig });
     playAtmSound('success');
     return {
       success: true,
-      message: 'Konfigurasi Kontak & Studio Banned berhasil disimpan ke Cloud Firestore!',
+      message: 'Konfigurasi Kontak & Studio Banned berhasil disimpan permanen ke Cloud & Perangkat!',
     };
   };
 
@@ -9973,6 +10362,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    banSupportUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
+    void saveAdminPersistentDataIdb({
+      banSupportConfig: nextConfig,
+      banSupportUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({
       banSupportConfig: nextConfig,
       ...(updatedBannedCount > 0 ? { accounts: nextAccounts } : {}),
@@ -9983,8 +10381,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       updatedBannedCount,
       message:
         updatedBannedCount > 0
-          ? `Template Banned berhasil disimpan ke Cloud & otomatis diperbarui di ${updatedBannedCount} akun yang sedang dibanned!`
-          : 'Template Global Default Layar Banned berhasil disimpan ke Cloud Firestore!',
+          ? `Template Banned berhasil disimpan permanen ke Cloud & Perangkat serta otomatis diperbarui di ${updatedBannedCount} akun yang sedang dibanned!`
+          : 'Template Global Default Layar Banned berhasil disimpan permanen ke Cloud & Perangkat!',
     };
   };
 
@@ -9997,6 +10395,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!cleanName) {
       return { success: false, message: 'Nama preset konfigurasi tidak boleh kosong.' };
     }
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const basePresets =
       banSupportConfig.savedPresets && banSupportConfig.savedPresets.length > 0
         ? banSupportConfig.savedPresets
@@ -10015,11 +10415,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           : input.config.messageTemplate ?? '',
     };
     const newPreset: BanConfigPreset = {
-      id: `preset-custom-${Date.now()}`,
+      id: `preset-custom-${nowMs}`,
       name: cleanName,
       description:
         input.description?.trim() || `${normalizedCfg.durationLabel} • Tema ${normalizedCfg.theme}`,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
       config: normalizedCfg,
     };
     const nextPresets = [newPreset, ...basePresets];
@@ -10027,15 +10427,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...banSupportConfig,
       savedPresets: nextPresets,
       presets: nextPresets,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     };
+    banSupportUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
     setBanSupportConfig(nextConfig);
+    void saveAdminPersistentDataIdb({
+      banSupportConfig: nextConfig,
+      banSupportUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({ banSupportConfig: nextConfig });
     playAtmSound('success');
     return {
       success: true,
       preset: newPreset,
-      message: `Preset Konfigurasi Banned "${cleanName}" berhasil disimpan ke Cloud!`,
+      message: `Preset Konfigurasi Banned "${cleanName}" berhasil disimpan permanen ke Cloud & Perangkat!`,
     };
   };
 
@@ -10091,18 +10498,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
         : p
     );
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const nextConfig: BanSupportConfig = {
       ...banSupportConfig,
       savedPresets: nextPresets,
       presets: nextPresets,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     };
+    banSupportUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
     setBanSupportConfig(nextConfig);
+    void saveAdminPersistentDataIdb({
+      banSupportConfig: nextConfig,
+      banSupportUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({ banSupportConfig: nextConfig });
     playAtmSound('success');
     return {
       success: true,
-      message: `Perubahan preset "${cleanName}" berhasil disimpan ke Cloud!`,
+      message: `Perubahan preset "${cleanName}" berhasil disimpan permanen ke Cloud & Perangkat!`,
     };
   };
 
@@ -10119,11 +10535,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!source) {
       return { success: false, message: 'Preset sumber tidak ditemukan.' };
     }
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const clonedPreset: BanConfigPreset = {
-      id: `preset-custom-${Date.now()}`,
+      id: `preset-custom-${nowMs}`,
       name: `${source.name} (Salinan)`,
       description: source.description,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
       config: { ...source.config },
     };
     const nextPresets = [clonedPreset, ...basePresets];
@@ -10131,15 +10549,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...banSupportConfig,
       savedPresets: nextPresets,
       presets: nextPresets,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     };
+    banSupportUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
     setBanSupportConfig(nextConfig);
+    void saveAdminPersistentDataIdb({
+      banSupportConfig: nextConfig,
+      banSupportUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({ banSupportConfig: nextConfig });
     playAtmSound('success');
     return {
       success: true,
       preset: clonedPreset,
-      message: `Preset "${source.name}" berhasil diduplikasi menjadi preset custom yang siap diedit!`,
+      message: `Preset "${source.name}" berhasil diduplikasi dan disimpan permanen!`,
     };
   };
 
@@ -10151,37 +10576,59 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? banSupportConfig.presets
         : DEFAULT_BAN_CONFIG_PRESETS;
     const nextPresets = basePresets.filter((p) => p.id !== presetId);
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const nextConfig: BanSupportConfig = {
       ...banSupportConfig,
       savedPresets: nextPresets,
       presets: nextPresets,
-      updatedAt: new Date().toISOString(),
+      updatedAt: nowIso,
     };
+    banSupportUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
     setBanSupportConfig(nextConfig);
+    void saveAdminPersistentDataIdb({
+      banSupportConfig: nextConfig,
+      banSupportUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({ banSupportConfig: nextConfig });
     return {
       success: true,
-      message: 'Preset konfigurasi Banned berhasil dihapus.',
+      message: 'Preset konfigurasi Banned berhasil dihapus secara permanen.',
     };
   };
 
   // ============================================================================
-  // PUSAT BANTUAN (50+ FAQ) & CONTACT US (WHATSAPP + EMAIL) CRUD ADMIN
+  // PUSAT BANTUAN (350+ FAQ ACAK) & CONTACT US (10 KATEGORI PRESET WA/EMAIL) CRUD ADMIN
   // ============================================================================
   const adminUpdateSupportContactConfig = (
     updates: Partial<SupportContactConfig>
   ): { success: boolean; message: string } => {
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const nextConfig: SupportContactConfig = {
       ...supportContactConfig,
       ...updates,
-      updatedAt: new Date().toISOString(),
+      presetCategories: getResolvedPresetCategories(
+        updates.presetCategories ?? supportContactConfig.presetCategories
+      ),
+      updatedAt: nowIso,
     };
+    supportContactUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
     setSupportContactConfig(nextConfig);
+    void saveAdminPersistentDataIdb({
+      supportContactConfig: nextConfig,
+      supportContactUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({ supportContactConfig: nextConfig });
     playAtmSound('success');
     return {
       success: true,
-      message: 'Pengaturan Contact Us (WhatsApp, Email & Template Pesan Otomatis) berhasil disimpan ke Cloud!',
+      message:
+        'Pengaturan Contact Us, 10 Kategori & Sub-Pilihan Preset WhatsApp/Email berhasil disimpan permanen ke Cloud & Perangkat!',
     };
   };
 
@@ -10199,9 +10646,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Pertanyaan dan penjelasan jawaban FAQ wajib diisi.' };
     }
     const cleanSteps = (input.steps || []).map((s) => s.trim()).filter(Boolean);
-    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const newItem: SupportFaqItem = {
-      id: `faq-custom-${Date.now()}`,
+      id: `faq-custom-${nowMs}`,
       category: input.category || 'akun',
       question: cleanQuestion,
       answer: cleanAnswer,
@@ -10209,17 +10657,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       tip: input.tip?.trim() || undefined,
       keywords: (input.keywords || []).map((k) => k.trim()).filter(Boolean),
       isActive: true,
+      isCustomAdmin: true,
       createdAt: nowIso,
       updatedAt: nowIso,
     };
     const nextFaqs = [newItem, ...supportFaqs];
+    supportFaqsUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
     setSupportFaqs(nextFaqs);
+    void saveAdminPersistentDataIdb({
+      supportFaqs: nextFaqs,
+      supportFaqsUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({ supportFaqs: nextFaqs });
     playAtmSound('success');
     return {
       success: true,
       item: newItem,
-      message: `FAQ baru "${cleanQuestion.slice(0, 48)}..." berhasil ditambahkan (${nextFaqs.length} total FAQ).`,
+      message: `FAQ baru "${cleanQuestion.slice(0, 48)}..." berhasil ditambahkan dan disimpan permanen (${nextFaqs.length} total FAQ).`,
     };
   };
 
@@ -10231,6 +10687,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) {
       return { success: false, message: 'Item FAQ tidak ditemukan.' };
     }
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const nextFaqs = supportFaqs.map((f) =>
       f.id === id
         ? {
@@ -10243,38 +10701,85 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 ? updates.steps.map((s) => s.trim()).filter(Boolean)
                 : f.steps,
             tip: updates.tip !== undefined ? updates.tip.trim() || undefined : f.tip,
-            updatedAt: new Date().toISOString(),
+            isCustomAdmin: true,
+            updatedAt: nowIso,
           }
         : f
     );
+    supportFaqsUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
     setSupportFaqs(nextFaqs);
+    void saveAdminPersistentDataIdb({
+      supportFaqs: nextFaqs,
+      supportFaqsUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({ supportFaqs: nextFaqs });
     playAtmSound('success');
     return {
       success: true,
-      message: 'Perubahan FAQ berhasil disimpan ke Cloud Firestore!',
+      message: 'Perubahan FAQ berhasil disimpan permanen ke Cloud & Perangkat!',
     };
   };
 
   const adminDeleteSupportFaq = (id: string): { success: boolean; message: string } => {
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const nextFaqs = supportFaqs.filter((f) => f.id !== id);
+    supportFaqsUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
     setSupportFaqs(nextFaqs);
+    void saveAdminPersistentDataIdb({
+      supportFaqs: nextFaqs,
+      supportFaqsUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
     flushMasterStateToCloud({ supportFaqs: nextFaqs });
     playAtmSound('success');
     return {
       success: true,
-      message: `Item FAQ berhasil dihapus. Sisa ${nextFaqs.length} bantuan FAQ aktif.`,
+      message: `Item FAQ berhasil dihapus secara permanen. Sisa ${nextFaqs.length} bantuan FAQ aktif.`,
     };
   };
 
   const adminResetSupportFaqs = (): { success: boolean; message: string } => {
-    const fresh50 = DEFAULT_SUPPORT_FAQS_50.map((f) => ({ ...f, steps: [...f.steps] }));
-    setSupportFaqs(fresh50);
-    flushMasterStateToCloud({ supportFaqs: fresh50 });
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const fresh350 = DEFAULT_SUPPORT_FAQS_350.map((f) => ({ ...f, steps: [...f.steps] }));
+    supportFaqsUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
+    setSupportFaqs(fresh350);
+    void saveAdminPersistentDataIdb({
+      supportFaqs: fresh350,
+      supportFaqsUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
+    flushMasterStateToCloud({ supportFaqs: fresh350 });
     playAtmSound('success');
     return {
       success: true,
-      message: 'Daftar Pusat Bantuan berhasil direset kembali ke 50 FAQ komprehensif bawaan!',
+      message:
+        'Daftar Pusat Bantuan berhasil direset kembali ke 350 FAQ Acak komprehensif bawaan dan disimpan permanen!',
+    };
+  };
+
+  const adminShuffleSupportFaqs = (): { success: boolean; message: string } => {
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const shuffled = shuffleSupportFaqsList(supportFaqs, nowMs);
+    supportFaqsUpdatedAtMsRef.current = nowMs;
+    setLastAdminSavedAtIso(nowIso);
+    setSupportFaqs(shuffled);
+    void saveAdminPersistentDataIdb({
+      supportFaqs: shuffled,
+      supportFaqsUpdatedAtMs: nowMs,
+      lastAdminSavedAtIso: nowIso,
+    });
+    flushMasterStateToCloud({ supportFaqs: shuffled });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Urutan ${shuffled.length} bantuan FAQ berhasil diacak ulang lintas kategori dan disimpan permanen!`,
     };
   };
 
@@ -22044,6 +22549,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         guestLocalAccounts,
         deviceLobbyGuestAccount,
         canCreateLobbyGuestOnThisDevice,
+        deviceLobbyCreatedAccount,
+        canCreateLobbyRegularAccountOnThisDevice,
+        registerLobbyStandaloneAccount,
+        enterLobbyCreatedAccountSession,
         registerGuestRegularCard,
         loginToGuestAccountWithPin,
         linkCurrentAccountWithGooglePopup,
@@ -22186,11 +22695,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminDeleteBanPreset,
         supportFaqs,
         supportContactConfig,
+        lastAdminSavedAtIso,
         adminUpdateSupportContactConfig,
         adminAddSupportFaq,
         adminUpdateSupportFaq,
         adminDeleteSupportFaq,
         adminResetSupportFaqs,
+        adminShuffleSupportFaqs,
         adminUnbanCard,
         adminUnbanAllCards,
         submitCardBanAppeal,

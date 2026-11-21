@@ -1589,6 +1589,10 @@ export type SupportFaqCategory =
   | 'atm'
   | 'pinjaman'
   | 'keamanan'
+  | 'transfer'
+  | 'emas'
+  | 'spin'
+  | 'oa_guest'
   | 'umum';
 
 export interface SupportFaqItem {
@@ -1600,7 +1604,31 @@ export interface SupportFaqItem {
   tip?: string;
   keywords?: string[];
   isActive?: boolean;
+  isCustomAdmin?: boolean;
   createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SupportContactSubOptionPreset {
+  id: string;
+  categoryId: string;
+  label: string;
+  shortLabel: string;
+  explanation: string;
+  isDefault?: boolean;
+  isActive?: boolean;
+  updatedAt?: string;
+}
+
+export interface SupportContactCategoryPreset {
+  id: string;
+  label: string;
+  shortLabel: string;
+  description: string;
+  accentClass?: string;
+  subOptions: SupportContactSubOptionPreset[];
+  isDefault?: boolean;
+  isActive?: boolean;
   updatedAt?: string;
 }
 
@@ -1615,6 +1643,8 @@ export interface SupportContactConfig {
   emailAutoBody: string;
   operatingHours: string;
   responseEstimate: string;
+  presetCategories?: SupportContactCategoryPreset[];
   updatedAt?: string;
 }
+
 

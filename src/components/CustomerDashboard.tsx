@@ -34,6 +34,8 @@ import {
   Crown,
   Zap,
   Clock,
+  Link2,
+  Loader2,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CardVisualizer } from './CardVisualizer';
@@ -102,8 +104,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     deleteScheduledPayment,
     featureConfigs,
     devRoles,
+    linkCurrentAccountWithGooglePopup,
   } = useBank();
 
+  const [isLinkingGoogleInDashboard, setIsLinkingGoogleInDashboard] = useState<boolean>(false);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const activeTrialCount = currentAccount?.activeTrials?.length || 0;
   useEffect(() => {
@@ -180,6 +184,25 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       </div>
     );
   }
+
+  const hasRealGoogleConnected = Boolean(
+    currentAccount.googleEmail &&
+      !currentAccount.googleEmail.endsWith('@banknusantara.local') &&
+      !currentAccount.googleEmail.endsWith('@guest.banknusantara.local')
+  );
+
+  const handleConnectAccountToGoogle = async () => {
+    setIsLinkingGoogleInDashboard(true);
+    try {
+      const res = await linkCurrentAccountWithGooglePopup(currentAccount.id);
+      if (res.message) {
+        setDashboardNotice(res.message);
+        setTimeout(() => setDashboardNotice(null), 6000);
+      }
+    } finally {
+      setIsLinkingGoogleInDashboard(false);
+    }
+  };
 
   const tierConfig = CARD_TIER_CONFIGS[currentAccount.cardTier] || CARD_TIER_CONFIGS.regular;
   const activeDevRole = currentAccount.devRoleId
@@ -373,6 +396,30 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             </strong>{' '}
             • Terdaftar sejak {new Date(currentAccount.createdAt).getFullYear()}
           </p>
+
+          {/* Status & Tombol Sambungkan ke Google pada Kartu Status Dashboard */}
+          <div className="pt-1.5 flex flex-wrap items-center gap-2">
+            {hasRealGoogleConnected ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-[11px] font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Tersambung Google: {currentAccount.googleEmail}</span>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={handleConnectAccountToGoogle}
+                disabled={isLinkingGoogleInDashboard}
+                className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg transition cursor-pointer disabled:opacity-60"
+              >
+                {isLinkingGoogleInDashboard ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                ) : (
+                  <Link2 className="w-3.5 h-3.5 text-blue-600" />
+                )}
+                <span>Sambungkan ke Google (Gabung Tanpa Hapus Kartu Lama)</span>
+              </button>
+            )}
+          </div>
 
           {activeDevRole && activeDevStyle && activeDevRole.canQuickOpenAdmin && onQuickAdminAccess && (
             <div className="pt-2 flex flex-wrap items-center gap-2">
@@ -691,19 +738,19 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
           {/* Quick Actions & Specifications (Takes 7 cols) */}
           <div className="lg:col-span-7 space-y-6">
-            {/* Profil & Identitas Resmi Nasabah (ID 16 Digit Permanen di Atas Nama) */}
+            {/* Profil, Pengaturan Akun & Identitas Resmi Nasabah (ID 16 Digit Permanen di Atas Nama + Sambungkan ke Google) */}
             <div className="bg-slate-900/80 border border-cyan-500/30 rounded-3xl p-5 shadow-xl space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
                 <h3 className="font-bold text-white text-sm flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 text-cyan-400" />
-                  <span>Profil & Identitas Nasabah (ID 16 Digit Permanen)</span>
+                  <span>Profil &amp; Pengaturan Akun Nasabah (ID 16 Digit Permanen)</span>
                 </h3>
                 <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-slate-800 text-cyan-300 border border-cyan-500/30">
                   🔒 ID 16 Digit Tidak Dapat Diubah oleh User
                 </span>
               </div>
 
-              <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
+              <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3">
                 <UserId16AboveNameBanner
                   account={currentAccount}
                   size="md"
@@ -734,6 +781,49 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       {currentAccount.phone} • {currentAccount.email || '-'}
                     </span>
                   </div>
+                </div>
+
+                {/* Baris Pengaturan Akun: Sambungkan ke Google, Ubah No. HP, Ganti PIN */}
+                <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPhoneModal(true)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Phone className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Ubah No. HP</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowPinModal(true)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Ganti PIN Kartu</span>
+                    </button>
+                  </div>
+
+                  {hasRealGoogleConnected ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-xs font-bold">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Google Terhubung: {currentAccount.googleEmail}</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleConnectAccountToGoogle}
+                      disabled={isLinkingGoogleInDashboard}
+                      className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md transition cursor-pointer disabled:opacity-60"
+                    >
+                      {isLinkingGoogleInDashboard ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                      ) : (
+                        <Link2 className="w-3.5 h-3.5 text-blue-600" />
+                      )}
+                      <span>Sambungkan ke Google</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
