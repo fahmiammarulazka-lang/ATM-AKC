@@ -927,10 +927,12 @@ export interface RedeemCode {
   rewardAmount: number;
   rewards?: AdminGiftRewardItem[]; // Paket hadiah lengkap setara Surat & Hadiah (termasuk Trial & Gacha)
   maxClaims: number; // Berapa banyak orang yang bisa me-redeem
+  unlimitedClaims?: boolean; // Jika true, kuota klaim tanpa batas
   claimedBy: RedeemCodeClaimRecord[];
   createdAt: string;
   expiresAt: string; // Berapa lama kodenya berfungsi (ISO timestamp)
   durationMinutes: number;
+  unlimitedDuration?: boolean; // Jika true, masa aktif kode tanpa batas waktu
   active: boolean;
   requireAdminPin?: boolean;
   sendNotification?: boolean;

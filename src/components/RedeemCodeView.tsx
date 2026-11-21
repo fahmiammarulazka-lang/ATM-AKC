@@ -169,7 +169,7 @@ export const RedeemCodeView: React.FC<RedeemCodeViewProps> = ({
 
   const executeClaim = (rawCode: string, adminPinVerified = false) => {
     setErrorMessage(null);
-    const cleaned = rawCode.trim().toUpperCase().replace(/\s+/g, '');
+    const cleaned = rawCode.trim();
     if (!cleaned) {
       setErrorMessage('Masukkan kode redeem terlebih dahulu sebelum menekan tombol tukar.');
       return;
@@ -445,7 +445,7 @@ export const RedeemCodeView: React.FC<RedeemCodeViewProps> = ({
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} className="space-y-5">
+              <form onSubmit={handleSubmit} noValidate className="space-y-5">
                 <div className="space-y-2">
                   <label
                     htmlFor="redeem-code-input"
@@ -456,19 +456,18 @@ export const RedeemCodeView: React.FC<RedeemCodeViewProps> = ({
                   <input
                     id="redeem-code-input"
                     type="text"
-                    required
                     autoComplete="off"
                     spellCheck={false}
                     value={codeInput}
                     onChange={(e) => {
-                      setCodeInput(e.target.value.toUpperCase());
+                      setCodeInput(e.target.value);
                       if (errorMessage) setErrorMessage(null);
                     }}
-                    placeholder="Ketik kode redeem di sini (contoh: NUSANTARA2026)"
-                    className="w-full rounded-xl bg-slate-950 border border-slate-700 focus:border-amber-400 focus:outline-none px-4 py-4 text-center font-mono text-lg sm:text-xl font-bold text-amber-300 uppercase tracking-[0.18em] placeholder:text-slate-600 placeholder:tracking-normal placeholder:font-sans placeholder:text-sm placeholder:font-normal transition-colors"
+                    placeholder="Ketik kode redeem dari Admin di sini..."
+                    className="w-full rounded-xl bg-slate-950 border border-slate-700 focus:border-amber-400 focus:outline-none px-4 py-4 text-center font-mono text-lg sm:text-xl font-bold text-amber-300 tracking-wider placeholder:text-slate-600 placeholder:tracking-normal placeholder:font-sans placeholder:text-sm placeholder:font-normal transition-colors"
                   />
                   <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
-                    <span>Otomatis dikonversi ke huruf kapital tanpa spasi</span>
+                    <span>Mendukung semua karakter sesuai kode dari Admin (tidak peka huruf besar/kecil)</span>
                     <span className="font-mono tabular-nums">{codeInput.trim().length} karakter</span>
                   </div>
                 </div>

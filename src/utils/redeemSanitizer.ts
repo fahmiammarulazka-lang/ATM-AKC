@@ -1,7 +1,8 @@
 /**
  * Bank Nusantara — Auto-Healing Sanitizer & Helper untuk Data Kode Redeem
  * Memperbaiki struktur data lama/tidak lengkap dari Cloud atau penyimpanan lokal secara otomatis
- * tanpa pernah menghapus kode redeem milik Admin, sehingga mencegah crash layar hitam.
+ * tanpa pernah menghapus kode redeem milik Admin, mendukung kode bebas karakter,
+ * kuota/durasi Tanpa Batas, serta pembersihan payload ringkas agar aman untuk Firestore.
  */
 import {
   AdminGiftRewardItem,
@@ -11,6 +12,8 @@ import {
 } from '../types/bank';
 import { GIFT_REWARD_CATALOG, formatTrialDurationLabel } from '../data/giftRewardsCatalog';
 import { formatRupiah } from './bankUtils';
+
+const UNLIMITED_EXPIRY_ISO = '2099-12-31T23:59:59.000Z';
 
 function toSafeIso(value: unknown, fallbackMs: number): string {
   if (typeof value === 'string' && value.trim()) {
@@ -58,7 +61,7 @@ export function sanitizeRedeemRewardItem(raw: unknown, idx: number): AdminGiftRe
       ? catMeta.defaultTrialMinutes || 1440
       : undefined;
 
-  return {
+  const item: AdminGiftRewardItem = {
     id: typeof obj.id === 'string' && obj.id.trim() ? obj.id : `rdm-rew-${idx}-${Date.now()}`,
     type: catMeta.type,
     label: typeof obj.label === 'string' && obj.label.trim() ? obj.label : catMeta.label,
@@ -68,16 +71,30 @@ export function sanitizeRedeemRewardItem(raw: unknown, idx: number): AdminGiftRe
         ? obj.unitLabel
         : catMeta.unitLabel,
     emoji: typeof obj.emoji === 'string' && obj.emoji.trim() ? obj.emoji : catMeta.emoji,
-    customNote: typeof obj.customNote === 'string' ? obj.customNote : undefined,
-    trialDurationMinutes,
-    targetDevRoleId: typeof obj.targetDevRoleId === 'string' ? obj.targetDevRoleId : undefined,
-    selectedSubOptionId:
-      typeof obj.selectedSubOptionId === 'string' ? obj.selectedSubOptionId : undefined,
-    selectedSubOptionLabel:
-      typeof obj.selectedSubOptionLabel === 'string' ? obj.selectedSubOptionLabel : undefined,
     rewardMode: obj.rewardMode === 'gacha' ? 'gacha' : 'fixed',
-    gachaTiers: sanitizeGachaTiers(obj.gachaTiers),
   };
+
+  if (typeof obj.customNote === 'string' && obj.customNote.trim()) {
+    item.customNote = obj.customNote.trim();
+  }
+  if (trialDurationMinutes !== undefined) {
+    item.trialDurationMinutes = trialDurationMinutes;
+  }
+  if (typeof obj.targetDevRoleId === 'string' && obj.targetDevRoleId.trim()) {
+    item.targetDevRoleId = obj.targetDevRoleId.trim();
+  }
+  if (typeof obj.selectedSubOptionId === 'string' && obj.selectedSubOptionId.trim()) {
+    item.selectedSubOptionId = obj.selectedSubOptionId.trim();
+  }
+  if (typeof obj.selectedSubOptionLabel === 'string' && obj.selectedSubOptionLabel.trim()) {
+    item.selectedSubOptionLabel = obj.selectedSubOptionLabel.trim();
+  }
+  const cleanTiers = sanitizeGachaTiers(obj.gachaTiers);
+  if (cleanTiers && cleanTiers.length > 0 && item.rewardMode === 'gacha') {
+    item.gachaTiers = cleanTiers;
+  }
+
+  return item;
 }
 
 export function sanitizeClaimRecord(raw: unknown, idx: number): RedeemCodeClaimRecord | null {
@@ -100,42 +117,66 @@ export function sanitizeClaimRecord(raw: unknown, idx: number): RedeemCodeClaimR
     ? obj.rewardsGranted.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
     : undefined;
 
-  return {
+  const rec: RedeemCodeClaimRecord = {
     accountId,
     accountNumber,
     fullName,
     claimedAt,
-    rewardSummary: typeof obj.rewardSummary === 'string' ? obj.rewardSummary : undefined,
-    rewardsGranted: rewardsGranted && rewardsGranted.length > 0 ? rewardsGranted : undefined,
-    referenceNo: typeof obj.referenceNo === 'string' ? obj.referenceNo : undefined,
   };
+  if (typeof obj.rewardSummary === 'string' && obj.rewardSummary.trim()) {
+    rec.rewardSummary = obj.rewardSummary.trim();
+  }
+  if (rewardsGranted && rewardsGranted.length > 0) {
+    rec.rewardsGranted = rewardsGranted;
+  }
+  if (typeof obj.referenceNo === 'string' && obj.referenceNo.trim()) {
+    rec.referenceNo = obj.referenceNo.trim();
+  }
+  return rec;
 }
 
 /**
  * Memperbaiki satu entri Kode Redeem yang mungkin tidak lengkap / korup tanpa menghapus kode lama.
+ * Tidak menyisakan properti bernilai `undefined` agar aman saat langsung ditulis ke Firestore.
  */
 export function sanitizeRedeemCode(raw: unknown, idx = 0): RedeemCode | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;
 
-  const rawCode = typeof obj.code === 'string' ? obj.code.trim().toUpperCase().replace(/\s+/g, '') : '';
+  const rawCode = typeof obj.code === 'string' ? obj.code.trim() : '';
   const safeCode = rawCode || `REDEEMLEGACY${idx + 1}`;
   const safeId =
     typeof obj.id === 'string' && obj.id.trim()
       ? obj.id.trim()
-      : `rdm-repaired-${idx}-${safeCode}`;
+      : `rdm-repaired-${idx}-${safeCode.replace(/[^a-zA-Z0-9_-]/g, '') || idx}`;
+
+  const unlimitedDuration = Boolean(obj.unlimitedDuration);
+  const unlimitedClaims = Boolean(obj.unlimitedClaims);
 
   const rawDuration = Number(obj.durationMinutes);
-  const durationMinutes =
-    Number.isFinite(rawDuration) && rawDuration > 0 ? Math.floor(rawDuration) : 1440;
+  const durationMinutes = unlimitedDuration
+    ? Number.isFinite(rawDuration) && rawDuration > 0
+      ? Math.floor(rawDuration)
+      : 5256000
+    : Number.isFinite(rawDuration) && rawDuration > 0
+    ? Math.floor(rawDuration)
+    : 1440;
 
   const nowMs = Date.now();
   const createdAt = toSafeIso(obj.createdAt, nowMs);
   const createdMs = Date.parse(createdAt) || nowMs;
-  const expiresAt = toSafeIso(obj.expiresAt, createdMs + durationMinutes * 60_000);
+  const expiresAt = unlimitedDuration
+    ? UNLIMITED_EXPIRY_ISO
+    : toSafeIso(obj.expiresAt, createdMs + durationMinutes * 60_000);
 
   const rawMaxClaims = Number(obj.maxClaims);
-  const maxClaims = Number.isFinite(rawMaxClaims) && rawMaxClaims >= 1 ? Math.floor(rawMaxClaims) : 1;
+  const maxClaims = unlimitedClaims
+    ? Number.isFinite(rawMaxClaims) && rawMaxClaims >= 1
+      ? Math.floor(rawMaxClaims)
+      : 999999999
+    : Number.isFinite(rawMaxClaims) && rawMaxClaims >= 1
+    ? Math.floor(rawMaxClaims)
+    : 1;
 
   // Normalisasi claimedBy (mendukung array, object map dari Firebase RTDB, atau undefined/null)
   let rawClaimsArr: unknown[] = [];
@@ -165,7 +206,12 @@ export function sanitizeRedeemCode(raw: unknown, idx = 0): RedeemCode | null {
 
   const rawRewardAmount = Number(obj.rewardAmount);
   const derivedCashFromRewards = sanitizedRewards
-    .filter((r) => r.type === 'cash_balance' || r.type === 'cash_startup_modal' || r.type === 'cash_billionaire_vault')
+    .filter(
+      (r) =>
+        r.type === 'cash_balance' ||
+        r.type === 'cash_startup_modal' ||
+        r.type === 'cash_billionaire_vault'
+    )
     .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
   const rewardAmount =
     Number.isFinite(rawRewardAmount) && rawRewardAmount >= 0
@@ -187,13 +233,11 @@ export function sanitizeRedeemCode(raw: unknown, idx = 0): RedeemCode | null {
       ? obj.isActive
       : true;
 
-  return {
+  const cleanObj: RedeemCode = {
     id: safeId,
     code: safeCode,
     title: safeTitle,
-    description: typeof obj.description === 'string' ? obj.description : undefined,
     rewardAmount,
-    rewards: sanitizedRewards.length > 0 ? sanitizedRewards : undefined,
     maxClaims,
     claimedBy,
     createdAt,
@@ -203,6 +247,21 @@ export function sanitizeRedeemCode(raw: unknown, idx = 0): RedeemCode | null {
     requireAdminPin: Boolean(obj.requireAdminPin),
     sendNotification: obj.sendNotification !== false,
   };
+
+  if (typeof obj.description === 'string' && obj.description.trim()) {
+    cleanObj.description = obj.description.trim();
+  }
+  if (sanitizedRewards.length > 0) {
+    cleanObj.rewards = sanitizedRewards;
+  }
+  if (unlimitedClaims) {
+    cleanObj.unlimitedClaims = true;
+  }
+  if (unlimitedDuration) {
+    cleanObj.unlimitedDuration = true;
+  }
+
+  return cleanObj;
 }
 
 export function sanitizeRedeemCodesList(rawList: unknown): RedeemCode[] {
@@ -226,14 +285,43 @@ export function sanitizeRedeemCodesList(rawList: unknown): RedeemCode[] {
   return result;
 }
 
+/**
+ * Menghasilkan kode redeem acak yang dijamin belum terdaftar di daftar existingCodes.
+ */
+export function generateUniqueRedeemCode(
+  existingCodes: RedeemCode[],
+  basePrefix?: string
+): string {
+  const existingSet = new Set(
+    sanitizeRedeemCodesList(existingCodes).map((r) => r.code.trim().toLowerCase())
+  );
+  const prefixes = ['NUSANTARA', 'BERKAH', 'REZEKI', 'BONUS', 'SULTAN', 'EMAS', 'HADIAH'];
+  const cleanBase = (basePrefix || '').trim();
+
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const suffix = Math.floor(1000 + Math.random() * 9000);
+    const candidate = cleanBase
+      ? `${cleanBase}-${suffix}`
+      : `${prefixes[Math.floor(Math.random() * prefixes.length)]}${suffix}`;
+    if (!existingSet.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+  return `${cleanBase || 'NUSANTARA'}-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+}
+
 export type RedeemCodeStatusKind = 'active' | 'quota_full' | 'expired' | 'inactive';
 
 export function getRedeemCodeStatus(rdm: RedeemCode, nowMs = Date.now()): RedeemCodeStatusKind {
   const claimedCount = Array.isArray(rdm.claimedBy) ? rdm.claimedBy.length : 0;
   const maxClaims = Math.max(1, Number(rdm.maxClaims) || 1);
   const expMs = Date.parse(rdm.expiresAt || '');
-  const isExpired = Number.isFinite(expMs) ? nowMs > expMs : false;
-  const isQuotaFull = claimedCount >= maxClaims;
+  const isExpired = rdm.unlimitedDuration
+    ? false
+    : Number.isFinite(expMs)
+    ? nowMs > expMs
+    : false;
+  const isQuotaFull = rdm.unlimitedClaims ? false : claimedCount >= maxClaims;
 
   if (!rdm.active) return 'inactive';
   if (isQuotaFull) return 'quota_full';
@@ -255,10 +343,16 @@ export function formatSingleRewardSummary(rew: AdminGiftRewardItem): string {
   const trialTxt = trialMins > 0 ? ` · Trial ${formatTrialDurationLabel(trialMins)}` : '';
   const modeTxt = rew.rewardMode === 'gacha' ? ' · Gacha' : '';
 
-  if (rew.type === 'cash_balance' || rew.type === 'cash_startup_modal' || rew.type === 'cash_billionaire_vault') {
+  if (
+    rew.type === 'cash_balance' ||
+    rew.type === 'cash_startup_modal' ||
+    rew.type === 'cash_billionaire_vault'
+  ) {
     return `${rew.emoji} ${rew.label}: ${formatRupiah(Number(rew.amount) || 0)}${modeTxt}`;
   }
-  return `${rew.emoji} ${rew.label}${subTxt} (${(Number(rew.amount) || 1).toLocaleString('id-ID')} ${rew.unitLabel})${trialTxt}${modeTxt}`;
+  return `${rew.emoji} ${rew.label}${subTxt} (${(Number(rew.amount) || 1).toLocaleString(
+    'id-ID'
+  )} ${rew.unitLabel})${trialTxt}${modeTxt}`;
 }
 
 export function summarizeRedeemCodeRewards(rdm: RedeemCode): string {

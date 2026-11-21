@@ -73,6 +73,7 @@ import {
   sanitizeRedeemCodesList,
   sanitizeRedeemCode,
   summarizeRedeemCodeRewards,
+  generateUniqueRedeemCode,
 } from '../utils/redeemSanitizer';
 import {
   ensureAnonymousVaultSession,
@@ -516,6 +517,10 @@ interface BankContextType {
 
   // Redeem Codes (Tukar Kode Redeem dibuat di Panel Admin dengan hadiah lengkap setara Surat & Hadiah + Trial)
   redeemCodes: RedeemCode[];
+  redeemCloudStatus: 'idle' | 'saving' | 'saved' | 'error';
+  redeemLastSavedAt: string | null;
+  redeemSaveError: string | null;
+  retrySaveRedeemCodesToCloud: () => Promise<boolean>;
   createRedeemCode: (input: {
     code: string;
     title: string;
@@ -523,10 +528,44 @@ interface BankContextType {
     rewardAmount?: number;
     rewards?: AdminGiftRewardItem[];
     maxClaims: number;
+    unlimitedClaims?: boolean;
     durationMinutes: number;
+    unlimitedDuration?: boolean;
     requireAdminPin?: boolean;
     sendNotification?: boolean;
-  }) => { success: boolean; message: string; redeemCode?: RedeemCode };
+  }) => { success: boolean; message: string; isDuplicate?: boolean; redeemCode?: RedeemCode };
+  updateRedeemCode: (
+    id: string,
+    input: {
+      code: string;
+      title: string;
+      description?: string;
+      rewardAmount?: number;
+      rewards?: AdminGiftRewardItem[];
+      maxClaims: number;
+      unlimitedClaims?: boolean;
+      durationMinutes: number;
+      unlimitedDuration?: boolean;
+      requireAdminPin?: boolean;
+      sendNotification?: boolean;
+      active?: boolean;
+    }
+  ) => { success: boolean; message: string; isDuplicate?: boolean; redeemCode?: RedeemCode };
+  duplicateRedeemCode: (id: string) => {
+    success: boolean;
+    message: string;
+    redeemCode?: RedeemCode;
+  };
+  extendRedeemCode: (
+    id: string,
+    options: {
+      extraMinutes?: number;
+      setUnlimitedDuration?: boolean;
+      extraClaims?: number;
+      setUnlimitedClaims?: boolean;
+      reactivate?: boolean;
+    }
+  ) => { success: boolean; message: string; redeemCode?: RedeemCode };
   deleteRedeemCode: (id: string) => void;
   toggleRedeemCodeActive: (id: string) => void;
   claimRedeemCode: (
@@ -2343,9 +2382,41 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     (f) => f && f.id !== 'redeem_code' && deletedFeatureIds.includes(f.id)
   );
 
-  const [redeemCodes, setRedeemCodes] = useState<RedeemCode[]>(() =>
-    sanitizeRedeemCodesList(INITIAL_REDEEM_CODES)
+  const [redeemCodes, setRedeemCodes] = useState<RedeemCode[]>(() => {
+    try {
+      const rawLocal = window.localStorage.getItem('bank_nusantara_redeem_codes_registry_v1');
+      if (rawLocal) {
+        const parsed = JSON.parse(rawLocal) as { redeemCodes?: unknown };
+        if (Array.isArray(parsed?.redeemCodes)) {
+          return sanitizeRedeemCodesList(parsed.redeemCodes);
+        }
+      }
+    } catch {
+      // ignore local storage read error
+    }
+    return sanitizeRedeemCodesList(INITIAL_REDEEM_CODES);
+  });
+  const redeemCodesRef = useRef<RedeemCode[]>(redeemCodes);
+  redeemCodesRef.current = redeemCodes;
+  const redeemCodesUpdatedAtMsRef = useRef<number>((() => {
+    try {
+      const rawLocal = window.localStorage.getItem('bank_nusantara_redeem_codes_registry_v1');
+      if (rawLocal) {
+        const parsed = JSON.parse(rawLocal) as { redeemCodesUpdatedAtMs?: number };
+        if (Number(parsed?.redeemCodesUpdatedAtMs) > 0) {
+          return Number(parsed.redeemCodesUpdatedAtMs);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return 0;
+  })());
+  const [redeemCloudStatus, setRedeemCloudStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(
+    'idle'
   );
+  const [redeemLastSavedAt, setRedeemLastSavedAt] = useState<string | null>(null);
+  const [redeemSaveError, setRedeemSaveError] = useState<string | null>(null);
   const [purchasedCodes, setPurchasedCodes] = useState<PurchasedVoucherCode[]>(INITIAL_PURCHASED_CODES);
   const [resiList, setResiList] = useState<ResiTrackingRecord[]>(INITIAL_RESI_LIST);
   const [cardUpgrades, setCardUpgrades] = useState<CardUpgradeApplication[]>(INITIAL_UPGRADES);
@@ -2739,7 +2810,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         (data.pinResetRequests as PinResetRequest[]).filter((p) => isNotBotAccountId(p.accountId))
       );
     }
-    if (data.redeemCodes) setRedeemCodes(sanitizeRedeemCodesList(data.redeemCodes));
+    if (data.redeemCodes) {
+      const incomingRedeemTs = Number(data.redeemCodesUpdatedAtMs || data.updatedAtMs || 0);
+      if (incomingRedeemTs >= redeemCodesUpdatedAtMsRef.current || redeemCodesUpdatedAtMsRef.current === 0) {
+        const cleanRedeemList = sanitizeRedeemCodesList(data.redeemCodes);
+        redeemCodesRef.current = cleanRedeemList;
+        if (incomingRedeemTs > 0) {
+          redeemCodesUpdatedAtMsRef.current = incomingRedeemTs;
+        }
+        setRedeemCodes(cleanRedeemList);
+      }
+    }
     if (Array.isArray(data.purchasedCodes)) {
       setPurchasedCodes(
         (data.purchasedCodes as PurchasedVoucherCode[]).filter((v) => isNotBotAccountId(v.accountId))
@@ -3181,7 +3262,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       pinResetRequests: (overrides?.pinResetRequests ?? pinResetRequests).filter((p) =>
         isNotBotAccountId(p.accountId)
       ),
-      redeemCodes: overrides?.redeemCodes ?? redeemCodes,
+      redeemCodes: overrides?.redeemCodes ?? redeemCodesRef.current,
+      redeemCodesUpdatedAtMs: redeemCodesUpdatedAtMsRef.current || nowMs,
       purchasedCodes: (overrides?.purchasedCodes ?? purchasedCodes).filter((v) =>
         isNotBotAccountId(v.accountId)
       ),
@@ -4389,6 +4471,33 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     });
 
+    const applyDedicatedRedeemRegistrySnapshot = (rawData: Record<string, any>) => {
+      if (!rawData || !Array.isArray(rawData.redeemCodes)) return;
+      const incomingTs = Number(rawData.redeemCodesUpdatedAtMs || rawData.updatedAtMs || 0);
+      if (incomingTs > 0 && incomingTs < redeemCodesUpdatedAtMsRef.current) {
+        return;
+      }
+      const cleanList = sanitizeRedeemCodesList(rawData.redeemCodes);
+      redeemCodesUpdatedAtMsRef.current = incomingTs || Date.now();
+      redeemCodesRef.current = cleanList;
+      isApplyingFirestoreRef.current = true;
+      setRedeemCodes(cleanList);
+      try {
+        window.localStorage.setItem(
+          'bank_nusantara_redeem_codes_registry_v1',
+          JSON.stringify({
+            redeemCodes: cleanList,
+            redeemCodesUpdatedAtMs: redeemCodesUpdatedAtMsRef.current,
+          })
+        );
+      } catch {
+        // ignore quota errors
+      }
+      window.setTimeout(() => {
+        isApplyingFirestoreRef.current = false;
+      }, 80);
+    };
+
     void Promise.all([
       readCloudDocDual<Record<string, any>>('bank_state_v1', 'gift_events_registry', {
         timeoutMs: 4500,
@@ -4396,7 +4505,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       readCloudDocDual<Record<string, any>>('bank_state_v1', 'letter_seal_config', {
         timeoutMs: 4500,
       }),
-    ]).then(([giftRes, sealRes]) => {
+      readCloudDocDual<Record<string, any>>('bank_state_v1', 'redeem_codes_registry', {
+        timeoutMs: 4500,
+      }),
+    ]).then(([giftRes, sealRes, redeemRes]) => {
       if (!mounted) return;
       if (giftRes.data) {
         applyDedicatedGiftRegistrySnapshot(giftRes.data);
@@ -4407,6 +4519,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         applyDedicatedSealRegistrySnapshot(sealRes.data);
       } else if (sealRes.respondedCleanly) {
         hasLoadedSealRegistryRef.current = true;
+      }
+      if (redeemRes.data) {
+        applyDedicatedRedeemRegistrySnapshot(redeemRes.data);
       }
     });
 
@@ -4438,10 +4553,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     );
 
+    const unsubRedeemDual = subscribeCloudDocDual<Record<string, any>>(
+      'bank_state_v1',
+      'redeem_codes_registry',
+      (data) => {
+        if (!mounted || !data) return;
+        applyDedicatedRedeemRegistrySnapshot(data);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.GET, 'bank_state_v1/redeem_codes_registry', {
+          suppressThrow: true,
+        });
+      }
+    );
+
     return () => {
       mounted = false;
       unsubGiftDual();
       unsubSealDual();
+      unsubRedeemDual();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [firebaseUser?.uid]);
@@ -4642,6 +4772,77 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setGiftRegistrySaveError(err instanceof Error ? err.message : 'Gangguan sinkronisasi Cloud.');
         return false;
       });
+  };
+
+  const persistRedeemCodesImmediately = (rawList: RedeemCode[]): Promise<boolean> => {
+    const cleanList = sanitizeRedeemCodesList(rawList);
+    const nowMs = Date.now();
+    const nextRegTs = Math.max(nowMs, redeemCodesUpdatedAtMsRef.current + 1);
+    const nowIso = new Date(nowMs).toISOString();
+
+    redeemCodesUpdatedAtMsRef.current = nextRegTs;
+    redeemCodesRef.current = cleanList;
+    setRedeemCodes(cleanList);
+    setRedeemCloudStatus('saving');
+    setRedeemSaveError(null);
+
+    try {
+      window.localStorage.setItem(
+        'bank_nusantara_redeem_codes_registry_v1',
+        JSON.stringify({
+          redeemCodes: cleanList,
+          redeemCodesUpdatedAtMs: nextRegTs,
+        })
+      );
+    } catch {
+      // ignore local storage quota errors
+    }
+
+    const registryPayload = sanitizeForFirestore({
+      redeemCodes: cleanList,
+      redeemCodesUpdatedAtMs: nextRegTs,
+      updatedAtMs: nowMs,
+      updatedAt: nowIso,
+      writerSessionId: clientSessionId,
+    }) as Record<string, unknown>;
+
+    const dualPromise = writeCloudDocDual(
+      'bank_state_v1',
+      'redeem_codes_registry',
+      registryPayload,
+      { merge: false }
+    );
+    const masterPromise = flushMasterStateToCloud({
+      redeemCodes: cleanList,
+    });
+
+    return Promise.all([dualPromise, masterPromise])
+      .then(([dualRes, masterOk]) => {
+        const overallOk = dualRes.ok || Boolean(masterOk);
+        if (overallOk) {
+          setRedeemCloudStatus('saved');
+          setRedeemLastSavedAt(new Date().toISOString());
+          setRedeemSaveError(null);
+        } else {
+          setRedeemCloudStatus('error');
+          setRedeemSaveError(
+            dualRes.errorMessage ||
+              'Gagal menyinkronkan ke Cloud, data tetap tersimpan aman di perangkat.'
+          );
+        }
+        return overallOk;
+      })
+      .catch((err) => {
+        setRedeemCloudStatus('error');
+        setRedeemSaveError(
+          err instanceof Error ? err.message : 'Gangguan sinkronisasi Cloud.'
+        );
+        return false;
+      });
+  };
+
+  const retrySaveRedeemCodesToCloud = (): Promise<boolean> => {
+    return persistRedeemCodesImmediately(redeemCodesRef.current);
   };
 
   const persistLetterSealImmediately = (
@@ -8268,7 +8469,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
   };
 
-  // ================= REDEEM CODE SYSTEM (HADIAH LENGKAP SETARA SURAT & HADIAH + TRIAL) =================
+  // ================= REDEEM CODE SYSTEM (HADIAH LENGKAP SETARA SURAT & HADIAH + TRIAL + CLOUD INSTAN) =================
   const createRedeemCode = (input: {
     code: string;
     title: string;
@@ -8276,22 +8477,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     rewardAmount?: number;
     rewards?: AdminGiftRewardItem[];
     maxClaims: number;
+    unlimitedClaims?: boolean;
     durationMinutes: number;
+    unlimitedDuration?: boolean;
     requireAdminPin?: boolean;
     sendNotification?: boolean;
   }) => {
-    const cleanCode = String(input.code || '').trim().toUpperCase().replace(/\s+/g, '');
-    if (!cleanCode || cleanCode.length < 3) {
-      return { success: false, message: 'Kode redeem minimal 3 karakter!' };
+    const cleanCode = String(input.code ?? '').trim();
+    if (!cleanCode) {
+      return { success: false, message: 'Masukkan Kode Redeem terlebih dahulu!' };
     }
-    if (redeemCodes.some((r) => String(r?.code || '').toUpperCase() === cleanCode)) {
-      return { success: false, message: 'Kode redeem tersebut sudah terdaftar!' };
+    const existingList = sanitizeRedeemCodesList(redeemCodesRef.current);
+    if (existingList.some((r) => r.code.trim().toLowerCase() === cleanCode.toLowerCase())) {
+      return {
+        success: false,
+        isDuplicate: true,
+        message: `Kode Redeem "${cleanCode}" sudah pernah dipakai! Gunakan kode lain atau klik "Buat Kode Unik Otomatis".`,
+      };
     }
 
     const providedRewards = Array.isArray(input.rewards) ? input.rewards.filter(Boolean) : [];
     const safeCashAmount = Math.max(0, Number(input.rewardAmount) || 0);
 
-    // Bangun daftar hadiah efektif: jika rewards dikirim pakai itu; jika legacy rewardAmount-only buat item cash_balance
     let finalRewards: AdminGiftRewardItem[] = providedRewards;
     if (finalRewards.length === 0 && safeCashAmount > 0) {
       finalRewards = [
@@ -8310,14 +8517,30 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (finalRewards.length === 0 && safeCashAmount <= 0) {
       return {
         success: false,
-        message: 'Pilih minimal 1 hadiah dari katalog hadiah atau isi nominal saldo lebih dari 0!',
+        message: 'Pilih minimal 1 hadiah dari Katalog Hadiah di kanan sebelum menerbitkan kode!',
       };
     }
 
-    const safeMaxClaims = Math.floor(Number(input.maxClaims) || 0);
-    const safeDurationMinutes = Math.floor(Number(input.durationMinutes) || 0);
-    if (safeMaxClaims <= 0 || safeDurationMinutes <= 0) {
-      return { success: false, message: 'Kuota orang dan durasi aktif harus lebih dari 0!' };
+    const isUnlimitedClaims = Boolean(input.unlimitedClaims);
+    const isUnlimitedDuration = Boolean(input.unlimitedDuration);
+    const safeMaxClaims = isUnlimitedClaims
+      ? 999999999
+      : Math.floor(Number(input.maxClaims) || 0);
+    const safeDurationMinutes = isUnlimitedDuration
+      ? 5256000
+      : Math.floor(Number(input.durationMinutes) || 0);
+
+    if (!isUnlimitedClaims && safeMaxClaims <= 0) {
+      return {
+        success: false,
+        message: 'Kuota maksimal klaim harus lebih dari 0 (atau aktifkan opsi Tanpa Batas).',
+      };
+    }
+    if (!isUnlimitedDuration && safeDurationMinutes <= 0) {
+      return {
+        success: false,
+        message: 'Durasi aktif kode harus lebih dari 0 (atau aktifkan opsi Tanpa Batas).',
+      };
     }
 
     const derivedCashTotal = finalRewards
@@ -8332,8 +8555,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const shouldNotify = input.sendNotification !== false;
     const now = Date.now();
-    const newRedeem: RedeemCode = {
-      id: `rdm-${now}-${Math.floor(Math.random() * 1000)}`,
+    const rawNewRedeem: RedeemCode = {
+      id: `rdm-${now}-${Math.floor(Math.random() * 10000)}`,
       code: cleanCode,
       title:
         String(input.title || '').trim() ||
@@ -8342,24 +8565,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           : effectiveCashAmount > 0
           ? `Voucher Redeem Rp ${effectiveCashAmount.toLocaleString('id-ID')}`
           : `Voucher Hadiah ${cleanCode}`),
-      description: input.description?.trim() || undefined,
+      ...(input.description?.trim() ? { description: input.description.trim() } : {}),
       rewardAmount: effectiveCashAmount,
       rewards: finalRewards,
       maxClaims: safeMaxClaims,
+      ...(isUnlimitedClaims ? { unlimitedClaims: true } : {}),
       claimedBy: [],
       createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + safeDurationMinutes * 60 * 1000).toISOString(),
+      expiresAt: isUnlimitedDuration
+        ? '2099-12-31T23:59:59.000Z'
+        : new Date(now + safeDurationMinutes * 60 * 1000).toISOString(),
       durationMinutes: safeDurationMinutes,
+      ...(isUnlimitedDuration ? { unlimitedDuration: true } : {}),
       active: true,
       requireAdminPin: Boolean(input.requireAdminPin),
       sendNotification: shouldNotify,
     };
 
-    setRedeemCodes((prev) => [newRedeem, ...sanitizeRedeemCodesList(prev)]);
+    const sanitizedNew = sanitizeRedeemCode(rawNewRedeem) || rawNewRedeem;
+    const nextList = [sanitizedNew, ...existingList];
+    void persistRedeemCodesImmediately(nextList);
+
     if (shouldNotify) {
+      const quotaText = isUnlimitedClaims ? 'kuota tanpa batas' : `${safeMaxClaims} orang`;
+      const durText = isUnlimitedDuration
+        ? 'masa aktif tanpa batas'
+        : `selama ${safeDurationMinutes} menit`;
       addNotification(
         'Kode Redeem Baru Tersedia',
-        `Event "${newRedeem.title}" telah aktif untuk ${safeMaxClaims} orang selama ${safeDurationMinutes} menit. Buka tab Kode Redeem untuk menukarkan kode dari Admin.`,
+        `Event "${sanitizedNew.title}" telah aktif untuk ${quotaText} (${durText}). Buka tab Kode Redeem untuk menukarkan kode dari Admin.`,
         'success',
         { category: 'hadiah', targetView: 'redeem' }
       );
@@ -8367,42 +8601,271 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     return {
       success: true,
-      message: `Kode Redeem "${cleanCode}" dengan ${finalRewards.length} jenis hadiah berhasil dibuat (${
-        shouldNotify ? 'dengan notifikasi ke nasabah' : 'mode senyap tanpa notifikasi'
-      })! Berlaku untuk ${safeMaxClaims} orang selama ${safeDurationMinutes} menit.`,
-      redeemCode: newRedeem,
+      message: `Kode Redeem "${cleanCode}" (${finalRewards.length} hadiah) berhasil diterbitkan dan disinkronkan ke Cloud!`,
+      redeemCode: sanitizedNew,
+    };
+  };
+
+  const updateRedeemCode = (
+    id: string,
+    input: {
+      code: string;
+      title: string;
+      description?: string;
+      rewardAmount?: number;
+      rewards?: AdminGiftRewardItem[];
+      maxClaims: number;
+      unlimitedClaims?: boolean;
+      durationMinutes: number;
+      unlimitedDuration?: boolean;
+      requireAdminPin?: boolean;
+      sendNotification?: boolean;
+      active?: boolean;
+    }
+  ) => {
+    const existingList = sanitizeRedeemCodesList(redeemCodesRef.current);
+    const target = existingList.find((r) => r.id === id);
+    if (!target) {
+      return { success: false, message: 'Kode Redeem yang ingin diubah tidak ditemukan!' };
+    }
+
+    const cleanCode = String(input.code ?? '').trim();
+    if (!cleanCode) {
+      return { success: false, message: 'Kode Redeem tidak boleh kosong!' };
+    }
+    if (
+      existingList.some(
+        (r) => r.id !== id && r.code.trim().toLowerCase() === cleanCode.toLowerCase()
+      )
+    ) {
+      return {
+        success: false,
+        isDuplicate: true,
+        message: `Kode Redeem "${cleanCode}" sudah digunakan oleh entri lain!`,
+      };
+    }
+
+    const providedRewards = Array.isArray(input.rewards) ? input.rewards.filter(Boolean) : [];
+    const safeCashAmount = Math.max(0, Number(input.rewardAmount) || 0);
+    if (providedRewards.length === 0 && safeCashAmount <= 0) {
+      return {
+        success: false,
+        message: 'Pilih minimal 1 hadiah sebelum menyimpan perubahan kode redeem!',
+      };
+    }
+
+    const isUnlimitedClaims = Boolean(input.unlimitedClaims);
+    const isUnlimitedDuration = Boolean(input.unlimitedDuration);
+    const safeMaxClaims = isUnlimitedClaims
+      ? 999999999
+      : Math.floor(Number(input.maxClaims) || 0);
+    const safeDurationMinutes = isUnlimitedDuration
+      ? 5256000
+      : Math.floor(Number(input.durationMinutes) || 0);
+
+    if (!isUnlimitedClaims && safeMaxClaims <= 0) {
+      return {
+        success: false,
+        message: 'Kuota maksimal klaim harus lebih dari 0 (atau aktifkan opsi Tanpa Batas).',
+      };
+    }
+    if (!isUnlimitedDuration && safeDurationMinutes <= 0) {
+      return {
+        success: false,
+        message: 'Durasi aktif kode harus lebih dari 0 (atau aktifkan opsi Tanpa Batas).',
+      };
+    }
+
+    const derivedCashTotal = providedRewards
+      .filter(
+        (r) =>
+          r.type === 'cash_balance' ||
+          r.type === 'cash_startup_modal' ||
+          r.type === 'cash_billionaire_vault'
+      )
+      .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+    const effectiveCashAmount = derivedCashTotal > 0 ? derivedCashTotal : safeCashAmount;
+
+    const now = Date.now();
+    const durationChanged =
+      safeDurationMinutes !== target.durationMinutes ||
+      isUnlimitedDuration !== Boolean(target.unlimitedDuration);
+    const nextExpiresAt = isUnlimitedDuration
+      ? '2099-12-31T23:59:59.000Z'
+      : durationChanged
+      ? new Date(now + safeDurationMinutes * 60 * 1000).toISOString()
+      : target.expiresAt;
+
+    const updatedRaw: RedeemCode = {
+      ...target,
+      code: cleanCode,
+      title: String(input.title || '').trim() || target.title,
+      ...(input.description?.trim() ? { description: input.description.trim() } : { description: undefined }),
+      rewardAmount: effectiveCashAmount,
+      rewards: providedRewards,
+      maxClaims: safeMaxClaims,
+      unlimitedClaims: isUnlimitedClaims || undefined,
+      durationMinutes: safeDurationMinutes,
+      unlimitedDuration: isUnlimitedDuration || undefined,
+      expiresAt: nextExpiresAt,
+      requireAdminPin: Boolean(input.requireAdminPin),
+      sendNotification: input.sendNotification !== false,
+      active: typeof input.active === 'boolean' ? input.active : target.active,
+    };
+
+    const sanitizedUpdated = sanitizeRedeemCode(updatedRaw) || updatedRaw;
+    const nextList = existingList.map((r) => (r.id === id ? sanitizedUpdated : r));
+    void persistRedeemCodesImmediately(nextList);
+    playAtmSound('success');
+
+    return {
+      success: true,
+      message: `Perubahan pada Kode Redeem "${sanitizedUpdated.code}" berhasil disimpan ke Cloud!`,
+      redeemCode: sanitizedUpdated,
+    };
+  };
+
+  const duplicateRedeemCode = (id: string) => {
+    const existingList = sanitizeRedeemCodesList(redeemCodesRef.current);
+    const source = existingList.find((r) => r.id === id);
+    if (!source) {
+      return { success: false, message: 'Kode Redeem sumber tidak ditemukan.' };
+    }
+
+    const freshCode = generateUniqueRedeemCode(existingList, source.code.slice(0, 12));
+    const now = Date.now();
+    const isUnlimitedDuration = Boolean(source.unlimitedDuration);
+    const durMins = Math.max(1, Number(source.durationMinutes) || 60);
+
+    const clonedRaw: RedeemCode = {
+      ...source,
+      id: `rdm-${now}-${Math.floor(Math.random() * 10000)}`,
+      code: freshCode,
+      title: `${source.title} (Salinan)`,
+      claimedBy: [],
+      createdAt: new Date(now).toISOString(),
+      expiresAt: isUnlimitedDuration
+        ? '2099-12-31T23:59:59.000Z'
+        : new Date(now + durMins * 60 * 1000).toISOString(),
+      active: true,
+    };
+
+    const sanitizedClone = sanitizeRedeemCode(clonedRaw) || clonedRaw;
+    const nextList = [sanitizedClone, ...existingList];
+    void persistRedeemCodesImmediately(nextList);
+    playAtmSound('success');
+
+    return {
+      success: true,
+      message: `Kode Redeem berhasil diduplikasi menjadi "${sanitizedClone.code}" dan disimpan ke Cloud!`,
+      redeemCode: sanitizedClone,
+    };
+  };
+
+  const extendRedeemCode = (
+    id: string,
+    options: {
+      extraMinutes?: number;
+      setUnlimitedDuration?: boolean;
+      extraClaims?: number;
+      setUnlimitedClaims?: boolean;
+      reactivate?: boolean;
+    }
+  ) => {
+    const existingList = sanitizeRedeemCodesList(redeemCodesRef.current);
+    const target = existingList.find((r) => r.id === id);
+    if (!target) {
+      return { success: false, message: 'Kode Redeem tidak ditemukan.' };
+    }
+
+    const now = Date.now();
+    const currentExpMs = Date.parse(target.expiresAt);
+    const baseMs = Number.isFinite(currentExpMs) && currentExpMs > now ? currentExpMs : now;
+
+    let nextUnlimitedDuration = Boolean(target.unlimitedDuration);
+    let nextDurationMinutes = Math.max(1, Number(target.durationMinutes) || 60);
+    let nextExpiresAt = target.expiresAt;
+
+    if (options.setUnlimitedDuration) {
+      nextUnlimitedDuration = true;
+      nextDurationMinutes = 5256000;
+      nextExpiresAt = '2099-12-31T23:59:59.000Z';
+    } else if (options.extraMinutes && options.extraMinutes > 0) {
+      const addMins = Math.floor(options.extraMinutes);
+      nextUnlimitedDuration = false;
+      nextDurationMinutes = (target.unlimitedDuration ? 0 : nextDurationMinutes) + addMins;
+      nextExpiresAt = new Date(baseMs + addMins * 60 * 1000).toISOString();
+    }
+
+    let nextUnlimitedClaims = Boolean(target.unlimitedClaims);
+    let nextMaxClaims = Math.max(1, Number(target.maxClaims) || 1);
+    if (options.setUnlimitedClaims) {
+      nextUnlimitedClaims = true;
+      nextMaxClaims = 999999999;
+    } else if (options.extraClaims && options.extraClaims > 0) {
+      nextUnlimitedClaims = false;
+      nextMaxClaims =
+        (target.unlimitedClaims ? target.claimedBy.length : nextMaxClaims) +
+        Math.floor(options.extraClaims);
+    }
+
+    const updatedRaw: RedeemCode = {
+      ...target,
+      durationMinutes: nextDurationMinutes,
+      unlimitedDuration: nextUnlimitedDuration || undefined,
+      expiresAt: nextExpiresAt,
+      maxClaims: nextMaxClaims,
+      unlimitedClaims: nextUnlimitedClaims || undefined,
+      active: options.reactivate !== false ? true : target.active,
+    };
+
+    const sanitizedUpdated = sanitizeRedeemCode(updatedRaw) || updatedRaw;
+    const nextList = existingList.map((r) => (r.id === id ? sanitizedUpdated : r));
+    void persistRedeemCodesImmediately(nextList);
+    playAtmSound('success');
+
+    return {
+      success: true,
+      message: options.setUnlimitedDuration
+        ? `Masa aktif Kode "${sanitizedUpdated.code}" diubah menjadi Tanpa Batas dan diaktifkan!`
+        : `Masa aktif Kode "${sanitizedUpdated.code}" berhasil diperpanjang dan disimpan ke Cloud!`,
+      redeemCode: sanitizedUpdated,
     };
   };
 
   const deleteRedeemCode = (id: string) => {
-    setRedeemCodes((prev) => sanitizeRedeemCodesList(prev).filter((r) => r.id !== id));
+    const nextList = sanitizeRedeemCodesList(redeemCodesRef.current).filter((r) => r.id !== id);
+    void persistRedeemCodesImmediately(nextList);
     playAtmSound('beep');
   };
 
   const toggleRedeemCodeActive = (id: string) => {
-    setRedeemCodes((prev) =>
-      sanitizeRedeemCodesList(prev).map((r) => (r.id === id ? { ...r, active: !r.active } : r))
+    const nextList = sanitizeRedeemCodesList(redeemCodesRef.current).map((r) =>
+      r.id === id ? { ...r, active: !r.active } : r
     );
+    void persistRedeemCodesImmediately(nextList);
     playAtmSound('beep');
   };
 
   const claimRedeemCode = (code: string, options?: { adminPinVerified?: boolean }) => {
     if (!currentAccount) return { success: false, message: 'Akun tidak aktif!' };
-    const cleanCode = String(code || '').trim().toUpperCase().replace(/\s+/g, '');
+    const cleanCode = String(code ?? '').trim();
     if (!cleanCode) {
       playAtmSound('alert');
       return { success: false, message: 'Masukkan kode redeem terlebih dahulu.' };
     }
 
-    const safeCodes = sanitizeRedeemCodesList(redeemCodes);
-    const rawTarget = safeCodes.find((r) => r.code.toUpperCase() === cleanCode);
+    const safeCodes = sanitizeRedeemCodesList(redeemCodesRef.current);
+    const rawTarget = safeCodes.find(
+      (r) => r.code.trim().toLowerCase() === cleanCode.toLowerCase()
+    );
     const target = rawTarget ? sanitizeRedeemCode(rawTarget) : null;
 
     if (!target) {
       playAtmSound('alert');
       return {
         success: false,
-        message: `Kode Redeem "${cleanCode}" tidak ditemukan! Periksa kembali huruf dan angkanya.`,
+        message: `Kode Redeem "${cleanCode}" tidak ditemukan! Periksa kembali penulisan kodenya.`,
       };
     }
 
@@ -8410,26 +8873,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       playAtmSound('alert');
       return {
         success: false,
-        message: `Kode Redeem "${cleanCode}" sedang dinonaktifkan oleh Admin.`,
+        message: `Kode Redeem "${target.code}" sedang dinonaktifkan oleh Admin.`,
       };
     }
 
-    const now = new Date();
-    const exp = new Date(target.expiresAt);
-    if (Number.isFinite(exp.getTime()) && now > exp) {
-      playAtmSound('alert');
-      return {
-        success: false,
-        message: `Masa berlaku Kode Redeem "${cleanCode}" telah habis (Kedaluwarsa pada ${exp.toLocaleString('id-ID')} WIB).`,
-      };
+    if (!target.unlimitedDuration) {
+      const now = new Date();
+      const exp = new Date(target.expiresAt);
+      if (Number.isFinite(exp.getTime()) && now > exp) {
+        playAtmSound('alert');
+        return {
+          success: false,
+          message: `Masa berlaku Kode Redeem "${target.code}" telah habis (Kedaluwarsa pada ${exp.toLocaleString('id-ID')} WIB).`,
+        };
+      }
     }
 
     const claimedList = Array.isArray(target.claimedBy) ? target.claimedBy : [];
-    if (claimedList.length >= target.maxClaims) {
+    if (!target.unlimitedClaims && claimedList.length >= target.maxClaims) {
       playAtmSound('alert');
       return {
         success: false,
-        message: `Kuota klaim Kode Redeem "${cleanCode}" sudah penuh (${claimedList.length}/${target.maxClaims} orang telah mengklaim).`,
+        message: `Kuota klaim Kode Redeem "${target.code}" sudah penuh (${claimedList.length}/${target.maxClaims} orang telah mengklaim).`,
       };
     }
 
@@ -8437,7 +8902,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       playAtmSound('alert');
       return {
         success: false,
-        message: `Akun Anda (${currentAccount.fullName}) sudah pernah menukarkan kode "${cleanCode}" ini!`,
+        message: `Akun Anda (${currentAccount.fullName}) sudah pernah menukarkan kode "${target.code}" ini!`,
       };
     }
 
@@ -9406,28 +9871,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
     }
 
-    // Catat riwayat klaim pengklaim secara aman
-    setRedeemCodes((prev) =>
-      sanitizeRedeemCodesList(prev).map((r) =>
-        r.id === target.id
-          ? {
-              ...r,
-              claimedBy: [
-                ...r.claimedBy,
-                {
-                  accountId: currentAccount.id,
-                  accountNumber: currentAccount.accountNumber,
-                  fullName: currentAccount.fullName,
-                  claimedAt: claimedAtIso,
-                  rewardSummary,
-                  rewardsGranted: summaryLines,
-                  referenceNo,
-                },
-              ],
-            }
-          : r
-      )
+    // Catat riwayat klaim pengklaim secara aman dan simpan langsung ke Cloud
+    const updatedRedeemListAfterClaim = sanitizeRedeemCodesList(redeemCodesRef.current).map((r) =>
+      r.id === target.id
+        ? {
+            ...r,
+            claimedBy: [
+              ...r.claimedBy,
+              {
+                accountId: currentAccount.id,
+                accountNumber: currentAccount.accountNumber,
+                fullName: currentAccount.fullName,
+                claimedAt: claimedAtIso,
+                rewardSummary,
+                rewardsGranted: summaryLines,
+                referenceNo,
+              },
+            ],
+          }
+        : r
     );
+    void persistRedeemCodesImmediately(updatedRedeemListAfterClaim);
 
     // Catat ke riwayat mutasi transaksi
     const tx: Transaction = {
@@ -23705,7 +24169,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         resetUserSettings,
         updateCustomerProfileIdentity,
         redeemCodes,
+        redeemCloudStatus,
+        redeemLastSavedAt,
+        redeemSaveError,
+        retrySaveRedeemCodesToCloud,
         createRedeemCode,
+        updateRedeemCode,
+        duplicateRedeemCode,
+        extendRedeemCode,
         deleteRedeemCode,
         toggleRedeemCodeActive,
         claimRedeemCode,
