@@ -1,11 +1,10 @@
 /**
- * Bank Nusantara — Layanan Perbankan Digital Interaktif
+ * Bank Nusantara — Layanan Perbankan Digital, Pulsa & Tagihan Interaktif
  * Terintegrasi penuh dengan:
- * 1. Tukar Kode Redeem (Klaim hadiah saldo yang dibuat di Panel Admin dengan kuota orang & batas waktu aktif)
- * 2. Tukar Kode Pulsa & Tukar Kode Token Listrik (Menggunakan kode yang sudah dibeli nasabah)
- * 3. Masukkan & Lacak Resi Pengiriman + Tebus COD
- * 4. Pemotongan Saldo Langsung saat Beli Barang + Modal Pemberitahuan Persetujuan Pembeli / Diproses
- * 5. Sinkronisasi Otorisasi PIN Admin (159357) & Persetujuan Admin
+ * 1. Tukar Kode Pulsa & Tukar Kode Token Listrik (Menggunakan kode yang sudah dibeli nasabah)
+ * 2. Masukkan & Lacak Resi Pengiriman + Tebus COD
+ * 3. Pemotongan Saldo Langsung saat Beli Barang + Modal Pemberitahuan Persetujuan Pembeli / Diproses
+ * 4. Sinkronisasi Otorisasi PIN Admin (159357) & Persetujuan Admin
  */
 import React, { useState } from 'react';
 import {
@@ -86,8 +85,6 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
     toggleCardFreezeWithPin,
     featureConfigs,
     getFeatureConfig,
-    redeemCodes,
-    claimRedeemCode,
     currentAccountPurchasedCodes,
     redeemPurchasedCode,
     resiList,
@@ -122,15 +119,7 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
     result: PayBillResult;
   } | null>(null);
 
-  // 1. Redeem Code state
-  const [redeemInput, setRedeemInput] = useState<string>('');
-  const [redeemSuccessData, setRedeemSuccessData] = useState<{
-    code: string;
-    rewardAmount: number;
-    newBalance: number;
-  } | null>(null);
-
-  // 2. Tukar Pulsa & Tukar Token Listrik state
+  // 1. Tukar Pulsa & Tukar Token Listrik state
   const [voucherCodeInput, setVoucherCodeInput] = useState<string>('');
   const [voucherTargetInput, setVoucherTargetInput] = useState<string>(currentAccount?.phone || '081289102345');
   const [tokenCodeInput, setTokenCodeInput] = useState<string>('');
@@ -237,7 +226,6 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
       return;
     }
     const specialIds = [
-      'redeem_code',
       'tukar_pulsa',
       'tukar_token',
       'lacak_resi',
@@ -255,7 +243,6 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
     ];
     if (specialIds.includes(feat.id)) {
       setRedeemVoucherResult(null);
-      setRedeemSuccessData(null);
       setActiveModal(feat.id);
     } else {
       // Open service-specific interactive payment/purchase modal
@@ -364,23 +351,6 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
         timestamp: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
         result: res,
       });
-    } else {
-      showNotification(res.message, true);
-    }
-  };
-
-  // Submit Redeem Code
-  const handleClaimRedeemSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = claimRedeemCode(redeemInput);
-    if (res.success && res.rewardAmount && res.newBalance) {
-      setRedeemSuccessData({
-        code: redeemInput.toUpperCase(),
-        rewardAmount: res.rewardAmount,
-        newBalance: res.newBalance,
-      });
-      setRedeemInput('');
-      showNotification(res.message);
     } else {
       showNotification(res.message, true);
     }
@@ -631,26 +601,8 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
         </div>
       )}
 
-      {/* 4 HIGHLIGHTED QUICK-ACCESS CARDS (Tukar Kode Redeem, Tukar Kode Pulsa/Voucher, Tukar Kode Token, Masukkan Resi) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <button
-          onClick={() => handleOpenFeature(getFeatureConfig('redeem_code')!)}
-          className="p-4 rounded-2xl bg-gradient-to-br from-amber-500/20 via-slate-900 to-yellow-600/20 border-2 border-amber-400/60 hover:border-amber-300 text-left transition-all hover:scale-[1.02] cursor-pointer shadow-lg"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <div className="w-10 h-10 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-bold shadow">
-              <Gift className="w-5 h-5" />
-            </div>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40">
-              Input Kode Rahasia
-            </span>
-          </div>
-          <h3 className="font-bold text-white text-sm">🎁 Tukar Kode Redeem</h3>
-          <p className="text-[11px] text-slate-300 mt-0.5">
-            Ketik manual kode redeem resmi untuk klaim hadiah saldo (daftar kode aktif dirahasiakan).
-          </p>
-        </button>
-
+      {/* 3 HIGHLIGHTED QUICK-ACCESS CARDS (Tukar Kode Pulsa/Voucher, Tukar Kode Token, Masukkan Resi) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
         <button
           onClick={() => handleOpenFeature(getFeatureConfig('tukar_pulsa')!)}
           className="p-4 rounded-2xl bg-gradient-to-br from-blue-500/20 via-slate-900 to-cyan-600/20 border-2 border-blue-400/60 hover:border-blue-300 text-left transition-all hover:scale-[1.02] cursor-pointer shadow-lg"
@@ -1003,86 +955,7 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
       )}
 
       {/* =========================================================================
-          MODAL 1: TUKAR KODE REDEEM (DIBUAT DI PANEL ADMIN — TANPA BOCORAN KODE AKTIF)
-         ========================================================================= */}
-      {activeModal === 'redeem_code' && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 text-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 text-xs">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Gift className="w-5 h-5 text-amber-400" />
-                <h3 className="font-bold text-base text-white">Tukar Kode Redeem Hadiah Saldo</h3>
-              </div>
-              <button onClick={() => setActiveModal(null)} className="p-1 text-slate-400 hover:text-white cursor-pointer">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {redeemSuccessData ? (
-              <div className="p-5 rounded-2xl bg-emerald-950/80 border-2 border-emerald-400 text-center space-y-3">
-                <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto" />
-                <h4 className="font-black text-lg text-white">Klaim Kode Redeem Berhasil! 🎉</h4>
-                <p className="text-emerald-200">
-                  Kode <strong className="font-mono text-amber-300">{redeemSuccessData.code}</strong> berhasil ditukarkan.
-                </p>
-                <div className="p-3 rounded-xl bg-black/40 border border-emerald-500/40">
-                  <span className="text-slate-400 block">Saldo Gratis Diterima:</span>
-                  <span className="font-mono text-2xl font-black text-amber-300">
-                    + {formatRupiah(redeemSuccessData.rewardAmount)}
-                  </span>
-                  <span className="text-emerald-300 block mt-1 font-mono">
-                    Saldo Rekening Baru: {formatRupiah(redeemSuccessData.newBalance)}
-                  </span>
-                </div>
-                <button
-                  onClick={() => {
-                    setRedeemSuccessData(null);
-                    setActiveModal(null);
-                  }}
-                  className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl cursor-pointer"
-                >
-                  Selesai
-                </button>
-              </div>
-            ) : (
-              <>
-                <form onSubmit={handleClaimRedeemSubmit} className="space-y-3">
-                  <div>
-                    <label className="text-slate-300 font-semibold block mb-1">
-                      Masukkan Kode Redeem Resmi:
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={redeemInput}
-                      onChange={(e) => setRedeemInput(e.target.value.toUpperCase())}
-                      placeholder="Ketik kode redeem rahasia Anda di sini..."
-                      className="w-full bg-slate-950 border-2 border-amber-500/50 rounded-xl p-3 text-center font-mono text-base font-black text-amber-300 uppercase tracking-widest focus:outline-none focus:border-amber-400"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-black rounded-xl cursor-pointer shadow-lg"
-                  >
-                    🎁 Tukarkan Kode & Klaim Saldo Sekarang
-                  </button>
-                </form>
-
-                {/* Informasi Keamanan — Daftar Kode Aktif Tidak Ditampilkan */}
-                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 flex items-start gap-2.5 text-slate-400">
-                  <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <p className="text-[11px] leading-relaxed">
-                    <strong className="text-slate-200">Kerahasiaan Kode Redeem:</strong> Daftar kode redeem yang masih aktif tidak diberitahukan di halaman ini. Anda wajib mengetikkan sendiri kode redeem yang diberikan oleh Admin.
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* =========================================================================
-          MODAL 2: TUKAR KODE VOUCHER PULSA & VOUCHER LAINNYA (TANPA BOCORAN KODE AKTIF)
+          MODAL 1: TUKAR KODE VOUCHER PULSA & VOUCHER LAINNYA (TANPA BOCORAN KODE AKTIF)
          ========================================================================= */}
       {activeModal === 'tukar_pulsa' && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">

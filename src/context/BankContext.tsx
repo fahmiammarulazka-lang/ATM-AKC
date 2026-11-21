@@ -60,6 +60,7 @@ import {
 import {
   getActiveAppBuildInfo,
   mergeAutoDetectedAppUpdates,
+  cleanupExcessAutoDdUpdates,
   getPublicAppUpdates,
   getPublicCurrentUpdate,
   getLatestStructuredVersion,
@@ -68,6 +69,11 @@ import {
   STRUCTURED_BASE_VERSION,
   type ActiveAppBuildInfo,
 } from '../services/autoUpdateReleaseService';
+import {
+  sanitizeRedeemCodesList,
+  sanitizeRedeemCode,
+  summarizeRedeemCodeRewards,
+} from '../utils/redeemSanitizer';
 import {
   ensureAnonymousVaultSession,
   resolvePendingAuthRedirect,
@@ -508,12 +514,14 @@ interface BankContextType {
     nik?: string;
   }) => { success: boolean; message: string };
 
-  // Redeem Codes (Tukar Kode Redeem dibuat di Panel Admin dengan kuota, durasi & opsi notifikasi)
+  // Redeem Codes (Tukar Kode Redeem dibuat di Panel Admin dengan hadiah lengkap setara Surat & Hadiah + Trial)
   redeemCodes: RedeemCode[];
   createRedeemCode: (input: {
     code: string;
     title: string;
-    rewardAmount: number;
+    description?: string;
+    rewardAmount?: number;
+    rewards?: AdminGiftRewardItem[];
     maxClaims: number;
     durationMinutes: number;
     requireAdminPin?: boolean;
@@ -521,11 +529,27 @@ interface BankContextType {
   }) => { success: boolean; message: string; redeemCode?: RedeemCode };
   deleteRedeemCode: (id: string) => void;
   toggleRedeemCodeActive: (id: string) => void;
-  claimRedeemCode: (code: string) => {
+  claimRedeemCode: (
+    code: string,
+    options?: { adminPinVerified?: boolean }
+  ) => {
     success: boolean;
     message: string;
+    requiresAdminPin?: boolean;
+    redeemTitle?: string;
+    code?: string;
+    referenceNo?: string;
+    claimedAt?: string;
     rewardAmount?: number;
     newBalance?: number;
+    rewardsGranted?: string[];
+    activeTrialsGranted?: {
+      label: string;
+      emoji: string;
+      expiresAt: string;
+      durationMinutes: number;
+    }[];
+    gachaResults?: GachaClaimedItemResult[];
   };
 
   // Purchased Voucher Codes (Tukar Pulsa & Tukar Token Listrik pakai kode yang sudah dibeli)
@@ -974,6 +998,7 @@ interface BankContextType {
   adminSetCurrentAppUpdate: (id: string) => { success: boolean; message: string };
   adminDeleteAppUpdate: (id: string) => { success: boolean; message: string };
   adminResetAppUpdates: () => { success: boolean; message: string };
+  adminCleanupAutoDdUpdates: () => { success: boolean; message: string; removedCount: number };
   adminAddCustomFeature: (input: {
     title: string;
     category: string;
@@ -2311,10 +2336,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const userSettingsRef = useRef<UserAppSettings>(userSettings);
   userSettingsRef.current = userSettings;
 
-  const featureConfigs = rawFeatureConfigs.filter((f) => !deletedFeatureIds.includes(f.id));
-  const deletedFeaturesList = rawFeatureConfigs.filter((f) => deletedFeatureIds.includes(f.id));
+  const featureConfigs = rawFeatureConfigs.filter(
+    (f) => f && f.id !== 'redeem_code' && !deletedFeatureIds.includes(f.id)
+  );
+  const deletedFeaturesList = rawFeatureConfigs.filter(
+    (f) => f && f.id !== 'redeem_code' && deletedFeatureIds.includes(f.id)
+  );
 
-  const [redeemCodes, setRedeemCodes] = useState<RedeemCode[]>(INITIAL_REDEEM_CODES);
+  const [redeemCodes, setRedeemCodes] = useState<RedeemCode[]>(() =>
+    sanitizeRedeemCodesList(INITIAL_REDEEM_CODES)
+  );
   const [purchasedCodes, setPurchasedCodes] = useState<PurchasedVoucherCode[]>(INITIAL_PURCHASED_CODES);
   const [resiList, setResiList] = useState<ResiTrackingRecord[]>(INITIAL_RESI_LIST);
   const [cardUpgrades, setCardUpgrades] = useState<CardUpgradeApplication[]>(INITIAL_UPGRADES);
@@ -2708,7 +2739,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         (data.pinResetRequests as PinResetRequest[]).filter((p) => isNotBotAccountId(p.accountId))
       );
     }
-    if (Array.isArray(data.redeemCodes)) setRedeemCodes(data.redeemCodes as RedeemCode[]);
+    if (data.redeemCodes) setRedeemCodes(sanitizeRedeemCodesList(data.redeemCodes));
     if (Array.isArray(data.purchasedCodes)) {
       setPurchasedCodes(
         (data.purchasedCodes as PurchasedVoucherCode[]).filter((v) => isNotBotAccountId(v.accountId))
@@ -8237,106 +8268,172 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
   };
 
-  // ================= REDEEM CODE SYSTEM =================
+  // ================= REDEEM CODE SYSTEM (HADIAH LENGKAP SETARA SURAT & HADIAH + TRIAL) =================
   const createRedeemCode = (input: {
     code: string;
     title: string;
-    rewardAmount: number;
+    description?: string;
+    rewardAmount?: number;
+    rewards?: AdminGiftRewardItem[];
     maxClaims: number;
     durationMinutes: number;
     requireAdminPin?: boolean;
     sendNotification?: boolean;
   }) => {
-    const cleanCode = input.code.trim().toUpperCase().replace(/\s+/g, '');
+    const cleanCode = String(input.code || '').trim().toUpperCase().replace(/\s+/g, '');
     if (!cleanCode || cleanCode.length < 3) {
       return { success: false, message: 'Kode redeem minimal 3 karakter!' };
     }
-    if (redeemCodes.some((r) => r.code.toUpperCase() === cleanCode)) {
+    if (redeemCodes.some((r) => String(r?.code || '').toUpperCase() === cleanCode)) {
       return { success: false, message: 'Kode redeem tersebut sudah terdaftar!' };
     }
-    if (input.rewardAmount <= 0 || input.maxClaims <= 0 || input.durationMinutes <= 0) {
-      return { success: false, message: 'Nominal, kuota orang, dan durasi harus lebih dari 0!' };
+
+    const providedRewards = Array.isArray(input.rewards) ? input.rewards.filter(Boolean) : [];
+    const safeCashAmount = Math.max(0, Number(input.rewardAmount) || 0);
+
+    // Bangun daftar hadiah efektif: jika rewards dikirim pakai itu; jika legacy rewardAmount-only buat item cash_balance
+    let finalRewards: AdminGiftRewardItem[] = providedRewards;
+    if (finalRewards.length === 0 && safeCashAmount > 0) {
+      finalRewards = [
+        {
+          id: `rdm-cash-${Date.now()}`,
+          type: 'cash_balance',
+          label: 'Saldo Uang Tunai',
+          amount: safeCashAmount,
+          unitLabel: 'Rupiah',
+          emoji: '💵',
+          rewardMode: 'fixed',
+        },
+      ];
     }
+
+    if (finalRewards.length === 0 && safeCashAmount <= 0) {
+      return {
+        success: false,
+        message: 'Pilih minimal 1 hadiah dari katalog hadiah atau isi nominal saldo lebih dari 0!',
+      };
+    }
+
+    const safeMaxClaims = Math.floor(Number(input.maxClaims) || 0);
+    const safeDurationMinutes = Math.floor(Number(input.durationMinutes) || 0);
+    if (safeMaxClaims <= 0 || safeDurationMinutes <= 0) {
+      return { success: false, message: 'Kuota orang dan durasi aktif harus lebih dari 0!' };
+    }
+
+    const derivedCashTotal = finalRewards
+      .filter(
+        (r) =>
+          r.type === 'cash_balance' ||
+          r.type === 'cash_startup_modal' ||
+          r.type === 'cash_billionaire_vault'
+      )
+      .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+    const effectiveCashAmount = derivedCashTotal > 0 ? derivedCashTotal : safeCashAmount;
 
     const shouldNotify = input.sendNotification !== false;
     const now = Date.now();
     const newRedeem: RedeemCode = {
-      id: `rdm-${now}`,
+      id: `rdm-${now}-${Math.floor(Math.random() * 1000)}`,
       code: cleanCode,
-      title: input.title.trim() || `Voucher Redeem Rp ${input.rewardAmount.toLocaleString('id-ID')}`,
-      rewardAmount: input.rewardAmount,
-      maxClaims: input.maxClaims,
+      title:
+        String(input.title || '').trim() ||
+        (finalRewards.length > 1
+          ? `Paket Hadiah ${cleanCode} (${finalRewards.length} Hadiah)`
+          : effectiveCashAmount > 0
+          ? `Voucher Redeem Rp ${effectiveCashAmount.toLocaleString('id-ID')}`
+          : `Voucher Hadiah ${cleanCode}`),
+      description: input.description?.trim() || undefined,
+      rewardAmount: effectiveCashAmount,
+      rewards: finalRewards,
+      maxClaims: safeMaxClaims,
       claimedBy: [],
       createdAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + input.durationMinutes * 60 * 1000).toISOString(),
-      durationMinutes: input.durationMinutes,
+      expiresAt: new Date(now + safeDurationMinutes * 60 * 1000).toISOString(),
+      durationMinutes: safeDurationMinutes,
       active: true,
-      requireAdminPin: input.requireAdminPin || false,
+      requireAdminPin: Boolean(input.requireAdminPin),
       sendNotification: shouldNotify,
     };
 
-    setRedeemCodes((prev) => [newRedeem, ...prev]);
+    setRedeemCodes((prev) => [newRedeem, ...sanitizeRedeemCodesList(prev)]);
     if (shouldNotify) {
       addNotification(
-        'Kode Redeem Baru Dibuat 🎁',
-        `Kode "${cleanCode}" senilai Rp ${input.rewardAmount.toLocaleString('id-ID')} aktif untuk ${input.maxClaims} orang selama ${input.durationMinutes} menit.`,
-        'success'
+        'Kode Redeem Baru Tersedia',
+        `Event "${newRedeem.title}" telah aktif untuk ${safeMaxClaims} orang selama ${safeDurationMinutes} menit. Buka tab Kode Redeem untuk menukarkan kode dari Admin.`,
+        'success',
+        { category: 'hadiah', targetView: 'redeem' }
       );
     }
     playAtmSound('success');
     return {
       success: true,
-      message: `Kode Redeem "${cleanCode}" berhasil dibuat (${
+      message: `Kode Redeem "${cleanCode}" dengan ${finalRewards.length} jenis hadiah berhasil dibuat (${
         shouldNotify ? 'dengan notifikasi ke nasabah' : 'mode senyap tanpa notifikasi'
-      })! Berlaku untuk ${input.maxClaims} orang selama ${input.durationMinutes} menit.`,
+      })! Berlaku untuk ${safeMaxClaims} orang selama ${safeDurationMinutes} menit.`,
       redeemCode: newRedeem,
     };
   };
 
   const deleteRedeemCode = (id: string) => {
-    setRedeemCodes((prev) => prev.filter((r) => r.id !== id));
+    setRedeemCodes((prev) => sanitizeRedeemCodesList(prev).filter((r) => r.id !== id));
     playAtmSound('beep');
   };
 
   const toggleRedeemCodeActive = (id: string) => {
-    setRedeemCodes((prev) => prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r)));
+    setRedeemCodes((prev) =>
+      sanitizeRedeemCodesList(prev).map((r) => (r.id === id ? { ...r, active: !r.active } : r))
+    );
     playAtmSound('beep');
   };
 
-  const claimRedeemCode = (code: string) => {
+  const claimRedeemCode = (code: string, options?: { adminPinVerified?: boolean }) => {
     if (!currentAccount) return { success: false, message: 'Akun tidak aktif!' };
-    const cleanCode = code.trim().toUpperCase().replace(/\s+/g, '');
-    const target = redeemCodes.find((r) => r.code.toUpperCase() === cleanCode);
+    const cleanCode = String(code || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!cleanCode) {
+      playAtmSound('alert');
+      return { success: false, message: 'Masukkan kode redeem terlebih dahulu.' };
+    }
+
+    const safeCodes = sanitizeRedeemCodesList(redeemCodes);
+    const rawTarget = safeCodes.find((r) => r.code.toUpperCase() === cleanCode);
+    const target = rawTarget ? sanitizeRedeemCode(rawTarget) : null;
 
     if (!target) {
       playAtmSound('alert');
-      return { success: false, message: `Kode Redeem "${cleanCode}" tidak ditemukan! Periksa kembali huruf/angkanya.` };
+      return {
+        success: false,
+        message: `Kode Redeem "${cleanCode}" tidak ditemukan! Periksa kembali huruf dan angkanya.`,
+      };
     }
 
     if (!target.active) {
       playAtmSound('alert');
-      return { success: false, message: `Kode Redeem "${cleanCode}" sedang dinonaktifkan oleh Admin.` };
+      return {
+        success: false,
+        message: `Kode Redeem "${cleanCode}" sedang dinonaktifkan oleh Admin.`,
+      };
     }
 
     const now = new Date();
     const exp = new Date(target.expiresAt);
-    if (now > exp) {
+    if (Number.isFinite(exp.getTime()) && now > exp) {
       playAtmSound('alert');
       return {
         success: false,
-        message: `Masa berlaku Kode Redeem "${cleanCode}" telah habis (Kedaluwarsa pada ${exp.toLocaleTimeString('id-ID')} WIB).`,
+        message: `Masa berlaku Kode Redeem "${cleanCode}" telah habis (Kedaluwarsa pada ${exp.toLocaleString('id-ID')} WIB).`,
       };
     }
 
-    if (target.claimedBy.length >= target.maxClaims) {
+    const claimedList = Array.isArray(target.claimedBy) ? target.claimedBy : [];
+    if (claimedList.length >= target.maxClaims) {
       playAtmSound('alert');
       return {
         success: false,
-        message: `Kuota klaim Kode Redeem "${cleanCode}" sudah penuh (${target.claimedBy.length}/${target.maxClaims} orang telah mengklaim).`,
+        message: `Kuota klaim Kode Redeem "${cleanCode}" sudah penuh (${claimedList.length}/${target.maxClaims} orang telah mengklaim).`,
       };
     }
 
-    if (target.claimedBy.some((c) => c.accountId === currentAccount.id)) {
+    if (claimedList.some((c) => c.accountId === currentAccount.id)) {
       playAtmSound('alert');
       return {
         success: false,
@@ -8344,20 +8441,974 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    const newBalance = currentAccount.balance + target.rewardAmount;
+    if (target.requireAdminPin && !options?.adminPinVerified) {
+      return {
+        success: false,
+        requiresAdminPin: true,
+        redeemTitle: target.title,
+        code: target.code,
+        message: `Kode Redeem "${target.code}" memerlukan otorisasi PIN Admin sebelum hadiah diklaim.`,
+      };
+    }
 
-    // Update account balance
+    // Susun paket hadiah yang akan diberikan (100% setara Surat & Hadiah, tetap kompatibel penuh dengan kode saldo lama)
+    const effectiveRewards: AdminGiftRewardItem[] =
+      Array.isArray(target.rewards) && target.rewards.length > 0
+        ? target.rewards
+        : target.rewardAmount > 0
+        ? [
+            {
+              id: `legacy-cash-${target.id}`,
+              type: 'cash_balance',
+              label: 'Saldo Uang Tunai',
+              amount: target.rewardAmount,
+              unitLabel: 'Rupiah',
+              emoji: '💵',
+              rewardMode: 'fixed',
+            },
+          ]
+        : [];
+
+    let addCash = 0;
+    let addCoins = 0;
+    let addVouchers = 0;
+    let addJobLevels = 0;
+    let addGoldGrams = 0;
+    let addPoints = 50; // Bonus poin loyalitas standar setiap klaim kode redeem
+    let addPulsa = 0;
+    let addPlnKwh = 0;
+    let addClickPower = 0;
+    let addSalaryMult = 0;
+    let setCashbackPct: number | null = null;
+    let enableShield = false;
+    let enableBlueCheck = false;
+    let tierUpgradeSteps = 0;
+    let depositoAmount = 0;
+    let pocketAmount = 0;
+    const addBusinesses: Record<string, number> = {};
+    const addTrading: Record<string, number> = {};
+    let shouldForgiveLoans = false;
+    let forceCardTier: CardTier | null = null;
+    let explicitTargetTier: CardTier | null = null;
+    let grantedDevRoleId: string | null | undefined = undefined;
+    const createdTrials: ActiveAccountTrial[] = [];
+    const rolledResults: GachaClaimedItemResult[] = [];
+    const summaryLines: string[] = [];
+
+    const existingActiveTrials = (currentAccount.activeTrials || []).filter(
+      (t) => new Date(t.expiresAt).getTime() > Date.now()
+    );
+    const nonTrialCardTier: CardTier =
+      existingActiveTrials.find((t) => t.revertSnapshot.previousCardTier)?.revertSnapshot.previousCardTier ||
+      currentAccount.cardTier;
+    const nonTrialVerified: boolean = existingActiveTrials.some(
+      (t) => t.revertSnapshot.previousVerified !== undefined
+    )
+      ? Boolean(
+          existingActiveTrials.find((t) => t.revertSnapshot.previousVerified !== undefined)
+            ?.revertSnapshot.previousVerified
+        )
+      : Boolean(currentAccount.isVerified);
+    const nonTrialVerifiedLabel: string | undefined =
+      existingActiveTrials.find((t) => t.revertSnapshot.previousVerifiedLabel !== undefined)
+        ?.revertSnapshot.previousVerifiedLabel || currentAccount.verifiedLabel;
+    const nonTrialVipShield: boolean = existingActiveTrials.some(
+      (t) => t.revertSnapshot.previousVipShield !== undefined
+    )
+      ? Boolean(
+          existingActiveTrials.find((t) => t.revertSnapshot.previousVipShield !== undefined)
+            ?.revertSnapshot.previousVipShield
+        )
+      : Boolean(currentAccount.vipShieldActive);
+    const nonTrialCashbackPercent: number =
+      existingActiveTrials.find((t) => t.revertSnapshot.previousCashbackPercent !== undefined)
+        ?.revertSnapshot.previousCashbackPercent ?? (currentAccount.cashbackPercent || 0);
+    const nonTrialDevRoleId: string | null | undefined = existingActiveTrials.some(
+      (t) => t.revertSnapshot.previousDevRoleId !== undefined
+    )
+      ? existingActiveTrials.find((t) => t.revertSnapshot.previousDevRoleId !== undefined)
+          ?.revertSnapshot.previousDevRoleId ?? null
+      : currentAccount.devRoleId ?? null;
+
+    for (const rew of effectiveRewards) {
+      const catMeta = GIFT_REWARD_CATALOG.find((c) => c.type === rew.type);
+      const selectedSub = catMeta?.subOptions?.find((s) => s.id === rew.selectedSubOptionId);
+      const step = selectedSub?.stepOverride || catMeta?.step || 1;
+      let qty = Math.max(1, Number(rew.amount) || 1);
+
+      if (rew.rewardMode === 'gacha' && rew.gachaTiers && rew.gachaTiers.length > 0) {
+        const rolled = rollGachaOutcome(rew.gachaTiers, step);
+        qty = rolled.rolledAmount;
+        rolledResults.push({
+          rewardId: rew.id,
+          type: rew.type,
+          label: rew.selectedSubOptionLabel ? `${rew.label} (${rew.selectedSubOptionLabel})` : rew.label,
+          emoji: rew.emoji,
+          unitLabel: rew.unitLabel,
+          tierLabel: rolled.tierLabel,
+          probabilityPercent: rolled.probabilityPercent,
+          rolledAmount: rolled.rolledAmount,
+          minAmount: rolled.minAmount,
+          maxAmount: rolled.maxAmount,
+        });
+      }
+
+      const isTrialItem = Boolean(catMeta?.isTrial || selectedSub?.isTrialVariant);
+      const trialMins = isTrialItem
+        ? Math.max(
+            1,
+            Number(rew.trialDurationMinutes) ||
+              (rew.rewardMode === 'gacha'
+                ? qty
+                : selectedSub?.defaultTrialMinutesOverride || catMeta?.defaultTrialMinutes || 1440)
+          )
+        : 0;
+      const subSuffix = rew.selectedSubOptionLabel ? ` • ${rew.selectedSubOptionLabel}` : '';
+      const trialSuffix = trialMins > 0 ? ` [Trial ${formatTrialDurationLabel(trialMins)}]` : '';
+      const gachaMatch = rolledResults.find((gr) => gr.rewardId === rew.id);
+      const gachaTag = gachaMatch ? ` [Gacha: ${gachaMatch.tierLabel}]` : '';
+
+      if (
+        rew.type === 'cash_balance' ||
+        rew.type === 'cash_startup_modal' ||
+        rew.type === 'cash_billionaire_vault'
+      ) {
+        summaryLines.push(`${rew.emoji} ${rew.label}: +${formatRupiah(qty)}${gachaTag}`);
+      } else {
+        summaryLines.push(
+          `${rew.emoji} ${rew.label}${subSuffix} (${qty.toLocaleString('id-ID')} ${rew.unitLabel})${trialSuffix}${gachaTag}`
+        );
+      }
+
+      const nowDate = new Date();
+      const expiresIso = new Date(nowDate.getTime() + (trialMins || 1440) * 60_000).toISOString();
+
+      switch (rew.type) {
+        case 'cash_balance':
+        case 'salary_jackpot_drop':
+        case 'fee_waiver_pass':
+        case 'sultan_empire_dividend':
+        case 'cash_startup_modal':
+        case 'cash_billionaire_vault':
+          addCash += qty;
+          break;
+        case 'spin_coins':
+        case 'coin_jackpot_rain':
+          addCoins += qty;
+          break;
+        case 'level_voucher':
+        case 'suit_victory_charm':
+        case 'voucher_bundle_pro':
+        case 'voucher_sultan_50':
+          addVouchers += qty;
+          break;
+        case 'job_level_up':
+        case 'instant_executive_unlock':
+        case 'job_level_mega_jump':
+          addJobLevels += qty;
+          break;
+        case 'gold_grams':
+        case 'gold_bar_royal_10g':
+        case 'gold_jewel_bonus':
+        case 'gold_bar_50g_royal':
+          addGoldGrams += qty;
+          break;
+        case 'reward_points':
+        case 'loyalty_point_chest':
+          addPoints += qty;
+          break;
+        case 'pulsa_balance':
+        case 'pulsa_roaming_vip':
+          addPulsa += qty;
+          break;
+        case 'pln_kwh':
+        case 'pln_super_pack':
+        case 'pln_industrial_pack':
+          addPlnKwh += qty;
+          break;
+        case 'click_power_boost':
+        case 'job_progress_boost':
+          addClickPower += qty;
+          break;
+        case 'salary_multiplier_boost':
+          addSalaryMult += qty;
+          break;
+        case 'cashback_percent':
+        case 'cashback_tier_max':
+          setCashbackPct = Math.max(setCashbackPct || 0, Math.min(100, qty));
+          break;
+        case 'vip_shield':
+          enableShield = true;
+          break;
+        case 'blue_checkmark':
+          enableBlueCheck = true;
+          break;
+        case 'upgrade_card_tier': {
+          const subTierMap: Record<string, CardTier> = {
+            tier_regular: 'regular',
+            tier_gold: 'gold',
+            tier_premium: 'premium',
+            tier_platinum: 'platinum',
+            tier_admin: 'admin',
+          };
+          if (rew.selectedSubOptionId && subTierMap[rew.selectedSubOptionId]) {
+            const chosenTier = subTierMap[rew.selectedSubOptionId];
+            explicitTargetTier = chosenTier;
+            if (chosenTier === 'admin') {
+              enableShield = true;
+              enableBlueCheck = true;
+            }
+          } else {
+            tierUpgradeSteps += qty;
+          }
+          break;
+        }
+        case 'upgrade_card_platinum_perm':
+          if (currentAccount.cardTier !== 'admin') forceCardTier = 'platinum';
+          break;
+        case 'upgrade_card_admin_infinity_perm':
+          forceCardTier = 'admin';
+          enableShield = true;
+          enableBlueCheck = true;
+          break;
+        case 'special_deposito':
+        case 'high_yield_deposito_vip':
+        case 'deposito_platinum_50m':
+          depositoAmount += qty;
+          break;
+        case 'dream_pocket_fund':
+        case 'emergency_vault_fund':
+        case 'dream_pocket_education_fund':
+        case 'dream_pocket_house_fund':
+          pocketAmount += qty;
+          break;
+        case 'trading_gold_kg':
+        case 'trading_sp500_vip':
+          addTrading['gold_antam_kg'] = (addTrading['gold_antam_kg'] || 0) + qty;
+          break;
+        case 'trading_btc_vip':
+          addTrading['crypto_btc_vip'] = (addTrading['crypto_btc_vip'] || 0) + qty;
+          break;
+        case 'trading_custom_selector': {
+          const trdId = rew.selectedSubOptionId || 'gold_antam_kg';
+          addTrading[trdId] = (addTrading[trdId] || 0) + qty;
+          break;
+        }
+        case 'forgive_loans':
+          shouldForgiveLoans = true;
+          break;
+        case 'mystery_thr_combo':
+          addCash += 1_500_000 * qty;
+          addCoins += 100 * qty;
+          addPoints += 2_000 * qty;
+          break;
+        case 'double_wallet_bonus':
+          addCash += 3_000_000 * qty;
+          addCoins += 200 * qty;
+          break;
+        case 'career_turbo_pack':
+          addJobLevels += 2 * qty;
+          addVouchers += 3 * qty;
+          addClickPower += 2 * qty;
+          break;
+        case 'royal_crown_100g_50m_pack':
+          addGoldGrams += 100 * qty;
+          addCash += 50_000_000 * qty;
+          break;
+        case 'cash_thr_lebaran_pack':
+          addCash += 4_000_000 * qty;
+          addGoldGrams += 2 * qty;
+          addCoins += 250 * qty;
+          break;
+        case 'spin_mega_ticket_bundle':
+          addCoins += 500 * qty;
+          addPoints += 10_000 * qty;
+          break;
+        case 'gold_coin_nusantara_pack':
+          addGoldGrams += 5 * qty;
+          addCoins += 300 * qty;
+          break;
+        case 'diamond_all_permanent_pack':
+          if (currentAccount.cardTier !== 'admin') forceCardTier = 'platinum';
+          enableBlueCheck = true;
+          enableShield = true;
+          addCash += 10_000_000 * qty;
+          addGoldGrams += 10 * qty;
+          break;
+        case 'vip_protection_selector': {
+          const vipId = rew.selectedSubOptionId || 'vip_full';
+          if (vipId === 'vip_blue' || vipId === 'vip_full') enableBlueCheck = true;
+          if (vipId === 'vip_shield' || vipId === 'vip_full') enableShield = true;
+          if (vipId === 'vip_cashback' || vipId === 'vip_full') {
+            setCashbackPct = Math.max(setCashbackPct || 0, 25);
+          }
+          break;
+        }
+        case 'job_career_custom_selector': {
+          const subId = rew.selectedSubOptionId || 'job_level';
+          if (subId === 'job_level') addJobLevels += qty;
+          else if (subId === 'job_voucher') addVouchers += qty;
+          else if (subId === 'job_click') addClickPower += qty;
+          else if (subId === 'job_salary') addSalaryMult += qty;
+          else if (subId === 'job_coin') addCoins += qty;
+          else if (subId === 'job_trial') {
+            addClickPower += 5;
+            addSalaryMult += qty;
+            addVouchers += 1;
+            createdTrials.push({
+              id: `trial-rdm-jobpack-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+              rewardType: 'job_career_custom_selector',
+              label: `Trial Paket Pekerjaan Lengkap (${formatTrialDurationLabel(trialMins)})`,
+              emoji: '⏳',
+              startedAt: nowDate.toISOString(),
+              expiresAt: expiresIso,
+              durationMinutes: trialMins,
+              revertSnapshot: { deltaClickPower: 5, deltaSalaryMultiplier: qty },
+            });
+          }
+          break;
+        }
+        case 'role_grant_permanent': {
+          const roleObj = devRoles.find((r) => r.id === rew.targetDevRoleId) || devRoles[0];
+          if (roleObj) grantedDevRoleId = roleObj.id;
+          break;
+        }
+        case 'role_grant_trial': {
+          const roleObj = devRoles.find((r) => r.id === rew.targetDevRoleId) || devRoles[0];
+          if (roleObj) {
+            grantedDevRoleId = roleObj.id;
+            createdTrials.push({
+              id: `trial-rdm-role-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+              rewardType: 'role_grant_trial',
+              label: `Role ${roleObj.name} Trial (${formatTrialDurationLabel(trialMins)})`,
+              emoji: '⏳',
+              startedAt: nowDate.toISOString(),
+              expiresAt: expiresIso,
+              durationMinutes: trialMins,
+              revertSnapshot: { previousDevRoleId: nonTrialDevRoleId },
+            });
+          }
+          break;
+        }
+        case 'role_gacha_random_permanent': {
+          const randRole = devRoles[Math.floor(Math.random() * devRoles.length)] || devRoles[0];
+          if (randRole) grantedDevRoleId = randRole.id;
+          break;
+        }
+        case 'role_gacha_random_trial': {
+          const randRole = devRoles[Math.floor(Math.random() * devRoles.length)] || devRoles[0];
+          if (randRole) {
+            grantedDevRoleId = randRole.id;
+            createdTrials.push({
+              id: `trial-rdm-randrole-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+              rewardType: 'role_gacha_random_trial',
+              label: `Gacha Role ${randRole.name} Trial (${formatTrialDurationLabel(trialMins)})`,
+              emoji: '🎟️',
+              startedAt: nowDate.toISOString(),
+              expiresAt: expiresIso,
+              durationMinutes: trialMins,
+              revertSnapshot: { previousDevRoleId: nonTrialDevRoleId },
+            });
+          }
+          break;
+        }
+        case 'trial_blue_checkmark':
+          enableBlueCheck = true;
+          createdTrials.push({
+            id: `trial-rdm-blue-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_blue_checkmark',
+            label: `Centang Biru Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '☑️',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+            },
+          });
+          break;
+        case 'trial_vip_shield':
+          enableShield = true;
+          createdTrials.push({
+            id: `trial-rdm-vip-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_vip_shield',
+            label: `VIP Shield Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🛡️',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { previousVipShield: nonTrialVipShield },
+          });
+          break;
+        case 'trial_gold_card':
+          if (currentAccount.cardTier !== 'admin') {
+            forceCardTier = forceCardTier === 'platinum' ? 'platinum' : 'gold';
+          }
+          createdTrials.push({
+            id: `trial-rdm-gold-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_gold_card',
+            label: `Kartu Emas Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🌟',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'gold',
+            revertSnapshot: { previousCardTier: nonTrialCardTier },
+          });
+          break;
+        case 'trial_platinum_card':
+          if (currentAccount.cardTier !== 'admin') forceCardTier = 'platinum';
+          createdTrials.push({
+            id: `trial-rdm-plat-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_platinum_card',
+            label: `Kartu Platinum Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '💎',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'platinum',
+            revertSnapshot: { previousCardTier: nonTrialCardTier },
+          });
+          break;
+        case 'trial_career_boost':
+          addClickPower += 5;
+          addSalaryMult += qty;
+          createdTrials.push({
+            id: `trial-rdm-boost-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_career_boost',
+            label: `Boost Gaji +${qty}x & Klik +5 Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '⚡',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { deltaClickPower: 5, deltaSalaryMultiplier: qty },
+          });
+          break;
+        case 'sultan_starter_pack':
+          addCash += 5_000_000 * qty;
+          addCoins += 300 * qty;
+          enableBlueCheck = true;
+          if (currentAccount.cardTier !== 'admin') forceCardTier = 'platinum';
+          createdTrials.push({
+            id: `trial-rdm-sultan-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'sultan_starter_pack',
+            label: `Paket Kartu Sultan Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '👑',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'platinum',
+            revertSnapshot: {
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+              previousCardTier: nonTrialCardTier,
+            },
+          });
+          break;
+        case 'trial_diamond_combo':
+          addCash += 2_000_000 * qty;
+          enableBlueCheck = true;
+          enableShield = true;
+          if (currentAccount.cardTier !== 'admin') forceCardTier = 'platinum';
+          createdTrials.push({
+            id: `trial-rdm-diamond-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_diamond_combo',
+            label: `Paket Diamond VIP Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '💠',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'platinum',
+            revertSnapshot: {
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+              previousVipShield: nonTrialVipShield,
+              previousCardTier: nonTrialCardTier,
+            },
+          });
+          break;
+        case 'trial_all_assets_boost':
+          addGoldGrams += 1 * qty;
+          addCoins += 50 * qty;
+          addSalaryMult += qty;
+          addClickPower += 4;
+          createdTrials.push({
+            id: `trial-rdm-allboost-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_all_assets_boost',
+            label: `Turbo Boost Kerja & Emas Trial (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🌟',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { deltaClickPower: 4, deltaSalaryMultiplier: qty },
+          });
+          break;
+        case 'trial_card_tier_selector': {
+          const subTierMap: Record<string, CardTier> = {
+            tier_regular: 'regular',
+            tier_gold: 'gold',
+            tier_premium: 'premium',
+            tier_platinum: 'platinum',
+            tier_admin: 'admin',
+          };
+          const chosenTier = subTierMap[rew.selectedSubOptionId || 'tier_platinum'] || 'platinum';
+          explicitTargetTier = chosenTier;
+          if (chosenTier === 'admin') {
+            enableShield = true;
+            enableBlueCheck = true;
+          }
+          createdTrials.push({
+            id: `trial-rdm-cardsel-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_card_tier_selector',
+            label: `Trial Kartu ${chosenTier.toUpperCase()} (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '💳',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: chosenTier,
+            revertSnapshot: {
+              previousCardTier: nonTrialCardTier,
+              ...(chosenTier === 'admin'
+                ? {
+                    previousVerified: nonTrialVerified,
+                    previousVerifiedLabel: nonTrialVerifiedLabel,
+                    previousVipShield: nonTrialVipShield,
+                  }
+                : {}),
+            },
+          });
+          break;
+        }
+        case 'trial_regular_card':
+          explicitTargetTier = 'regular';
+          createdTrials.push({
+            id: `trial-rdm-reg-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_regular_card',
+            label: `Trial Kartu Reguler (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🪪',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'regular',
+            revertSnapshot: { previousCardTier: nonTrialCardTier },
+          });
+          break;
+        case 'trial_premium_card':
+          if (currentAccount.cardTier !== 'admin') forceCardTier = 'premium';
+          createdTrials.push({
+            id: `trial-rdm-prem-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_premium_card',
+            label: `Trial Kartu Premium (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '✨',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'premium',
+            revertSnapshot: { previousCardTier: nonTrialCardTier },
+          });
+          break;
+        case 'trial_admin_infinity_card':
+          explicitTargetTier = 'admin';
+          enableShield = true;
+          enableBlueCheck = true;
+          createdTrials.push({
+            id: `trial-rdm-admintrial-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_admin_infinity_card',
+            label: `Trial Kartu Admin Infinity (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '👑',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'admin',
+            revertSnapshot: {
+              previousCardTier: nonTrialCardTier,
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+              previousVipShield: nonTrialVipShield,
+            },
+          });
+          break;
+        case 'trial_job_career_selector': {
+          const subId = rew.selectedSubOptionId || 'trial_job_combo';
+          let dClick = 0;
+          let dSalary = 0;
+          if (subId === 'trial_job_salary') {
+            dSalary = qty;
+          } else if (subId === 'trial_job_click') {
+            dClick = qty * 4;
+          } else if (subId === 'trial_job_coin') {
+            addCoins += 150 * qty;
+            dClick = 3;
+            dSalary = 1;
+          } else {
+            addVouchers += 2;
+            dClick = 6;
+            dSalary = qty;
+          }
+          addClickPower += dClick;
+          addSalaryMult += dSalary;
+          createdTrials.push({
+            id: `trial-rdm-jobsel-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_job_career_selector',
+            label: `${rew.selectedSubOptionLabel || 'Trial Pekerjaan'} (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '⚙️',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { deltaClickPower: dClick, deltaSalaryMultiplier: dSalary },
+          });
+          break;
+        }
+        case 'trial_job_salary_2x':
+        case 'trial_job_salary_5x':
+          addSalaryMult += qty;
+          createdTrials.push({
+            id: `trial-rdm-jsal-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: rew.type,
+            label: `${catMeta?.label || 'Trial Pengali Gaji'} (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '💵',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { deltaSalaryMultiplier: qty },
+          });
+          break;
+        case 'trial_job_click_power':
+          addClickPower += qty;
+          createdTrials.push({
+            id: `trial-rdm-jclk-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_job_click_power',
+            label: `Trial Klik Kerja +${qty} (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '👆',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { deltaClickPower: qty },
+          });
+          break;
+        case 'trial_job_coin_rain':
+          addCoins += 150 * qty;
+          addClickPower += 3;
+          addSalaryMult += 1;
+          createdTrials.push({
+            id: `trial-rdm-jcoin-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_job_coin_rain',
+            label: `Trial Bonus Koin & Boost Kerja (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🪙',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { deltaClickPower: 3, deltaSalaryMultiplier: 1 },
+          });
+          break;
+        case 'trial_cashback_15':
+        case 'trial_cashback_50': {
+          const pct = Math.min(100, qty);
+          setCashbackPct = Math.max(setCashbackPct || 0, pct);
+          createdTrials.push({
+            id: `trial-rdm-cb-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: rew.type,
+            label: `Trial Cashback ${pct}% (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🏷️',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { previousCashbackPercent: nonTrialCashbackPercent },
+          });
+          break;
+        }
+        case 'trial_free_transfer_vip':
+          addCash += 250_000 * qty;
+          enableShield = true;
+          setCashbackPct = Math.max(setCashbackPct || 0, 20);
+          createdTrials.push({
+            id: `trial-rdm-freetf-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_free_transfer_vip',
+            label: `Trial Bebas Admin & VIP Shield (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🛡️',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: {
+              previousVipShield: nonTrialVipShield,
+              previousCashbackPercent: nonTrialCashbackPercent,
+            },
+          });
+          break;
+        case 'trial_priority_badge_verified':
+          enableBlueCheck = true;
+          if (currentAccount.cardTier !== 'admin') forceCardTier = 'premium';
+          createdTrials.push({
+            id: `trial-rdm-prio-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_priority_badge_verified',
+            label: `Trial Lencana Prioritas & Centang Biru (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🎖️',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'premium',
+            revertSnapshot: {
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+              previousCardTier: nonTrialCardTier,
+            },
+          });
+          break;
+        case 'trial_trading_selector': {
+          const trdId = rew.selectedSubOptionId || 'gold_antam_kg';
+          addTrading[trdId] = (addTrading[trdId] || 0) + qty;
+          createdTrials.push({
+            id: `trial-rdm-trdsel-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_trading_selector',
+            label: `${rew.selectedSubOptionLabel || 'Trial Bursa'} (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '📊',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { temporaryTradingDeltas: { [trdId]: qty } },
+          });
+          break;
+        }
+        case 'trial_trading_btc_whale':
+          addTrading['crypto_btc_vip'] = (addTrading['crypto_btc_vip'] || 0) + qty;
+          createdTrials.push({
+            id: `trial-rdm-btc-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_trading_btc_whale',
+            label: `Trial Whale Bitcoin VIP (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '₿',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { temporaryTradingDeltas: { crypto_btc_vip: qty } },
+          });
+          break;
+        case 'trial_trading_gold_bullion':
+          addTrading['gold_antam_kg'] = (addTrading['gold_antam_kg'] || 0) + qty;
+          createdTrials.push({
+            id: `trial-rdm-bull-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_trading_gold_bullion',
+            label: `Trial Kolektor Emas Bullion (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🥇',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { temporaryTradingDeltas: { gold_antam_kg: qty } },
+          });
+          break;
+        case 'trial_royal_emperor_all_access':
+          explicitTargetTier = 'admin';
+          enableBlueCheck = true;
+          enableShield = true;
+          addSalaryMult += 5;
+          addClickPower += 10;
+          createdTrials.push({
+            id: `trial-rdm-emperor-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_royal_emperor_all_access',
+            label: `Trial Royal Emperor All-Access (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🔱',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'admin',
+            revertSnapshot: {
+              previousCardTier: nonTrialCardTier,
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+              previousVipShield: nonTrialVipShield,
+              deltaClickPower: 10,
+              deltaSalaryMultiplier: 5,
+            },
+          });
+          break;
+        case 'trial_gacha_mystery_duration':
+          addCash += 1_000_000 * qty;
+          enableBlueCheck = true;
+          if (currentAccount.cardTier !== 'admin') forceCardTier = 'platinum';
+          addSalaryMult += 3;
+          createdTrials.push({
+            id: `trial-rdm-mystdur-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_gacha_mystery_duration',
+            label: `Trial Misteri VIP & Boost (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '🎲',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            grantedTrialCardTier: 'platinum',
+            revertSnapshot: {
+              previousCardTier: nonTrialCardTier,
+              previousVerified: nonTrialVerified,
+              previousVerifiedLabel: nonTrialVerifiedLabel,
+              deltaSalaryMultiplier: 3,
+            },
+          });
+          break;
+        case 'trial_double_reward_points':
+          addPoints += 5_000 * qty;
+          addGoldGrams += 1 * qty;
+          setCashbackPct = Math.max(setCashbackPct || 0, 30);
+          createdTrials.push({
+            id: `trial-rdm-dblpts-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+            rewardType: 'trial_double_reward_points',
+            label: `Trial Cashback 30% & Loyalitas (${formatTrialDurationLabel(trialMins)})`,
+            emoji: '⭐',
+            startedAt: nowDate.toISOString(),
+            expiresAt: expiresIso,
+            durationMinutes: trialMins,
+            revertSnapshot: { previousCashbackPercent: nonTrialCashbackPercent },
+          });
+          break;
+      }
+    }
+
+    const tierOrder: CardTier[] = ['regular', 'gold', 'premium', 'platinum'];
+    const isUnlim =
+      currentAccount.cardTier === 'admin' ||
+      forceCardTier === 'admin' ||
+      explicitTargetTier === 'admin' ||
+      isUnlimitedNumber(currentAccount.balance);
+    const newBalance = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance + addCash;
+    const claimedAtIso = new Date().toISOString();
+    const referenceNo = `RDM-${Date.now().toString().slice(-8)}`;
+    const rewardSummary =
+      summaryLines.length > 0 ? summaryLines.join(' · ') : summarizeRedeemCodeRewards(target);
+
+    // Update rekening nasabah dengan seluruh hadiah & Trial aktif
     setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === currentAccount.id
-          ? { ...acc, balance: newBalance, rewardPoints: (acc.rewardPoints || 0) + 50 }
-          : acc
-      )
+      prev.map((acc) => {
+        if (acc.id !== currentAccount.id) return acc;
+        let nextTier = acc.cardTier;
+        if (explicitTargetTier) {
+          nextTier = explicitTargetTier;
+        } else if (forceCardTier === 'admin') {
+          nextTier = 'admin';
+        } else {
+          if (tierUpgradeSteps > 0 && acc.cardTier !== 'admin') {
+            const idx = tierOrder.indexOf(acc.cardTier);
+            const nextIdx = Math.min(tierOrder.length - 1, Math.max(0, idx) + tierUpgradeSteps);
+            nextTier = tierOrder[nextIdx];
+          }
+          if (forceCardTier && acc.cardTier !== 'admin') {
+            const curIdx = tierOrder.indexOf(nextTier);
+            const forceIdx = tierOrder.indexOf(forceCardTier);
+            if (forceIdx > curIdx) {
+              nextTier = forceCardTier;
+            }
+          }
+        }
+        const nextBiz = { ...(acc.empireBusinesses || {}) };
+        Object.entries(addBusinesses).forEach(([k, v]) => {
+          nextBiz[k] = (nextBiz[k] || 0) + v;
+        });
+        const nextTrd = { ...(acc.empireTradingHoldings || {}) };
+        Object.entries(addTrading).forEach(([k, v]) => {
+          nextTrd[k] = (nextTrd[k] || 0) + v;
+        });
+        const newGoldBatches =
+          addGoldGrams > 0
+            ? [
+                ...(acc.goldBatches || []),
+                {
+                  id: `gold-rdm-${Date.now()}`,
+                  purchasedAt: claimedAtIso,
+                  purchaseDateKey: claimedAtIso.slice(0, 10),
+                  grams: addGoldGrams,
+                  costRupiah: 0,
+                  pricePerGramAtBuy: goldMarketConfig.currentPricePerGram,
+                  goldForm: 'batangan' as const,
+                  motif: 'royal_platinum' as const,
+                  note: `Hadiah Kode Redeem ${target.code}`,
+                },
+              ]
+            : acc.goldBatches;
+
+        const hasBlueTrial = createdTrials.some(
+          (t) =>
+            t.rewardType === 'trial_blue_checkmark' ||
+            t.rewardType === 'sultan_starter_pack' ||
+            t.rewardType === 'trial_diamond_combo' ||
+            t.rewardType === 'trial_priority_badge_verified'
+        );
+
+        return {
+          ...acc,
+          balance: newBalance,
+          spinCoins: (acc.spinCoins || 0) + addCoins,
+          levelVouchers: (acc.levelVouchers || 0) + addVouchers,
+          jobLevel: (acc.jobLevel || 1) + addJobLevels,
+          goldGrams: (acc.goldGrams || 0) + addGoldGrams,
+          goldBatches: newGoldBatches,
+          rewardPoints: (acc.rewardPoints || 0) + addPoints,
+          pulsaBalance: (acc.pulsaBalance || 0) + addPulsa,
+          plnKwhBalance: (acc.plnKwhBalance || 0) + addPlnKwh,
+          clickPower: (acc.clickPower || 1) + addClickPower,
+          salaryMultiplier: (acc.salaryMultiplier || 1) + addSalaryMult,
+          cashbackPercent:
+            setCashbackPct !== null
+              ? Math.max(acc.cashbackPercent || 0, setCashbackPct)
+              : acc.cashbackPercent,
+          vipShieldActive: enableShield ? true : acc.vipShieldActive,
+          isVerified: enableBlueCheck ? true : acc.isVerified,
+          verifiedAt: enableBlueCheck ? acc.verifiedAt || claimedAtIso : acc.verifiedAt,
+          verifiedLabel: enableBlueCheck
+            ? acc.verifiedLabel || (hasBlueTrial ? 'Centang Biru Trial' : 'Nasabah Prioritas Terverifikasi')
+            : acc.verifiedLabel,
+          cardTier: nextTier,
+          devRoleId: grantedDevRoleId !== undefined ? grantedDevRoleId : acc.devRoleId,
+          empireBusinesses: nextBiz,
+          empireTradingHoldings: nextTrd,
+          activeTrials: [...existingActiveTrials, ...createdTrials],
+        };
+      })
     );
 
-    // Record claim
+    if (depositoAmount > 0) {
+      const dep: DepositoRecord = {
+        id: `depo-rdm-${Date.now()}`,
+        accountId: currentAccount.id,
+        principalAmount: depositoAmount,
+        tenorMonths: 6,
+        interestRateAnnual: 12,
+        maturityDate: new Date(Date.now() + 180 * 86400 * 1000).toISOString(),
+        projectedReturn: Math.round(depositoAmount * 1.06),
+        certificateNumber: `DEP-RDM-${Date.now().toString().slice(-6)}`,
+        status: 'active',
+        openedAt: claimedAtIso,
+      };
+      setDepositos((prev) => [dep, ...prev]);
+    }
+
+    if (pocketAmount > 0) {
+      const pkt: PocketSaving = {
+        id: `pkt-rdm-${Date.now()}`,
+        accountId: currentAccount.id,
+        title: `Celengan Redeem: ${target.code}`,
+        targetAmount: pocketAmount,
+        currentAmount: pocketAmount,
+        color: 'amber',
+        icon: '🎁',
+      };
+      setPockets((prev) => [pkt, ...prev]);
+    }
+
+    if (shouldForgiveLoans) {
+      setLoans((prev) =>
+        prev.map((ln) =>
+          ln.accountId === currentAccount.id && ln.status === 'approved'
+            ? {
+                ...ln,
+                status: 'approved',
+                remainingInstallments: 0,
+                adminNotes: `Dilunasi oleh Kode Redeem ${target.code}`,
+              }
+            : ln
+        )
+      );
+    }
+
+    // Catat riwayat klaim pengklaim secara aman
     setRedeemCodes((prev) =>
-      prev.map((r) =>
+      sanitizeRedeemCodesList(prev).map((r) =>
         r.id === target.id
           ? {
               ...r,
@@ -8367,7 +9418,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   accountId: currentAccount.id,
                   accountNumber: currentAccount.accountNumber,
                   fullName: currentAccount.fullName,
-                  claimedAt: new Date().toISOString(),
+                  claimedAt: claimedAtIso,
+                  rewardSummary,
+                  rewardsGranted: summaryLines,
+                  referenceNo,
                 },
               ],
             }
@@ -8375,39 +9429,52 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       )
     );
 
-    // Add transaction history
+    // Catat ke riwayat mutasi transaksi
     const tx: Transaction = {
       id: `tx-rdm-${Date.now()}`,
       accountId: currentAccount.id,
       type: 'redeem_code',
       title: `Klaim Kode Redeem: ${target.code} (${target.title})`,
-      amount: target.rewardAmount,
+      amount: addCash,
       recipientAccount: currentAccount.accountNumber,
       recipientName: currentAccount.fullName,
-      description: `Hadiah saldo Kode Redeem ${target.code} berhasil masuk ke rekening`,
+      description: `Hadiah Kode Redeem ${target.code}: ${rewardSummary}`,
       status: 'success',
-      referenceNo: `RDM${Date.now()}`,
-      timestamp: new Date().toISOString(),
+      referenceNo,
+      timestamp: claimedAtIso,
       category: 'redeem',
     };
     setTransactions((prev) => [tx, ...prev]);
 
     addNotification(
-      'Kode Redeem Berhasil Diklaim! 🎉',
-      `Selamat! Saldo sebesar Rp ${target.rewardAmount.toLocaleString('id-ID')} dari kode "${target.code}" telah langsung ditambahkan ke rekening Anda.`,
-      'success'
+      'Kode Redeem Berhasil Diklaim',
+      `Kode "${target.code}" (${target.title}) berhasil ditukar. Hadiah diterima: ${rewardSummary}`,
+      'success',
+      { category: 'hadiah', targetView: 'redeem' }
     );
 
     try {
-      confetti({ particleCount: 90, spread: 70, origin: { y: 0.6 } });
+      confetti({ particleCount: 110, spread: 78, origin: { y: 0.6 } });
     } catch { /* empty */ }
     playAtmSound('success');
 
     return {
       success: true,
-      message: `Selamat! Kode "${target.code}" berhasil ditukar. Saldo Anda bertambah Rp ${target.rewardAmount.toLocaleString('id-ID')}!`,
-      rewardAmount: target.rewardAmount,
+      message: `Selamat! Kode "${target.code}" berhasil ditukarkan dan seluruh hadiah langsung masuk ke akun Anda.`,
+      code: target.code,
+      redeemTitle: target.title,
+      referenceNo,
+      claimedAt: claimedAtIso,
+      rewardAmount: addCash,
       newBalance,
+      rewardsGranted: summaryLines,
+      activeTrialsGranted: createdTrials.map((t) => ({
+        label: t.label,
+        emoji: t.emoji,
+        expiresAt: t.expiresAt,
+        durationMinutes: t.durationMinutes,
+      })),
+      gachaResults: rolledResults.length > 0 ? rolledResults : undefined,
     };
   };
 
@@ -14238,12 +15305,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const latestStructured = getLatestStructuredVersion(appUpdates);
     const normalizedVersion =
       normalizeVersionInput(input.version) ||
-      bumpStructuredVersion(latestStructured || STRUCTURED_BASE_VERSION, input.releaseType || 'small_bug');
+      bumpStructuredVersion(latestStructured || STRUCTURED_BASE_VERSION, input.releaseType || 'patch');
 
     const newUpdate: AppUpdateRecord = {
       id: `upd-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       version: normalizedVersion,
-      releaseType: input.releaseType || 'small_bug',
+      releaseType: input.releaseType || 'patch',
       visibilityMode: input.visibilityMode || 'auto',
       title: cleanTitle,
       fullDate: cleanDate,
@@ -14415,6 +15482,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       message: 'Daftar Riwayat Update dikembalikan ke daftar bawaan resmi.',
+    };
+  };
+
+  const adminCleanupAutoDdUpdates = (): {
+    success: boolean;
+    message: string;
+    removedCount: number;
+  } => {
+    const { cleaned, removedCount } = cleanupExcessAutoDdUpdates(appUpdates);
+    const merged = mergeAutoDetectedAppUpdates(cleaned, INITIAL_APP_UPDATES).mergedUpdates;
+    setAppUpdates(merged);
+    flushMasterStateToCloud({ appUpdates: merged });
+    syncUpdatesToServer(merged);
+    playAtmSound('success');
+    return {
+      success: true,
+      removedCount,
+      message:
+        removedCount > 0
+          ? `Berhasil membersihkan ${removedCount} entri auto-DD berlebih dan menyinkronkan versi resmi terbaru.`
+          : 'Riwayat update sudah bersih — tidak ditemukan entri auto-DD berlebih.',
     };
   };
 
@@ -22765,6 +23853,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminSetCurrentAppUpdate,
         adminDeleteAppUpdate,
         adminResetAppUpdates,
+        adminCleanupAutoDdUpdates,
         adminAddCustomFeature,
         workJobClick,
         upgradeJobLevelWithCash,

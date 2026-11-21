@@ -330,16 +330,6 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
     requireAdminApproval: false, // Sesuai permintaan: "Pas aku transfer, transfer itu tidak memakai persetujuan admin"
   },
   {
-    id: 'redeem_code',
-    title: 'Tukar Kode Redeem (Klaim Hadiah Saldo)',
-    category: 'Utama & Kode',
-    description: 'Masukkan kode redeem resmi dari Admin untuk mendapatkan tambahan saldo rekening instan.',
-    defaultAmount: 0,
-    isPaidWithMoney: false,
-    requireAdminPin: false,
-    requireAdminApproval: false,
-  },
-  {
     id: 'tukar_pulsa',
     title: 'Tukar Kode Voucher Pulsa',
     category: 'Utama & Kode',
@@ -3091,32 +3081,65 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v12-32-97',
+    version: 'v12.32.97',
+    releaseType: 'major',
+    visibilityMode: 'auto',
+    title:
+      'Tab Khusus Kode Redeem di Navbar, Hadiah Kode Redeem Lengkap & Trial, 350 FAQ Acak, Preset WhatsApp 10 Kategori & Standar Versi vAAA.SS.DD',
+    fullDate: 'Sabtu, 21 November 2026 • Pukul 16:30 WIB',
+    dateText: 'Sabtu, 21 November 2026 • Pukul 16:30 WIB',
+    description:
+      'Pembaruan besar v12.32.97 menghadirkan Tab Khusus Kode Redeem tepat di sebelah Anggaran pada bilah navigasi utama lengkap dengan Kartu Struk Hadiah, tampilan saldo & rincian hadiah terbaru, animasi perayaan konfeti, Riwayat Klaim Saya, serta Panduan Klaim. Layanan Digital kini dirapikan menjadi "Layanan Digital, Pulsa & Tagihan", sistem Kode Redeem mendukung hadiah lengkap termasuk Hadiah Trial berdurasi otomatis, Pusat Bantuan memuat 350 panduan acak dengan langkah detail, Contact Us dilengkapi 10 kategori preset pesan WhatsApp, dan penomoran versi dibakukan ke standar resmi vAAA.SS.DD tanpa kenaikan DD otomatis berlebih.',
+    highlights: [
+      'Tab Khusus Kode Redeem di Navbar (Sebelah Anggaran): Halaman khusus penukaran kode rahasia dilengkapi Form Tukar Kode, Kartu Struk Hadiah, tampilan saldo & hadiah baru, animasi perayaan konfeti, Riwayat Klaim Saya, dan Panduan Klaim.',
+      'Hadiah Kode Redeem Lengkap Termasuk Trial: Kode Redeem kini dapat memberikan seluruh jenis hadiah lengkap seperti Saldo Tunai, Koin Spin, Emas 24K, Level, Voucher, Boost Karir, Upgrade Kartu, Centang Biru, Role, hingga Hadiah Trial berdurasi otomatis.',
+      'Pembaruan Menu Layanan Digital, Pulsa & Tagihan: Menghapus duplikasi Kode Redeem dari Layanan Digital agar penukaran kode terpusat rapi di tab khususnya sendiri.',
+      '350 Bantuan FAQ Acak & Preset WhatsApp 10 Kategori: Pusat Bantuan menampilkan 350 panduan acak dengan langkah bernomor lengkap dan perbaikan tata letak anti-terpotong di HP maupun laptop, serta 10 kategori preset pesan otomatis WhatsApp di Contact Us.',
+      'Perbaikan Permanen Layar Hitam & Fitur Kelola Kode Redeem di Panel Admin: Sanitasi otomatis struktur data lama tanpa menghapus kode, pelindung galat tab, pencarian kode, filter status, dan detail pengklaim lengkap.',
+      'Standar Penomoran Versi Resmi vAAA.SS.DD: AAA untuk Major, SS untuk Minor (fitur baru), dan DD untuk Patch (perbaikan bug), tanpa reset angka belakang dan bebas dari penambahan DD otomatis setiap muat ulang.',
+    ],
+    changes: [
+      'Tab Khusus Kode Redeem di Navbar (Sebelah Anggaran): Halaman khusus penukaran kode rahasia dilengkapi Form Tukar Kode, Kartu Struk Hadiah, tampilan saldo & hadiah baru, animasi perayaan konfeti, Riwayat Klaim Saya, dan Panduan Klaim.',
+      'Hadiah Kode Redeem Lengkap Termasuk Trial: Kode Redeem kini dapat memberikan seluruh jenis hadiah lengkap seperti Saldo Tunai, Koin Spin, Emas 24K, Level, Voucher, Boost Karir, Upgrade Kartu, Centang Biru, Role, hingga Hadiah Trial berdurasi otomatis.',
+      'Pembaruan Menu Layanan Digital, Pulsa & Tagihan: Menghapus duplikasi Kode Redeem dari Layanan Digital agar penukaran kode terpusat rapi di tab khususnya sendiri.',
+      '350 Bantuan FAQ Acak & Preset WhatsApp 10 Kategori: Pusat Bantuan menampilkan 350 panduan acak dengan langkah bernomor lengkap dan perbaikan tata letak anti-terpotong di HP maupun laptop, serta 10 kategori preset pesan otomatis WhatsApp di Contact Us.',
+      'Perbaikan Permanen Layar Hitam & Fitur Kelola Kode Redeem di Panel Admin: Sanitasi otomatis struktur data lama tanpa menghapus kode, pelindung galat tab, pencarian kode, filter status, dan detail pengklaim lengkap.',
+      'Standar Penomoran Versi Resmi vAAA.SS.DD: AAA untuk Major, SS untuk Minor (fitur baru), dan DD untuk Patch (perbaikan bug), tanpa reset angka belakang dan bebas dari penambahan DD otomatis setiap muat ulang.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-21T09:30:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v11-32-97',
     version: 'v11.32.97',
-    releaseType: 'bug',
+    releaseType: 'minor',
     visibilityMode: 'auto',
     title:
       'Penyimpanan Permanen Hadiah, Surat & Tanda Tangan Digital, Sistem Versi Baru v11.32.97 serta Tampilan Editorial Tab Update',
     fullDate: 'Jumat, 20 November 2026 • Pukul 12:30 WIB',
     dateText: 'Jumat, 20 November 2026 • Pukul 12:30 WIB',
     description:
-      'Pembaruan menyeluruh versi v11.32.97 menghadirkan penyimpanan permanen lintas perangkat untuk seluruh paket hadiah, surat resmi, serta tanda tangan digital agar selalu terjaga saat halaman di-refresh, disertai peresmian format penomoran versi terstruktur vppp.ww.gg yang presisi dan tampilan editorial baru pada halaman Riwayat Update. Pada Panel Admin tersedia kalkulator 3 tipe rilis serta sakelar visibilitas untuk mengelola catatan khusus Admin.',
+      'Pembaruan menyeluruh versi v11.32.97 menghadirkan penyimpanan permanen lintas perangkat untuk seluruh paket hadiah, surat resmi, serta tanda tangan digital agar selalu terjaga saat halaman di-refresh, disertai peresmian format penomoran versi terstruktur yang presisi dan tampilan editorial baru pada halaman Riwayat Update. Pada Panel Admin tersedia kalkulator 3 tipe rilis serta sakelar visibilitas untuk mengelola catatan khusus Admin.',
     highlights: [
       'Penyimpanan Permanen Hadiah & Surat Resmi: Seluruh paket hadiah dan surat kini tersimpan ganda di Cloud dan penyimpanan perangkat sehingga tetap aman utuh saat halaman dimuat ulang maupun dibuka dari perangkat lain.',
       'Persistensi Penuh 4 Mode Tanda Tangan & Stempel Digital: Tanda tangan kanvas bebas, unggahan foto tanda tangan terkompresi otomatis, desain bawaan global, dan segel khusus per surat tersimpan permanen tanpa terpotong.',
       'Standar Penomoran Versi Terstruktur v11.32.97: Mengganti penomoran lama dengan sistem tiga angka berurutan yang konsisten di seluruh layar sehingga kenaikan versi selalu rapi dan terukur.',
       'Tampilan Editorial Baru Halaman Riwayat Update: Desain gelap berkelas dengan garis waktu vertikal terbuka penuh, pencarian cepat, dan filter Era Baru serta Arsip Lama.',
-      'Kalkulator 3 Tipe Rilis & Kontrol Visibilitas di Panel Admin: Admin dapat memilih Update Besar, Update Bug, atau Bug Kecil otomatis dengan peringatan anti-lompat jauh serta menyembunyikan atau menampilkan catatan khusus Admin dengan satu klik.',
+      'Kalkulator 3 Tipe Rilis & Kontrol Visibilitas di Panel Admin: Admin dapat memilih tipe rilis otomatis dengan peringatan anti-lompat jauh serta menyembunyikan atau menampilkan catatan khusus Admin dengan satu klik.',
     ],
     changes: [
       'Penyimpanan Permanen Hadiah & Surat Resmi: Seluruh paket hadiah dan surat kini tersimpan ganda di Cloud dan penyimpanan perangkat sehingga tetap aman utuh saat halaman dimuat ulang maupun dibuka dari perangkat lain.',
       'Persistensi Penuh 4 Mode Tanda Tangan & Stempel Digital: Tanda tangan kanvas bebas, unggahan foto tanda tangan terkompresi otomatis, desain bawaan global, dan segel khusus per surat tersimpan permanen tanpa terpotong.',
       'Standar Penomoran Versi Terstruktur v11.32.97: Mengganti penomoran lama dengan sistem tiga angka berurutan yang konsisten di seluruh layar sehingga kenaikan versi selalu rapi dan terukur.',
       'Tampilan Editorial Baru Halaman Riwayat Update: Desain gelap berkelas dengan garis waktu vertikal terbuka penuh, pencarian cepat, dan filter Era Baru serta Arsip Lama.',
-      'Kalkulator 3 Tipe Rilis & Kontrol Visibilitas di Panel Admin: Admin dapat memilih Update Besar, Update Bug, atau Bug Kecil otomatis dengan peringatan anti-lompat jauh serta menyembunyikan atau menampilkan catatan khusus Admin dengan satu klik.',
+      'Kalkulator 3 Tipe Rilis & Kontrol Visibilitas di Panel Admin: Admin dapat memilih tipe rilis otomatis dengan peringatan anti-lompat jauh serta menyembunyikan atau menampilkan catatan khusus Admin dengan satu klik.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-20T05:30:00.000Z',
     isAutoDetected: true,

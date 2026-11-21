@@ -483,7 +483,7 @@ export interface BugReportRecord {
   updatedAt?: string;
 }
 
-export type AppUpdateReleaseType = 'major' | 'bug' | 'small_bug';
+export type AppUpdateReleaseType = 'major' | 'minor' | 'patch' | 'bug' | 'small_bug';
 export type AppUpdateVisibilityMode = 'auto' | 'public' | 'admin_only';
 
 export interface AppUpdateRecord {
@@ -502,7 +502,7 @@ export interface AppUpdateRecord {
   buildId?: string; // ID Build otomatis saat kompilasi/publish (mis. BLD-20261120-1230)
   isAutoDetected?: boolean; // true jika tercatat otomatis oleh detektor build/rilis
   editedByAdmin?: boolean; // true jika telah diedit manual oleh Admin agar tidak ditimpa ulang
-  releaseType?: AppUpdateReleaseType; // major (+p), bug (+w), small_bug (+g)
+  releaseType?: AppUpdateReleaseType; // Format vAAA.SS.DD: major (+AAA), minor (+SS), patch (+DD)
   visibilityMode?: AppUpdateVisibilityMode; // auto = saring poin Admin otomatis, public = tampil penuh, admin_only = sembunyikan khusus Admin
 }
 
@@ -909,18 +909,25 @@ export interface FeatureSecurityConfig {
   requireAdminApproval: boolean; // Wajib Persetujuan Admin atau langsung berhasil bebas di Panel Admin
 }
 
+export interface RedeemCodeClaimRecord {
+  accountId: string;
+  accountNumber: string;
+  fullName: string;
+  claimedAt: string;
+  rewardSummary?: string;
+  rewardsGranted?: string[];
+  referenceNo?: string;
+}
+
 export interface RedeemCode {
   id: string;
   code: string;
   title: string;
+  description?: string;
   rewardAmount: number;
+  rewards?: AdminGiftRewardItem[]; // Paket hadiah lengkap setara Surat & Hadiah (termasuk Trial & Gacha)
   maxClaims: number; // Berapa banyak orang yang bisa me-redeem
-  claimedBy: {
-    accountId: string;
-    accountNumber: string;
-    fullName: string;
-    claimedAt: string;
-  }[];
+  claimedBy: RedeemCodeClaimRecord[];
   createdAt: string;
   expiresAt: string; // Berapa lama kodenya berfungsi (ISO timestamp)
   durationMinutes: number;

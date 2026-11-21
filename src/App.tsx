@@ -8,6 +8,7 @@ import { CustomerDashboard, DashboardTab } from './components/CustomerDashboard'
 import { TransferWorkspace } from './components/TransferWorkspace';
 import { TabEmasView } from './components/TabEmasView';
 import { BudgetingWorkspace } from './components/BudgetingWorkspace';
+import { RedeemCodeView } from './components/RedeemCodeView';
 import { TransferBebasAssetMode, DevRoleConfig } from './types/bank';
 import { AtmSimulator } from './components/AtmSimulator';
 import { AdminPortal } from './components/AdminPortal';
@@ -119,6 +120,7 @@ function BankAppContent() {
         'transfer',
         'emas',
         'anggaran',
+        'redeem',
         'jobs',
         'spin_wheel',
         'atm',
@@ -492,6 +494,18 @@ function BankAppContent() {
           />
         )}
         {activeView === 'anggaran' && <BudgetingWorkspace />}
+        {activeView === 'redeem' && (
+          <RedeemCodeView
+            onNavigateToDashboard={() => {
+              setRequestedDashboardTab({ tab: 'ringkasan', nonce: Date.now() });
+              setActiveView('dashboard');
+            }}
+            onNavigateToMutasi={() => {
+              setRequestedDashboardTab({ tab: 'mutasi', nonce: Date.now() });
+              setActiveView('dashboard');
+            }}
+          />
+        )}
         {activeView === 'jobs' && <JobVacancyView />}
         {activeView === 'spin_wheel' && <SpinTheWheelView />}
         {activeView === 'chat' && <NusantaraChat />}

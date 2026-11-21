@@ -31,6 +31,7 @@ import {
   ChevronRight,
   ArrowLeft,
   ReceiptText,
+  Ticket,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
@@ -54,6 +55,7 @@ export type AppNavView =
   | 'transfer'
   | 'emas'
   | 'anggaran'
+  | 'redeem'
   | 'jobs'
   | 'spin_wheel'
   | 'atm'
@@ -160,7 +162,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const activeDevStyle = activeDevRole ? getDevBadgeColorStyle(activeDevRole.badgeColor) : null;
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v11.32.97';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v12.32.97';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -1060,6 +1062,20 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {budgetAlertCount}
                 </span>
               )}
+            </button>
+
+            {/* 5. Kode Redeem (Tab Khusus di Sebelah Anggaran) */}
+            <button
+              type="button"
+              onClick={(e) => handleSelectNavView('redeem', e)}
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                activeView === 'redeem'
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
+                  : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/35'
+              }`}
+            >
+              <Ticket className="w-3.5 h-3.5 shrink-0" />
+              <span>Kode Redeem</span>
             </button>
 
             {/* 5. Lowongan Kerja */}

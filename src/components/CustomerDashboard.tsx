@@ -624,7 +624,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           }`}
         >
           <Sparkles className="w-4 h-4" />
-          <span>Layanan Digital, Redeem &amp; Pulsa</span>
+          <span>Layanan Digital, Pulsa &amp; Tagihan</span>
         </button>
 
         <button

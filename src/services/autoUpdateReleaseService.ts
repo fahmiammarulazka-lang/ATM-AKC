@@ -1,18 +1,18 @@
 /**
- * Bank Nusantara — Mesin Penomoran Versi Terstruktur (vppp.ww.gg),
- * Deteksi Rilis & Build Otomatis, serta Filter Visibilitas Khusus Admin
+ * Bank Nusantara — Mesin Penomoran Versi Terstruktur (vAAA.SS.DD),
+ * Sinkronisasi Katalog Rilis, Pembersihan Spam Auto-DD & Filter Visibilitas Khusus Admin
  * ------------------------------------------------------------------------------------
- * Aturan Resmi Penomoran Versi:
- * - Format 3-segmen: vppp.ww.gg (p = Update Besar, w = Update Bug, g = Update Bug Kecil)
- * - Prefiks 'v', p ditulis alami (1–3 digit, mis. 11), w & g selalu 2 digit (leading zero, mis. 02.05)
- * - Rilis awal era baru: v11.32.97
- * - Tanpa reset segmen saat p atau w naik (+1 terus melanjutkan angka di belakangnya)
+ * Aturan Resmi Penomoran Versi (vAAA.SS.DD):
+ * - v  : Singkatan dari version (versi).
+ * - AAA (Major): Berubah saat ada pembaruan besar atau perombakan total pada sistem/tampilan.
+ * - SS  (Minor): Berubah saat ada penambahan fitur baru tanpa mengubah sistem utama.
+ * - DD  (Patch): Berubah saat perbaikan bug, optimalisasi kecil, atau tambalan keamanan.
+ * - Tanpa reset segmen belakang saat AAA atau SS naik (+1 melanjutkan angka SS.DD)
  * - Rollover otomatis 99 -> 00:
- *     * g > 99 -> g = 00, w + 1
- *     * w > 99 -> w = 00, p + 1
- * - Auto-build / publish baru tanpa input manual: selalu naik +1 pada g (Update Bug Kecil)
- * - Arsip lama (v1.0–v19.0) tetap dipertahankan utuh di Update Sebelumnya
- * - Deteksi otomatis konten khusus Admin + sakelar manual Panel Admin (auto / public / admin_only)
+ *     * DD > 99 -> DD = 00, SS + 1
+ *     * SS > 99 -> SS = 00, AAA + 1
+ * - Tidak ada lagi auto-increment DD buta setiap kali build/halaman dimuat ulang;
+ *   versi hanya naik saat benar-benar ada rilis fitur/perbaikan resmi atau publikasi Admin.
  */
 import {
   AppUpdateRecord,
@@ -20,12 +20,12 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v11.32.97';
+export const STRUCTURED_BASE_VERSION = 'v12.32.97';
 
 export interface StructuredVersion {
-  p: number; // Update Besar (penambahan/penghapusan fitur)
-  w: number; // Update Bug
-  g: number; // Update Bug Kecil
+  p: number; // AAA: Major (pembaruan besar / perombakan sistem)
+  w: number; // SS:  Minor (penambahan fitur baru)
+  g: number; // DD:  Patch (perbaikan bug, optimalisasi kecil, keamanan)
 }
 
 export interface ActiveAppBuildInfo {
@@ -128,27 +128,40 @@ export function compareStructuredVersions(a: StructuredVersion, b: StructuredVer
 }
 
 /**
- * Menaikkan versi 3-segmen sesuai tipe rilis:
- * - Tanpa reset segmen di belakangnya
- * - Rollover otomatis 99 -> 00 ke segmen kiri (+1)
+ * Menormalkan tipe rilis historis ('bug' -> 'minor', 'small_bug' -> 'patch') ke standar vAAA.SS.DD
+ */
+export function normalizeReleaseType(
+  releaseType?: AppUpdateReleaseType
+): 'major' | 'minor' | 'patch' {
+  if (releaseType === 'major') return 'major';
+  if (releaseType === 'minor' || releaseType === 'bug') return 'minor';
+  return 'patch';
+}
+
+/**
+ * Menaikkan versi 3-segmen sesuai tipe rilis vAAA.SS.DD:
+ * - major (+AAA): Pembaruan besar / perombakan total (melanjutkan SS.DD tanpa reset)
+ * - minor (+SS):  Penambahan fitur baru (melanjutkan DD tanpa reset, rollover 99 -> 00 ke AAA)
+ * - patch (+DD):  Perbaikan bug / optimalisasi kecil / keamanan (rollover 99 -> 00 ke SS)
  */
 export function bumpStructuredVersion(
   baseVersionStr: string | undefined,
   releaseType: AppUpdateReleaseType
 ): string {
-  const base = parseStructuredVersion(baseVersionStr) || { p: 11, w: 32, g: 97 };
+  const base = parseStructuredVersion(baseVersionStr) || { p: 12, w: 32, g: 97 };
   let { p, w, g } = base;
+  const kind = normalizeReleaseType(releaseType);
 
-  if (releaseType === 'major') {
+  if (kind === 'major') {
     p = Math.min(999, p + 1);
-  } else if (releaseType === 'bug') {
+  } else if (kind === 'minor') {
     w += 1;
     if (w > 99) {
       w = 0;
       p = Math.min(999, p + 1);
     }
   } else {
-    // small_bug (+g)
+    // patch (+DD)
     g += 1;
     if (g > 99) {
       g = 0;
@@ -179,8 +192,8 @@ export function getLatestStructuredVersion(records: AppUpdateRecord[]): string {
 }
 
 /**
- * Validasi lunak kenaikan versi di Panel Admin:
- * - Memberi peringatan jika format bukan vppp.ww.gg, versi sama/mundur, atau lompat lebih dari +1
+ * Validasi lunak kenaikan versi di Panel Admin (Format vAAA.SS.DD):
+ * - Memberi peringatan jika format bukan vAAA.SS.DD, versi sama/mundur, atau lompat lebih dari +1
  * - Tetap mengizinkan Admin menyimpan apabila dikehendaki
  */
 export function validateVersionJump(
@@ -188,7 +201,7 @@ export function validateVersionJump(
   candidateVersionStr: string
 ): VersionJumpValidationResult {
   const normalized = normalizeVersionInput(candidateVersionStr);
-  const currentParsed = parseStructuredVersion(currentVersionStr) || { p: 11, w: 32, g: 97 };
+  const currentParsed = parseStructuredVersion(currentVersionStr) || { p: 12, w: 32, g: 97 };
   const currentFormatted = formatStructuredVersion(currentParsed);
 
   const candidateParsed = parseStructuredVersion(candidateVersionStr);
@@ -199,13 +212,13 @@ export function validateVersionJump(
       normalizedVersion: normalized,
       matchedReleaseType: null,
       warningMessage:
-        'Format versi disarankan mengikuti pola vppp.ww.gg dengan angka 00–99 untuk w & g (contoh: v11.32.98). Anda tetap bisa menyimpan jika memang disengaja.',
+        'Format versi disarankan mengikuti pola vAAA.SS.DD dengan angka 00–99 untuk SS & DD (contoh: v12.33.97). Anda tetap bisa menyimpan jika memang disengaja.',
     };
   }
 
   const nextMajor = bumpStructuredVersion(currentFormatted, 'major');
-  const nextBug = bumpStructuredVersion(currentFormatted, 'bug');
-  const nextSmallBug = bumpStructuredVersion(currentFormatted, 'small_bug');
+  const nextMinor = bumpStructuredVersion(currentFormatted, 'minor');
+  const nextPatch = bumpStructuredVersion(currentFormatted, 'patch');
 
   if (normalized === nextMajor) {
     return {
@@ -216,21 +229,21 @@ export function validateVersionJump(
       warningMessage: null,
     };
   }
-  if (normalized === nextBug) {
+  if (normalized === nextMinor) {
     return {
       isValidFormat: true,
       hasWarning: false,
       normalizedVersion: normalized,
-      matchedReleaseType: 'bug',
+      matchedReleaseType: 'minor',
       warningMessage: null,
     };
   }
-  if (normalized === nextSmallBug) {
+  if (normalized === nextPatch) {
     return {
       isValidFormat: true,
       hasWarning: false,
       normalizedVersion: normalized,
-      matchedReleaseType: 'small_bug',
+      matchedReleaseType: 'patch',
       warningMessage: null,
     };
   }
@@ -242,7 +255,7 @@ export function validateVersionJump(
       hasWarning: true,
       normalizedVersion: normalized,
       matchedReleaseType: null,
-      warningMessage: `Nomor versi ${normalized} sama dengan versi aktif ${currentFormatted}. Pilih salah satu tombol +p, +w, atau +g untuk kenaikan bertahap (+1).`,
+      warningMessage: `Nomor versi ${normalized} sama dengan versi aktif ${currentFormatted}. Pilih salah satu tombol Major (+AAA), Minor (+SS), atau Patch (+DD) untuk kenaikan bertahap (+1).`,
     };
   }
   if (cmp < 0) {
@@ -259,9 +272,9 @@ export function validateVersionJump(
   const dw = candidateParsed.w - currentParsed.w;
   const dg = candidateParsed.g - currentParsed.g;
   const jumpParts: string[] = [];
-  if (dp > 1) jumpParts.push(`Update Besar p melompat +${dp}`);
-  if (dw > 1) jumpParts.push(`Update Bug w melompat +${dw}`);
-  if (dg > 1) jumpParts.push(`Bug Kecil g melompat +${dg}`);
+  if (dp > 1) jumpParts.push(`Major AAA melompat +${dp}`);
+  if (dw > 1) jumpParts.push(`Minor SS melompat +${dw}`);
+  if (dg > 1) jumpParts.push(`Patch DD melompat +${dg}`);
 
   const detail =
     jumpParts.length > 0
@@ -273,7 +286,7 @@ export function validateVersionJump(
     hasWarning: true,
     normalizedVersion: normalized,
     matchedReleaseType: null,
-    warningMessage: `Peringatan Anti-Lompat Jauh: ${detail}. Saran bertahap: ${nextSmallBug} (+g), ${nextBug} (+w), atau ${nextMajor} (+p). Admin tetap dapat menyimpan jika diperlukan.`,
+    warningMessage: `Peringatan Anti-Lompat Jauh: ${detail}. Saran bertahap: ${nextPatch} (Patch +DD), ${nextMinor} (Minor +SS), atau ${nextMajor} (Major +AAA). Admin tetap dapat menyimpan jika diperlukan.`,
   };
 }
 
@@ -585,6 +598,40 @@ export interface AutoMergeUpdatesResult {
   mergedUpdates: AppUpdateRecord[];
   didChange: boolean;
   newlyAddedIds: string[];
+  cleanedAutoNoiseCount?: number;
+}
+
+/**
+ * Mendeteksi catatan auto-DD berlebih yang dibuat otomatis saat muat ulang build di versi lama
+ * (hanya menyaring entri otomatis yang belum pernah diedit oleh Admin).
+ */
+export function isExcessAutoDdNoiseRecord(rec?: AppUpdateRecord | null): boolean {
+  if (!rec || !rec.id) return false;
+  if (rec.editedByAdmin) return false;
+  const idLower = String(rec.id).toLowerCase();
+  const titleLower = String(rec.title || '').toLowerCase();
+  return (
+    idLower.startsWith('upd-auto-') ||
+    (rec.isAutoDetected === true &&
+      titleLower.startsWith('pembaruan stabilitas & optimalisasi'))
+  );
+}
+
+/**
+ * Membersihkan entri auto-DD berlebih tanpa menyentuh rilis resmi katalog maupun suntingan Admin.
+ */
+export function cleanupExcessAutoDdUpdates(records: AppUpdateRecord[]): {
+  cleaned: AppUpdateRecord[];
+  removedCount: number;
+} {
+  const safeList = Array.isArray(records)
+    ? records.filter((u): u is AppUpdateRecord => Boolean(u && u.id))
+    : [];
+  const kept = safeList.filter((rec) => !isExcessAutoDdNoiseRecord(rec));
+  return {
+    cleaned: kept,
+    removedCount: Math.max(0, safeList.length - kept.length),
+  };
 }
 
 export function mergeAutoDetectedAppUpdates(
@@ -592,28 +639,28 @@ export function mergeAutoDetectedAppUpdates(
   builtInCatalog: AppUpdateRecord[]
 ): AutoMergeUpdatesResult {
   const buildInfo = getActiveAppBuildInfo();
-  const safeExisting = Array.isArray(existingUpdates)
+  const rawExisting = Array.isArray(existingUpdates)
     ? existingUpdates.filter((u): u is AppUpdateRecord => Boolean(u && u.id))
     : [];
+  const { cleaned: safeExisting, removedCount: cleanedAutoNoiseCount } =
+    cleanupExcessAutoDdUpdates(rawExisting);
   const safeCatalog = Array.isArray(builtInCatalog)
     ? builtInCatalog.filter((u): u is AppUpdateRecord => Boolean(u && u.id))
     : [];
 
   const byId = new Map<string, AppUpdateRecord>();
   const existingVersions = new Set<string>();
-  const existingBuildIds = new Set<string>();
 
   for (const item of safeExisting) {
     byId.set(item.id, { ...item });
     if (item.version) existingVersions.add(item.version.trim().toLowerCase());
-    if (item.buildId) existingBuildIds.add(item.buildId.trim().toUpperCase());
   }
 
-  let didChange = false;
+  let didChange = cleanedAutoNoiseCount > 0;
   const newlyAddedIds: string[] = [];
   const newestCatalogId = safeCatalog[0]?.id;
 
-  // 1. Gabungkan katalog rilis bawaan baru (termasuk v11.32.97) tanpa pernah menghapus / menimpa suntingan Admin
+  // 1. Gabungkan katalog rilis resmi terbaru (mis. v12.32.97 Major) tanpa pernah menimpa suntingan Admin
   for (const catItem of safeCatalog) {
     const prev = byId.get(catItem.id);
     const isNewestCatalog = catItem.id === newestCatalogId;
@@ -628,7 +675,6 @@ export function mergeAutoDetectedAppUpdates(
       };
       byId.set(enriched.id, enriched);
       existingVersions.add(enriched.version.trim().toLowerCase());
-      if (enriched.buildId) existingBuildIds.add(enriched.buildId.trim().toUpperCase());
       newlyAddedIds.push(enriched.id);
       didChange = true;
     } else if (prev && !prev.editedByAdmin && isNewestCatalog && !prev.buildId) {
@@ -636,54 +682,14 @@ export function mergeAutoDetectedAppUpdates(
         ...prev,
         buildId: buildInfo.buildId,
       });
-      existingBuildIds.add(buildInfo.buildId.trim().toUpperCase());
       didChange = true;
     }
   }
 
-  // 2. Deteksi build/publish baru di masa depan -> naikkan +1 pada segmen g (Update Bug Kecil) dari versi 3-segmen terakhir
-  const normalizedActiveBuildId = buildInfo.buildId.trim().toUpperCase();
-  const autoBuildRecordId = `upd-auto-${normalizedActiveBuildId.toLowerCase()}`;
-  const buildAlreadyTracked =
-    existingBuildIds.has(normalizedActiveBuildId) || byId.has(autoBuildRecordId);
+  // 2. TIDAK lagi membuat entri auto-DD generik setiap kali buildId berubah.
+  // Versi hanya naik ketika benar-benar ada rilis fitur/perbaikan baru di katalog resmi atau diterbitkan Admin.
 
-  if (!buildAlreadyTracked && safeExisting.length > 0) {
-    const currentPool = Array.from(byId.values());
-    const latestStructured = getLatestStructuredVersion(currentPool);
-    const nextVersion = bumpStructuredVersion(latestStructured, 'small_bug');
-    const autoRecord: AppUpdateRecord = {
-      id: autoBuildRecordId,
-      version: nextVersion,
-      releaseType: 'small_bug',
-      visibilityMode: 'auto',
-      title: `Pembaruan Stabilitas & Optimalisasi ${nextVersion}`,
-      fullDate: buildInfo.buildDateWib,
-      dateText: buildInfo.buildDateWib,
-      description: `Aplikasi Bank Nusantara Digital baru saja diperbarui secara otomatis ke versi ${nextVersion} pada ${buildInfo.buildDateWib}. Seluruh penyempurnaan performa, keandalan sinkronisasi Cloud, serta perbaikan stabilitas ringan telah aktif secara instan di seluruh perangkat nasabah tanpa perlu login ulang.`,
-      highlights: [
-        `Peningkatan stabilitas dan optimalisasi performa versi ${nextVersion} telah aktif secara otomatis.`,
-        'Sesi login permanen tetap terjaga sehingga nasabah langsung masuk ke Dashboard tanpa kembali ke halaman login.',
-        'Sinkronisasi otomatis Cloud menjaga konsistensi data transaksi, hadiah, dan pengaturan lintas perangkat.',
-      ],
-      changes: [
-        `Peningkatan stabilitas dan optimalisasi performa versi ${nextVersion} telah aktif secara otomatis.`,
-        'Sesi login permanen tetap terjaga sehingga nasabah langsung masuk ke Dashboard tanpa kembali ke halaman login.',
-        'Sinkronisasi otomatis Cloud menjaga konsistensi data transaksi, hadiah, dan pengaturan lintas perangkat.',
-      ],
-      isCurrent: true,
-      categoryBadge: `Update Sekarang`,
-      author: 'Tim Pengembangan Bank Nusantara',
-      createdAt: buildInfo.buildIso,
-      buildId: buildInfo.buildId,
-      isAutoDetected: true,
-      editedByAdmin: false,
-    };
-    byId.set(autoRecord.id, autoRecord);
-    newlyAddedIds.push(autoRecord.id);
-    didChange = true;
-  }
-
-  // 3. Urutkan kronologis (Era Baru vppp.ww.gg di atas Arsip Lama) dan pastikan tepat satu entri aktif sebagai Update Sekarang
+  // 3. Urutkan kronologis (Era Baru vAAA.SS.DD di atas Arsip Lama) dan pastikan tepat satu entri aktif sebagai Update Sekarang
   const mergedList = Array.from(byId.values()).sort(compareRecordsNewestFirst);
 
   if (mergedList.length > 0) {
@@ -697,7 +703,6 @@ export function mergeAutoDetectedAppUpdates(
         mergedList.find((u) => newlyAddedIds.includes(u.id)) || mergedList[0];
       targetCurrentId = newestAdded.id;
     } else if (!hasExistingStructuredCurrent && isStructuredThreePartVersion(mergedList[0].version)) {
-      // Saat migrasi dari versi lama (mis. v19.0) ke format baru (v11.32.97), promosikan versi 3-segmen terbaru sebagai aktif
       targetCurrentId = mergedList[0].id;
     } else {
       const existingCurrent = mergedList.find((u) => u.isCurrent);
@@ -734,6 +739,7 @@ export function mergeAutoDetectedAppUpdates(
       mergedUpdates: normalizedList,
       didChange,
       newlyAddedIds,
+      cleanedAutoNoiseCount,
     };
   }
 
@@ -741,5 +747,6 @@ export function mergeAutoDetectedAppUpdates(
     mergedUpdates: mergedList,
     didChange,
     newlyAddedIds,
+    cleanedAutoNoiseCount,
   };
 }
