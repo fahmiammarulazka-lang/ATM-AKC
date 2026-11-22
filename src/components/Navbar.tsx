@@ -162,7 +162,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const activeDevStyle = activeDevRole ? getDevBadgeColorStyle(activeDevRole.badgeColor) : null;
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v12.32.97';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v12.33.97';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({

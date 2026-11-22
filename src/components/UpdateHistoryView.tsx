@@ -72,7 +72,7 @@ export const UpdateHistoryView: React.FC<UpdateHistoryViewProps> = ({
       : currentUpdate?.changes || [];
 
   const activeVersionLabel =
-    currentUpdate?.version || activeBuildInfo.catalogVersion || 'v12.32.97';
+    currentUpdate?.version || activeBuildInfo.catalogVersion || 'v12.33.97';
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-10 pb-12">

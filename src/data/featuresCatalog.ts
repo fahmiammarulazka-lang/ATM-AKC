@@ -3081,6 +3081,37 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v12-33-97',
+    version: 'v12.33.97',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Arena Minigame Adu Stopwatch vs Bot Level Hard (Level Normal & Level Susah), Format Presisi X,XX & Pemfokusan Arena Suit + Stopwatch',
+    fullDate: 'Minggu, 22 November 2026 • Pukul 14:45 WIB',
+    dateText: 'Minggu, 22 November 2026 • Pukul 14:45 WIB',
+    description:
+      'Pembaruan fitur baru v12.33.97 (kenaikan segmen Minor +SS pada standar vAAA.SS.DD) menghadirkan Arena Adu Stopwatch melawan Bot Level Hard di Portal Lowongan Pekerjaan, mendampingi Arena Suit (Batu • Gunting • Kertas) setelah penghapusan 12 minigame arcade lama. Dilengkapi pilihan Level Normal (Biaya Rp 500.000, Target Angka Bulat X, Hadiah 1 Voucher Level + Rp 100.000) dan Level Susah (Biaya Rp 1.200.000, Target Milidetik Puluhan X,X tanpa milidetik satuan, Hadiah Rp 500.000 + 2 Voucher Level), layar kronograf digital X,XX berkecepatan tinggi, serta pengembalian biaya 100% saat hasil Seri.',
+    highlights: [
+      'Minigame Baru Adu Stopwatch Lawan Bot Level Hard: Beradu ketepatan menghentikan waktu melawan Bot Level Hard berakurasi tinggi (selisih 0,01–0,08 detik dari target) secara live bersamaan.',
+      'Level Normal (Biaya Rp 500.000 • Hadiah +1 Voucher Level & +Rp 100.000): Target waktu otomatis sistem menggunakan angka detik bulat X (1 s/d 10 detik) yang dipaskan pada layar stopwatch X,00.',
+      'Level Susah (Biaya Rp 1.200.000 • Hadiah +Rp 500.000 & +2 Voucher Level): Target waktu otomatis memiliki milidetik puluhan tanpa milidetik satuan (X,X seperti 0,1 atau 4,3), sementara layar stopwatch tetap menampilkan X,XX penuh.',
+      'Layar Kronograf Digital X,XX & Jaminan Seri Refund 100%: Menampilkan Detik, Milidetik Puluhan, dan Milidetik Satuan secara real-time dengan respons tombol berhenti instan serta pengembalian saldo utuh jika selisih waktu seri.',
+      'Pemfokusan Minigame Lowongan Pekerjaan: Menghapus 12 minigame arcade lama dan menyisakan Arena Suit (Batu • Gunting • Kertas) bersama Arena Adu Stopwatch agar lebih fokus, ringan, dan menguntungkan.',
+    ],
+    changes: [
+      'Minigame Baru Adu Stopwatch Lawan Bot Level Hard: Beradu ketepatan menghentikan waktu melawan Bot Level Hard berakurasi tinggi (selisih 0,01–0,08 detik dari target) secara live bersamaan.',
+      'Level Normal (Biaya Rp 500.000 • Hadiah +1 Voucher Level & +Rp 100.000): Target waktu otomatis sistem menggunakan angka detik bulat X (1 s/d 10 detik) yang dipaskan pada layar stopwatch X,00.',
+      'Level Susah (Biaya Rp 1.200.000 • Hadiah +Rp 500.000 & +2 Voucher Level): Target waktu otomatis memiliki milidetik puluhan tanpa milidetik satuan (X,X seperti 0,1 atau 4,3), sementara layar stopwatch tetap menampilkan X,XX penuh.',
+      'Layar Kronograf Digital X,XX & Jaminan Seri Refund 100%: Menampilkan Detik, Milidetik Puluhan, dan Milidetik Satuan secara real-time dengan respons tombol berhenti instan serta pengembalian saldo utuh jika selisih waktu seri.',
+      'Pemfokusan Minigame Lowongan Pekerjaan: Menghapus 12 minigame arcade lama dan menyisakan Arena Suit (Batu • Gunting • Kertas) bersama Arena Adu Stopwatch agar lebih fokus, ringan, dan menguntungkan.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-22T07:45:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v12-32-97',
     version: 'v12.32.97',
     releaseType: 'major',
@@ -3107,8 +3138,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Perbaikan Permanen Layar Hitam & Fitur Kelola Kode Redeem di Panel Admin: Sanitasi otomatis struktur data lama tanpa menghapus kode, pelindung galat tab, pencarian kode, filter status, dan detail pengklaim lengkap.',
       'Standar Penomoran Versi Resmi vAAA.SS.DD: AAA untuk Major, SS untuk Minor (fitur baru), dan DD untuk Patch (perbaikan bug), tanpa reset angka belakang dan bebas dari penambahan DD otomatis setiap muat ulang.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-21T09:30:00.000Z',
     isAutoDetected: true,

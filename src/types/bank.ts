@@ -251,6 +251,8 @@ export interface BankAccount {
   suitWins?: number;
   suitPlayed?: number;
   suitWinStreak?: number;
+  stopwatchWins?: number;
+  stopwatchPlayed?: number;
   arcadeClaimedTargets?: Record<string, number[]>;
   arcadeHighScores?: Record<string, number>;
   clickPower?: number; // Default 1 klik per tap (bisa di-boost lewat Super Tools Admin)

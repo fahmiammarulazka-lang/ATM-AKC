@@ -1081,6 +1081,25 @@ interface BankContextType {
     winStreakAfter?: number;
     message: string;
   };
+  playStopwatchChallenge: (input: {
+    level: 'normal' | 'hard';
+    targetCentis: number;
+    playerCentis: number;
+    botCentis: number;
+  }) => {
+    success: boolean;
+    outcome?: 'win' | 'draw' | 'lose';
+    level: 'normal' | 'hard';
+    targetCentis: number;
+    playerCentis: number;
+    botCentis: number;
+    playerDiffCentis: number;
+    botDiffCentis: number;
+    entryCost: number;
+    rewardCash: number;
+    rewardVoucher: number;
+    message: string;
+  };
   startArcadeMinigameRun: (gameId: ArcadeGameId) => {
     success: boolean;
     message: string;
@@ -16449,6 +16468,246 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const playStopwatchChallenge = (input: {
+    level: 'normal' | 'hard';
+    targetCentis: number;
+    playerCentis: number;
+    botCentis: number;
+  }): {
+    success: boolean;
+    outcome?: 'win' | 'draw' | 'lose';
+    level: 'normal' | 'hard';
+    targetCentis: number;
+    playerCentis: number;
+    botCentis: number;
+    playerDiffCentis: number;
+    botDiffCentis: number;
+    entryCost: number;
+    rewardCash: number;
+    rewardVoucher: number;
+    message: string;
+  } => {
+    const { level, targetCentis, playerCentis, botCentis } = input;
+    const entryCost = level === 'hard' ? 1_200_000 : 500_000;
+    const winCashPrize = level === 'hard' ? 500_000 : 100_000;
+    const winVoucherPrize = level === 'hard' ? 2 : 1;
+    const levelLabel = level === 'hard' ? 'Level Susah' : 'Level Normal';
+
+    const formatXxx = (centis: number) => {
+      const safe = Math.max(0, Math.round(centis));
+      const sec = Math.floor(safe / 100);
+      const tens = Math.floor((safe % 100) / 10);
+      const units = safe % 10;
+      return `${sec},${tens}${units}`;
+    };
+
+    const formatTargetDisplay = (centis: number, lvl: 'normal' | 'hard') => {
+      const safe = Math.max(0, Math.round(centis));
+      const sec = Math.floor(safe / 100);
+      const tens = Math.floor((safe % 100) / 10);
+      if (lvl === 'normal') {
+        return `${sec} (${sec},00)`;
+      }
+      return `${sec},${tens} (${sec},${tens}0)`;
+    };
+
+    const playerDiffCentis = Math.abs(Math.round(playerCentis) - Math.round(targetCentis));
+    const botDiffCentis = Math.abs(Math.round(botCentis) - Math.round(targetCentis));
+
+    if (!currentAccount) {
+      return {
+        success: false,
+        level,
+        targetCentis,
+        playerCentis,
+        botCentis,
+        playerDiffCentis,
+        botDiffCentis,
+        entryCost,
+        rewardCash: 0,
+        rewardVoucher: 0,
+        message: 'Silakan login terlebih dahulu.',
+      };
+    }
+
+    const isUnlim =
+      currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+
+    if (!isUnlim && currentAccount.balance < entryCost) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        level,
+        targetCentis,
+        playerCentis,
+        botCentis,
+        playerDiffCentis,
+        botDiffCentis,
+        entryCost,
+        rewardCash: 0,
+        rewardVoucher: 0,
+        message: `Saldo tidak mencukupi untuk Adu Stopwatch ${levelLabel}! Biaya main adalah ${formatRupiah(
+          entryCost
+        )} (Saldo Anda: ${formatRupiah(currentAccount.balance)}).`,
+      };
+    }
+
+    const targetStr = formatTargetDisplay(targetCentis, level);
+    const playerStr = formatXxx(playerCentis);
+    const botStr = formatXxx(botCentis);
+    const playerDiffStr = formatXxx(playerDiffCentis);
+    const botDiffStr = formatXxx(botDiffCentis);
+
+    if (playerDiffCentis < botDiffCentis) {
+      // PLAYER WINS against Bot Level Hard
+      const afterEntryBal = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance - entryCost;
+      const finalBal = isUnlim ? UNLIMITED_BALANCE : afterEntryBal + winCashPrize;
+
+      const nextAccounts = accounts.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              balance: finalBal,
+              levelVouchers: (a.levelVouchers || 0) + winVoucherPrize,
+              stopwatchWins: (a.stopwatchWins || 0) + 1,
+              stopwatchPlayed: (a.stopwatchPlayed || 0) + 1,
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+
+      const entryTx: Transaction = {
+        id: `tx-sw-in-${Date.now()}`,
+        accountId: currentAccount.id,
+        type: 'tagihan',
+        title: `⏱️ Biaya Adu Stopwatch ${levelLabel} (Target ${targetStr} dtk)`,
+        amount: entryCost,
+        balanceAfter: afterEntryBal,
+        date: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+        referenceNo: `SW-${Date.now().toString().slice(-6)}`,
+        status: 'berhasil',
+      };
+      const prizeTx: Transaction = {
+        id: `tx-sw-win-${Date.now() + 1}`,
+        accountId: currentAccount.id,
+        type: 'setor',
+        title: `🏆 Menang Adu Stopwatch ${levelLabel} vs Bot Level Hard (${playerStr} vs ${botStr} • +${winVoucherPrize} Voucher Level & +${formatRupiah(
+          winCashPrize
+        )})`,
+        amount: winCashPrize,
+        balanceAfter: finalBal,
+        date: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+        referenceNo: `SWWIN-${Date.now().toString().slice(-6)}`,
+        status: 'berhasil',
+      };
+      const nextTxs = [prizeTx, entryTx, ...transactions];
+      setTransactions(nextTxs);
+      flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+      playAtmSound('cash');
+
+      return {
+        success: true,
+        outcome: 'win',
+        level,
+        targetCentis,
+        playerCentis,
+        botCentis,
+        playerDiffCentis,
+        botDiffCentis,
+        entryCost,
+        rewardCash: winCashPrize,
+        rewardVoucher: winVoucherPrize,
+        message:
+          playerDiffCentis === 0
+            ? `🎯 TEPAT SASARAN SEMPURNA! Waktu Anda ${playerStr} dtk (Selisih 0,00 dtk) mengalahkan Bot Level Hard ${botStr} dtk (Selisih ${botDiffStr} dtk) pada Target ${targetStr} dtk! Hadiah +${formatRupiah(
+                winCashPrize
+              )} & +${winVoucherPrize} Voucher Level langsung cair!`
+            : `🏆 MENANG ADU STOPWATCH (${levelLabel.toUpperCase()})! Waktu Anda ${playerStr} dtk (Selisih ${playerDiffStr} dtk) lebih dekat ke Target ${targetStr} dtk dibanding Bot Level Hard ${botStr} dtk (Selisih ${botDiffStr} dtk). Hadiah +${formatRupiah(
+                winCashPrize
+              )} & +${winVoucherPrize} Voucher Level langsung cair!`,
+      };
+    } else if (playerDiffCentis === botDiffCentis) {
+      // DRAW -> 100% Refund (No balance deducted)
+      const nextAccounts = accounts.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              stopwatchPlayed: (a.stopwatchPlayed || 0) + 1,
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+      flushMasterStateToCloud({ accounts: nextAccounts });
+      playAtmSound('beep');
+
+      return {
+        success: true,
+        outcome: 'draw',
+        level,
+        targetCentis,
+        playerCentis,
+        botCentis,
+        playerDiffCentis,
+        botDiffCentis,
+        entryCost,
+        rewardCash: 0,
+        rewardVoucher: 0,
+        message: `🤝 SERI PRESISI! Selisih waktu Anda (${playerStr} dtk • Selisih ${playerDiffStr} dtk) dan Bot Level Hard (${botStr} dtk • Selisih ${botDiffStr} dtk) terhadap Target ${targetStr} dtk sama persis! Biaya ${formatRupiah(
+          entryCost
+        )} dikembalikan utuh 100% (tidak dipotong).`,
+      };
+    } else {
+      // LOSE against Bot Level Hard
+      const finalBal = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance - entryCost;
+      const nextAccounts = accounts.map((a) =>
+        a.id === currentAccount.id
+          ? {
+              ...a,
+              balance: finalBal,
+              stopwatchPlayed: (a.stopwatchPlayed || 0) + 1,
+            }
+          : a
+      );
+      setAccounts(nextAccounts);
+
+      const loseTx: Transaction = {
+        id: `tx-sw-lose-${Date.now()}`,
+        accountId: currentAccount.id,
+        type: 'tagihan',
+        title: `⏱️ Adu Stopwatch ${levelLabel} - Kalah vs Bot Level Hard (Anda ${playerStr} vs Bot ${botStr} • Target ${targetStr})`,
+        amount: entryCost,
+        balanceAfter: finalBal,
+        date: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+        referenceNo: `SW-${Date.now().toString().slice(-6)}`,
+        status: 'berhasil',
+      };
+      const nextTxs = [loseTx, ...transactions];
+      setTransactions(nextTxs);
+      flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+      playAtmSound('alert');
+
+      return {
+        success: true,
+        outcome: 'lose',
+        level,
+        targetCentis,
+        playerCentis,
+        botCentis,
+        playerDiffCentis,
+        botDiffCentis,
+        entryCost,
+        rewardCash: 0,
+        rewardVoucher: 0,
+        message: `💥 BOT LEVEL HARD MENANG! Catatan Bot ${botStr} dtk (Selisih ${botDiffStr} dtk) lebih dekat ke Target ${targetStr} dtk dibanding waktu Anda ${playerStr} dtk (Selisih ${playerDiffStr} dtk). Biaya ${formatRupiah(
+          entryCost
+        )} terpakai. Coba lagi!`,
+      };
+    }
+  };
+
   const startArcadeMinigameRun = (
     gameId: ArcadeGameId
   ): { success: boolean; message: string } => {
@@ -24330,6 +24589,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         upgradeJobLevelWithCash,
         useJobLevelVoucher,
         playSuitForLevelVoucher,
+        playStopwatchChallenge,
         startArcadeMinigameRun,
         claimArcadeMinigameScore,
         atmVaultBalance,

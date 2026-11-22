@@ -24,7 +24,7 @@ import { useBank } from '../context/BankContext';
 import { JOB_VACANCIES_CATALOG } from '../data/featuresCatalog';
 import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
 import { JobVacancyItem } from '../types/bank';
-import { ArcadeMinigameHub } from './ArcadeMinigameHub';
+import { StopwatchDuelArena } from './StopwatchDuelArena';
 
 type JobFilterMode = 'all' | 'unlocked' | 'locked' | 'pemula' | 'menengah' | 'eksekutif';
 
@@ -942,9 +942,9 @@ export const JobVacancyView: React.FC = () => {
       </div>
 
       {/* =====================================================================
-          SECTION 1.5: 12 MINIGAME ARCADE SULTAN (DINO CHROME + 11 GAME EKSTREM)
+          SECTION 1.5: ARENA ADU STOPWATCH LAWAN BOT LEVEL HARD (NORMAL & SUSAH)
          ===================================================================== */}
-      <ArcadeMinigameHub />
+      <StopwatchDuelArena />
 
       {/* =====================================================================
           SECTION 2: DAFTAR 25 LOWONGAN PEKERJAAN (Rp 100.000 - Rp 10.000.000)
