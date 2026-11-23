@@ -1078,6 +1078,7 @@ interface BankContextType {
     computerChoice?: 'batu' | 'gunting' | 'kertas';
     rewardCash?: number;
     rewardVoucher?: number;
+    previousStreak?: number;
     winStreakAfter?: number;
     message: string;
   };
@@ -4927,6 +4928,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const accountsRef = useRef<BankAccount[]>(accounts);
   accountsRef.current = accounts;
+  const currentAccountIdRef = useRef<string>(currentAccountId);
+  currentAccountIdRef.current = currentAccountId;
+  const transactionsRef = useRef<Transaction[]>(transactions);
+  transactionsRef.current = transactions;
 
   const currentAccount = accounts.find((a) => a.id === currentAccountId) || accounts[0] || null;
 
@@ -16278,10 +16283,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     computerChoice?: 'batu' | 'gunting' | 'kertas';
     rewardCash?: number;
     rewardVoucher?: number;
+    previousStreak?: number;
     winStreakAfter?: number;
     message: string;
   } => {
-    if (!currentAccount) {
+    const latestAccounts = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAccount =
+      latestAccounts.find((a) => a.id === currentAccountIdRef.current) ||
+      latestAccounts[0] ||
+      currentAccount;
+
+    if (!activeAccount) {
       return {
         success: false,
         playerChoice,
@@ -16293,15 +16305,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const WIN_CASH_PRIZE = 100_000;
     const STREAK_TARGET = 5;
     const isUnlim =
-      currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+      activeAccount.cardTier === 'admin' || isUnlimitedNumber(activeAccount.balance);
 
-    if (!isUnlim && currentAccount.balance < SUIT_COST) {
+    if (!isUnlim && activeAccount.balance < SUIT_COST) {
       playAtmSound('alert');
       return {
         success: false,
         playerChoice,
         message: `Saldo tidak mencukupi untuk Suit! Biaya Suit adalah Rp 500.000 (Saldo Anda: ${formatRupiah(
-          currentAccount.balance
+          activeAccount.balance
         )}). Kerjakan lowongan Rp 100.000 (Gratis) terlebih dahulu untuk mengumpulkan modal!`,
       };
     }
@@ -16336,18 +16348,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       computerChoice = losingMap[playerChoice];
     }
 
-    const prevStreak = currentAccount.suitWinStreak || 0;
+    const prevStreak = Math.max(0, Math.min(STREAK_TARGET - 1, Math.floor(Number(activeAccount.suitWinStreak) || 0)));
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+
+    const commitSuitAccountUpdate = (nextAccounts: BankAccount[], nextTxs?: Transaction[]) => {
+      accountsRef.current = nextAccounts;
+      latestServerAccountsRef.current = unionMergeAccountsList(
+        nextAccounts,
+        [latestServerAccountsRef.current],
+        deletedAccountIdsRef.current
+      );
+      setAccounts(nextAccounts);
+      if (nextTxs) {
+        transactionsRef.current = nextTxs;
+        setTransactions(nextTxs);
+        flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+      } else {
+        flushMasterStateToCloud({ accounts: nextAccounts });
+      }
+    };
 
     if (outcome === 'win') {
       const nextRawStreak = prevStreak + 1;
       const earnedVoucherNow = nextRawStreak >= STREAK_TARGET ? 1 : 0;
       const winStreakAfter = nextRawStreak >= STREAK_TARGET ? 0 : nextRawStreak;
 
-      const afterEntryBal = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance - SUIT_COST;
+      const afterEntryBal = isUnlim ? UNLIMITED_BALANCE : activeAccount.balance - SUIT_COST;
       const finalBal = isUnlim ? UNLIMITED_BALANCE : afterEntryBal + WIN_CASH_PRIZE;
 
-      const nextAccounts = accounts.map((a) =>
-        a.id === currentAccount.id
+      const nextAccounts = latestAccounts.map((a) =>
+        a.id === activeAccount.id
           ? {
               ...a,
               balance: finalBal,
@@ -16358,11 +16388,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           : a
       );
-      setAccounts(nextAccounts);
 
       const entryTx: Transaction = {
         id: `tx-suit-in-${Date.now()}`,
-        accountId: currentAccount.id,
+        accountId: activeAccount.id,
         type: 'tagihan',
         title: `🎮 Biaya Suit Lawan Komputer (${playerChoice.toUpperCase()} vs ${computerChoice.toUpperCase()})`,
         amount: SUIT_COST,
@@ -16374,7 +16403,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
       const prizeTx: Transaction = {
         id: `tx-suit-win-${Date.now() + 1}`,
-        accountId: currentAccount.id,
+        accountId: activeAccount.id,
         type: 'setor',
         title: earnedVoucherNow
           ? `🏆 STREAK 5 MENANG SUIT! (+1 Voucher Level & Hadiah Rp 100.000)`
@@ -16386,9 +16415,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         referenceNo: `WIN-${Date.now().toString().slice(-6)}`,
         status: 'berhasil',
       };
-      const nextTxs = [prizeTx, entryTx, ...transactions];
-      setTransactions(nextTxs);
-      flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+      const nextTxs = [prizeTx, entryTx, ...latestTxs];
+      commitSuitAccountUpdate(nextAccounts, nextTxs);
       playAtmSound('cash');
 
       return {
@@ -16398,21 +16426,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         computerChoice,
         rewardCash: WIN_CASH_PRIZE,
         rewardVoucher: earnedVoucherNow,
+        previousStreak: prevStreak,
         winStreakAfter: earnedVoucherNow ? STREAK_TARGET : winStreakAfter,
         message: earnedVoucherNow
           ? `🎉 STREAK 5/5 TERCAPAI TANPA KALAH! (${playerChoice.toUpperCase()} mengalahkan ${computerChoice.toUpperCase()}). Anda mendapatkan +1 VOUCHER LEVEL & hadiah uang Rp 100.000! Streak dimulai ulang 0/5.`
           : `🎉 MENANG SUIT! (${playerChoice.toUpperCase()} mengalahkan ${computerChoice.toUpperCase()}). Hadiah +Rp 100.000! Progres Streak Menang: ${nextRawStreak}/5 menuju 1 Voucher Level!`,
       };
     } else if (outcome === 'draw') {
-      const nextAccounts = accounts.map((a) =>
-        a.id === currentAccount.id
+      const nextAccounts = latestAccounts.map((a) =>
+        a.id === activeAccount.id
           ? {
               ...a,
               suitPlayed: (a.suitPlayed || 0) + 1,
+              suitWinStreak: prevStreak,
             }
           : a
       );
-      setAccounts(nextAccounts);
+      commitSuitAccountUpdate(nextAccounts);
       playAtmSound('beep');
       return {
         success: true,
@@ -16421,13 +16451,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         computerChoice,
         rewardCash: 0,
         rewardVoucher: 0,
+        previousStreak: prevStreak,
         winStreakAfter: prevStreak,
         message: `🤝 SERI / DRAW! (${playerChoice.toUpperCase()} vs ${computerChoice.toUpperCase()}). Saldo TIDAK DIPOTONG & Streak Anda tetap aman di ${prevStreak}/5!`,
       };
     } else {
-      const finalBal = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance - SUIT_COST;
-      const nextAccounts = accounts.map((a) =>
-        a.id === currentAccount.id
+      const finalBal = isUnlim ? UNLIMITED_BALANCE : activeAccount.balance - SUIT_COST;
+      const nextAccounts = latestAccounts.map((a) =>
+        a.id === activeAccount.id
           ? {
               ...a,
               balance: finalBal,
@@ -16436,11 +16467,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           : a
       );
-      setAccounts(nextAccounts);
 
       const loseTx: Transaction = {
         id: `tx-suit-lose-${Date.now()}`,
-        accountId: currentAccount.id,
+        accountId: activeAccount.id,
         type: 'tagihan',
         title: `🎮 Suit Lawan Komputer - Kalah (${playerChoice.toUpperCase()} vs ${computerChoice.toUpperCase()})`,
         amount: SUIT_COST,
@@ -16450,9 +16480,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         referenceNo: `SUIT-${Date.now().toString().slice(-6)}`,
         status: 'berhasil',
       };
-      const nextTxs = [loseTx, ...transactions];
-      setTransactions(nextTxs);
-      flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+      const nextTxs = [loseTx, ...latestTxs];
+      commitSuitAccountUpdate(nextAccounts, nextTxs);
       playAtmSound('alert');
 
       return {
@@ -16462,6 +16491,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         computerChoice,
         rewardCash: 0,
         rewardVoucher: 0,
+        previousStreak: prevStreak,
         winStreakAfter: 0,
         message: `💥 Komputer menang (${computerChoice.toUpperCase()} mengalahkan ${playerChoice.toUpperCase()}). Biaya Rp 500.000 terpakai & Win Streak reset kembali ke 0/5!`,
       };
@@ -16514,7 +16544,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const playerDiffCentis = Math.abs(Math.round(playerCentis) - Math.round(targetCentis));
     const botDiffCentis = Math.abs(Math.round(botCentis) - Math.round(targetCentis));
 
-    if (!currentAccount) {
+    const latestAccounts = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAccount =
+      latestAccounts.find((a) => a.id === currentAccountIdRef.current) ||
+      latestAccounts[0] ||
+      currentAccount;
+
+    if (!activeAccount) {
       return {
         success: false,
         level,
@@ -16531,9 +16567,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const isUnlim =
-      currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+      activeAccount.cardTier === 'admin' || isUnlimitedNumber(activeAccount.balance);
 
-    if (!isUnlim && currentAccount.balance < entryCost) {
+    if (!isUnlim && activeAccount.balance < entryCost) {
       playAtmSound('alert');
       return {
         success: false,
@@ -16548,7 +16584,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         rewardVoucher: 0,
         message: `Saldo tidak mencukupi untuk Adu Stopwatch ${levelLabel}! Biaya main adalah ${formatRupiah(
           entryCost
-        )} (Saldo Anda: ${formatRupiah(currentAccount.balance)}).`,
+        )} (Saldo Anda: ${formatRupiah(activeAccount.balance)}).`,
       };
     }
 
@@ -16557,14 +16593,32 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const botStr = formatXxx(botCentis);
     const playerDiffStr = formatXxx(playerDiffCentis);
     const botDiffStr = formatXxx(botDiffCentis);
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+
+    const commitStopwatchUpdate = (nextAccounts: BankAccount[], nextTxs?: Transaction[]) => {
+      accountsRef.current = nextAccounts;
+      latestServerAccountsRef.current = unionMergeAccountsList(
+        nextAccounts,
+        [latestServerAccountsRef.current],
+        deletedAccountIdsRef.current
+      );
+      setAccounts(nextAccounts);
+      if (nextTxs) {
+        transactionsRef.current = nextTxs;
+        setTransactions(nextTxs);
+        flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+      } else {
+        flushMasterStateToCloud({ accounts: nextAccounts });
+      }
+    };
 
     if (playerDiffCentis < botDiffCentis) {
       // PLAYER WINS against Bot Level Hard
-      const afterEntryBal = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance - entryCost;
+      const afterEntryBal = isUnlim ? UNLIMITED_BALANCE : activeAccount.balance - entryCost;
       const finalBal = isUnlim ? UNLIMITED_BALANCE : afterEntryBal + winCashPrize;
 
-      const nextAccounts = accounts.map((a) =>
-        a.id === currentAccount.id
+      const nextAccounts = latestAccounts.map((a) =>
+        a.id === activeAccount.id
           ? {
               ...a,
               balance: finalBal,
@@ -16574,11 +16628,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           : a
       );
-      setAccounts(nextAccounts);
 
       const entryTx: Transaction = {
         id: `tx-sw-in-${Date.now()}`,
-        accountId: currentAccount.id,
+        accountId: activeAccount.id,
         type: 'tagihan',
         title: `⏱️ Biaya Adu Stopwatch ${levelLabel} (Target ${targetStr} dtk)`,
         amount: entryCost,
@@ -16590,7 +16643,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
       const prizeTx: Transaction = {
         id: `tx-sw-win-${Date.now() + 1}`,
-        accountId: currentAccount.id,
+        accountId: activeAccount.id,
         type: 'setor',
         title: `🏆 Menang Adu Stopwatch ${levelLabel} vs Bot Level Hard (${playerStr} vs ${botStr} • +${winVoucherPrize} Voucher Level & +${formatRupiah(
           winCashPrize
@@ -16602,9 +16655,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         referenceNo: `SWWIN-${Date.now().toString().slice(-6)}`,
         status: 'berhasil',
       };
-      const nextTxs = [prizeTx, entryTx, ...transactions];
-      setTransactions(nextTxs);
-      flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+      const nextTxs = [prizeTx, entryTx, ...latestTxs];
+      commitStopwatchUpdate(nextAccounts, nextTxs);
       playAtmSound('cash');
 
       return {
@@ -16630,16 +16682,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     } else if (playerDiffCentis === botDiffCentis) {
       // DRAW -> 100% Refund (No balance deducted)
-      const nextAccounts = accounts.map((a) =>
-        a.id === currentAccount.id
+      const nextAccounts = latestAccounts.map((a) =>
+        a.id === activeAccount.id
           ? {
               ...a,
               stopwatchPlayed: (a.stopwatchPlayed || 0) + 1,
             }
           : a
       );
-      setAccounts(nextAccounts);
-      flushMasterStateToCloud({ accounts: nextAccounts });
+      commitStopwatchUpdate(nextAccounts);
       playAtmSound('beep');
 
       return {
@@ -16660,9 +16711,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     } else {
       // LOSE against Bot Level Hard
-      const finalBal = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance - entryCost;
-      const nextAccounts = accounts.map((a) =>
-        a.id === currentAccount.id
+      const finalBal = isUnlim ? UNLIMITED_BALANCE : activeAccount.balance - entryCost;
+      const nextAccounts = latestAccounts.map((a) =>
+        a.id === activeAccount.id
           ? {
               ...a,
               balance: finalBal,
@@ -16670,11 +16721,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           : a
       );
-      setAccounts(nextAccounts);
 
       const loseTx: Transaction = {
         id: `tx-sw-lose-${Date.now()}`,
-        accountId: currentAccount.id,
+        accountId: activeAccount.id,
         type: 'tagihan',
         title: `⏱️ Adu Stopwatch ${levelLabel} - Kalah vs Bot Level Hard (Anda ${playerStr} vs Bot ${botStr} • Target ${targetStr})`,
         amount: entryCost,
@@ -16684,9 +16734,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         referenceNo: `SW-${Date.now().toString().slice(-6)}`,
         status: 'berhasil',
       };
-      const nextTxs = [loseTx, ...transactions];
-      setTransactions(nextTxs);
-      flushMasterStateToCloud({ accounts: nextAccounts, transactions: nextTxs });
+      const nextTxs = [loseTx, ...latestTxs];
+      commitStopwatchUpdate(nextAccounts, nextTxs);
       playAtmSound('alert');
 
       return {

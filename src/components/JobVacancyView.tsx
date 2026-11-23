@@ -230,6 +230,11 @@ export const JobVacancyView: React.FC = () => {
   } | null>(null);
 
   const [isPlayingSuit, setIsPlayingSuit] = useState<boolean>(false);
+  const [streakVisualAnim, setStreakVisualAnim] = useState<
+    | { mode: 'idle' }
+    | { mode: 'losing_fade'; lostCount: number; nonce: number }
+    | { mode: 'celebrating_five'; nonce: number }
+  >({ mode: 'idle' });
   const [completionFlashMap, setCompletionFlashMap] = useState<Record<string, number>>({});
   const [sortOrder, setSortOrder] = useState<'salary' | 'level'>('salary');
   const [targetScale, setTargetScale] = useState<1 | 5>(1);
@@ -246,15 +251,31 @@ export const JobVacancyView: React.FC = () => {
   const flushTimersRef = useRef<Record<string, number>>({});
   const latestWorkJobClickRef = useRef(workJobClick);
   latestWorkJobClickRef.current = workJobClick;
+  const latestPlaySuitRef = useRef(playSuitForLevelVoucher);
+  latestPlaySuitRef.current = playSuitForLevelVoucher;
+  const isPlayingSuitRef = useRef<boolean>(false);
+  const suitRoundTimerRef = useRef<number | null>(null);
+  const streakAnimTimerRef = useRef<number | null>(null);
   const targetScaleRef = useRef(targetScale);
   targetScaleRef.current = targetScale;
 
-  // Reset local buffer when switching accounts
+  // Reset local buffer and streak animation when switching accounts
   useEffect(() => {
     Object.values(flushTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
     flushTimersRef.current = {};
     pendingDeltaRef.current = {};
     pendingMetaRef.current = {};
+    if (suitRoundTimerRef.current !== null) {
+      window.clearTimeout(suitRoundTimerRef.current);
+      suitRoundTimerRef.current = null;
+    }
+    if (streakAnimTimerRef.current !== null) {
+      window.clearTimeout(streakAnimTimerRef.current);
+      streakAnimTimerRef.current = null;
+    }
+    isPlayingSuitRef.current = false;
+    setIsPlayingSuit(false);
+    setStreakVisualAnim({ mode: 'idle' });
     const initial = currentAccount?.jobClickProgress || {};
     localClicksRef.current = { ...initial };
     setLocalClicksMap(initial);
@@ -288,9 +309,17 @@ export const JobVacancyView: React.FC = () => {
     });
   }, [currentAccount?.jobClickProgress]);
 
-  // Flush all buffered intermediate clicks when leaving the page
+  // Flush all buffered intermediate clicks and clear Suit timers when leaving the page
   useEffect(() => {
     return () => {
+      if (suitRoundTimerRef.current !== null) {
+        window.clearTimeout(suitRoundTimerRef.current);
+        suitRoundTimerRef.current = null;
+      }
+      if (streakAnimTimerRef.current !== null) {
+        window.clearTimeout(streakAnimTimerRef.current);
+        streakAnimTimerRef.current = null;
+      }
       Object.values(flushTimersRef.current).forEach((timerId) => window.clearTimeout(timerId));
       flushTimersRef.current = {};
       const entries = Object.entries(pendingDeltaRef.current);
@@ -464,10 +493,24 @@ export const JobVacancyView: React.FC = () => {
   );
 
   const handlePlaySuit = (choice: 'batu' | 'gunting' | 'kertas') => {
+    if (isPlayingSuitRef.current) return;
+
+    // Immediately cancel any active red-fade or 5/5 celebration animation so players can replay without waiting
+    if (streakAnimTimerRef.current !== null) {
+      window.clearTimeout(streakAnimTimerRef.current);
+      streakAnimTimerRef.current = null;
+    }
+    setStreakVisualAnim({ mode: 'idle' });
+
+    isPlayingSuitRef.current = true;
     setIsPlayingSuit(true);
-    setTimeout(() => {
-      const res = playSuitForLevelVoucher(choice);
+
+    suitRoundTimerRef.current = window.setTimeout(() => {
+      suitRoundTimerRef.current = null;
+      const res = latestPlaySuitRef.current(choice);
+      isPlayingSuitRef.current = false;
       setIsPlayingSuit(false);
+
       if (!res.success || !res.outcome || !res.computerChoice) {
         setFeedback({
           type: 'error',
@@ -476,6 +519,32 @@ export const JobVacancyView: React.FC = () => {
         });
         return;
       }
+
+      const prevStreak = res.previousStreak ?? 0;
+
+      if (res.outcome === 'lose' && prevStreak > 0) {
+        // Boxes 1..prevStreak turn red and smoothly fade out over 1.2s back to neutral
+        setStreakVisualAnim({
+          mode: 'losing_fade',
+          lostCount: prevStreak,
+          nonce: Date.now(),
+        });
+        streakAnimTimerRef.current = window.setTimeout(() => {
+          streakAnimTimerRef.current = null;
+          setStreakVisualAnim({ mode: 'idle' });
+        }, 1220);
+      } else if (res.outcome === 'win' && (res.rewardVoucher || 0) > 0) {
+        // All 5 boxes light up green and sparkle briefly before resetting to 0/5
+        setStreakVisualAnim({
+          mode: 'celebrating_five',
+          nonce: Date.now(),
+        });
+        streakAnimTimerRef.current = window.setTimeout(() => {
+          streakAnimTimerRef.current = null;
+          setStreakVisualAnim({ mode: 'idle' });
+        }, 1420);
+      }
+
       setSuitResult({
         outcome: res.outcome,
         playerChoice: res.playerChoice,
@@ -809,29 +878,70 @@ export const JobVacancyView: React.FC = () => {
             {/* Win Streak 0/5 Progress Tracker */}
             {(() => {
               const currentStreak = currentAccount.suitWinStreak || 0;
+              const isCelebratingFive = streakVisualAnim.mode === 'celebrating_five';
+              const isLosingFade = streakVisualAnim.mode === 'losing_fade';
+              const lostCount = isLosingFade ? streakVisualAnim.lostCount : 0;
+              const animNonce =
+                streakVisualAnim.mode !== 'idle' ? streakVisualAnim.nonce : 0;
+
+              const displayedStreakNumber = isCelebratingFive ? 5 : currentStreak;
+
               return (
-                <div className="p-3 rounded-2xl bg-slate-950/90 border border-cyan-400/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div
+                  className={`p-3 rounded-2xl bg-slate-950/90 border flex flex-col sm:flex-row sm:items-center justify-between gap-2 transition-colors duration-300 ${
+                    isLosingFade
+                      ? 'border-rose-500/60'
+                      : isCelebratingFive
+                      ? 'border-emerald-400/80'
+                      : 'border-cyan-400/40'
+                  }`}
+                >
                   <div>
                     <span className="text-[10px] font-mono uppercase text-cyan-300 font-bold block">
                       STREAK MENANG TANPA KALAH (SYARAT 1 VOUCHER LEVEL):
                     </span>
-                    <span className="text-xs text-slate-200 font-bold">
-                      {currentStreak} / 5 Kemenangan Beruntun {currentStreak >= 4 ? '— 🔥 1 Kemenangan Lagi Dapat 1 Voucher!' : ''}
+                    <span
+                      className={`text-xs font-bold block tabular-nums ${
+                        isLosingFade
+                          ? 'text-rose-300'
+                          : isCelebratingFive
+                          ? 'text-emerald-300'
+                          : 'text-slate-200'
+                      }`}
+                    >
+                      {isLosingFade
+                        ? `Streak ${lostCount} / 5 Terputus — Kembali ke 0 / 5`
+                        : isCelebratingFive
+                        ? '5 / 5 Kemenangan Beruntun — 🎉 +1 Voucher Level Cair!'
+                        : `${displayedStreakNumber} / 5 Kemenangan Beruntun${
+                            displayedStreakNumber >= 4
+                              ? ' — 🔥 1 Kemenangan Lagi Dapat 1 Voucher!'
+                              : ''
+                          }`}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {[1, 2, 3, 4, 5].map((step) => (
-                      <div
-                        key={step}
-                        className={`w-8 h-8 rounded-xl border-2 flex items-center justify-center font-mono font-black text-xs ${
-                          currentStreak >= step
-                            ? 'bg-emerald-400 text-slate-950 border-white shadow'
-                            : 'bg-slate-900 text-slate-500 border-slate-700'
-                        }`}
-                      >
-                        {currentStreak >= step ? '✓' : step}
-                      </div>
-                    ))}
+                    {[1, 2, 3, 4, 5].map((step) => {
+                      const isRedFadingBox = isLosingFade && step <= lostCount;
+                      const isGreenActiveBox = !isLosingFade && (isCelebratingFive || currentStreak >= step);
+
+                      return (
+                        <div
+                          key={`${step}-${isRedFadingBox ? `fade-${animNonce}` : isCelebratingFive ? `five-${animNonce}` : 'base'}`}
+                          className={`w-8 h-8 rounded-xl border-2 flex items-center justify-center font-mono font-black text-xs tabular-nums transition-colors duration-200 ${
+                            isCelebratingFive
+                              ? 'suit-streak-five-sparkle'
+                              : isRedFadingBox
+                              ? 'suit-streak-red-fade'
+                              : isGreenActiveBox
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-200 shadow-lg shadow-emerald-500/30'
+                              : 'bg-slate-900 text-slate-500 border-slate-700'
+                          }`}
+                        >
+                          {step}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );

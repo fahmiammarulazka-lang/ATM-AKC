@@ -1,5 +1,5 @@
 /**
- * Bank Nusantara — Arena Minigame Adu Stopwatch vs Bot Level Hard
+ * Bank Nusantara — Arena Minigame Adu Stopwatch vs Bot Level Hard (Zero-Lag 60–120 FPS Engine)
  * - Level Normal (Mudah): Biaya Rp 500.000 | Hadiah Menang: +1 Voucher Level & +Rp 100.000
  *   Format Target Sistem: Angka Bulat X (1 s/d 10 detik, mis. 3 atau 7 -> dipaskan di 3,00 atau 7,00 pada layar X,XX)
  * - Level Susah (Hard): Biaya Rp 1.200.000 | Hadiah Menang: +Rp 500.000 & +2 Voucher Level
@@ -7,6 +7,8 @@
  *   namun di layar stopwatch tetap berjalan penuh X,XX (Detik, Milidetik Puluhan & Milidetik Satuan).
  * - Lawan: Bot Level Hard dengan presisi tinggi (selisih 0,00 s/d 0,08 detik dari target).
  * - Seri (Draw): Selisih jarak waktu pemain & Bot sama persis -> Saldo kembali utuh 100% (tanpa potong biaya).
+ * - Performa: Zero React re-render selama stopwatch berjalan (pembaruan langsung DOM Ref + CSS paint containment
+ *   + pemicu kontak pertama onPointerDown touch-manipulation tanpa delay).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -84,15 +86,12 @@ function generateAutoTargetCentis(level: StopwatchDifficulty, previousCentis?: n
   for (let attempt = 0; attempt < 12; attempt++) {
     let candidate = 300;
     if (level === 'normal') {
-      // Integer seconds 1..10
       const randomSec = Math.floor(Math.random() * 10) + 1;
       candidate = randomSec * 100;
     } else {
-      // Level Susah: 15% chance for ultra-iconic 0,1..0,9 (especially 0,1 = 10 centis),
-      // 85% chance for 1,1..9,9 with non-zero tens digit and 0 units digit
       const roll = Math.random();
       if (roll < 0.14) {
-        candidate = 10; // 0,1 detik (0,10 di stopwatch) seperti contoh nasabah!
+        candidate = 10; // 0,1 detik (0,10 di stopwatch)
       } else if (roll < 0.25) {
         const subSecTens = Math.floor(Math.random() * 9) + 1; // 1..9 -> 0,1 s/d 0,9
         candidate = subSecTens * 10;
@@ -112,20 +111,10 @@ function generateAutoTargetCentis(level: StopwatchDifficulty, previousCentis?: n
 /**
  * Computes Bot Level Hard's stop time in centiseconds.
  * Bot Level Hard is extremely sharp: stops within 0,00 to 0,08 seconds (0 to 8 centiseconds) of target.
- * If the player hits exact 0,00 diff, ensure Bot is 1..4 centis away so a perfect player stop always wins!
  */
-function generateBotHardCentis(targetCentis: number, playerCentis?: number): number {
-  // Weighted precision table for Bot Level Hard (0 to 8 centiseconds error)
+function generateBotHardCentis(targetCentis: number): number {
   const diffs = [0, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 7, 8];
-  let chosenDiff = diffs[Math.floor(Math.random() * diffs.length)];
-
-  if (typeof playerCentis === 'number') {
-    const playerDiff = Math.abs(playerCentis - targetCentis);
-    if (playerDiff === 0 && chosenDiff === 0) {
-      chosenDiff = Math.floor(Math.random() * 3) + 1; // 0,01 - 0,03 so perfect 0,00 player always wins
-    }
-  }
-
+  const chosenDiff = diffs[Math.floor(Math.random() * diffs.length)];
   const sign = Math.random() < 0.5 ? -1 : 1;
   const rawBot = targetCentis + sign * chosenDiff;
   if (rawBot < 2) {
@@ -134,7 +123,121 @@ function generateBotHardCentis(targetCentis: number, playerCentis?: number): num
   return rawBot;
 }
 
-export const StopwatchDuelArena: React.FC = () => {
+interface StopwatchHistorySectionProps {
+  history: StopwatchMatchRecord[];
+  onClearHistory: () => void;
+}
+
+const StopwatchHistorySection: React.FC<StopwatchHistorySectionProps> = React.memo(
+  ({ history, onClearHistory }) => (
+    <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <History className="w-4 h-4 text-cyan-400" />
+          <h4 className="font-black text-white text-xs sm:text-sm uppercase tracking-wider">
+            Riwayat Pertandingan Adu Stopwatch ({history.length})
+          </h4>
+        </div>
+        {history.length > 0 && (
+          <button
+            type="button"
+            onClick={onClearHistory}
+            className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-300 text-[11px] font-semibold cursor-pointer flex items-center gap-1"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Bersihkan Riwayat</span>
+          </button>
+        )}
+      </div>
+
+      {history.length === 0 ? (
+        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 text-center text-xs text-slate-400">
+          Belum ada riwayat pertandingan Adu Stopwatch. Pilih <strong>Level Normal</strong> atau{' '}
+          <strong>Level Susah</strong> lalu tekan <strong>Mulai Adu Stopwatch</strong>!
+        </div>
+      ) : (
+        <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+          {history.map((item) => {
+            const tParts = formatStopwatchParts(item.targetCentis);
+            const pParts = formatStopwatchParts(item.playerCentis);
+            const bParts = formatStopwatchParts(item.botCentis);
+            const pDiffParts = formatStopwatchParts(item.playerDiffCentis);
+            const bDiffParts = formatStopwatchParts(item.botDiffCentis);
+            const targetDisp =
+              item.level === 'normal'
+                ? `${tParts.secondsStr} (${tParts.fullStr})`
+                : `${tParts.secondsStr},${tParts.tensStr} (${tParts.fullStr})`;
+
+            return (
+              <div
+                key={item.id}
+                className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`px-2 py-0.5 rounded-md font-black text-[10px] uppercase ${
+                      item.outcome === 'win'
+                        ? 'bg-emerald-400 text-slate-950'
+                        : item.outcome === 'draw'
+                        ? 'bg-amber-400 text-slate-950'
+                        : 'bg-rose-500/30 text-rose-200 border border-rose-500/40'
+                    }`}
+                  >
+                    {item.outcome === 'win'
+                      ? '🏆 MENANG'
+                      : item.outcome === 'draw'
+                      ? '🤝 SERI'
+                      : '💥 KALAH'}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-md font-mono font-bold text-[10px] ${
+                      item.level === 'hard'
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-400/40'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                    }`}
+                  >
+                    {item.level === 'hard' ? 'Level Susah' : 'Level Normal'}
+                  </span>
+                  <span className="font-mono text-slate-200 font-bold">
+                    Target: <strong className="text-amber-300">{targetDisp}</strong>
+                  </span>
+                  <span className="font-mono text-cyan-300">
+                    Anda: <strong>{pParts.fullStr}</strong> (±{pDiffParts.fullStr})
+                  </span>
+                  <span className="font-mono text-rose-300">
+                    Bot: <strong>{bParts.fullStr}</strong> (±{bDiffParts.fullStr})
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 font-mono">
+                  {item.outcome === 'win' ? (
+                    <span className="text-emerald-400 font-black flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>
+                        +{item.rewardVoucher} Voucher &amp; +{formatRupiah(item.rewardCash)}
+                      </span>
+                    </span>
+                  ) : item.outcome === 'draw' ? (
+                    <span className="text-amber-300 font-bold">Refund 100%</span>
+                  ) : (
+                    <span className="text-rose-400 font-bold">
+                      -{formatRupiah(item.entryCost)}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-slate-500">{item.timestamp}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  )
+);
+
+StopwatchHistorySection.displayName = 'StopwatchHistorySection';
+
+export const StopwatchDuelArena: React.FC = React.memo(() => {
   const { currentAccount, playStopwatchChallenge } = useBank();
 
   const [difficulty, setDifficulty] = useState<StopwatchDifficulty>('normal');
@@ -142,9 +245,9 @@ export const StopwatchDuelArena: React.FC = () => {
     generateAutoTargetCentis('normal')
   );
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [livePlayerCentis, setLivePlayerCentis] = useState<number>(0);
-  const [liveBotCentis, setLiveBotCentis] = useState<number>(0);
-  const [plannedBotCentis, setPlannedBotCentis] = useState<number>(0);
+  // Idle display state (updated ONLY on stop / reset / start, NEVER during the 60-120fps loop!)
+  const [settledPlayerCentis, setSettledPlayerCentis] = useState<number>(0);
+  const [settledBotCentis, setSettledBotCentis] = useState<number>(0);
   const [lastResult, setLastResult] = useState<{
     outcome: 'win' | 'draw' | 'lose';
     level: StopwatchDifficulty;
@@ -161,15 +264,99 @@ export const StopwatchDuelArena: React.FC = () => {
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [history, setHistory] = useState<StopwatchMatchRecord[]>([]);
 
+  // High-frequency refs (Zero React re-renders during RUNNING!)
   const rafRef = useRef<number | null>(null);
   const startPerfRef = useRef<number>(0);
   const isRunningRef = useRef<boolean>(false);
   const targetCentisRef = useRef<number>(targetCentis);
   const difficultyRef = useRef<StopwatchDifficulty>(difficulty);
   const plannedBotCentisRef = useRef<number>(0);
+  const lastDrawnPlayerCentisRef = useRef<number>(-1);
+  const lastDrawnBotCentisRef = useRef<number>(-1);
+  const botBadgeFlippedRef = useRef<boolean>(false);
+
+  // Direct DOM digit span refs for Player & Bot (X,XX + breakdown cards)
+  const playerSecBigRef = useRef<HTMLSpanElement | null>(null);
+  const playerTensBigRef = useRef<HTMLSpanElement | null>(null);
+  const playerUnitsBigRef = useRef<HTMLSpanElement | null>(null);
+  const playerSecSubRef = useRef<HTMLSpanElement | null>(null);
+  const playerTensSubRef = useRef<HTMLSpanElement | null>(null);
+  const playerUnitsSubRef = useRef<HTMLSpanElement | null>(null);
+
+  const botSecBigRef = useRef<HTMLSpanElement | null>(null);
+  const botTensBigRef = useRef<HTMLSpanElement | null>(null);
+  const botUnitsBigRef = useRef<HTMLSpanElement | null>(null);
+  const botSecSubRef = useRef<HTMLSpanElement | null>(null);
+  const botTensSubRef = useRef<HTMLSpanElement | null>(null);
+  const botUnitsSubRef = useRef<HTMLSpanElement | null>(null);
+  const botBadgeRef = useRef<HTMLSpanElement | null>(null);
+
+  // Stable refs for callbacks to prevent effect churn
+  const latestPlayStopwatchRef = useRef(playStopwatchChallenge);
+  latestPlayStopwatchRef.current = playStopwatchChallenge;
+  const currentAccountIdRef = useRef<string | undefined>(currentAccount?.id);
+  currentAccountIdRef.current = currentAccount?.id;
 
   targetCentisRef.current = targetCentis;
   difficultyRef.current = difficulty;
+
+  const writePlayerDigitsToDom = useCallback((centis: number) => {
+    const safe = Math.max(0, Math.round(centis));
+    if (lastDrawnPlayerCentisRef.current === safe) return;
+    lastDrawnPlayerCentisRef.current = safe;
+
+    const secStr = String(Math.floor(safe / 100));
+    const tensStr = String(Math.floor((safe % 100) / 10));
+    const unitsStr = String(safe % 10);
+
+    if (playerSecBigRef.current && playerSecBigRef.current.textContent !== secStr) {
+      playerSecBigRef.current.textContent = secStr;
+    }
+    if (playerTensBigRef.current && playerTensBigRef.current.textContent !== tensStr) {
+      playerTensBigRef.current.textContent = tensStr;
+    }
+    if (playerUnitsBigRef.current && playerUnitsBigRef.current.textContent !== unitsStr) {
+      playerUnitsBigRef.current.textContent = unitsStr;
+    }
+    if (playerSecSubRef.current && playerSecSubRef.current.textContent !== secStr) {
+      playerSecSubRef.current.textContent = secStr;
+    }
+    if (playerTensSubRef.current && playerTensSubRef.current.textContent !== tensStr) {
+      playerTensSubRef.current.textContent = tensStr;
+    }
+    if (playerUnitsSubRef.current && playerUnitsSubRef.current.textContent !== unitsStr) {
+      playerUnitsSubRef.current.textContent = unitsStr;
+    }
+  }, []);
+
+  const writeBotDigitsToDom = useCallback((centis: number) => {
+    const safe = Math.max(0, Math.round(centis));
+    if (lastDrawnBotCentisRef.current === safe) return;
+    lastDrawnBotCentisRef.current = safe;
+
+    const secStr = String(Math.floor(safe / 100));
+    const tensStr = String(Math.floor((safe % 100) / 10));
+    const unitsStr = String(safe % 10);
+
+    if (botSecBigRef.current && botSecBigRef.current.textContent !== secStr) {
+      botSecBigRef.current.textContent = secStr;
+    }
+    if (botTensBigRef.current && botTensBigRef.current.textContent !== tensStr) {
+      botTensBigRef.current.textContent = tensStr;
+    }
+    if (botUnitsBigRef.current && botUnitsBigRef.current.textContent !== unitsStr) {
+      botUnitsBigRef.current.textContent = unitsStr;
+    }
+    if (botSecSubRef.current && botSecSubRef.current.textContent !== secStr) {
+      botSecSubRef.current.textContent = secStr;
+    }
+    if (botTensSubRef.current && botTensSubRef.current.textContent !== tensStr) {
+      botTensSubRef.current.textContent = tensStr;
+    }
+    if (botUnitsSubRef.current && botUnitsSubRef.current.textContent !== unitsStr) {
+      botUnitsSubRef.current.textContent = unitsStr;
+    }
+  }, []);
 
   // Load match history per account
   useEffect(() => {
@@ -189,34 +376,40 @@ export const StopwatchDuelArena: React.FC = () => {
     }
   }, [currentAccount?.id]);
 
-  const saveMatchToHistory = useCallback(
-    (record: StopwatchMatchRecord) => {
-      if (!currentAccount?.id) return;
-      setHistory((prev) => {
-        const next = [record, ...prev].slice(0, 25);
-        try {
-          localStorage.setItem(
-            `${HISTORY_STORAGE_PREFIX}${currentAccount.id}`,
-            JSON.stringify(next)
-          );
-        } catch {
-          // ignore storage quota errors
-        }
-        return next;
-      });
-    },
-    [currentAccount?.id]
-  );
+  const saveMatchToHistory = useCallback((record: StopwatchMatchRecord) => {
+    const accId = currentAccountIdRef.current;
+    if (!accId) return;
+    setHistory((prev) => {
+      const next = [record, ...prev].slice(0, 25);
+      try {
+        localStorage.setItem(`${HISTORY_STORAGE_PREFIX}${accId}`, JSON.stringify(next));
+      } catch {
+        // ignore storage quota errors
+      }
+      return next;
+    });
+  }, []);
 
-  const clearHistory = () => {
-    if (!currentAccount?.id) return;
+  const clearHistory = useCallback(() => {
+    const accId = currentAccountIdRef.current;
+    if (!accId) return;
     setHistory([]);
     try {
-      localStorage.removeItem(`${HISTORY_STORAGE_PREFIX}${currentAccount.id}`);
+      localStorage.removeItem(`${HISTORY_STORAGE_PREFIX}${accId}`);
     } catch {
       // ignore
     }
-  };
+  }, []);
+
+  // Keep DOM digit spans synced whenever settled values change while idle
+  useEffect(() => {
+    if (!isRunningRef.current) {
+      lastDrawnPlayerCentisRef.current = -1;
+      lastDrawnBotCentisRef.current = -1;
+      writePlayerDigitsToDom(settledPlayerCentis);
+      writeBotDigitsToDom(settledBotCentis);
+    }
+  }, [settledPlayerCentis, settledBotCentis, writePlayerDigitsToDom, writeBotDigitsToDom]);
 
   // Switch difficulty level
   const handleSelectDifficulty = (nextLevel: StopwatchDifficulty) => {
@@ -224,8 +417,12 @@ export const StopwatchDuelArena: React.FC = () => {
     setDifficulty(nextLevel);
     const nextTarget = generateAutoTargetCentis(nextLevel);
     setTargetCentis(nextTarget);
-    setLivePlayerCentis(0);
-    setLiveBotCentis(0);
+    setSettledPlayerCentis(0);
+    setSettledBotCentis(0);
+    lastDrawnPlayerCentisRef.current = -1;
+    lastDrawnBotCentisRef.current = -1;
+    writePlayerDigitsToDom(0);
+    writeBotDigitsToDom(0);
     setLastResult(null);
     setErrorBanner(null);
   };
@@ -238,24 +435,29 @@ export const StopwatchDuelArena: React.FC = () => {
         ? customCentis
         : generateAutoTargetCentis(difficulty, targetCentis);
     setTargetCentis(nextTarget);
-    setLivePlayerCentis(0);
-    setLiveBotCentis(0);
+    setSettledPlayerCentis(0);
+    setSettledBotCentis(0);
+    lastDrawnPlayerCentisRef.current = -1;
+    lastDrawnBotCentisRef.current = -1;
+    writePlayerDigitsToDom(0);
+    writeBotDigitsToDom(0);
     setLastResult(null);
     setErrorBanner(null);
   };
 
-  // Stop & settle match
+  // Stop & settle match (Zero-Latency Instant Freeze on first contact!)
   const handleStopMatch = useCallback(
     (forcedElapsedCentis?: number) => {
       if (!isRunningRef.current) return;
+      // 1. Capture exact millisecond IMMEDIATELY on pointer contact before any React/storage work
+      const stopPerfNow = performance.now();
       isRunningRef.current = false;
-      setIsRunning(false);
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
         rafRef.current = null;
       }
 
-      const elapsedMs = performance.now() - startPerfRef.current;
+      const elapsedMs = stopPerfNow - startPerfRef.current;
       const finalPlayerCentis =
         typeof forcedElapsedCentis === 'number'
           ? forcedElapsedCentis
@@ -264,16 +466,24 @@ export const StopwatchDuelArena: React.FC = () => {
       const activeTarget = targetCentisRef.current;
       const activeLevel = difficultyRef.current;
 
-      // Finalize Bot Level Hard time (ensure a perfect 0,00 player shot always beats the bot)
+      // Finalize Bot Level Hard time (ensure a perfect 0,00 player stop always beats the bot)
       let finalBotCentis = plannedBotCentisRef.current;
       if (finalPlayerCentis === activeTarget && finalBotCentis === activeTarget) {
         finalBotCentis = activeTarget + (Math.random() < 0.5 ? 1 : 2);
       }
 
-      setLivePlayerCentis(finalPlayerCentis);
-      setLiveBotCentis(finalBotCentis);
+      // 2. Freeze exact numbers directly on screen in < 0.1ms
+      lastDrawnPlayerCentisRef.current = -1;
+      lastDrawnBotCentisRef.current = -1;
+      writePlayerDigitsToDom(finalPlayerCentis);
+      writeBotDigitsToDom(finalBotCentis);
 
-      const res = playStopwatchChallenge({
+      // 3. Commit single React state settlement & Cloud sync
+      setIsRunning(false);
+      setSettledPlayerCentis(finalPlayerCentis);
+      setSettledBotCentis(finalBotCentis);
+
+      const res = latestPlayStopwatchRef.current({
         level: activeLevel,
         targetCentis: activeTarget,
         playerCentis: finalPlayerCentis,
@@ -310,10 +520,10 @@ export const StopwatchDuelArena: React.FC = () => {
         ...resultObj,
       });
     },
-    [playStopwatchChallenge, saveMatchToHistory]
+    [saveMatchToHistory, writeBotDigitsToDom, writePlayerDigitsToDom]
   );
 
-  // Start match
+  // Start match (Zero-Re-Render RAF Loop)
   const handleStartMatch = () => {
     if (!currentAccount || isRunningRef.current) return;
     setErrorBanner(null);
@@ -333,7 +543,7 @@ export const StopwatchDuelArena: React.FC = () => {
       return;
     }
 
-    // If a round was just finished, auto-generate a fresh target for the new round
+    // Auto-generate a fresh target when replaying right after a finished match
     let activeTarget = targetCentis;
     if (lastResult !== null) {
       activeTarget = generateAutoTargetCentis(difficulty, targetCentis);
@@ -342,12 +552,17 @@ export const StopwatchDuelArena: React.FC = () => {
     }
 
     const botTargetStop = generateBotHardCentis(activeTarget);
-    setPlannedBotCentis(botTargetStop);
     plannedBotCentisRef.current = botTargetStop;
+    botBadgeFlippedRef.current = false;
 
     setLastResult(null);
-    setLivePlayerCentis(0);
-    setLiveBotCentis(0);
+    setSettledPlayerCentis(0);
+    setSettledBotCentis(0);
+    lastDrawnPlayerCentisRef.current = -1;
+    lastDrawnBotCentisRef.current = -1;
+    writePlayerDigitsToDom(0);
+    writeBotDigitsToDom(0);
+
     isRunningRef.current = true;
     setIsRunning(true);
     startPerfRef.current = performance.now();
@@ -359,9 +574,21 @@ export const StopwatchDuelArena: React.FC = () => {
       const now = performance.now();
       const elapsedCentis = Math.max(0, Math.round((now - startPerfRef.current) / 10));
 
-      setLivePlayerCentis(elapsedCentis);
-      // Bot stopwatch runs simultaneously and stops around its precision target
-      setLiveBotCentis(Math.min(elapsedCentis, plannedBotCentisRef.current));
+      // Direct DOM text updates: ZERO React re-renders per frame!
+      writePlayerDigitsToDom(elapsedCentis);
+
+      const botDisplayCentis =
+        elapsedCentis >= plannedBotCentisRef.current ? plannedBotCentisRef.current : elapsedCentis;
+      writeBotDigitsToDom(botDisplayCentis);
+
+      if (!botBadgeFlippedRef.current && elapsedCentis >= plannedBotCentisRef.current) {
+        botBadgeFlippedRef.current = true;
+        if (botBadgeRef.current) {
+          botBadgeRef.current.textContent = '⚡ BOT SUDAH TEKAN STOP!';
+          botBadgeRef.current.className =
+            'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-amber-400 text-slate-950';
+        }
+      }
 
       if (elapsedCentis >= maxRunCentis) {
         handleStopMatch(maxRunCentis);
@@ -376,13 +603,14 @@ export const StopwatchDuelArena: React.FC = () => {
   // Cleanup animation frame on unmount
   useEffect(() => {
     return () => {
+      isRunningRef.current = false;
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current);
       }
     };
   }, []);
 
-  // Support Space / Enter key to stop stopwatch immediately while running
+  // Support Space / Enter key to stop stopwatch immediately while running (stable listener, zero churn)
   useEffect(() => {
     if (!isRunning) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -402,8 +630,8 @@ export const StopwatchDuelArena: React.FC = () => {
   const winVouchers = difficulty === 'hard' ? 2 : 1;
 
   const targetParts = formatStopwatchParts(targetCentis);
-  const playerParts = formatStopwatchParts(livePlayerCentis);
-  const botParts = formatStopwatchParts(liveBotCentis);
+  const playerParts = formatStopwatchParts(settledPlayerCentis);
+  const botParts = formatStopwatchParts(settledBotCentis);
 
   // Target string according to level rule:
   // - Level Normal: only X (integer second, e.g. "3" or "7")
@@ -417,8 +645,6 @@ export const StopwatchDuelArena: React.FC = () => {
     difficulty === 'normal'
       ? `${targetParts.secondsStr},00`
       : `${targetParts.secondsStr},${targetParts.tensStr}0`;
-
-  const botHasStoppedDuringRun = isRunning && livePlayerCentis >= plannedBotCentis;
 
   return (
     <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/90 border-2 border-cyan-400/60 rounded-3xl p-5 sm:p-7 shadow-2xl space-y-6">
@@ -474,7 +700,7 @@ export const StopwatchDuelArena: React.FC = () => {
           type="button"
           disabled={isRunning}
           onClick={() => handleSelectDifficulty('normal')}
-          className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+          className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-colors cursor-pointer touch-manipulation flex flex-col justify-between gap-3 ${
             difficulty === 'normal'
               ? 'bg-gradient-to-br from-emerald-950/80 via-slate-900 to-slate-950 border-emerald-400 shadow-xl shadow-emerald-500/15'
               : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 opacity-80'
@@ -514,7 +740,7 @@ export const StopwatchDuelArena: React.FC = () => {
           type="button"
           disabled={isRunning}
           onClick={() => handleSelectDifficulty('hard')}
-          className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between gap-3 ${
+          className={`p-4 sm:p-5 rounded-2xl border-2 text-left transition-colors cursor-pointer touch-manipulation flex flex-col justify-between gap-3 ${
             difficulty === 'hard'
               ? 'bg-gradient-to-br from-rose-950/80 via-slate-900 to-slate-950 border-rose-400 shadow-xl shadow-rose-500/15'
               : 'bg-slate-950/70 border-slate-800 hover:border-slate-700 opacity-80'
@@ -600,7 +826,7 @@ export const StopwatchDuelArena: React.FC = () => {
                     type="button"
                     disabled={isRunning}
                     onClick={() => handleRerollTarget(preset.centis)}
-                    className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold cursor-pointer border transition-colors ${
+                    className={`px-2 py-0.5 rounded-md font-mono text-[10px] font-bold cursor-pointer border transition-colors touch-manipulation ${
                       targetCentis === preset.centis
                         ? 'bg-rose-500 text-white border-rose-300'
                         : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
@@ -632,7 +858,7 @@ export const StopwatchDuelArena: React.FC = () => {
               disabled={isRunning}
               onClick={() => handleRerollTarget()}
               title="Acak Target Waktu Baru"
-              className="p-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 hover:text-white cursor-pointer transition-colors flex flex-col items-center gap-1 disabled:opacity-40"
+              className="p-3.5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-cyan-300 hover:text-white cursor-pointer touch-manipulation transition-colors flex flex-col items-center gap-1 disabled:opacity-40"
             >
               <RefreshCw className="w-5 h-5" />
               <span className="text-[10px] font-bold">Acak Target</span>
@@ -646,7 +872,7 @@ export const StopwatchDuelArena: React.FC = () => {
           <div
             className={`p-5 rounded-2xl border-2 flex flex-col justify-between gap-4 transition-colors ${
               isRunning
-                ? 'bg-gradient-to-b from-cyan-950/50 to-slate-900 border-cyan-400 shadow-xl shadow-cyan-500/15'
+                ? 'bg-gradient-to-b from-cyan-950/50 to-slate-900 border-cyan-400 shadow-lg shadow-cyan-500/10'
                 : lastResult?.outcome === 'win'
                 ? 'bg-emerald-950/40 border-emerald-400'
                 : 'bg-slate-900/90 border-slate-800'
@@ -660,33 +886,45 @@ export const StopwatchDuelArena: React.FC = () => {
               <span
                 className={`px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] ${
                   isRunning
-                    ? 'bg-emerald-400 text-slate-950 animate-pulse'
+                    ? 'bg-emerald-400 text-slate-950'
                     : 'bg-slate-800 text-slate-300'
                 }`}
               >
-                {isRunning ? '● SEDANG BERJALAN' : 'SIAP / BERHENTI'}
+                {isRunning ? 'SEDANG BERJALAN' : 'SIAP / BERHENTI'}
               </span>
             </div>
 
-            {/* Big X,XX Digital Readout with Explicit Digit Breakdown */}
-            <div className="py-4 px-4 rounded-2xl bg-slate-950 border border-slate-800 text-center space-y-2">
+            {/* Big X,XX Digital Readout with CSS Paint Containment & Direct DOM Refs */}
+            <div className="py-4 px-4 rounded-2xl bg-slate-950 border border-slate-800 text-center space-y-2 [contain:layout_style_paint]">
               <div className="font-mono font-black text-5xl sm:text-6xl tracking-tight tabular-nums flex items-baseline justify-center">
-                <span className="text-white">{playerParts.secondsStr}</span>
+                <span ref={playerSecBigRef} className="text-white">
+                  {playerParts.secondsStr}
+                </span>
                 <span className="text-amber-400 mx-0.5">,</span>
-                <span className="text-cyan-300">{playerParts.tensStr}</span>
-                <span className="text-fuchsia-300">{playerParts.unitsStr}</span>
+                <span ref={playerTensBigRef} className="text-cyan-300">
+                  {playerParts.tensStr}
+                </span>
+                <span ref={playerUnitsBigRef} className="text-fuchsia-300">
+                  {playerParts.unitsStr}
+                </span>
               </div>
               <div className="grid grid-cols-3 gap-1.5 pt-1 text-[10px] font-mono">
                 <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-slate-300">
-                  <span className="text-white font-black block">{playerParts.secondsStr}</span>
+                  <span ref={playerSecSubRef} className="text-white font-black block">
+                    {playerParts.secondsStr}
+                  </span>
                   <span>Detik (X)</span>
                 </div>
                 <div className="p-1.5 rounded-lg bg-slate-900/90 border border-cyan-500/30 text-cyan-300">
-                  <span className="font-black block">{playerParts.tensStr}</span>
+                  <span ref={playerTensSubRef} className="font-black block">
+                    {playerParts.tensStr}
+                  </span>
                   <span>Milidetik Puluhan</span>
                 </div>
                 <div className="p-1.5 rounded-lg bg-slate-900/90 border border-fuchsia-500/30 text-fuchsia-300">
-                  <span className="font-black block">{playerParts.unitsStr}</span>
+                  <span ref={playerUnitsSubRef} className="font-black block">
+                    {playerParts.unitsStr}
+                  </span>
                   <span>Milidetik Satuan</span>
                 </div>
               </div>
@@ -718,41 +956,48 @@ export const StopwatchDuelArena: React.FC = () => {
                 <span>STOPWATCH BOT (LEVEL HARD)</span>
               </span>
               <span
+                ref={botBadgeRef}
                 className={`px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] ${
-                  botHasStoppedDuringRun
-                    ? 'bg-amber-400 text-slate-950'
-                    : isRunning
-                    ? 'bg-rose-500 text-white animate-pulse'
+                  isRunning
+                    ? 'bg-rose-500 text-white'
                     : 'bg-slate-800 text-rose-300'
                 }`}
               >
-                {botHasStoppedDuringRun
-                  ? '⚡ BOT SUDAH TEKAN STOP!'
-                  : isRunning
-                  ? '● BOT MENGINCAR TARGET...'
-                  : 'AKURASI PRESISI 0,01–0,08s'}
+                {isRunning ? 'BOT MENGINCAR TARGET...' : 'AKURASI PRESISI 0,01–0,08s'}
               </span>
             </div>
 
-            {/* Big X,XX Digital Readout for Bot */}
-            <div className="py-4 px-4 rounded-2xl bg-slate-950 border border-slate-800 text-center space-y-2">
+            {/* Big X,XX Digital Readout for Bot with CSS Paint Containment & Direct DOM Refs */}
+            <div className="py-4 px-4 rounded-2xl bg-slate-950 border border-slate-800 text-center space-y-2 [contain:layout_style_paint]">
               <div className="font-mono font-black text-5xl sm:text-6xl tracking-tight tabular-nums flex items-baseline justify-center">
-                <span className="text-white">{botParts.secondsStr}</span>
+                <span ref={botSecBigRef} className="text-white">
+                  {botParts.secondsStr}
+                </span>
                 <span className="text-amber-400 mx-0.5">,</span>
-                <span className="text-rose-300">{botParts.tensStr}</span>
-                <span className="text-amber-300">{botParts.unitsStr}</span>
+                <span ref={botTensBigRef} className="text-rose-300">
+                  {botParts.tensStr}
+                </span>
+                <span ref={botUnitsBigRef} className="text-amber-300">
+                  {botParts.unitsStr}
+                </span>
               </div>
               <div className="grid grid-cols-3 gap-1.5 pt-1 text-[10px] font-mono">
                 <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-slate-300">
-                  <span className="text-white font-black block">{botParts.secondsStr}</span>
+                  <span ref={botSecSubRef} className="text-white font-black block">
+                    {botParts.secondsStr}
+                  </span>
                   <span>Detik (X)</span>
                 </div>
                 <div className="p-1.5 rounded-lg bg-slate-900/90 border border-rose-500/30 text-rose-300">
-                  <span className="font-black block">{botParts.tensStr}</span>
+                  <span ref={botTensSubRef} className="font-black block">
+                    {botParts.tensStr}
+                  </span>
                   <span>Milidetik Puluhan</span>
                 </div>
                 <div className="p-1.5 rounded-lg bg-slate-900/90 border border-amber-500/30 text-amber-300">
-                  <span className="font-black block">{botParts.unitsStr}</span>
+                  <span ref={botUnitsSubRef} className="font-black block">
+                    {botParts.unitsStr}
+                  </span>
                   <span>Milidetik Satuan</span>
                 </div>
               </div>
@@ -769,13 +1014,13 @@ export const StopwatchDuelArena: React.FC = () => {
           </div>
         </div>
 
-        {/* PRIMARY START / INSTANT STOP TRIGGER BUTTON */}
+        {/* PRIMARY START / INSTANT ZERO-LATENCY STOP TRIGGER BUTTON */}
         <div className="space-y-2">
           {!isRunning ? (
             <button
               type="button"
               onClick={handleStartMatch}
-              className={`w-full py-4 sm:py-5 px-6 rounded-2xl font-black text-base sm:text-lg cursor-pointer transition-all shadow-2xl flex items-center justify-center gap-3 active:scale-[0.99] ${
+              className={`w-full py-4 sm:py-5 px-6 rounded-2xl font-black text-base sm:text-lg cursor-pointer touch-manipulation select-none transition-transform shadow-2xl flex items-center justify-center gap-3 active:scale-[0.99] ${
                 difficulty === 'hard'
                   ? 'bg-gradient-to-r from-rose-500 via-amber-400 to-rose-500 hover:from-rose-400 hover:to-amber-300 text-slate-950 shadow-rose-500/25'
                   : 'bg-gradient-to-r from-emerald-400 via-cyan-400 to-teal-400 hover:from-emerald-300 hover:to-cyan-300 text-slate-950 shadow-cyan-500/25'
@@ -790,16 +1035,12 @@ export const StopwatchDuelArena: React.FC = () => {
           ) : (
             <button
               type="button"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                handleStopMatch();
-              }}
-              onTouchStart={(e) => {
+              onPointerDown={(e) => {
                 e.preventDefault();
                 handleStopMatch();
               }}
               onClick={() => handleStopMatch()}
-              className="w-full py-5 sm:py-6 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-rose-500 to-amber-400 text-slate-950 font-black text-lg sm:text-2xl cursor-pointer shadow-2xl shadow-rose-500/30 flex items-center justify-center gap-3 select-none active:scale-95"
+              className="w-full py-5 sm:py-6 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-rose-500 to-amber-400 text-slate-950 font-black text-lg sm:text-2xl cursor-pointer touch-manipulation select-none shadow-2xl shadow-rose-500/30 flex items-center justify-center gap-3 active:scale-[0.98]"
             >
               <Square className="w-7 h-7 fill-current shrink-0" />
               <span>
@@ -810,7 +1051,7 @@ export const StopwatchDuelArena: React.FC = () => {
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 px-1">
             <span>
-              💡 Tips Presisi: Tombol Berhenti merespons sentuhan instan (0ms delay) atau tekan tombol{' '}
+              💡 Tips Presisi: Tombol Berhenti merespons kontak sentuhan pertama (0ms delay) atau tekan tombol{' '}
               <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 font-mono">
                 Spasi
               </kbd>{' '}
@@ -927,109 +1168,10 @@ export const StopwatchDuelArena: React.FC = () => {
         </div>
       )}
 
-      {/* RIWAYAT PERTANDINGAN ADU STOPWATCH */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <History className="w-4 h-4 text-cyan-400" />
-            <h4 className="font-black text-white text-xs sm:text-sm uppercase tracking-wider">
-              Riwayat Pertandingan Adu Stopwatch ({history.length})
-            </h4>
-          </div>
-          {history.length > 0 && (
-            <button
-              type="button"
-              onClick={clearHistory}
-              className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-300 text-[11px] font-semibold cursor-pointer flex items-center gap-1"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Bersihkan Riwayat</span>
-            </button>
-          )}
-        </div>
-
-        {history.length === 0 ? (
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 text-center text-xs text-slate-400">
-            Belum ada riwayat pertandingan Adu Stopwatch. Pilih <strong>Level Normal</strong> atau{' '}
-            <strong>Level Susah</strong> lalu tekan <strong>Mulai Adu Stopwatch</strong>!
-          </div>
-        ) : (
-          <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
-            {history.map((item) => {
-              const tParts = formatStopwatchParts(item.targetCentis);
-              const pParts = formatStopwatchParts(item.playerCentis);
-              const bParts = formatStopwatchParts(item.botCentis);
-              const pDiffParts = formatStopwatchParts(item.playerDiffCentis);
-              const bDiffParts = formatStopwatchParts(item.botDiffCentis);
-              const targetDisp =
-                item.level === 'normal'
-                  ? `${tParts.secondsStr} (${tParts.fullStr})`
-                  : `${tParts.secondsStr},${tParts.tensStr} (${tParts.fullStr})`;
-
-              return (
-                <div
-                  key={item.id}
-                  className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`px-2 py-0.5 rounded-md font-black text-[10px] uppercase ${
-                        item.outcome === 'win'
-                          ? 'bg-emerald-400 text-slate-950'
-                          : item.outcome === 'draw'
-                          ? 'bg-amber-400 text-slate-950'
-                          : 'bg-rose-500/30 text-rose-200 border border-rose-500/40'
-                      }`}
-                    >
-                      {item.outcome === 'win'
-                        ? '🏆 MENANG'
-                        : item.outcome === 'draw'
-                        ? '🤝 SERI'
-                        : '💥 KALAH'}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded-md font-mono font-bold text-[10px] ${
-                        item.level === 'hard'
-                          ? 'bg-rose-500/20 text-rose-300 border border-rose-400/40'
-                          : 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
-                      }`}
-                    >
-                      {item.level === 'hard' ? 'Level Susah' : 'Level Normal'}
-                    </span>
-                    <span className="font-mono text-slate-200 font-bold">
-                      Target: <strong className="text-amber-300">{targetDisp}</strong>
-                    </span>
-                    <span className="font-mono text-cyan-300">
-                      Anda: <strong>{pParts.fullStr}</strong> (±{pDiffParts.fullStr})
-                    </span>
-                    <span className="font-mono text-rose-300">
-                      Bot: <strong>{bParts.fullStr}</strong> (±{bDiffParts.fullStr})
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0 font-mono">
-                    {item.outcome === 'win' ? (
-                      <span className="text-emerald-400 font-black flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>
-                          +{item.rewardVoucher} Voucher &amp; +{formatRupiah(item.rewardCash)}
-                        </span>
-                      </span>
-                    ) : item.outcome === 'draw' ? (
-                      <span className="text-amber-300 font-bold">Refund 100%</span>
-                    ) : (
-                      <span className="text-rose-400 font-bold">
-                        -{formatRupiah(item.entryCost)}
-                      </span>
-                    )}
-                    <span className="text-[10px] text-slate-500">{item.timestamp}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {/* MEMOIZED RIWAYAT PERTANDINGAN ADU STOPWATCH */}
+      <StopwatchHistorySection history={history} onClearHistory={clearHistory} />
     </div>
   );
-};
+});
+
+StopwatchDuelArena.displayName = 'StopwatchDuelArena';

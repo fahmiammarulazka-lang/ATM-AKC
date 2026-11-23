@@ -3081,6 +3081,62 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v12-33-99',
+    version: 'v12.33.99',
+    releaseType: 'patch',
+    visibilityMode: 'auto',
+    title:
+      'Optimasi Zero-Lag 60–120 FPS & Sentuhan Berhenti Instan pada Minigame Adu Stopwatch (HP & Laptop)',
+    fullDate: 'Senin, 23 November 2026 • Pukul 06:05 WIB',
+    dateText: 'Senin, 23 November 2026 • Pukul 06:05 WIB',
+    description:
+      'Pembaruan patch v12.33.99 (kenaikan segmen Patch +DD pada standar vAAA.SS.DD) merombak mesin kronograf minigame Adu Stopwatch menjadi Zero-Re-Render Direct DOM Engine sehingga tidak lagi memicu render ulang React 60–120 kali per detik saat stopwatch berjalan. Angka X,XX kini melaju sangat mulus di HP maupun Laptop, dan tombol Berhenti langsung membekukan waktu tepat pada milidetik sentuhan jari pertama (onPointerDown).',
+    highlights: [
+      'Mesin Kronograf Tanpa Render Ulang (0 Re-Render Saat Berjalan): Pembaruan angka Detik, Milidetik Puluhan, dan Milidetik Satuan (X,XX) kini ditulis langsung ke simpul teks DOM sehingga bebas patah-patah di HP maupun Laptop 60–120Hz.',
+      'Tombol Berhenti Instan Kontak Pertama (onPointerDown + touch-manipulation): Waktu langsung dibekukan pada milidetik jari/klik pertama menyentuh tombol Berhenti sebelum penyelesaian saldo dan Cloud berjalan.',
+      'Isolasi Cat (CSS Paint Containment) & Memoisasi Riwayat: Kotak layar angka diisolasi agar tidak memicu gambar ulang seluruh halaman dan daftar riwayat pertandingan tetap tampil utuh tanpa membebani performa.',
+    ],
+    changes: [
+      'Mesin Kronograf Tanpa Render Ulang (0 Re-Render Saat Berjalan): Pembaruan angka Detik, Milidetik Puluhan, dan Milidetik Satuan (X,XX) kini ditulis langsung ke simpul teks DOM sehingga bebas patah-patah di HP maupun Laptop 60–120Hz.',
+      'Tombol Berhenti Instan Kontak Pertama (onPointerDown + touch-manipulation): Waktu langsung dibekukan pada milidetik jari/klik pertama menyentuh tombol Berhenti sebelum penyelesaian saldo dan Cloud berjalan.',
+      'Isolasi Cat (CSS Paint Containment) & Memoisasi Riwayat: Kotak layar angka diisolasi agar tidak memicu gambar ulang seluruh halaman dan daftar riwayat pertandingan tetap tampil utuh tanpa membebani performa.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-22T23:05:00.000Z',
+    isAutoDetected: true,
+  },
+  {
+    id: 'upd-v12-33-98',
+    version: 'v12.33.98',
+    releaseType: 'patch',
+    visibilityMode: 'auto',
+    title:
+      'Perbaikan Bug Win Streak Arena Suit (Batu • Gunting • Kertas) & Animasi Kotak Angka 1–5 Hijau / Merah Memudar',
+    fullDate: 'Senin, 23 November 2026 • Pukul 05:55 WIB',
+    dateText: 'Senin, 23 November 2026 • Pukul 05:55 WIB',
+    description:
+      'Pembaruan patch v12.33.98 (kenaikan segmen Patch +DD pada standar vAAA.SS.DD) memperbaiki bug perhitungan Kemenangan Beruntun (Win Streak) pada Arena Suit di Lowongan Pekerjaan yang sebelumnya dapat tertahan di angka 1 akibat race condition sinkronisasi Dual-Vault, sekaligus memperbarui kotak progres 1–5 agar tetap menampilkan angka berwarna hijau saat menang, berkilau penuh saat 5/5, serta berubah merah lalu memudar halus (±1,2 detik) kembali seperti semula ketika kalah.',
+    highlights: [
+      'Perbaikan Akurasi Win Streak Arena Suit (1 -> 2 -> 3 -> 4 -> 5): Sinkronisasi akun dan transaksi kini membaca serta memperbarui referensi terbaru secara langsung sehingga kemenangan beruntun tidak lagi tertahan di angka 1.',
+      'Kotak Progres Angka 1–5 Berwarna Hijau: Setiap kali menang Suit, kotak angka 1, 2, 3, 4, hingga 5 menyala hijau dengan angka tetap tampil jelas (bukan terganti ikon centang).',
+      'Animasi Merah Memudar (±1,2 Detik) Saat Kalah: Jika kalah setelah memiliki streak aktif (misalnya 2 kemenangan beruntun), kotak angka yang tadinya hijau berubah menjadi merah lalu memudar halus sebelum kembali ke tampilan semula.',
+      'Selebrasi Kilau 5/5 & Tombol Tetap Responsif: Saat mencapai 5 kemenangan beruntun, seluruh 5 kotak hijau berkilau sejenak sebelum kembali ke 0/5, dan tombol Batu/Gunting/Kertas tetap dapat langsung diklik tanpa menunggu animasi selesai.',
+    ],
+    changes: [
+      'Perbaikan Akurasi Win Streak Arena Suit (1 -> 2 -> 3 -> 4 -> 5): Sinkronisasi akun dan transaksi kini membaca serta memperbarui referensi terbaru secara langsung sehingga kemenangan beruntun tidak lagi tertahan di angka 1.',
+      'Kotak Progres Angka 1–5 Berwarna Hijau: Setiap kali menang Suit, kotak angka 1, 2, 3, 4, hingga 5 menyala hijau dengan angka tetap tampil jelas (bukan terganti ikon centang).',
+      'Animasi Merah Memudar (±1,2 Detik) Saat Kalah: Jika kalah setelah memiliki streak aktif (misalnya 2 kemenangan beruntun), kotak angka yang tadinya hijau berubah menjadi merah lalu memudar halus sebelum kembali ke tampilan semula.',
+      'Selebrasi Kilau 5/5 & Tombol Tetap Responsif: Saat mencapai 5 kemenangan beruntun, seluruh 5 kotak hijau berkilau sejenak sebelum kembali ke 0/5, dan tombol Batu/Gunting/Kertas tetap dapat langsung diklik tanpa menunggu animasi selesai.',
+    ],
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-22T22:55:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v12-33-97',
     version: 'v12.33.97',
     releaseType: 'minor',
@@ -3105,8 +3161,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Layar Kronograf Digital X,XX & Jaminan Seri Refund 100%: Menampilkan Detik, Milidetik Puluhan, dan Milidetik Satuan secara real-time dengan respons tombol berhenti instan serta pengembalian saldo utuh jika selisih waktu seri.',
       'Pemfokusan Minigame Lowongan Pekerjaan: Menghapus 12 minigame arcade lama dan menyisakan Arena Suit (Batu • Gunting • Kertas) bersama Arena Adu Stopwatch agar lebih fokus, ringan, dan menguntungkan.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-22T07:45:00.000Z',
     isAutoDetected: true,

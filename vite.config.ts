@@ -32,7 +32,7 @@ function buildWibMetadata() {
     buildId,
     buildIso: now.toISOString(),
     fullDateWib,
-    catalogVersion: 'v12.33.97',
+    catalogVersion: 'v12.33.99',
   };
 }
 
