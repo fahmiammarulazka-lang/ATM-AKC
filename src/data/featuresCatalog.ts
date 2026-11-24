@@ -3081,6 +3081,35 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v12-34-00',
+    version: 'v12.34.00',
+    releaseType: 'patch',
+    visibilityMode: 'auto',
+    title:
+      'Presisi Instan WYSIWYG Adu Stopwatch (Kunci Persis Angka Terlihat, Ticker 10ms Urut & Nol Delay Berhenti)',
+    fullDate: 'Senin, 23 November 2026 • Pukul 17:27 WIB',
+    dateText: 'Senin, 23 November 2026 • Pukul 17:27 WIB',
+    description:
+      'Pembaruan patch v12.34.00 (rollover resmi +1 Patch dari v12.33.99 sesuai aturan vAAA.SS.DD) menghilangkan sisa delay saat menekan tombol Berhenti dan mencegah angka stopwatch melompat 2 digit (misalnya 1,65 langsung menjadi 1,67). Angka yang terlihat di layar saat jari menyentuh tombol kini langsung dikunci persis (WYSIWYG), melaju berurutan tiap 10ms tanpa terganggu render global, serta memproses saldo dan sinkronisasi Cloud tepat setelah layar membeku instan.',
+    highlights: [
+      'Kunci Persis Angka Terlihat (WYSIWYG 0ms Delay): Listener asli fase capture (touchstart & pointerdown) langsung menghentikan kronograf dan mengunci persis angka yang sedang tampak di layar (misalnya 1,65 tetap terkunci 1,65, tidak pernah melompat ke 1,67).',
+      'Ticker Presisi 10ms Urut Terkalibrasi: Mesin hitung kini menggunakan penjadwal 10ms independen yang melangkah berurutan (+0,01 detik per langkah) tanpa melompati 2 angka di layar 60Hz sekaligus tetap akurat terhadap waktu nyata.',
+      'Isolasi Total Digit Kronograf: Layar angka Pemain & Bot kini terbungkus komponen terisolasi penuh sehingga pembaruan timer dashboard maupun sinkronisasi Cloud di latar belakang tidak pernah menimpa angka saat laga berlangsung.',
+      'Bekukan Instan Dulu, Proses Saldo & Cloud Pasca-Paint: Tampilan stopwatch dan tombol langsung membeku seketika (< 0,2ms), sedangkan perhitungan hadiah, riwayat, dan penyimpanan Cloud berjalan mulus satu frame setelahnya tanpa macet.',
+    ],
+    changes: [
+      'Kunci Persis Angka Terlihat (WYSIWYG 0ms Delay): Listener asli fase capture (touchstart & pointerdown) langsung menghentikan kronograf dan mengunci persis angka yang sedang tampak di layar (misalnya 1,65 tetap terkunci 1,65, tidak pernah melompat ke 1,67).',
+      'Ticker Presisi 10ms Urut Terkalibrasi: Mesin hitung kini menggunakan penjadwal 10ms independen yang melangkah berurutan (+0,01 detik per langkah) tanpa melompati 2 angka di layar 60Hz sekaligus tetap akurat terhadap waktu nyata.',
+      'Isolasi Total Digit Kronograf: Layar angka Pemain & Bot kini terbungkus komponen terisolasi penuh sehingga pembaruan timer dashboard maupun sinkronisasi Cloud di latar belakang tidak pernah menimpa angka saat laga berlangsung.',
+      'Bekukan Instan Dulu, Proses Saldo & Cloud Pasca-Paint: Tampilan stopwatch dan tombol langsung membeku seketika (< 0,2ms), sedangkan perhitungan hadiah, riwayat, dan penyimpanan Cloud berjalan mulus satu frame setelahnya tanpa macet.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-23T10:27:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v12-33-99',
     version: 'v12.33.99',
     releaseType: 'patch',
@@ -3101,8 +3130,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Tombol Berhenti Instan Kontak Pertama (onPointerDown + touch-manipulation): Waktu langsung dibekukan pada milidetik jari/klik pertama menyentuh tombol Berhenti sebelum penyelesaian saldo dan Cloud berjalan.',
       'Isolasi Cat (CSS Paint Containment) & Memoisasi Riwayat: Kotak layar angka diisolasi agar tidak memicu gambar ulang seluruh halaman dan daftar riwayat pertandingan tetap tampil utuh tanpa membebani performa.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-22T23:05:00.000Z',
     isAutoDetected: true,

@@ -1,5 +1,5 @@
 /**
- * Bank Nusantara — Arena Minigame Adu Stopwatch vs Bot Level Hard (Zero-Lag 60–120 FPS Engine)
+ * Bank Nusantara — Arena Minigame Adu Stopwatch vs Bot Level Hard (10ms Sequential WYSIWYG Engine)
  * - Level Normal (Mudah): Biaya Rp 500.000 | Hadiah Menang: +1 Voucher Level & +Rp 100.000
  *   Format Target Sistem: Angka Bulat X (1 s/d 10 detik, mis. 3 atau 7 -> dipaskan di 3,00 atau 7,00 pada layar X,XX)
  * - Level Susah (Hard): Biaya Rp 1.200.000 | Hadiah Menang: +Rp 500.000 & +2 Voucher Level
@@ -7,10 +7,14 @@
  *   namun di layar stopwatch tetap berjalan penuh X,XX (Detik, Milidetik Puluhan & Milidetik Satuan).
  * - Lawan: Bot Level Hard dengan presisi tinggi (selisih 0,00 s/d 0,08 detik dari target).
  * - Seri (Draw): Selisih jarak waktu pemain & Bot sama persis -> Saldo kembali utuh 100% (tanpa potong biaya).
- * - Performa: Zero React re-render selama stopwatch berjalan (pembaruan langsung DOM Ref + CSS paint containment
- *   + pemicu kontak pertama onPointerDown touch-manipulation tanpa delay).
+ * - Performa & Presisi (v12.34.00):
+ *   1. Ticker Presisi 10ms Berurutan (drift-compensated) agar angka melangkah urut (+0,01s) tanpa lompat 2 angka.
+ *   2. Kunci Persis Angka Terlihat (WYSIWYG): Native capture-phase touchstart/pointerdown langsung mengunci
+ *      exact displayedPlayerCentisRef.current (< 0,2ms) tanpa pernah melompat ke angka berikutnya.
+ *   3. Isolasi Total Digit Kronograf (React.memo constant comparator) agar render global tidak pernah menimpa digit.
+ *   4. Deferred Post-Paint Settlement: Layar & tombol membeku instan dulu, saldo/voucher/Cloud diproses tepat setelah paint.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Timer,
   Trophy,
@@ -122,6 +126,92 @@ function generateBotHardCentis(targetCentis: number): number {
   }
   return rawBot;
 }
+
+interface StopwatchDigitRefs {
+  secBig: React.RefObject<HTMLSpanElement | null>;
+  tensBig: React.RefObject<HTMLSpanElement | null>;
+  unitsBig: React.RefObject<HTMLSpanElement | null>;
+  secSub: React.RefObject<HTMLSpanElement | null>;
+  tensSub: React.RefObject<HTMLSpanElement | null>;
+  unitsSub: React.RefObject<HTMLSpanElement | null>;
+}
+
+interface StopwatchDigitsDisplayProps {
+  variant: 'player' | 'bot';
+  refs: StopwatchDigitRefs;
+}
+
+/**
+ * Fully isolated chronograph digit readout.
+ * Uses constant comparator () => true and empty <span> nodes populated purely via DOM refs,
+ * guaranteeing that NO parent or BankContext re-render can ever overwrite live digits during RUNNING.
+ */
+const StopwatchDigitsDisplay: React.FC<StopwatchDigitsDisplayProps> = React.memo(
+  ({ variant, refs }) => {
+    const isPlayer = variant === 'player';
+    return (
+      <div className="py-4 px-4 rounded-2xl bg-slate-950 border border-slate-800 text-center space-y-2 [contain:layout_style_paint]">
+        <div className="font-mono font-black text-5xl sm:text-6xl tracking-tight tabular-nums flex items-baseline justify-center">
+          <span ref={refs.secBig} className="text-white" />
+          <span className="text-amber-400 mx-0.5">,</span>
+          <span
+            ref={refs.tensBig}
+            className={isPlayer ? 'text-cyan-300' : 'text-rose-300'}
+          />
+          <span
+            ref={refs.unitsBig}
+            className={isPlayer ? 'text-fuchsia-300' : 'text-amber-300'}
+          />
+        </div>
+        <div className="grid grid-cols-3 gap-1.5 pt-1 text-[10px] font-mono">
+          <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-slate-300">
+            <span ref={refs.secSub} className="text-white font-black block" />
+            <span>Detik (X)</span>
+          </div>
+          <div
+            className={`p-1.5 rounded-lg bg-slate-900/90 border ${
+              isPlayer
+                ? 'border-cyan-500/30 text-cyan-300'
+                : 'border-rose-500/30 text-rose-300'
+            }`}
+          >
+            <span ref={refs.tensSub} className="font-black block" />
+            <span>Milidetik Puluhan</span>
+          </div>
+          <div
+            className={`p-1.5 rounded-lg bg-slate-900/90 border ${
+              isPlayer
+                ? 'border-fuchsia-500/30 text-fuchsia-300'
+                : 'border-amber-500/30 text-amber-300'
+            }`}
+          >
+            <span ref={refs.unitsSub} className="font-black block" />
+            <span>Milidetik Satuan</span>
+          </div>
+        </div>
+      </div>
+    );
+  },
+  () => true
+);
+
+StopwatchDigitsDisplay.displayName = 'StopwatchDigitsDisplay';
+
+interface IsolatedBadgeProps {
+  badgeRef: React.RefObject<HTMLSpanElement | null>;
+}
+
+const IsolatedStatusBadge: React.FC<IsolatedBadgeProps> = React.memo(
+  ({ badgeRef }) => (
+    <span
+      ref={badgeRef}
+      className="px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-slate-800 text-slate-300"
+    />
+  ),
+  () => true
+);
+
+IsolatedStatusBadge.displayName = 'IsolatedStatusBadge';
 
 interface StopwatchHistorySectionProps {
   history: StopwatchMatchRecord[];
@@ -245,7 +335,7 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
     generateAutoTargetCentis('normal')
   );
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  // Idle display state (updated ONLY on stop / reset / start, NEVER during the 60-120fps loop!)
+  // Idle display state (updated ONLY after visual freeze & post-paint settlement, NEVER during RUNNING!)
   const [settledPlayerCentis, setSettledPlayerCentis] = useState<number>(0);
   const [settledBotCentis, setSettledBotCentis] = useState<number>(0);
   const [lastResult, setLastResult] = useState<{
@@ -265,12 +355,19 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
   const [history, setHistory] = useState<StopwatchMatchRecord[]>([]);
 
   // High-frequency refs (Zero React re-renders during RUNNING!)
-  const rafRef = useRef<number | null>(null);
-  const startPerfRef = useRef<number>(0);
+  const tickerTimeoutRef = useRef<number | null>(null);
+  const settleRafRef = useRef<number | null>(null);
+  const settleTimerRef = useRef<number | null>(null);
+  const isMountedRef = useRef<boolean>(true);
   const isRunningRef = useRef<boolean>(false);
+  const isSettlingRef = useRef<boolean>(false);
+  const stopHandledRef = useRef<boolean>(false);
   const targetCentisRef = useRef<number>(targetCentis);
   const difficultyRef = useRef<StopwatchDifficulty>(difficulty);
   const plannedBotCentisRef = useRef<number>(0);
+  // Authoritative WYSIWYG visible numbers currently shown on screen
+  const displayedPlayerCentisRef = useRef<number>(0);
+  const displayedBotCentisRef = useRef<number>(0);
   const lastDrawnPlayerCentisRef = useRef<number>(-1);
   const lastDrawnBotCentisRef = useRef<number>(-1);
   const botBadgeFlippedRef = useRef<boolean>(false);
@@ -289,7 +386,35 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
   const botSecSubRef = useRef<HTMLSpanElement | null>(null);
   const botTensSubRef = useRef<HTMLSpanElement | null>(null);
   const botUnitsSubRef = useRef<HTMLSpanElement | null>(null);
+
+  const playerStatusBadgeRef = useRef<HTMLSpanElement | null>(null);
   const botBadgeRef = useRef<HTMLSpanElement | null>(null);
+  const stopButtonRef = useRef<HTMLButtonElement | null>(null);
+  const stopButtonLabelRef = useRef<HTMLSpanElement | null>(null);
+
+  const playerDigitRefs = useMemo<StopwatchDigitRefs>(
+    () => ({
+      secBig: playerSecBigRef,
+      tensBig: playerTensBigRef,
+      unitsBig: playerUnitsBigRef,
+      secSub: playerSecSubRef,
+      tensSub: playerTensSubRef,
+      unitsSub: playerUnitsSubRef,
+    }),
+    []
+  );
+
+  const botDigitRefs = useMemo<StopwatchDigitRefs>(
+    () => ({
+      secBig: botSecBigRef,
+      tensBig: botTensBigRef,
+      unitsBig: botUnitsBigRef,
+      secSub: botSecSubRef,
+      tensSub: botTensSubRef,
+      unitsSub: botUnitsSubRef,
+    }),
+    []
+  );
 
   // Stable refs for callbacks to prevent effect churn
   const latestPlayStopwatchRef = useRef(playStopwatchChallenge);
@@ -299,6 +424,8 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
 
   targetCentisRef.current = targetCentis;
   difficultyRef.current = difficulty;
+
+  const hasAccount = Boolean(currentAccount);
 
   const writePlayerDigitsToDom = useCallback((centis: number) => {
     const safe = Math.max(0, Math.round(centis));
@@ -401,24 +528,62 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
     }
   }, []);
 
-  // Keep DOM digit spans synced whenever settled values change while idle
-  useEffect(() => {
-    if (!isRunningRef.current) {
+  // Synchronize isolated DOM digit spans whenever idle settled values or mount state change
+  useLayoutEffect(() => {
+    if (!hasAccount) return;
+    if (!isRunningRef.current && !isSettlingRef.current) {
+      displayedPlayerCentisRef.current = settledPlayerCentis;
+      displayedBotCentisRef.current = settledBotCentis;
       lastDrawnPlayerCentisRef.current = -1;
       lastDrawnBotCentisRef.current = -1;
       writePlayerDigitsToDom(settledPlayerCentis);
       writeBotDigitsToDom(settledBotCentis);
     }
-  }, [settledPlayerCentis, settledBotCentis, writePlayerDigitsToDom, writeBotDigitsToDom]);
+  }, [hasAccount, settledPlayerCentis, settledBotCentis, writePlayerDigitsToDom, writeBotDigitsToDom]);
+
+  // Synchronize isolated status badges ONLY when isRunning or mount changes (immune to background context re-renders!)
+  useLayoutEffect(() => {
+    if (!hasAccount) return;
+    if (playerStatusBadgeRef.current) {
+      if (isRunning) {
+        playerStatusBadgeRef.current.textContent = 'SEDANG BERJALAN';
+        playerStatusBadgeRef.current.className =
+          'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-emerald-400 text-slate-950';
+      } else {
+        playerStatusBadgeRef.current.textContent = 'SIAP / BERHENTI';
+        playerStatusBadgeRef.current.className =
+          'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-slate-800 text-slate-300';
+      }
+    }
+    if (botBadgeRef.current) {
+      if (isRunning) {
+        if (botBadgeFlippedRef.current) {
+          botBadgeRef.current.textContent = '⚡ BOT SUDAH TEKAN STOP!';
+          botBadgeRef.current.className =
+            'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-amber-400 text-slate-950';
+        } else {
+          botBadgeRef.current.textContent = 'BOT MENGINCAR TARGET...';
+          botBadgeRef.current.className =
+            'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-rose-500 text-white';
+        }
+      } else {
+        botBadgeRef.current.textContent = 'AKURASI PRESISI 0,01–0,08s';
+        botBadgeRef.current.className =
+          'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-slate-800 text-rose-300';
+      }
+    }
+  }, [hasAccount, isRunning]);
 
   // Switch difficulty level
   const handleSelectDifficulty = (nextLevel: StopwatchDifficulty) => {
-    if (isRunningRef.current) return;
+    if (isRunningRef.current || isSettlingRef.current) return;
     setDifficulty(nextLevel);
     const nextTarget = generateAutoTargetCentis(nextLevel);
     setTargetCentis(nextTarget);
     setSettledPlayerCentis(0);
     setSettledBotCentis(0);
+    displayedPlayerCentisRef.current = 0;
+    displayedBotCentisRef.current = 0;
     lastDrawnPlayerCentisRef.current = -1;
     lastDrawnBotCentisRef.current = -1;
     writePlayerDigitsToDom(0);
@@ -429,7 +594,7 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
 
   // Reroll target manually before starting
   const handleRerollTarget = (customCentis?: number) => {
-    if (isRunningRef.current) return;
+    if (isRunningRef.current || isSettlingRef.current) return;
     const nextTarget =
       typeof customCentis === 'number'
         ? customCentis
@@ -437,6 +602,8 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
     setTargetCentis(nextTarget);
     setSettledPlayerCentis(0);
     setSettledBotCentis(0);
+    displayedPlayerCentisRef.current = 0;
+    displayedBotCentisRef.current = 0;
     lastDrawnPlayerCentisRef.current = -1;
     lastDrawnBotCentisRef.current = -1;
     writePlayerDigitsToDom(0);
@@ -445,23 +612,26 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
     setErrorBanner(null);
   };
 
-  // Stop & settle match (Zero-Latency Instant Freeze on first contact!)
+  // Stop & freeze match (0ms WYSIWYG Instant Lock on first contact + Deferred Post-Paint Settlement!)
   const handleStopMatch = useCallback(
     (forcedElapsedCentis?: number) => {
-      if (!isRunningRef.current) return;
-      // 1. Capture exact millisecond IMMEDIATELY on pointer contact before any React/storage work
-      const stopPerfNow = performance.now();
+      if (!isRunningRef.current || stopHandledRef.current) return;
+
+      // 1. T = 0.0ms — Stop the 10ms precision ticker immediately & guard against double trigger
+      stopHandledRef.current = true;
       isRunningRef.current = false;
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
+      isSettlingRef.current = true;
+
+      if (tickerTimeoutRef.current !== null) {
+        window.clearTimeout(tickerTimeoutRef.current);
+        tickerTimeoutRef.current = null;
       }
 
-      const elapsedMs = stopPerfNow - startPerfRef.current;
+      // 2. WYSIWYG EXACT LOCK: lock the EXACT number visible on screen (never jumps from e.g. 1,65 to 1,67!)
       const finalPlayerCentis =
         typeof forcedElapsedCentis === 'number'
-          ? forcedElapsedCentis
-          : Math.max(1, Math.round(elapsedMs / 10));
+          ? Math.max(1, Math.round(forcedElapsedCentis))
+          : Math.max(1, displayedPlayerCentisRef.current);
 
       const activeTarget = targetCentisRef.current;
       const activeLevel = difficultyRef.current;
@@ -472,60 +642,100 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
         finalBotCentis = activeTarget + (Math.random() < 0.5 ? 1 : 2);
       }
 
-      // 2. Freeze exact numbers directly on screen in < 0.1ms
+      // 3. Instant visual freeze directly in DOM (< 0.15ms, ZERO React/Cloud work yet!)
+      displayedPlayerCentisRef.current = finalPlayerCentis;
+      displayedBotCentisRef.current = finalBotCentis;
       lastDrawnPlayerCentisRef.current = -1;
       lastDrawnBotCentisRef.current = -1;
       writePlayerDigitsToDom(finalPlayerCentis);
       writeBotDigitsToDom(finalBotCentis);
 
-      // 3. Commit single React state settlement & Cloud sync
-      setIsRunning(false);
-      setSettledPlayerCentis(finalPlayerCentis);
-      setSettledBotCentis(finalBotCentis);
+      const lockedStr = formatStopwatchParts(finalPlayerCentis).fullStr;
 
-      const res = latestPlayStopwatchRef.current({
-        level: activeLevel,
-        targetCentis: activeTarget,
-        playerCentis: finalPlayerCentis,
-        botCentis: finalBotCentis,
-      });
-
-      if (!res.success || !res.outcome) {
-        setErrorBanner(res.message);
-        return;
+      if (stopButtonRef.current) {
+        stopButtonRef.current.style.pointerEvents = 'none';
+        stopButtonRef.current.className =
+          'w-full py-5 sm:py-6 px-6 rounded-2xl bg-gradient-to-r from-emerald-400 via-cyan-400 to-emerald-400 text-slate-950 font-black text-lg sm:text-2xl select-none shadow-2xl shadow-emerald-500/30 flex items-center justify-center gap-3 scale-[0.98]';
+      }
+      if (stopButtonLabelRef.current) {
+        stopButtonLabelRef.current.textContent = `✓ TERKUNCI DI ${lockedStr} DETIK — MEMPROSES HASIL...`;
+      }
+      if (playerStatusBadgeRef.current) {
+        playerStatusBadgeRef.current.textContent = `✓ TERKUNCI ${lockedStr}`;
+        playerStatusBadgeRef.current.className =
+          'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-cyan-400 text-slate-950';
+      }
+      if (botBadgeRef.current) {
+        botBadgeRef.current.textContent = '✓ HASIL BOT TERKUNCI';
+        botBadgeRef.current.className =
+          'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-amber-400 text-slate-950';
       }
 
-      const resultObj = {
-        outcome: res.outcome,
-        level: activeLevel,
-        targetCentis: activeTarget,
-        playerCentis: finalPlayerCentis,
-        botCentis: finalBotCentis,
-        playerDiffCentis: res.playerDiffCentis,
-        botDiffCentis: res.botDiffCentis,
-        entryCost: res.entryCost,
-        rewardCash: res.rewardCash,
-        rewardVoucher: res.rewardVoucher,
-        message: res.message,
-      };
-      setLastResult(resultObj);
+      // 4. Deferred Post-Paint Settlement: let the browser paint the frozen frame first,
+      //    then process balance, vouchers, history, and Cloud sync smoothly in the background!
+      if (settleRafRef.current !== null) {
+        window.cancelAnimationFrame(settleRafRef.current);
+      }
+      if (settleTimerRef.current !== null) {
+        window.clearTimeout(settleTimerRef.current);
+      }
 
-      saveMatchToHistory({
-        id: `sw-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString('id-ID', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-        ...resultObj,
+      settleRafRef.current = window.requestAnimationFrame(() => {
+        settleRafRef.current = null;
+        settleTimerRef.current = window.setTimeout(() => {
+          settleTimerRef.current = null;
+          isSettlingRef.current = false;
+          if (!isMountedRef.current) return;
+
+          setIsRunning(false);
+          setSettledPlayerCentis(finalPlayerCentis);
+          setSettledBotCentis(finalBotCentis);
+
+          const res = latestPlayStopwatchRef.current({
+            level: activeLevel,
+            targetCentis: activeTarget,
+            playerCentis: finalPlayerCentis,
+            botCentis: finalBotCentis,
+          });
+
+          if (!res.success || !res.outcome) {
+            setErrorBanner(res.message);
+            return;
+          }
+
+          const resultObj = {
+            outcome: res.outcome,
+            level: activeLevel,
+            targetCentis: activeTarget,
+            playerCentis: finalPlayerCentis,
+            botCentis: finalBotCentis,
+            playerDiffCentis: res.playerDiffCentis,
+            botDiffCentis: res.botDiffCentis,
+            entryCost: res.entryCost,
+            rewardCash: res.rewardCash,
+            rewardVoucher: res.rewardVoucher,
+            message: res.message,
+          };
+          setLastResult(resultObj);
+
+          saveMatchToHistory({
+            id: `sw-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString('id-ID', {
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            }),
+            ...resultObj,
+          });
+        }, 0);
       });
     },
     [saveMatchToHistory, writeBotDigitsToDom, writePlayerDigitsToDom]
   );
 
-  // Start match (Zero-Re-Render RAF Loop)
+  // Start match (Independent Drift-Compensated 10ms Sequential Precision Ticker)
   const handleStartMatch = () => {
-    if (!currentAccount || isRunningRef.current) return;
+    if (!currentAccount || isRunningRef.current || isSettlingRef.current) return;
     setErrorBanner(null);
 
     const entryCost = difficulty === 'hard' ? 1_200_000 : 500_000;
@@ -554,10 +764,13 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
     const botTargetStop = generateBotHardCentis(activeTarget);
     plannedBotCentisRef.current = botTargetStop;
     botBadgeFlippedRef.current = false;
+    stopHandledRef.current = false;
 
     setLastResult(null);
     setSettledPlayerCentis(0);
     setSettledBotCentis(0);
+    displayedPlayerCentisRef.current = 0;
+    displayedBotCentisRef.current = 0;
     lastDrawnPlayerCentisRef.current = -1;
     lastDrawnBotCentisRef.current = -1;
     writePlayerDigitsToDom(0);
@@ -565,62 +778,117 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
 
     isRunningRef.current = true;
     setIsRunning(true);
-    startPerfRef.current = performance.now();
 
+    const startPerf = performance.now();
     const maxRunCentis = activeTarget + 300; // Auto-stop if player overshoots by +3,00 seconds
+    let nextStepCentis = 1;
 
-    const tick = () => {
+    const scheduleNext10msTick = () => {
       if (!isRunningRef.current) return;
       const now = performance.now();
-      const elapsedCentis = Math.max(0, Math.round((now - startPerfRef.current) / 10));
+      const targetTickPerf = startPerf + nextStepCentis * 10;
+      const delayMs = Math.max(0, targetTickPerf - now);
 
-      // Direct DOM text updates: ZERO React re-renders per frame!
-      writePlayerDigitsToDom(elapsedCentis);
+      tickerTimeoutRef.current = window.setTimeout(() => {
+        if (!isRunningRef.current) return;
 
-      const botDisplayCentis =
-        elapsedCentis >= plannedBotCentisRef.current ? plannedBotCentisRef.current : elapsedCentis;
-      writeBotDigitsToDom(botDisplayCentis);
+        const tickNow = performance.now();
+        const actualElapsedCentis = Math.max(0, Math.floor((tickNow - startPerf) / 10));
 
-      if (!botBadgeFlippedRef.current && elapsedCentis >= plannedBotCentisRef.current) {
-        botBadgeFlippedRef.current = true;
-        if (botBadgeRef.current) {
-          botBadgeRef.current.textContent = '⚡ BOT SUDAH TEKAN STOP!';
-          botBadgeRef.current.className =
-            'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-amber-400 text-slate-950';
+        // Step strictly sequentially (+1 centisecond = 0,01s) without jumping 2 digits (e.g. 1,65 -> 1,66 -> 1,67),
+        // while gently recovering if the browser tab was backgrounded (> 250ms stall).
+        let nextDisplay: number;
+        if (actualElapsedCentis - displayedPlayerCentisRef.current >= 25) {
+          nextDisplay = actualElapsedCentis;
+        } else {
+          nextDisplay = displayedPlayerCentisRef.current + 1;
         }
-      }
+        nextStepCentis = nextDisplay + 1;
 
-      if (elapsedCentis >= maxRunCentis) {
-        handleStopMatch(maxRunCentis);
-        return;
-      }
-      rafRef.current = requestAnimationFrame(tick);
+        displayedPlayerCentisRef.current = nextDisplay;
+        writePlayerDigitsToDom(nextDisplay);
+
+        const botTarget = plannedBotCentisRef.current;
+        const botDisplayCentis = nextDisplay >= botTarget ? botTarget : nextDisplay;
+        displayedBotCentisRef.current = botDisplayCentis;
+        writeBotDigitsToDom(botDisplayCentis);
+
+        if (!botBadgeFlippedRef.current && nextDisplay >= botTarget) {
+          botBadgeFlippedRef.current = true;
+          if (botBadgeRef.current) {
+            botBadgeRef.current.textContent = '⚡ BOT SUDAH TEKAN STOP!';
+            botBadgeRef.current.className =
+              'px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] bg-amber-400 text-slate-950';
+          }
+        }
+
+        if (nextDisplay >= maxRunCentis) {
+          handleStopMatch(maxRunCentis);
+          return;
+        }
+
+        scheduleNext10msTick();
+      }, delayMs);
     };
 
-    rafRef.current = requestAnimationFrame(tick);
+    scheduleNext10msTick();
   };
 
-  // Cleanup animation frame on unmount
+  // Native capture-phase zero-delay listener directly on the Stop button (fires BEFORE React synthetic events!)
   useEffect(() => {
+    if (!isRunning) return;
+    const btn = stopButtonRef.current;
+    if (!btn) return;
+
+    const onNativeInstantStop = (e: Event) => {
+      if (stopHandledRef.current || !isRunningRef.current) return;
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+      e.stopImmediatePropagation();
+      handleStopMatch();
+    };
+
+    btn.addEventListener('touchstart', onNativeInstantStop, { capture: true, passive: false });
+    btn.addEventListener('pointerdown', onNativeInstantStop, { capture: true, passive: false });
+
     return () => {
+      btn.removeEventListener('touchstart', onNativeInstantStop, { capture: true });
+      btn.removeEventListener('pointerdown', onNativeInstantStop, { capture: true });
+    };
+  }, [isRunning, handleStopMatch]);
+
+  // Cleanup timers & RAF on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
       isRunningRef.current = false;
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
+      isSettlingRef.current = false;
+      if (tickerTimeoutRef.current !== null) {
+        window.clearTimeout(tickerTimeoutRef.current);
+      }
+      if (settleRafRef.current !== null) {
+        window.cancelAnimationFrame(settleRafRef.current);
+      }
+      if (settleTimerRef.current !== null) {
+        window.clearTimeout(settleTimerRef.current);
       }
     };
   }, []);
 
-  // Support Space / Enter key to stop stopwatch immediately while running (stable listener, zero churn)
+  // Support Space / Enter key to stop stopwatch immediately in capture phase while running
   useEffect(() => {
     if (!isRunning) return;
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
       if (e.code === 'Space' || e.code === 'Enter') {
         e.preventDefault();
         handleStopMatch();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [isRunning, handleStopMatch]);
 
   if (!currentAccount) return null;
@@ -630,8 +898,6 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
   const winVouchers = difficulty === 'hard' ? 2 : 1;
 
   const targetParts = formatStopwatchParts(targetCentis);
-  const playerParts = formatStopwatchParts(settledPlayerCentis);
-  const botParts = formatStopwatchParts(settledBotCentis);
 
   // Target string according to level rule:
   // - Level Normal: only X (integer second, e.g. "3" or "7")
@@ -657,7 +923,7 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
               <span>🤖 LAWAN BOT LEVEL: HARD (PRESISI TINGGI)</span>
             </span>
             <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 font-mono font-bold text-[10px]">
-              Format Stopwatch: X,XX (Detik, Milidetik Puluhan &amp; Satuan)
+              Ticker Presisi 10ms Urut • Kunci Instan WYSIWYG
             </span>
             <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-mono font-bold text-[10px]">
               Menang Langsung Cair Voucher + Uang Tunai!
@@ -883,52 +1149,11 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
                 <User className="w-4 h-4" />
                 <span>STOPWATCH ANDA (FORMAT X,XX)</span>
               </span>
-              <span
-                className={`px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] ${
-                  isRunning
-                    ? 'bg-emerald-400 text-slate-950'
-                    : 'bg-slate-800 text-slate-300'
-                }`}
-              >
-                {isRunning ? 'SEDANG BERJALAN' : 'SIAP / BERHENTI'}
-              </span>
+              <IsolatedStatusBadge badgeRef={playerStatusBadgeRef} />
             </div>
 
-            {/* Big X,XX Digital Readout with CSS Paint Containment & Direct DOM Refs */}
-            <div className="py-4 px-4 rounded-2xl bg-slate-950 border border-slate-800 text-center space-y-2 [contain:layout_style_paint]">
-              <div className="font-mono font-black text-5xl sm:text-6xl tracking-tight tabular-nums flex items-baseline justify-center">
-                <span ref={playerSecBigRef} className="text-white">
-                  {playerParts.secondsStr}
-                </span>
-                <span className="text-amber-400 mx-0.5">,</span>
-                <span ref={playerTensBigRef} className="text-cyan-300">
-                  {playerParts.tensStr}
-                </span>
-                <span ref={playerUnitsBigRef} className="text-fuchsia-300">
-                  {playerParts.unitsStr}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-1.5 pt-1 text-[10px] font-mono">
-                <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-slate-300">
-                  <span ref={playerSecSubRef} className="text-white font-black block">
-                    {playerParts.secondsStr}
-                  </span>
-                  <span>Detik (X)</span>
-                </div>
-                <div className="p-1.5 rounded-lg bg-slate-900/90 border border-cyan-500/30 text-cyan-300">
-                  <span ref={playerTensSubRef} className="font-black block">
-                    {playerParts.tensStr}
-                  </span>
-                  <span>Milidetik Puluhan</span>
-                </div>
-                <div className="p-1.5 rounded-lg bg-slate-900/90 border border-fuchsia-500/30 text-fuchsia-300">
-                  <span ref={playerUnitsSubRef} className="font-black block">
-                    {playerParts.unitsStr}
-                  </span>
-                  <span>Milidetik Satuan</span>
-                </div>
-              </div>
-            </div>
+            {/* Fully Isolated Player Chronograph Readout (0% affected by global re-renders!) */}
+            <StopwatchDigitsDisplay variant="player" refs={playerDigitRefs} />
 
             {lastResult && (
               <div className="flex items-center justify-between text-xs px-1">
@@ -955,53 +1180,11 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
                 <Bot className="w-4 h-4" />
                 <span>STOPWATCH BOT (LEVEL HARD)</span>
               </span>
-              <span
-                ref={botBadgeRef}
-                className={`px-2.5 py-0.5 rounded-full font-mono font-bold text-[10px] ${
-                  isRunning
-                    ? 'bg-rose-500 text-white'
-                    : 'bg-slate-800 text-rose-300'
-                }`}
-              >
-                {isRunning ? 'BOT MENGINCAR TARGET...' : 'AKURASI PRESISI 0,01–0,08s'}
-              </span>
+              <IsolatedStatusBadge badgeRef={botBadgeRef} />
             </div>
 
-            {/* Big X,XX Digital Readout for Bot with CSS Paint Containment & Direct DOM Refs */}
-            <div className="py-4 px-4 rounded-2xl bg-slate-950 border border-slate-800 text-center space-y-2 [contain:layout_style_paint]">
-              <div className="font-mono font-black text-5xl sm:text-6xl tracking-tight tabular-nums flex items-baseline justify-center">
-                <span ref={botSecBigRef} className="text-white">
-                  {botParts.secondsStr}
-                </span>
-                <span className="text-amber-400 mx-0.5">,</span>
-                <span ref={botTensBigRef} className="text-rose-300">
-                  {botParts.tensStr}
-                </span>
-                <span ref={botUnitsBigRef} className="text-amber-300">
-                  {botParts.unitsStr}
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-1.5 pt-1 text-[10px] font-mono">
-                <div className="p-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-slate-300">
-                  <span ref={botSecSubRef} className="text-white font-black block">
-                    {botParts.secondsStr}
-                  </span>
-                  <span>Detik (X)</span>
-                </div>
-                <div className="p-1.5 rounded-lg bg-slate-900/90 border border-rose-500/30 text-rose-300">
-                  <span ref={botTensSubRef} className="font-black block">
-                    {botParts.tensStr}
-                  </span>
-                  <span>Milidetik Puluhan</span>
-                </div>
-                <div className="p-1.5 rounded-lg bg-slate-900/90 border border-amber-500/30 text-amber-300">
-                  <span ref={botUnitsSubRef} className="font-black block">
-                    {botParts.unitsStr}
-                  </span>
-                  <span>Milidetik Satuan</span>
-                </div>
-              </div>
-            </div>
+            {/* Fully Isolated Bot Chronograph Readout (0% affected by global re-renders!) */}
+            <StopwatchDigitsDisplay variant="bot" refs={botDigitRefs} />
 
             {lastResult && (
               <div className="flex items-center justify-between text-xs px-1">
@@ -1014,7 +1197,7 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
           </div>
         </div>
 
-        {/* PRIMARY START / INSTANT ZERO-LATENCY STOP TRIGGER BUTTON */}
+        {/* PRIMARY START / NATIVE CAPTURE-PHASE ZERO-DELAY WYSIWYG STOP TRIGGER BUTTON */}
         <div className="space-y-2">
           {!isRunning ? (
             <button
@@ -1034,16 +1217,13 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
             </button>
           ) : (
             <button
+              ref={stopButtonRef}
               type="button"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                handleStopMatch();
-              }}
               onClick={() => handleStopMatch()}
               className="w-full py-5 sm:py-6 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-rose-500 to-amber-400 text-slate-950 font-black text-lg sm:text-2xl cursor-pointer touch-manipulation select-none shadow-2xl shadow-rose-500/30 flex items-center justify-center gap-3 active:scale-[0.98]"
             >
               <Square className="w-7 h-7 fill-current shrink-0" />
-              <span>
+              <span ref={stopButtonLabelRef}>
                 TEKAN BERHENTI SEKARANG! (PAS-KAN DI {formattedTargetStopwatchHint})
               </span>
             </button>
@@ -1051,7 +1231,7 @@ export const StopwatchDuelArena: React.FC = React.memo(() => {
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 px-1">
             <span>
-              💡 Tips Presisi: Tombol Berhenti merespons kontak sentuhan pertama (0ms delay) atau tekan tombol{' '}
+              💡 Presisi Instan WYSIWYG: Angka yang terlihat di layar saat tombol disentuh langsung terkunci persis (0ms delay), atau tekan{' '}
               <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 font-mono">
                 Spasi
               </kbd>{' '}

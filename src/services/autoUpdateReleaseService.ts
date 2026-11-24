@@ -20,7 +20,7 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v12.33.99';
+export const STRUCTURED_BASE_VERSION = 'v12.34.00';
 
 export interface StructuredVersion {
   p: number; // AAA: Major (pembaruan besar / perombakan sistem)
