@@ -60,6 +60,8 @@ import {
 import { useBank } from '../context/BankContext';
 import {
   formatRupiah,
+  formatAssetCount,
+  isAdminCardAccount,
   formatIndoDate,
   CARD_TIER_CONFIGS,
   isUnlimitedNumber,
@@ -1571,6 +1573,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                       +Bagikan Koin
                     </button>
                   </div>
+                  <p className="text-[10px] text-amber-200/80">
+                    Kartu bertier ADMIN otomatis mempertahankan Koin Spin &amp; Permata bernilai ∞.
+                  </p>
                 </div>
               </div>
             </div>
@@ -3880,7 +3885,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               >
                 {accounts.map((acc, idx) => (
                   <option key={acc.id} value={acc.id}>
-                    Kartu #{idx + 1}: {acc.fullName} — Rek: {acc.accountNumber} | Saldo: {formatRupiah(acc.balance)} | Tier: {acc.cardTier.toUpperCase()} | PIN: {acc.pin}
+                    Kartu #{idx + 1}: {acc.fullName} — Rek: {acc.accountNumber} | Saldo: {isAdminCardAccount(acc) || isUnlimitedNumber(acc.balance) ? '∞' : formatRupiah(acc.balance)} | Tier: {acc.cardTier.toUpperCase()} | PIN: {acc.pin}
                   </option>
                 ))}
               </select>
@@ -3896,12 +3901,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   SUPER TOOL #1 • INJEKSI SALDO & INFINITY (∞)
                 </span>
                 <h4 className="font-black text-white text-sm">Atur Saldo Rekening Target (+ / - / = / ∞)</h4>
+                {isAdminCardAccount(accounts.find((a) => a.id === superToolAccountId)) && (
+                  <p className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-1.5">
+                    Target bertier ADMIN: Saldo sudah ∞ (Infinity) dan tetap bisa disinkronkan ke Cloud.
+                  </p>
+                )}
                 <div className="grid grid-cols-4 gap-1">
                   {[
                     { id: 'add', label: '+ Tambah' },
                     { id: 'subtract', label: '- Kurang' },
                     { id: 'set', label: '= Set' },
-                    { id: 'unlimited', label: '∞ Tak Terbatas' },
+                    { id: 'unlimited', label: '∞ Infinity' },
                   ].map((m) => (
                     <button
                       key={m.id}
@@ -4227,12 +4237,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-mono font-bold text-[10px]">
                   SUPER TOOL #9 • GENERATOR POIN REWARDS
                 </span>
-                <h4 className="font-black text-white text-sm">Tambah / Set / ∞ Nusantara Poin</h4>
+                <h4 className="font-black text-white text-sm">
+                  Tambah / Set / ∞ Nusantara Poin ({formatAssetCount(accounts.find((a) => a.id === superToolAccountId)?.rewardPoints, { isAdmin: isAdminCardAccount(accounts.find((a) => a.id === superToolAccountId)) })})
+                </h4>
+                {isAdminCardAccount(accounts.find((a) => a.id === superToolAccountId)) && (
+                  <p className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-1.5">
+                    Poin Rewards kartu ADMIN sudah ∞ dan tetap bisa disinkronkan ke Cloud.
+                  </p>
+                )}
                 <div className="grid grid-cols-3 gap-1">
                   {[
                     { id: 'add', label: '+ Tambah' },
                     { id: 'set', label: '= Set Poin' },
-                    { id: 'unlimited', label: '∞ Unlimited' },
+                    { id: 'unlimited', label: '∞ Infinity' },
                   ].map((m) => (
                     <button
                       key={m.id}
@@ -4527,6 +4544,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   SUPER TOOL #16 • LIMIT BELANJA & AKSES INTERNASIONAL
                 </span>
                 <h4 className="font-black text-white text-sm">Override Limit Harian & Roaming Kartu</h4>
+                {isAdminCardAccount(accounts.find((a) => a.id === superToolAccountId)) && (
+                  <p className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-1.5">
+                    Limit Belanja Harian kartu ADMIN otomatis ∞ (Infinity).
+                  </p>
+                )}
                 <input
                   type="number"
                   value={customSpendLimit}

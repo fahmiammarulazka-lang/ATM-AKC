@@ -261,14 +261,16 @@ export const SultanEmpireView: React.FC = () => {
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
                 <p className="text-[10px] font-bold uppercase text-slate-400">Saldo Rekening</p>
                 <p className="text-sm sm:text-base font-black text-emerald-400 truncate">
-                  {isUnlimited ? '∞ Unlimited' : formatRupiah(currentAccount.balance)}
+                  {currentAccount.cardTier === 'admin' || isUnlimited ? '∞' : formatRupiah(currentAccount.balance)}
                 </p>
               </div>
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5">
                 <p className="text-[10px] font-bold uppercase text-slate-400">Koin Spin Wheel</p>
                 <p className="text-sm sm:text-base font-black text-amber-400 flex items-center gap-1">
                   <Coins className="w-4 h-4 text-amber-400" />
-                  {(currentAccount.spinCoins || 0).toLocaleString('id-ID')} Koin
+                  {currentAccount.cardTier === 'admin' || (currentAccount.spinCoins || 0) >= 900_000_000_000_000
+                    ? '∞'
+                    : `${(currentAccount.spinCoins || 0).toLocaleString('id-ID')} Koin`}
                 </p>
               </div>
             </div>

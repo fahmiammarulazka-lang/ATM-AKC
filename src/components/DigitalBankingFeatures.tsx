@@ -520,7 +520,7 @@ export const DigitalBankingFeatures: React.FC<DigitalBankingFeaturesProps> = () 
             <span className="text-[10px] text-blue-300 block">Pulsa HP Aktif</span>
             <span className="font-mono font-bold text-white text-xs sm:text-sm block mt-0.5">
               {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.pulsaBalance)
-                ? '∞ (Tidak Terbatas)'
+                ? '∞'
                 : formatRupiah(currentAccount.pulsaBalance || 0)}
             </span>
           </div>

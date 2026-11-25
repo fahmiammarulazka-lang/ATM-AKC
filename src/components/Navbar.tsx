@@ -39,7 +39,13 @@ import { useBank } from '../context/BankContext';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
 import { UserProfileStatsModal } from './UserProfileStatsModal';
 import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
-import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
+import {
+  formatRupiah,
+  formatCompactRupiah,
+  formatAssetCount,
+  isAdminCardAccount,
+  isUnlimitedNumber,
+} from '../utils/bankUtils';
 import { computeMonthlyBudgetReport, getCurrentMonthKey } from '../utils/budgetUtils';
 import { useSecretAdminSequence } from '../utils/useSecretAdminSequence';
 import { DevRoleConfig, NotificationCategory10Key } from '../types/bank';
@@ -49,8 +55,7 @@ import {
   normalizeNotificationCategory,
   getNotificationCategoryMeta,
 } from '../data/notificationCategories';
-import { LiveSyncTelemetryHud } from './SecurityCommandCenter';
-import { ShieldCheck } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 
 export type AppNavView =
   | 'dashboard'
@@ -111,6 +116,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     setIsDiamondStoreOpen,
     diamondConfig,
     uiVisibilityConfig,
+    syncTelemetry,
   } = useBank();
 
   const activeDebtAmount = Math.max(0, Math.round(currentAccount?.debtAmount || 0));
@@ -159,7 +165,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v13.34.00';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v13.35.43';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -276,10 +282,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   return (
+    <>
     <header className="sticky top-0 z-40 w-full bg-slate-950/95 backdrop-blur-md shadow-md">
-      {/* BARIS 1: Tab Kotak Hutang + Identitas Bank Nusantara + Live Sync HUD (Lebar Terkunci) + Hubungkan Google + Saldo & Koin + Notifikasi + Profil */}
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-4">
-        <div className="flex items-center gap-2.5 shrink-0">
+      {/* BARIS 1: Tab Kotak Hutang + Identitas Bank Nusantara + Live Sync HUD + Saldo & Koin + Notifikasi + Profil */}
+      <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6 h-14 flex items-center justify-between gap-1.5 sm:gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
           {/* TAB KOTAK HUTANG — Tepat di sebelah kiri logo Bank Nusantara */}
           {uiVisibilityConfig.navTabs.debt !== false && (
             <button
@@ -291,7 +298,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   : 'Tab Kotak Hutang — Tidak ada hutang aktif'
               }
               aria-label="Tab Hutang"
-              className={`relative w-10 h-10 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer shrink-0 ${
+              className={`relative w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer shrink-0 ${
                 activeDebtAmount > 0
                   ? activeView === 'debt'
                     ? 'bg-rose-600 border-rose-300 text-white shadow-lg shadow-rose-600/40 ring-2 ring-rose-400/60'
@@ -301,8 +308,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   : 'bg-slate-900 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
               }`}
             >
-              <ReceiptText className={`w-4 h-4 ${activeDebtAmount > 0 ? 'text-rose-200' : ''}`} />
-              <span className="text-[8px] font-black uppercase leading-none mt-0.5 tracking-tight">
+              <ReceiptText className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${activeDebtAmount > 0 ? 'text-rose-200' : ''}`} />
+              <span className="text-[7px] sm:text-[8px] font-black uppercase leading-none mt-0.5 tracking-tight">
                 HUTANG
               </span>
               {activeDebtAmount > 0 && (
@@ -320,36 +327,30 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Brand Logo (Stealth 4-stage trigger attached cleanly with zero visual cues) */}
           <div
             onClick={() => setActiveView('dashboard')}
-            className="flex items-center gap-3 cursor-pointer select-none shrink-0"
+            className="flex items-center gap-1.5 sm:gap-2.5 cursor-pointer select-none shrink-0"
           >
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-600 flex items-center justify-center text-slate-950 font-bold shadow-md shadow-amber-500/20">
-              <CreditCard className="w-5 h-5 text-slate-950" />
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-600 flex items-center justify-center text-slate-950 font-bold shadow-md shadow-amber-500/20 shrink-0">
+              <CreditCard className="w-4 h-4 sm:w-5 sm:h-5 text-slate-950" />
             </div>
-            <div>
+            <div className="shrink-0">
               <div className="flex items-center gap-1.5">
-                <span className="font-mono font-extrabold text-white text-base tracking-wider">
+                <span className="font-mono font-extrabold text-white text-[11px] sm:text-base tracking-wider whitespace-nowrap leading-none">
                   <span onClick={handleBankClick}>BANK</span>{' '}
                   <span onClick={handleNusantaraClick}>NUSANTARA</span>
                 </span>
-                <span className="text-[9px] bg-amber-400/20 text-amber-300 px-1.5 py-0.2 rounded font-mono font-semibold">
+                <span className="hidden md:inline-block text-[9px] bg-amber-400/20 text-amber-300 px-1.5 py-0.2 rounded font-mono font-semibold shrink-0">
                   ID
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 -mt-0.5 tracking-tight">
+              <p className="hidden md:block text-[10px] text-slate-400 -mt-0.5 tracking-tight whitespace-nowrap">
                 Sistem Perbankan & ATM Terpadu
               </p>
             </div>
           </div>
         </div>
 
-        {/* Right Action Bar (Lega di Baris 1 karena 11 Menu Navigasi sudah pindah ke Baris 2) */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Live Sync Telemetry HUD (Lebar Terkunci + Tombol Sync Cepat 1-Klik) */}
-          <LiveSyncTelemetryHud
-            onOpenCommandCenter={(sec) => {
-              if (onOpenSecurityCenter) onOpenSecurityCenter(sec || 'telemetry');
-            }}
-          />
+        {/* Right Action Bar (Adaptif di semua lebar layar agar BANK NUSANTARA & Profil selalu tampil utuh) */}
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
 
           {/* Tombol Cepat "Hubungkan Google" untuk Akun OA & Akun Guest yang Belum Tersambung Email Google */}
           {isCurrentAccountUnlinkedToGoogle && (
@@ -357,7 +358,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               type="button"
               onClick={handleLinkCurrentAccountToGoogle}
               disabled={isLinkingGoogle}
-              className="hidden sm:flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white hover:bg-slate-100 text-slate-900 border border-cyan-400/60 text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition disabled:opacity-60"
+              className="hidden 2xl:flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-white hover:bg-slate-100 text-slate-900 border border-cyan-400/60 text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer transition disabled:opacity-60"
               title="Hubungkan Akun ini ke email Google Anda agar tersinkronisasi permanen di Cloud"
             >
               <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
@@ -382,18 +383,24 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Money, Coin & Diamond (+ Top-Up QRIS Nusantara) Indicator Bar — Rapi sejajar di Baris 1 */}
+          {/* Money, Coin & Diamond (+ Top-Up QRIS Nusantara) Indicator Bar */}
           {currentAccount && (
             <>
-              <div className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-slate-900 border border-slate-700/80 whitespace-nowrap shrink-0 font-mono text-[11px] tabular-nums">
+              <div className="hidden lg:flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-slate-900 border border-slate-700/80 whitespace-nowrap shrink-0 font-mono text-[11px] tabular-nums">
                 <span
                   className="flex items-center gap-1 text-emerald-300 font-bold pr-1.5 border-r border-slate-700"
-                  title="Saldo Uang Rekening"
+                  title={`Saldo Uang Rekening: ${
+                    isAdminCardAccount(currentAccount) || isUnlimitedNumber(currentAccount.balance)
+                      ? '∞'
+                      : formatRupiah(currentAccount.balance)
+                  }`}
                 >
                   <Banknote className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span>
-                    {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
+                    {isAdminCardAccount(currentAccount) || isUnlimitedNumber(currentAccount.balance)
                       ? '∞'
+                      : Math.abs(currentAccount.balance) >= 10_000_000
+                      ? formatCompactRupiah(currentAccount.balance)
                       : formatRupiah(currentAccount.balance)}
                   </span>
                 </span>
@@ -409,7 +416,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   title="Total Coin Nusantara (Klik ke Spin the Wheel)"
                 >
                   <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>{(currentAccount.spinCoins ?? 0).toLocaleString('id-ID')}</span>
+                  <span>
+                    {formatAssetCount(currentAccount.spinCoins, {
+                      isAdmin: isAdminCardAccount(currentAccount),
+                    })}
+                  </span>
                 </button>
                 {(uiVisibilityConfig.showDiamondBalance !== false ||
                   uiVisibilityConfig.showDiamondTopUpButton !== false) && (
@@ -420,7 +431,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                     {uiVisibilityConfig.showDiamondBalance !== false && (
                       <>
                         <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
-                        <span>{(currentAccount.diamonds ?? 0).toLocaleString('id-ID')}</span>
+                        <span>
+                          {formatAssetCount(currentAccount.diamonds, {
+                            isAdmin: isAdminCardAccount(currentAccount),
+                          })}
+                        </span>
                       </>
                     )}
                     {uiVisibilityConfig.showDiamondTopUpButton !== false && (
@@ -445,21 +460,25 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </div>
 
-              {/* Compact Mobile Diamond Indicator & + Button (Sakelar Terpisah) */}
+              {/* Compact Mobile & Tablet Diamond Indicator & + Button */}
               {(uiVisibilityConfig.showDiamondBalance !== false ||
                 uiVisibilityConfig.showDiamondTopUpButton !== false) && (
-                <div className="flex md:hidden items-center gap-1 h-8 px-2 rounded-lg bg-slate-900 border border-cyan-500/40 text-cyan-300 font-mono text-[11px] font-bold tabular-nums shrink-0">
+                <div className="flex lg:hidden items-center gap-1 h-7 sm:h-8 px-1.5 sm:px-2 rounded-lg bg-slate-900 border border-cyan-500/40 text-cyan-300 font-mono text-[10px] sm:text-[11px] font-bold tabular-nums shrink-0">
                   {uiVisibilityConfig.showDiamondBalance !== false && (
                     <>
-                      <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
-                      <span>{(currentAccount.diamonds ?? 0).toLocaleString('id-ID')}</span>
+                      <DiamondIcon tone="bright" className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                      <span className="max-w-[56px] truncate">
+                        {formatAssetCount(currentAccount.diamonds, {
+                          isAdmin: isAdminCardAccount(currentAccount),
+                        })}
+                      </span>
                     </>
                   )}
                   {uiVisibilityConfig.showDiamondTopUpButton !== false && (
                     <button
                       type="button"
                       onClick={() => setIsDiamondStoreOpen(true)}
-                      className="flex h-4 w-4 items-center justify-center rounded bg-cyan-500 text-slate-950 cursor-pointer"
+                      className="flex h-4 w-4 items-center justify-center rounded bg-cyan-500 text-slate-950 cursor-pointer shrink-0"
                       title="Top-Up via QRIS Nusantara"
                       aria-label="Top-Up"
                     >
@@ -472,7 +491,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           {/* 🔔 Tombol Notifikasi (10 Jenis dengan Centang Izin & Drill-Down) */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -483,8 +502,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }
                 setShowProfileStatsModal(false);
               }}
-              className="relative p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-amber-300 transition cursor-pointer"
+              className="relative p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-amber-300 transition cursor-pointer"
               title="Pusat Notifikasi (10 Jenis)"
+              aria-label="Pusat Notifikasi"
             >
               <Bell className="w-4 h-4 text-amber-400" />
               {unreadNotificationCount > 0 && (
@@ -495,7 +515,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             {showNotifDropdown && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-[26rem] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 z-50 text-xs space-y-2.5">
+              <div className="absolute right-0 mt-2 w-[min(22rem,calc(100vw-1rem))] sm:w-[26rem] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 z-50 text-xs space-y-2.5">
                 {selectedNotifCategory === null ? (
                   <>
                     {/* LEVEL 1 HEADER */}
@@ -766,36 +786,60 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </div>
 
-          {/* Register Card Button */}
+          {/* Register Card Button (Ringkas di HP/Tablet, Tampil di Layar Lebar xl+) */}
           <button
             onClick={onOpenRegisterModal}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+            className="hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-bold text-xs shadow-md shadow-amber-500/20 transition-all cursor-pointer whitespace-nowrap shrink-0"
           >
-            <PlusCircle className="w-3.5 h-3.5" />
+            <PlusCircle className="w-3.5 h-3.5 shrink-0" />
             <span>Daftar Kartu Baru</span>
           </button>
 
-          {/* Profil & Statistik Akun Lengkap (Tanpa Fitur Ganti Akun PIN) */}
-          <div className="relative">
+          {/* Profil, Sync Status & Statistik Akun Lengkap */}
+          <div className="relative shrink-0">
             <button
               type="button"
               onClick={() => {
                 setShowNotifDropdown(false);
                 setShowProfileStatsModal(true);
               }}
-              title="Buka Profil & Statistik Akun Lengkap"
-              className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs cursor-pointer transition-colors"
+              title="Buka Profil, Status Sync Cloud & Statistik Akun Lengkap"
+              className="flex items-center gap-1.5 sm:gap-2 p-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs cursor-pointer transition-colors shrink-0"
             >
               <div
-                className={`w-7 h-7 rounded-lg text-white flex items-center justify-center font-bold text-xs ${
+                className={`relative w-7 h-7 rounded-lg text-white flex items-center justify-center font-bold text-xs shrink-0 ${
                   currentAccount?.cardStatus === 'banned' ? 'bg-rose-600' : 'bg-blue-600'
                 }`}
               >
                 {currentAccount ? currentAccount.fullName.charAt(0) : 'U'}
+                <span
+                  title={
+                    syncTelemetry.status === 'error'
+                      ? 'Sync Cloud Bermasalah — klik Profil'
+                      : syncTelemetry.status === 'offline'
+                      ? 'Mode Offline — klik Profil'
+                      : syncTelemetry.status === 'syncing'
+                      ? 'Menyinkronkan ke Cloud...'
+                      : 'Cloud Tersinkronisasi'
+                  }
+                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-slate-950 flex items-center justify-center ${
+                    syncTelemetry.status === 'error'
+                      ? 'bg-rose-500'
+                      : syncTelemetry.status === 'offline'
+                      ? 'bg-amber-400'
+                      : syncTelemetry.status === 'syncing'
+                      ? 'bg-blue-400'
+                      : 'bg-emerald-400'
+                  }`}
+                >
+                  {syncTelemetry.status === 'syncing' && (
+                    <RefreshCw className="w-1.5 h-1.5 text-slate-950 animate-spin" />
+                  )}
+                </span>
               </div>
-              <div className="text-left hidden sm:block">
+              <div className="text-left hidden sm:block min-w-0">
                 {currentAccount && (
-                  <div className="mb-0.5">
+                  <div className="hidden xl:block mb-0.5">
                     <UserId16AboveNameBanner
                       account={currentAccount}
                       variant="navbar"
@@ -804,7 +848,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
                 )}
                 <div className="flex items-center gap-1">
-                  <span className="font-bold text-white block truncate max-w-[105px]">
+                  <span className="font-bold text-white block truncate max-w-[78px] lg:max-w-[105px]">
                     {currentAccount ? currentAccount.fullName.split(' ')[0] : 'Profil Akun'}
                   </span>
                   {currentAccount?.isVerified && (
@@ -812,7 +856,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   )}
                   {currentAccount?.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
                 </div>
-                <span className="text-[10px] font-mono text-amber-300 -mt-0.5 block">
+                <span className="hidden md:block text-[10px] font-mono text-amber-300 -mt-0.5">
                   {currentAccount ? currentAccount.accountNumber : ''}
                 </span>
               </div>
@@ -978,7 +1022,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>Spin the Wheel</span>
                 <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 font-mono tabular-nums text-[10px] font-bold">
-                  {(currentAccount?.spinCoins ?? 0).toLocaleString('id-ID')}
+                  {formatAssetCount(currentAccount?.spinCoins, {
+                    isAdmin: isAdminCardAccount(currentAccount),
+                  })}
                 </span>
               </button>
             )}
@@ -1099,13 +1145,16 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       )}
 
-      {/* Modal Profil & Statistik Akun Lengkap (Tanpa Ganti Akun PIN) */}
-      <UserProfileStatsModal
-        isOpen={showProfileStatsModal}
-        onClose={() => setShowProfileStatsModal(false)}
-        onQuickAdminAccess={onQuickAdminAccess}
-      />
     </header>
+
+    {/* Modal Profil & Statistik Akun Lengkap dirender di luar stacking context <header> */}
+    <UserProfileStatsModal
+      isOpen={showProfileStatsModal}
+      onClose={() => setShowProfileStatsModal(false)}
+      onQuickAdminAccess={onQuickAdminAccess}
+      onOpenSecurityCenter={onOpenSecurityCenter}
+    />
+    </>
   );
 };
 

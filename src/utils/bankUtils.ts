@@ -1,13 +1,29 @@
 /**
  * Bank Nusantara Utilities and Configurations
  */
-import { CardTierConfig, LoanTierConfig } from '../types/bank';
+import { CardTier, CardTierConfig, LoanTierConfig } from '../types/bank';
 
 export const UNLIMITED_BALANCE = 999_999_999_999_999;
 
 export function isUnlimitedNumber(val?: number): boolean {
   if (val === undefined || val === null) return false;
   return !Number.isFinite(val) || val >= 900_000_000_000_000;
+}
+
+export function isAdminCardAccount(acc?: { cardTier?: string } | null): boolean {
+  return acc?.cardTier === 'admin';
+}
+
+export function formatAssetCount(
+  val?: number,
+  options?: { isAdmin?: boolean; suffix?: string }
+): string {
+  if (options?.isAdmin || isUnlimitedNumber(val)) {
+    return options?.suffix ? `∞ ${options.suffix}` : '∞';
+  }
+  const safeVal = Math.max(0, Math.round(val || 0));
+  const formatted = safeVal.toLocaleString('id-ID');
+  return options?.suffix ? `${formatted} ${options.suffix}` : formatted;
 }
 
 export const CARD_TIER_CONFIGS: Record<string, CardTierConfig> = {
@@ -244,6 +260,93 @@ export function formatUserId16(id16?: string): string {
   return normalized.replace(/(\d{4})(?=\d)/g, '$1 ');
 }
 
+export function normalizeAdminAccountAssets<
+  T extends {
+    cardTier: string;
+    balance: number;
+    spinCoins?: number;
+    diamonds?: number;
+    rewardPoints?: number;
+    customSpendingLimit?: number;
+    expiryDate?: string;
+  }
+>(acc: T): T {
+  if (acc.cardTier !== 'admin') return acc;
+  const alreadyInfinite =
+    acc.balance === UNLIMITED_BALANCE &&
+    acc.spinCoins === UNLIMITED_BALANCE &&
+    acc.diamonds === UNLIMITED_BALANCE &&
+    acc.rewardPoints === UNLIMITED_BALANCE &&
+    acc.customSpendingLimit === UNLIMITED_BALANCE &&
+    acc.expiryDate === '∞ / SELAMANYA';
+  if (alreadyInfinite) return acc;
+  return {
+    ...acc,
+    balance: UNLIMITED_BALANCE,
+    spinCoins: UNLIMITED_BALANCE,
+    diamonds: UNLIMITED_BALANCE,
+    rewardPoints: UNLIMITED_BALANCE,
+    customSpendingLimit: UNLIMITED_BALANCE,
+    expiryDate: '∞ / SELAMANYA',
+  };
+}
+
+export function applyTierTransitionAssets<
+  T extends {
+    cardTier: string;
+    balance: number;
+    spinCoins?: number;
+    diamonds?: number;
+    rewardPoints?: number;
+    customSpendingLimit?: number;
+    expiryDate?: string;
+  }
+>(
+  acc: T,
+  nextTier: CardTier,
+  overrides?: Partial<
+    Pick<
+      T,
+      'balance' | 'spinCoins' | 'diamonds' | 'rewardPoints' | 'customSpendingLimit' | 'expiryDate'
+    >
+  >
+): T {
+  if (nextTier === 'admin') {
+    return normalizeAdminAccountAssets({
+      ...acc,
+      ...overrides,
+      cardTier: 'admin',
+    });
+  }
+  const tierCfg = CARD_TIER_CONFIGS[nextTier] || CARD_TIER_CONFIGS.regular;
+  const nextExpiry =
+    overrides?.expiryDate ??
+    (acc.expiryDate === '∞ / SELAMANYA' || !acc.expiryDate
+      ? generateExpiryDate(tierCfg.validityYears || 5)
+      : acc.expiryDate);
+  const rawBalance = overrides?.balance ?? acc.balance;
+  const rawCoins = overrides?.spinCoins ?? acc.spinCoins;
+  const rawDiamonds = overrides?.diamonds ?? acc.diamonds;
+  const rawPoints = overrides?.rewardPoints ?? acc.rewardPoints;
+  const rawLimit = overrides?.customSpendingLimit ?? acc.customSpendingLimit;
+
+  return {
+    ...acc,
+    cardTier: nextTier,
+    balance: isUnlimitedNumber(rawBalance) ? 10_000_000 : Math.max(0, rawBalance),
+    spinCoins: isUnlimitedNumber(rawCoins) ? 100 : Math.max(0, rawCoins || 0),
+    diamonds: isUnlimitedNumber(rawDiamonds) ? 50 : Math.max(0, rawDiamonds || 0),
+    rewardPoints: isUnlimitedNumber(rawPoints) ? 1000 : Math.max(0, rawPoints || 0),
+    customSpendingLimit:
+      rawLimit === undefined
+        ? tierCfg.dailyWithdrawalLimit
+        : isUnlimitedNumber(rawLimit)
+        ? tierCfg.dailyWithdrawalLimit
+        : Math.max(0, rawLimit),
+    expiryDate: nextExpiry,
+  };
+}
+
 /**
  * Generates a random strong 6-digit PIN
  */
@@ -267,7 +370,7 @@ export function generateRandomPin6(): string {
  */
 export function formatRupiah(amount: number): string {
   if (!Number.isFinite(amount) || amount >= 900_000_000_000_000) {
-    return '∞ (Tidak Terbatas)';
+    return '∞';
   }
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
@@ -275,6 +378,39 @@ export function formatRupiah(amount: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+/**
+ * Formats large Rupiah amounts cleanly into compact Indonesian notation:
+ * Rp 750 K, Rp 12,5 JT, Rp 2,4 M, Rp 1,5 T
+ */
+export function formatCompactRupiah(amount: number): string {
+  if (!Number.isFinite(amount) || amount >= 900_000_000_000_000) {
+    return '∞';
+  }
+  const sign = amount < 0 ? '-' : '';
+  const abs = Math.abs(amount);
+
+  const units: Array<{ threshold: number; suffix: string }> = [
+    { threshold: 1_000_000_000_000, suffix: 'T' },
+    { threshold: 1_000_000_000, suffix: 'M' },
+    { threshold: 1_000_000, suffix: 'JT' },
+    { threshold: 1_000, suffix: 'K' },
+  ];
+
+  for (const unit of units) {
+    if (abs >= unit.threshold) {
+      const scaled = abs / unit.threshold;
+      const decimals = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+      const formattedNum = new Intl.NumberFormat('id-ID', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: decimals,
+      }).format(Number(scaled.toFixed(decimals)));
+      return `${sign}Rp ${formattedNum} ${unit.suffix}`;
+    }
+  }
+
+  return formatRupiah(amount);
 }
 
 /**

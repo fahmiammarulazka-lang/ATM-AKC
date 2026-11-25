@@ -464,8 +464,8 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
             <p className="text-xs text-slate-400 mt-0.5">
               {currentAccount.fullName} · Saldo Rekening:{' '}
               <span className="font-mono text-emerald-300 font-semibold">
-                {isUnlimitedNumber(currentAccount.balance)
-                  ? 'Rp ∞ (Tak Terbatas)'
+                {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
+                  ? '∞'
                   : formatRupiah(currentAccount.balance)}
               </span>
             </p>
@@ -651,8 +651,8 @@ export const TabEmasView: React.FC<TabEmasViewProps> = ({
           <div className="rounded-2xl bg-[#11151E] border border-slate-800 p-4">
             <div className="text-xs text-slate-400">Saldo Uang Tunai Rekening</div>
             <div className="font-mono tabular-nums text-xl font-bold text-white mt-1">
-              {isUnlimitedNumber(currentAccount.balance)
-                ? '∞ UNLIMITED'
+              {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
+                ? '∞'
                 : formatRupiah(currentAccount.balance)}
             </div>
             <div className="text-xs text-amber-300/90 mt-0.5">

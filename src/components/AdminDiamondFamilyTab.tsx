@@ -16,7 +16,7 @@ import {
   MAX_DIAMOND_PURCHASE_RUPIAH,
   UI_VISIBILITY_NAV_METADATA,
 } from '../data/diamondCatalog';
-import { formatRupiah } from '../utils/bankUtils';
+import { formatRupiah, formatAssetCount, isAdminCardAccount } from '../utils/bankUtils';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
 import { AdminWarningStudioSection } from './AdminWarningStudioSection';
 
@@ -268,57 +268,70 @@ export const AdminDiamondFamilyTab: React.FC = () => {
         </div>
 
         {/* Inject / Set Account Diamonds */}
-        <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 space-y-3">
-          <h3 className="font-black text-white flex items-center gap-1.5">
-            <Coins className="h-4 w-4 text-cyan-400" />
-            <span>Atur / Suntik Saldo</span>
-            <DiamondIcon tone="bright" className="h-4 w-4" />
-            <span>Nasabah</span>
-          </h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
-            <select
-              value={selectedAccountId}
-              onChange={(e) => setSelectedAccountId(e.target.value)}
-              className="sm:col-span-5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-white font-bold"
-            >
-              {accounts.map((acc) => (
-                <option key={acc.id} value={acc.id}>
-                  {acc.fullName} ({acc.accountNumber}) — Saldo: {(acc.diamonds || 0).toLocaleString('id-ID')}
-                </option>
-              ))}
-            </select>
-            <input
-              type="number"
-              min={0}
-              value={diamondAdjustVal}
-              onChange={(e) => setDiamondAdjustVal(Math.max(0, Number(e.target.value) || 0))}
-              className="sm:col-span-3 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
-              placeholder="Jumlah"
-            />
-            <div className="sm:col-span-4 flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  const res = adminAdjustAccountDiamonds(selectedAccountId, diamondAdjustVal, 'add');
-                  showMsg(res.message);
-                }}
-                className="flex-1 rounded-xl bg-cyan-500 px-3 py-2 font-black text-slate-950 hover:bg-cyan-400 cursor-pointer"
-              >
-                + Tambah
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const res = adminAdjustAccountDiamonds(selectedAccountId, diamondAdjustVal, 'set');
-                  showMsg(res.message);
-                }}
-                className="flex-1 rounded-xl bg-slate-800 px-3 py-2 font-black text-cyan-300 border border-cyan-500/40 hover:bg-slate-700 cursor-pointer"
-              >
-                Set Persis
-              </button>
+        {(() => {
+          const selectedTargetAcc = accounts.find((a) => a.id === selectedAccountId);
+          const targetIsAdmin = isAdminCardAccount(selectedTargetAcc);
+          return (
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-black text-white flex items-center gap-1.5">
+                  <Coins className="h-4 w-4 text-cyan-400" />
+                  <span>Atur / Suntik Saldo</span>
+                  <DiamondIcon tone="bright" className="h-4 w-4" />
+                  <span>Nasabah</span>
+                </h3>
+                {targetIsAdmin && (
+                  <span className="px-2.5 py-1 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 font-black text-[11px]">
+                    Kartu ADMIN · Sudah ∞ (Tetap bisa disinkronkan)
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-12">
+                <select
+                  value={selectedAccountId}
+                  onChange={(e) => setSelectedAccountId(e.target.value)}
+                  className="sm:col-span-5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-white font-bold"
+                >
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.fullName} ({acc.accountNumber}) — Saldo: {formatAssetCount(acc.diamonds, { isAdmin: isAdminCardAccount(acc) })}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="number"
+                  min={0}
+                  value={diamondAdjustVal}
+                  onChange={(e) => setDiamondAdjustVal(Math.max(0, Number(e.target.value) || 0))}
+                  className="sm:col-span-3 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
+                  placeholder="Jumlah"
+                />
+                <div className="sm:col-span-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminAdjustAccountDiamonds(selectedAccountId, diamondAdjustVal, 'add');
+                      showMsg(res.message);
+                    }}
+                    className="flex-1 rounded-xl bg-cyan-500 px-3 py-2 font-black text-slate-950 hover:bg-cyan-400 cursor-pointer"
+                  >
+                    + Tambah
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminAdjustAccountDiamonds(selectedAccountId, diamondAdjustVal, 'set');
+                      showMsg(res.message);
+                    }}
+                    className="flex-1 rounded-xl bg-slate-800 px-3 py-2 font-black text-cyan-300 border border-cyan-500/40 hover:bg-slate-700 cursor-pointer"
+                  >
+                    Set Persis
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          );
+        })()}
       </div>
 
       {/* SECTION 1B: KONTROL SEMBUNYIKAN / MUNCULKAN TAB NAVIGASI, TOP-UP & TOKO (REAL-TIME) */}

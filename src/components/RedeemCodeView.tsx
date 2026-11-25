@@ -247,7 +247,7 @@ export const RedeemCodeView: React.FC<RedeemCodeViewProps> = ({
           <div className="px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-right">
             <span className="block text-[11px] text-slate-400">Saldo Rekening Aktif</span>
             <span className="block font-mono tabular-nums text-sm sm:text-base font-bold text-emerald-400">
-              {isBalanceUnlimited ? '∞ Unlimited' : formatRupiah(currentAccount.balance)}
+              {currentAccount.cardTier === 'admin' || isBalanceUnlimited ? '∞' : formatRupiah(currentAccount.balance)}
             </span>
           </div>
           {onNavigateToMutasi && (
@@ -346,7 +346,7 @@ export const RedeemCodeView: React.FC<RedeemCodeViewProps> = ({
                   <span className="text-xs text-slate-400 block">Saldo Rekening Terbaru</span>
                   <span className="font-mono tabular-nums text-xl sm:text-2xl font-bold text-white block">
                     {isUnlimitedNumber(receipt.newBalance) || currentAccount.cardTier === 'admin'
-                      ? '∞ Unlimited'
+                      ? '∞'
                       : formatRupiah(receipt.newBalance)}
                   </span>
                 </div>

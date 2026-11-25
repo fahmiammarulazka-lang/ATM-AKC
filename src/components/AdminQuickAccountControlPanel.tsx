@@ -49,6 +49,8 @@ import { useBank } from '../context/BankContext';
 import { BankAccount, CardStatus, CardTier, StructuredIndonesiaAddress } from '../types/bank';
 import {
   formatRupiah,
+  formatAssetCount,
+  isAdminCardAccount,
   isUnlimitedNumber,
   UNLIMITED_BALANCE,
   CARD_TIER_CONFIGS,
@@ -297,10 +299,12 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
   const handleApplySultanMaxPreset = () => {
     setCCardTier('admin');
     setCIsUnlimited(true);
+    setCBalance(String(UNLIMITED_BALANCE));
     setCExpiryDate('∞ / SELAMANYA');
     setCGoldGrams('1000');
-    setCSpinCoins('100000');
-    setCRewardPoints('1000000');
+    setCSpinCoins(String(UNLIMITED_BALANCE));
+    setCRewardPoints(String(UNLIMITED_BALANCE));
+    setCSpendingLimit(String(UNLIMITED_BALANCE));
     setCPulsaBalance('50000000');
     setCPlnKwhBalance('99999');
     setCJobLevel('50');
@@ -1018,10 +1022,22 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                     value={cCardTier}
                     onChange={(e) => {
                       const nextTier = e.target.value as CardTier;
+                      const prevTier = cCardTier;
                       setCCardTier(nextTier);
                       if (nextTier === 'admin') {
                         setCIsUnlimited(true);
+                        setCBalance(String(UNLIMITED_BALANCE));
+                        setCSpinCoins(String(UNLIMITED_BALANCE));
+                        setCRewardPoints(String(UNLIMITED_BALANCE));
+                        setCSpendingLimit(String(UNLIMITED_BALANCE));
                         setCExpiryDate('∞ / SELAMANYA');
+                      } else if (prevTier === 'admin') {
+                        setCIsUnlimited(false);
+                        setCBalance('10000000');
+                        setCSpinCoins('100');
+                        setCRewardPoints('1000');
+                        setCSpendingLimit(String(CARD_TIER_CONFIGS[nextTier].dailyWithdrawalLimit));
+                        setCExpiryDate(generateExpiryDate(5));
                       }
                     }}
                     className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold"
@@ -1030,8 +1046,13 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                     <option value="gold">2. Kartu Emas</option>
                     <option value="premium">3. Kartu Premium</option>
                     <option value="platinum">4. Kartu Platinum VIP</option>
-                    <option value="admin">5. Kartu ADMIN (∞ Unlimited)</option>
+                    <option value="admin">5. Kartu ADMIN (∞)</option>
                   </select>
+                  {cCardTier === 'admin' && (
+                    <span className="mt-1 block text-[10px] font-bold text-amber-300">
+                      Tier ADMIN otomatis ∞ pada Uang, Koin Spin, Diamond, Poin Rewards &amp; Limit Harian.
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -1515,10 +1536,17 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                         No. Rek: <strong className="text-amber-300">{acc.accountNumber}</strong>
                       </span>
                       <span>
-                        Saldo: <strong className="text-emerald-300">{formatRupiah(acc.balance)}</strong>
+                        Saldo:{' '}
+                        <strong className="text-emerald-300">
+                          {isAdminCardAccount(acc) || isUnlimitedNumber(acc.balance)
+                            ? '∞'
+                            : formatRupiah(acc.balance)}
+                        </strong>
                       </span>
                       <span>
-                        Lv.{acc.jobLevel || 1} • Koin: {(acc.spinCoins || 0).toLocaleString('id-ID')} • Emas:{' '}
+                        Lv.{acc.jobLevel || 1} • Koin:{' '}
+                        {formatAssetCount(acc.spinCoins, { isAdmin: isAdminCardAccount(acc) })} • Permata:{' '}
+                        {formatAssetCount(acc.diamonds, { isAdmin: isAdminCardAccount(acc) })} • Emas:{' '}
                         {(acc.goldGrams || 0).toFixed(2)}g
                       </span>
                     </div>
@@ -1880,7 +1908,7 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                           res.success ? 'success' : 'error',
                           currentlyUnlim
                             ? `Saldo "${acc.fullName}" dikembalikan ke Rp 100.000.000.`
-                            : `∞ Saldo "${acc.fullName}" diubah menjadi UNLIMITED (Tak Terbatas)!`
+                            : `∞ Saldo "${acc.fullName}" diubah menjadi ∞!`
                         );
                       }}
                       className={`px-2.5 py-1.5 rounded-xl font-black flex items-center gap-1 cursor-pointer border transition ${
@@ -1891,7 +1919,7 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                     >
                       <InfinityIcon className="w-3.5 h-3.5" />
                       <span>
-                        Unlimited ∞: {isUnlimitedNumber(acc.balance) ? 'ON' : 'OFF'}
+                        Saldo ∞: {isUnlimitedNumber(acc.balance) ? 'ON' : 'OFF'}
                       </span>
                     </button>
 
@@ -2103,7 +2131,9 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                         <div className="flex items-center justify-between">
                           <span className="font-black text-emerald-300">1. Suntik Saldo Rupiah</span>
                           <span className="font-mono text-[11px] text-white font-bold">
-                            {isUnlimitedNumber(acc.balance) ? '∞ UNLIMITED' : formatRupiah(acc.balance)}
+                            {isAdminCardAccount(acc) || isUnlimitedNumber(acc.balance)
+                              ? '∞'
+                              : formatRupiah(acc.balance)}
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-1">
@@ -2234,12 +2264,17 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
 
                       {/* 3. Suntik Koin Spin */}
                       <div className="p-3 rounded-xl bg-slate-950/90 border border-fuchsia-500/35 space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="font-black text-fuchsia-300">3. Suntik Koin Spin</span>
                           <span className="font-mono text-[11px] text-fuchsia-200 font-bold">
-                            {(acc.spinCoins || 0).toLocaleString('id-ID')} Koin
+                            {formatAssetCount(acc.spinCoins, { isAdmin: isAdminCardAccount(acc) })} Koin
                           </span>
                         </div>
+                        {isAdminCardAccount(acc) && (
+                          <div className="text-[10px] font-bold text-amber-300">
+                            Kartu ADMIN sudah ∞ (klik tombol untuk tetap sinkronkan ke Cloud).
+                          </div>
+                        )}
                         <div className="flex flex-wrap gap-1">
                           {[1000, 10000, 100000, 1000000].map((c) => (
                             <button
@@ -2387,12 +2422,17 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
 
                       {/* 5. Suntik Poin Reward & Voucher Level Kerja */}
                       <div className="p-3 rounded-xl bg-slate-950/90 border border-indigo-500/35 space-y-2">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-2">
                           <span className="font-black text-indigo-300">5. Poin Reward & Voucher Lv</span>
                           <span className="font-mono text-[10px] text-indigo-200">
-                            {(acc.rewardPoints || 0).toLocaleString('id-ID')} Poin • {acc.levelVouchers || 0} Vch
+                            {formatAssetCount(acc.rewardPoints, { isAdmin: isAdminCardAccount(acc) })} Poin • {acc.levelVouchers || 0} Vch
                           </span>
                         </div>
+                        {isAdminCardAccount(acc) && (
+                          <div className="text-[10px] font-bold text-amber-300">
+                            Poin Rewards kartu ADMIN sudah ∞ (tetap bisa disinkronkan).
+                          </div>
+                        )}
                         <div className="flex flex-wrap gap-1">
                           <button
                             type="button"
@@ -2911,12 +2951,36 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                         </label>
                         <select
                           value={editDraft.cardTier}
-                          onChange={(e) =>
-                            setEditDraft({
-                              ...editDraft,
-                              cardTier: e.target.value as CardTier,
-                            })
-                          }
+                          onChange={(e) => {
+                            const nextTier = e.target.value as CardTier;
+                            const prevTier = editDraft.cardTier;
+                            if (nextTier === 'admin') {
+                              setEditDraft({
+                                ...editDraft,
+                                cardTier: nextTier,
+                                isUnlimited: true,
+                                balance: String(UNLIMITED_BALANCE),
+                                spinCoins: String(UNLIMITED_BALANCE),
+                                rewardPoints: String(UNLIMITED_BALANCE),
+                                expiryDate: '∞ / SELAMANYA',
+                              });
+                            } else if (prevTier === 'admin') {
+                              setEditDraft({
+                                ...editDraft,
+                                cardTier: nextTier,
+                                isUnlimited: false,
+                                balance: isUnlimitedNumber(Number(editDraft.balance)) ? '10000000' : editDraft.balance,
+                                spinCoins: isUnlimitedNumber(Number(editDraft.spinCoins)) ? '100' : editDraft.spinCoins,
+                                rewardPoints: isUnlimitedNumber(Number(editDraft.rewardPoints)) ? '1000' : editDraft.rewardPoints,
+                                expiryDate: editDraft.expiryDate === '∞ / SELAMANYA' ? generateExpiryDate(5) : editDraft.expiryDate,
+                              });
+                            } else {
+                              setEditDraft({
+                                ...editDraft,
+                                cardTier: nextTier,
+                              });
+                            }
+                          }}
                           className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white"
                         >
                           <option value="regular">Reguler (Biru)</option>

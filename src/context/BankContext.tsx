@@ -12,6 +12,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, ReactNod
 import confetti from 'canvas-confetti';
 import {
   auth,
+  authPersistenceReady,
   onAuthStateChanged,
   signOut,
   signInWithGooglePopup,
@@ -48,6 +49,7 @@ import {
   saveActiveBootSession,
   readActiveBootSession,
   clearActiveBootSession,
+  getActiveBootSessionWriteSeq,
   saveDeviceLobbyGuestId,
   readDeviceLobbyGuestId,
   saveDeviceLobbyCreatedAccountId,
@@ -311,6 +313,10 @@ import {
   ensureAccountUserId16,
   formatUserId16,
   generateRandomPin6,
+  isAdminCardAccount,
+  formatAssetCount,
+  normalizeAdminAccountAssets,
+  applyTierTransitionAssets,
 } from '../utils/bankUtils';
 
 interface RegisterCardInput {
@@ -2381,9 +2387,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     changes: Array.isArray(u.changes) ? u.changes.map(sanitizeQrisBrandText) : u.changes,
   });
 
-  // Helper Write-Through Instan ke IndexedDB (Zero localStorage) terikat ketat pada deviceId perangkat ini
+  // Helper Write-Through Instan ke IndexedDB + mirror ringkas lokal terikat ketat pada deviceId perangkat ini
   const persistActiveSessionToIdb = (params: {
-    authMode: 'google' | 'oa_account' | 'guest' | 'standard_account';
+    authMode: 'email_direct' | 'google' | 'oa_account' | 'guest' | 'standard_account';
     firebaseUid?: string;
     email?: string;
     emailKey?: string;
@@ -2405,7 +2411,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             (a.email && normalizeEmailKey(a.email) === cleanEmail)))
     );
     const nowMs = Date.now();
+    const capturedSeq = getActiveBootSessionWriteSeq();
     void getOrCreatePersistentDeviceId().then((deviceId) => {
+      if (capturedSeq !== getActiveBootSessionWriteSeq()) return;
       const snapshot: FastBootSessionSnapshot = {
         authMode: params.authMode,
         firebaseUid: params.firebaseUid,
@@ -2421,7 +2429,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         verifiedAtMs: params.isPinVerified ? nowMs : undefined,
         savedAtMs: nowMs,
       };
-      void saveActiveBootSession(snapshot);
+      void saveActiveBootSession(snapshot, capturedSeq);
     });
     if (pool.length > 0 && params.isPinVerified) {
       void saveFastBootSnapshot({
@@ -2850,7 +2858,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const normEmail = hasGoogle
       ? normalizeEmailKey(a.googleEmail || a.email || '')
       : normalizeEmailKey(a.email || '');
-    return {
+    return normalizeAdminAccountAssets({
       ...a,
       userId16: ensureAccountUserId16(a),
       email: normEmail || a.email || '',
@@ -2861,7 +2869,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       oaAdminPin: a.oaAdminPin || '159357',
       jobLevel: Math.max(1, Math.floor(Number(a.jobLevel) || 1)),
       levelVouchers: Math.max(0, Math.floor(Number(a.levelVouchers) || 0)),
+      spinCoins: Math.max(0, Math.floor(Number(a.spinCoins) || 0)),
       diamonds: Math.max(0, Math.floor(Number(a.diamonds) || 0)),
+      rewardPoints: Math.max(0, Math.floor(Number(a.rewardPoints) || 0)),
       extraFamilySlots: Math.max(0, Math.floor(Number(a.extraFamilySlots) || 0)),
       accountUpdatedAtMs: Number(a.accountUpdatedAtMs) || 0,
       status:
@@ -2869,7 +2879,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ? ('banned' as const)
           : ('active' as const),
       banReason: a.banReason || a.banInfo?.reason || '',
-    };
+    });
   };
 
   // Gabungkan daftar akun dari berbagai vault (master_state, users/{uid}.savedAccounts, users_by_email/{emailKey}.savedAccounts, dan state lokal)
@@ -4031,7 +4041,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         .catch(() => {});
     };
 
-    const authUnsub = onAuthStateChanged(auth, async (fbUser) => {
+    let authUnsub: (() => void) | null = null;
+
+    const handleAuthSnapshot = async (fbUser: FirebaseUser | null) => {
       if (!active) return;
 
       if (userDocUnsub) {
@@ -4049,22 +4061,34 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
 
-      // 1. Cek Fast-Boot Cache + Active Session Envelope + Identitas Perangkat Lokal (deviceId)
-      const [[cachedBoot, savedSession], currentDeviceId] = await Promise.all([
-        fastCachePromise,
+      // 1. Baca SEGAR setiap callback onAuthStateChanged agar login baru (Google / Anonymous Guest) tidak pernah membaca cache basi t=0
+      const [cachedBoot, savedSession, currentDeviceId] = await Promise.all([
+        readFastBootSnapshot(),
+        readActiveBootSession(),
         getOrCreatePersistentDeviceId(),
       ]);
       if (!active) return;
 
-      // Sesi lokal hanya sah untuk auto-masuk saat refresh jika terikat kuat ke deviceId perangkat INI dan sudah verifikasi PIN
-      const isValidLocalDeviceSession = Boolean(
+      // Sesi lokal sah jika tersimpan lengkap pada penyimpanan perangkat INI.
+      // Jika sesi berasal dari versi sebelum ada field deviceId, izinkan migrasi & langsung segel ke currentDeviceId.
+      // Jika deviceId ada dan berbeda, tolak!
+      const hasValidSessionFields = Boolean(
         savedSession &&
           savedSession.activeAccountId &&
           savedSession.isPinVerified === true &&
-          savedSession.hasCompletedOnboarding === true &&
-          savedSession.deviceId &&
-          savedSession.deviceId === currentDeviceId
+          savedSession.hasCompletedOnboarding === true
       );
+      const isDeviceBoundValid = Boolean(
+        savedSession && (!savedSession.deviceId || savedSession.deviceId === currentDeviceId)
+      );
+      const isValidLocalDeviceSession = Boolean(hasValidSessionFields && isDeviceBoundValid);
+
+      if (isValidLocalDeviceSession && savedSession && !savedSession.deviceId) {
+        void saveActiveBootSession({
+          ...savedSession,
+          deviceId: currentDeviceId,
+        });
+      }
 
       let workingAccounts: BankAccount[] = accountsRef.current;
       const sessionBackups =
@@ -4130,6 +4154,106 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         );
       };
 
+      // Helper bersama untuk memulihkan sesi lokal terverifikasi (termasuk fallback ke RTDB jika akun belum ada di cache lokal)
+      const restoreVerifiedLocalSession = async (): Promise<boolean> => {
+        if (!active || !isValidLocalDeviceSession || !savedSession?.activeAccountId) {
+          return false;
+        }
+        const activeId = savedSession.activeAccountId;
+        if (deletedAccountIdsRef.current.includes(activeId)) {
+          return false;
+        }
+
+        let candidatePool = workingAccounts;
+        let restoredAcc =
+          candidatePool.find((a) => a.id === activeId) ||
+          sessionBackups.find((a) => a.id === activeId) ||
+          null;
+
+        if (!restoredAcc) {
+          const earlyAccountsRes = await getEarlyAccountsPrefetch(3500);
+          if (!active) return false;
+          if (earlyAccountsRes?.accounts) {
+            const delIds = toArraySafe<string>(earlyAccountsRes.deletedAccountIds);
+            const mergedDel =
+              delIds.length > 0
+                ? Array.from(new Set([...deletedAccountIdsRef.current, ...delIds]))
+                : deletedAccountIdsRef.current;
+            if (delIds.length > 0) setDeletedAccountIds(mergedDel);
+            if (mergedDel.includes(activeId)) {
+              return false;
+            }
+            const incomingAccs = toArraySafe<BankAccount>(earlyAccountsRes.accounts);
+            if (incomingAccs.length > 0) {
+              candidatePool = unionMergeAccountsList(
+                incomingAccs,
+                [sessionBackups, latestServerAccountsRef.current, accountsRef.current],
+                mergedDel
+              );
+              latestServerAccountsRef.current = candidatePool;
+              accountsRef.current = candidatePool;
+              setAccounts(candidatePool);
+              hasCloudAccountsArrived = true;
+              void saveFastBootSnapshot({
+                accounts: candidatePool,
+                deletedAccountIds: mergedDel,
+                cachedAtMs: Date.now(),
+              });
+            }
+          }
+          restoredAcc =
+            candidatePool.find((a) => a.id === activeId) ||
+            sessionBackups.find((a) => a.id === activeId) ||
+            null;
+        }
+
+        if (!restoredAcc || !active) {
+          return false;
+        }
+
+        const cleanRestoredEmail = savedSession.email ? normalizeEmailKey(savedSession.email) : '';
+        const resolvedUid = restoredAcc.firebaseUid || savedSession.firebaseUid;
+        if (resolvedUid) {
+          attachGoogleRealtimeListener(resolvedUid, cleanRestoredEmail);
+        }
+
+        setCurrentAccountIdState(restoredAcc.id);
+        setActiveCloudEmail(cleanRestoredEmail || '');
+        setCloudAccountVerificationState('confirmed_has_accounts');
+        setGoogleUser({
+          email: cleanRestoredEmail,
+          name: restoredAcc.fullName || savedSession.name,
+          picture: savedSession.picture,
+          firebaseUid: resolvedUid,
+          authMode: savedSession.authMode,
+          emailKey: cleanRestoredEmail ? emailToFirestoreDocId(cleanRestoredEmail) : savedSession.emailKey,
+          loggedInAt: new Date().toISOString(),
+          hasCompletedOnboarding: true,
+          isPinVerified: true,
+        });
+        persistActiveSessionToIdb({
+          authMode: savedSession.authMode,
+          firebaseUid: resolvedUid,
+          email: cleanRestoredEmail,
+          emailKey: cleanRestoredEmail ? emailToFirestoreDocId(cleanRestoredEmail) : savedSession.emailKey,
+          name: restoredAcc.fullName || savedSession.name,
+          picture: savedSession.picture,
+          activeAccountId: restoredAcc.id,
+          isPinVerified: true,
+          hasCompletedOnboarding: true,
+          accountsPool: candidatePool,
+        });
+        updateSyncTelemetry({
+          fromCache: !hasCloudAccountsArrived,
+          hasPendingWrites: !hasCloudAccountsArrived,
+          syncedDocCount: candidatePool.length,
+        });
+        hasFirestoreHydratedRef.current = true;
+        finishAuthCheck();
+        hydrateFullMasterInBackground();
+        return true;
+      };
+
       // =========================================================================
       // MODE A: Sesi Anonymous Vault (signInAnonymously) — WAJIB segel deviceId lokal
       // =========================================================================
@@ -4147,30 +4271,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         void registerActiveDeviceSession(fbUser.uid, 'anonymous');
 
         const applyGuestMatch = (accs: BankAccount[]): BankAccount | null => {
-          const preferredId =
-            savedSession &&
-            (savedSession.authMode === 'guest' ||
-              savedSession.authMode === 'oa_account' ||
-              savedSession.authMode === 'standard_account')
-              ? savedSession.activeAccountId
-              : undefined;
+          const preferredId = savedSession?.activeAccountId;
           const matchedGuest =
             (preferredId ? accs.find((a) => a.id === preferredId) : null) ||
             accs.find((a) => a.firebaseUid === fbUser.uid && a.isGuestAccount) ||
             accs.find((a) => a.firebaseUid === fbUser.uid) ||
             null;
           if (matchedGuest && active) {
-            const resolvedAuthMode: 'oa_account' | 'standard_account' | 'guest' =
+            const resolvedAuthMode: FastBootSessionSnapshot['authMode'] =
               savedSession?.authMode === 'oa_account'
                 ? 'oa_account'
                 : savedSession?.authMode === 'standard_account'
                 ? 'standard_account'
+                : savedSession?.authMode === 'email_direct'
+                ? 'email_direct'
+                : savedSession?.authMode === 'google'
+                ? 'google'
                 : 'guest';
             setCurrentAccountIdState(matchedGuest.id);
-            setActiveCloudEmail('');
+            setActiveCloudEmail(savedSession?.email || '');
             setCloudAccountVerificationState('confirmed_has_accounts');
             setGoogleUser({
-              email: '',
+              email: savedSession?.email || '',
               name: matchedGuest.fullName,
               firebaseUid: fbUser.uid,
               authMode: resolvedAuthMode,
@@ -4244,14 +4366,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const finalGuest = applyGuestMatch(cloudAccountsLoaded);
         if (finalGuest) {
           persistActiveSessionToIdb({
-            authMode:
-              savedSession?.authMode === 'oa_account'
-                ? 'oa_account'
-                : savedSession?.authMode === 'standard_account'
-                ? 'standard_account'
-                : 'guest',
+            authMode: savedSession?.authMode || 'guest',
             firebaseUid: fbUser.uid,
-            email: '',
+            email: savedSession?.email || '',
             name: finalGuest.fullName,
             activeAccountId: finalGuest.id,
             isPinVerified: true,
@@ -4269,6 +4386,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // MODE B: Sesi Google Permanen Terverifikasi
       // =========================================================================
       if (fbUser && !fbUser.isAnonymous && active) {
+        // Jika di perangkat INI pengguna login eksplisit memakai Akun OA / Standard / Guest yang berbeda dari sesi Google lama,
+        // hormati sesi lokal terverifikasi tersebut agar tidak terlempar ke gerbang Google saat update/refresh!
+        if (
+          isValidLocalDeviceSession &&
+          savedSession &&
+          (savedSession.authMode === 'oa_account' ||
+            savedSession.authMode === 'standard_account' ||
+            savedSession.authMode === 'guest') &&
+          savedSession.activeAccountId
+        ) {
+          const restoredExplicitLocal = await restoreVerifiedLocalSession();
+          if (restoredExplicitLocal) {
+            return;
+          }
+        }
+
         void ensureFirestoreActiveNow();
         const cleanEmail = normalizeEmailKey(fbUser.email || '') || 'nasabah@banknusantara.id';
         const cleanName =
@@ -4286,12 +4419,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // Pasang listener real-time users/{uid} SEGERA agar sinyal Ban langsung mengunci layar
         attachGoogleRealtimeListener(fbUser.uid, cleanEmail);
 
+        const isOwnedByUser = (a: BankAccount) =>
+          a.firebaseUid === fbUser.uid ||
+          (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
+          (a.email && normalizeEmailKey(a.email) === cleanEmail);
+
         const isSavedSessionForThisGoogle = Boolean(
           isValidLocalDeviceSession &&
             savedSession &&
-            savedSession.authMode === 'google' &&
             ((savedSession.firebaseUid && savedSession.firebaseUid === fbUser.uid) ||
-              (savedSession.email && normalizeEmailKey(savedSession.email) === cleanEmail))
+              (savedSession.email && normalizeEmailKey(savedSession.email) === cleanEmail) ||
+              Boolean(
+                savedSession.activeAccountId &&
+                  workingAccounts.some((a) => a.id === savedSession.activeAccountId && isOwnedByUser(a))
+              ))
         );
 
         const findBestGoogleAccount = (
@@ -4300,11 +4441,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ): BankAccount | null => {
           const sessionLastAccId = isSavedSessionForThisGoogle ? savedSession?.activeAccountId : undefined;
           const cloudLastAccId = userDoc?.lastAccountId;
-
-          const isOwnedByUser = (a: BankAccount) =>
-            a.firebaseUid === fbUser.uid ||
-            (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
-            (a.email && normalizeEmailKey(a.email) === cleanEmail);
 
           if (sessionLastAccId) {
             const bySession = accs.find((a) => a.id === sessionLastAccId && a.id !== 'acc-admin');
@@ -4341,12 +4477,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           }
 
           // Isolasi Perangkat Ketat: Hanya izinkan masuk langsung (isPinVerified=true) jika perangkat INI sudah terverifikasi sebelumnya.
-          // Jika perangkat baru/HP ke-2 mendeteksi sesi Google tanpa segel deviceId lokal, WAJIB verifikasi PIN 6 digit (atau keluar akun)!
-          const isLocallyVerifiedOnThisDevice = Boolean(
-            keepVerifiedFromIdb && isSavedSessionForThisGoogle && savedSession?.isPinVerified
+          // Jika perangkat baru/HP ke-2 mendeteksi sesi Google tanpa segel sesi lokal di perangkat tersebut, WAJIB verifikasi PIN 6 digit!
+          const isMatchedSavedSession = Boolean(
+            isValidLocalDeviceSession &&
+              savedSession &&
+              ((savedSession.firebaseUid && savedSession.firebaseUid === fbUser.uid) ||
+                (savedSession.email && normalizeEmailKey(savedSession.email) === cleanEmail) ||
+                (matchedAccount && savedSession.activeAccountId === matchedAccount.id))
           );
 
           setGoogleUser((prev) => {
+            const alreadyVerifiedInCurrentTab = Boolean(
+              prev?.isPinVerified && prev?.firebaseUid === fbUser.uid && prev?.hasCompletedOnboarding
+            );
+            const isLocallyVerifiedOnThisDevice = Boolean(
+              alreadyVerifiedInCurrentTab ||
+                (keepVerifiedFromIdb && isMatchedSavedSession && savedSession?.isPinVerified)
+            );
             const hasAccountReady = Boolean(
               matchedAccount ||
                 userDoc?.hasCompletedOnboarding ||
@@ -4526,17 +4673,39 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (!active) return;
 
-        const finalMatched = applyMatchedGoogleSession(cloudAccountsLoaded, initialUserData, true);
+        // Refresh savedSession lagi sesaat sebelum keputusan final (jaga-jaga user baru saja selesai verifikasi PIN saat cloud fetch berjalan)
+        const latestSavedSession = await readActiveBootSession();
+        const isLatestVerifiedForThisGoogle = Boolean(
+          latestSavedSession &&
+            latestSavedSession.isPinVerified === true &&
+            latestSavedSession.hasCompletedOnboarding === true &&
+            (!latestSavedSession.deviceId || latestSavedSession.deviceId === currentDeviceId) &&
+            ((latestSavedSession.firebaseUid && latestSavedSession.firebaseUid === fbUser.uid) ||
+              (latestSavedSession.email && normalizeEmailKey(latestSavedSession.email) === cleanEmail) ||
+              Boolean(
+                latestSavedSession.activeAccountId &&
+                  cloudAccountsLoaded.some((a) => a.id === latestSavedSession.activeAccountId && isOwnedByUser(a))
+              ))
+        );
+
+        const finalMatched = applyMatchedGoogleSession(
+          cloudAccountsLoaded,
+          initialUserData,
+          true
+        );
         if (finalMatched) {
           setCloudAccountVerificationState('confirmed_has_accounts');
-          if (isSavedSessionForThisGoogle && savedSession?.isPinVerified) {
+          if (isLatestVerifiedForThisGoogle) {
+            setGoogleUser((prev) =>
+              prev ? { ...prev, hasCompletedOnboarding: true, isPinVerified: true } : prev
+            );
             persistActiveSessionToIdb({
               authMode: 'google',
               firebaseUid: fbUser.uid,
               email: cleanEmail,
               emailKey: emailDocId,
               name: finalMatched.fullName || cleanName,
-              picture: fbUser.photoURL || savedSession?.picture,
+              picture: fbUser.photoURL || latestSavedSession?.picture,
               activeAccountId: finalMatched.id,
               isPinVerified: true,
               hasCompletedOnboarding: true,
@@ -4558,41 +4727,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       // =========================================================================
-      // MODE C: Tanpa Sesi Firebase Google (Cek Sesi Aktif Terikat deviceId di IndexedDB)
+      // MODE C: Tanpa Sesi Firebase Auth (Pulihkan SEMUA Sesi Lokal Terverifikasi termasuk OA, Guest, Standard, Email & Google)
       // =========================================================================
-      if (
-        active &&
-        isValidLocalDeviceSession &&
-        savedSession &&
-        (savedSession.authMode === 'oa_account' ||
-          savedSession.authMode === 'guest' ||
-          savedSession.authMode === 'standard_account') &&
-        savedSession.activeAccountId
-      ) {
-        const restoredAcc = workingAccounts.find((a) => a.id === savedSession.activeAccountId);
-        if (restoredAcc) {
-          const cleanRestoredEmail = savedSession.email ? normalizeEmailKey(savedSession.email) : '';
-          setCurrentAccountIdState(restoredAcc.id);
-          setActiveCloudEmail(cleanRestoredEmail || '');
-          setCloudAccountVerificationState('confirmed_has_accounts');
-          setGoogleUser({
-            email: cleanRestoredEmail,
-            name: restoredAcc.fullName || savedSession.name,
-            firebaseUid: restoredAcc.firebaseUid || savedSession.firebaseUid,
-            authMode: savedSession.authMode,
-            emailKey: cleanRestoredEmail ? emailToFirestoreDocId(cleanRestoredEmail) : undefined,
-            loggedInAt: new Date().toISOString(),
-            hasCompletedOnboarding: true,
-            isPinVerified: true,
-          });
-          updateSyncTelemetry({
-            fromCache: true,
-            hasPendingWrites: true,
-            syncedDocCount: workingAccounts.length,
-          });
-          hasFirestoreHydratedRef.current = true;
-          finishAuthCheck();
-          hydrateFullMasterInBackground();
+      if (isValidLocalDeviceSession && savedSession?.activeAccountId) {
+        const restored = await restoreVerifiedLocalSession();
+        if (restored) {
           return;
         }
       }
@@ -4642,12 +4781,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       hydrateFullMasterInBackground();
+    };
+
+    void Promise.race([
+      authPersistenceReady,
+      new Promise<void>((resolve) => window.setTimeout(resolve, 1200)),
+    ]).then(() => {
+      if (!active) return;
+      authUnsub = onAuthStateChanged(auth, (fbUser) => {
+        void handleAuthSnapshot(fbUser);
+      });
     });
 
     return () => {
       active = false;
       window.clearTimeout(hardTimeoutId);
-      authUnsub();
+      if (authUnsub) authUnsub();
       if (userDocUnsub) userDocUnsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4681,6 +4830,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     const activeUid = firebaseUser?.uid || googleUser?.firebaseUid;
     if (!activeUid || !googleUser) return;
+    const sessionStartMs = googleUser.loggedInAt ? new Date(googleUser.loggedInAt).getTime() : Date.now();
     let cancelled = false;
     let unsub: (() => void) | null = null;
     void getOrCreatePersistentDeviceId().then((myDeviceId) => {
@@ -4688,6 +4838,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unsub = subscribeActiveDevices(activeUid, (devices) => {
         const selfRecord = devices.find((d) => d.deviceId === myDeviceId);
         if (selfRecord?.revoked) {
+          const revokedAtMs = selfRecord.revokedAtIso ? new Date(selfRecord.revokedAtIso).getTime() : 0;
+          // Abaikan revokasi lama yang terjadi sebelum sesi login baru di perangkat ini
+          if (revokedAtMs > 0 && Number.isFinite(sessionStartMs) && revokedAtMs < sessionStartMs - 2000) {
+            return;
+          }
           void clearActiveBootSession();
           void clearFastBootSnapshot();
           setCurrentAccountIdState('');
@@ -5767,13 +5922,38 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setGoogleUser((prev) =>
       prev ? { ...prev, hasCompletedOnboarding: true, isPinVerified: true } : prev
     );
+    const targetAcc = currentAccount || linkedUserAccount;
     const targetEmail =
-      googleUser?.email || activeCloudEmail || currentAccount?.googleEmail || currentAccount?.email;
+      googleUser?.email || activeCloudEmail || targetAcc?.googleEmail || targetAcc?.email || '';
+    const resolvedUid = firebaseUser?.uid || googleUser?.firebaseUid || targetAcc?.firebaseUid;
+    if (targetAcc?.id) {
+      persistActiveSessionToIdb({
+        authMode:
+          googleUser?.authMode === 'oa_account'
+            ? 'oa_account'
+            : googleUser?.authMode === 'standard_account'
+            ? 'standard_account'
+            : googleUser?.authMode === 'guest'
+            ? 'guest'
+            : googleUser?.authMode === 'email_direct'
+            ? 'email_direct'
+            : 'google',
+        firebaseUid: resolvedUid,
+        email: targetEmail,
+        emailKey: googleUser?.emailKey,
+        name: targetAcc.fullName || googleUser?.name || 'Nasabah',
+        picture: googleUser?.picture,
+        activeAccountId: targetAcc.id,
+        isPinVerified: true,
+        hasCompletedOnboarding: true,
+        accountsPool: accountsRef.current,
+      });
+    }
     void syncCloudUserProfile(
-      { uid: firebaseUser?.uid, email: targetEmail || undefined },
+      { uid: resolvedUid, email: targetEmail || undefined },
       {
         hasCompletedOnboarding: true,
-        lastAccountId: currentAccountId || '',
+        lastAccountId: targetAcc?.id || currentAccountId || '',
       }
     );
   };
@@ -8820,7 +9000,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const nextBal = isUnlim ? UNLIMITED_BALANCE : targetAcc.balance + cashAmt;
           const updatedAccounts = pool.map((a) =>
             a.id === targetAcc.id
-              ? {
+              ? normalizeAdminAccountAssets({
                   ...a,
                   balance: nextBal,
                   spinCoins: (a.spinCoins || 0) + coinAmt,
@@ -8830,7 +9010,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   rewardPoints: (a.rewardPoints || 0) + pointsAmt,
                   extraFamilySlots: (a.extraFamilySlots || 0) + familySlotAmt,
                   accountUpdatedAtMs: stampMs,
-                }
+                })
               : a
           );
           accountsRef.current = updatedAccounts;
@@ -10811,35 +10991,39 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             t.rewardType === 'trial_priority_badge_verified'
         );
 
-        return {
-          ...acc,
-          balance: newBalance,
-          spinCoins: (acc.spinCoins || 0) + addCoins,
-          levelVouchers: (acc.levelVouchers || 0) + addVouchers,
-          jobLevel: (acc.jobLevel || 1) + addJobLevels,
-          goldGrams: (acc.goldGrams || 0) + addGoldGrams,
-          goldBatches: newGoldBatches,
-          rewardPoints: (acc.rewardPoints || 0) + addPoints,
-          pulsaBalance: (acc.pulsaBalance || 0) + addPulsa,
-          plnKwhBalance: (acc.plnKwhBalance || 0) + addPlnKwh,
-          clickPower: (acc.clickPower || 1) + addClickPower,
-          salaryMultiplier: (acc.salaryMultiplier || 1) + addSalaryMult,
-          cashbackPercent:
-            setCashbackPct !== null
-              ? Math.max(acc.cashbackPercent || 0, setCashbackPct)
-              : acc.cashbackPercent,
-          vipShieldActive: enableShield ? true : acc.vipShieldActive,
-          isVerified: enableBlueCheck ? true : acc.isVerified,
-          verifiedAt: enableBlueCheck ? acc.verifiedAt || claimedAtIso : acc.verifiedAt,
-          verifiedLabel: enableBlueCheck
-            ? acc.verifiedLabel || (hasBlueTrial ? 'Centang Biru Trial' : 'Nasabah Prioritas Terverifikasi')
-            : acc.verifiedLabel,
-          cardTier: nextTier,
-          devRoleId: grantedDevRoleId !== undefined ? grantedDevRoleId : acc.devRoleId,
-          empireBusinesses: nextBiz,
-          empireTradingHoldings: nextTrd,
-          activeTrials: [...existingActiveTrials, ...createdTrials],
-        };
+        return normalizeAdminAccountAssets(
+          applyTierTransitionAssets(
+            {
+              ...acc,
+              balance: newBalance,
+              spinCoins: (acc.spinCoins || 0) + addCoins,
+              levelVouchers: (acc.levelVouchers || 0) + addVouchers,
+              jobLevel: (acc.jobLevel || 1) + addJobLevels,
+              goldGrams: (acc.goldGrams || 0) + addGoldGrams,
+              goldBatches: newGoldBatches,
+              rewardPoints: (acc.rewardPoints || 0) + addPoints,
+              pulsaBalance: (acc.pulsaBalance || 0) + addPulsa,
+              plnKwhBalance: (acc.plnKwhBalance || 0) + addPlnKwh,
+              clickPower: (acc.clickPower || 1) + addClickPower,
+              salaryMultiplier: (acc.salaryMultiplier || 1) + addSalaryMult,
+              cashbackPercent:
+                setCashbackPct !== null
+                  ? Math.max(acc.cashbackPercent || 0, setCashbackPct)
+                  : acc.cashbackPercent,
+              vipShieldActive: enableShield ? true : acc.vipShieldActive,
+              isVerified: enableBlueCheck ? true : acc.isVerified,
+              verifiedAt: enableBlueCheck ? acc.verifiedAt || claimedAtIso : acc.verifiedAt,
+              verifiedLabel: enableBlueCheck
+                ? acc.verifiedLabel || (hasBlueTrial ? 'Centang Biru Trial' : 'Nasabah Prioritas Terverifikasi')
+                : acc.verifiedLabel,
+              devRoleId: grantedDevRoleId !== undefined ? grantedDevRoleId : acc.devRoleId,
+              empireBusinesses: nextBiz,
+              empireTradingHoldings: nextTrd,
+              activeTrials: [...existingActiveTrials, ...createdTrials],
+            },
+            nextTier
+          )
+        );
       })
     );
 
@@ -11299,20 +11483,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       prev.map((u) => (u.id === upgradeId ? { ...u, status: 'approved', decidedAt: new Date().toISOString() } : u))
     );
 
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === upgrade.accountId
-          ? {
-              ...acc,
-              cardTier: upgrade.requestedTier,
-            }
-          : acc
-      )
+    const nextAccounts = accounts.map((acc) =>
+      acc.id === upgrade.accountId
+        ? applyTierTransitionAssets(acc, upgrade.requestedTier)
+        : acc
     );
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
 
     addNotification(
       'Upgrade Kartu Disetujui! 🌟',
-      `Selamat! Permohonan upgrade kartu Anda ke ${CARD_TIER_CONFIGS[upgrade.requestedTier].nameIndo} telah disetujui Admin. Batas tarik tunai harian Anda kini menjadi Rp ${CARD_TIER_CONFIGS[upgrade.requestedTier].dailyWithdrawalLimit.toLocaleString('id-ID')}.`,
+      `Selamat! Permohonan upgrade kartu Anda ke ${CARD_TIER_CONFIGS[upgrade.requestedTier].nameIndo} telah disetujui Admin. Batas tarik tunai harian Anda kini menjadi ${formatRupiah(CARD_TIER_CONFIGS[upgrade.requestedTier].dailyWithdrawalLimit)}.`,
       'success'
     );
 
@@ -12011,7 +12194,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (acc.id === accountId) {
         const nextBalance =
           acc.cardTier === 'admin' ? UNLIMITED_BALANCE : Math.max(0, acc.balance || 0);
-        return {
+        return normalizeAdminAccountAssets({
           ...acc,
           accountNumber: finalAccountNumber,
           cardStatus: 'active' as const,
@@ -12020,7 +12203,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           rejectionReason: undefined,
           tutorialApprovedByAdmin: true,
           hasCompletedTutorial: true,
-        };
+        });
       }
       return acc;
     });
@@ -12063,11 +12246,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Ensure onboarding state is also marked completed so user is never asked to activate/register again
     if (!googleUser || !googleUser.hasCompletedOnboarding) {
+      const resolvedEmail = googleUser?.email || target.googleEmail || target.email || '';
+      const isRealGoogle = isRealGoogleLinkedEmail(resolvedEmail);
+      const nextAuthMode: FastBootSessionSnapshot['authMode'] =
+        googleUser?.authMode ||
+        (target.isOfficialAdminAccount
+          ? 'oa_account'
+          : target.isGuestAccount
+          ? 'guest'
+          : isRealGoogle
+          ? 'google'
+          : 'standard_account');
       setGoogleUser({
-        email: googleUser?.email || target.email || 'nasabah@banknusantara.id',
+        email: resolvedEmail || 'nasabah@banknusantara.id',
         name: googleUser?.name || target.fullName,
+        firebaseUid: googleUser?.firebaseUid || target.firebaseUid,
+        authMode: nextAuthMode,
         loggedInAt: googleUser?.loggedInAt || new Date().toISOString(),
         hasCompletedOnboarding: true,
+        isPinVerified: true,
+      });
+      persistActiveSessionToIdb({
+        authMode: nextAuthMode,
+        firebaseUid: googleUser?.firebaseUid || target.firebaseUid,
+        email: resolvedEmail,
+        name: googleUser?.name || target.fullName,
+        picture: googleUser?.picture,
+        activeAccountId: target.id,
+        isPinVerified: true,
+        hasCompletedOnboarding: true,
+        accountsPool: nextAccounts,
       });
     }
 
@@ -12276,21 +12484,53 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       );
     }
+    const targetEmail = normalizeEmailKey(
+      activeEmailSession || targetAcc.googleEmail || targetAcc.email || ''
+    );
+    const resolvedUid = firebaseUser?.uid || googleUser?.firebaseUid || targetAcc.firebaseUid;
+    const resolvedAuthMode: FastBootSessionSnapshot['authMode'] =
+      googleUser?.authMode ||
+      (targetAcc.isOfficialAdminAccount
+        ? 'oa_account'
+        : targetAcc.isGuestAccount
+        ? 'guest'
+        : isRealGoogleLinkedEmail(targetEmail)
+        ? 'google'
+        : 'standard_account');
+
     if (googleUser) {
-      setGoogleUser({ ...googleUser, hasCompletedOnboarding: true, isPinVerified: true });
+      setGoogleUser({
+        ...googleUser,
+        name: targetAcc.fullName,
+        hasCompletedOnboarding: true,
+        isPinVerified: true,
+      });
     } else {
-      const loginEmail = normalizeEmailKey(targetAcc.googleEmail || targetAcc.email || 'nasabah@banknusantara.id');
+      const loginEmail = targetEmail || 'nasabah@banknusantara.id';
       setActiveCloudEmail(loginEmail);
       setGoogleUser({
         email: loginEmail,
         name: targetAcc.fullName,
-        authMode: 'email_direct',
+        firebaseUid: resolvedUid,
+        authMode: resolvedAuthMode,
         emailKey: emailToFirestoreDocId(loginEmail),
         loggedInAt: new Date().toISOString(),
         hasCompletedOnboarding: true,
         isPinVerified: true,
       });
     }
+    setCloudAccountVerificationState('confirmed_has_accounts');
+    persistActiveSessionToIdb({
+      authMode: resolvedAuthMode,
+      firebaseUid: resolvedUid,
+      email: targetEmail,
+      name: targetAcc.fullName,
+      picture: googleUser?.picture,
+      activeAccountId: targetAcc.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: accountsRef.current,
+    });
 
     addNotification(
       'Berhasil Login ke Kartu Anda! 💳',
@@ -12341,17 +12581,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Jika sekaligus ingin mengubah jenis kartu pada akun tersebut
       if (input.targetCardTier && input.targetCardTier !== targetAcc.cardTier) {
-        setAccounts((prev) =>
-          prev.map((acc) =>
-            acc.id === targetAcc.id
-              ? {
+        const nextAccounts = accounts.map((acc) =>
+          acc.id === targetAcc.id
+            ? applyTierTransitionAssets(
+                {
                   ...acc,
-                  cardTier: input.targetCardTier!,
                   cardNumber: input.regenerateCardDigits ? generateRandomCardNumber() : acc.cardNumber,
-                }
-              : acc
-          )
+                },
+                input.targetCardTier!
+              )
+            : acc
         );
+        accountsRef.current = nextAccounts;
+        latestServerAccountsRef.current = nextAccounts;
+        setAccounts(nextAccounts);
+        void flushMasterStateToCloud({ accounts: nextAccounts });
       }
 
       addNotification(
@@ -12376,20 +12620,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextCvv = input.regenerateCardDigits ? generateRandomCVV() : currentAccount.cvv;
     const tierCfg = CARD_TIER_CONFIGS[nextTier];
 
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === currentAccount.id
-          ? {
+    const nextAccounts = accounts.map((acc) =>
+      acc.id === currentAccount.id
+        ? applyTierTransitionAssets(
+            {
               ...acc,
-              cardTier: nextTier,
-              balance: nextTier === 'admin' ? UNLIMITED_BALANCE : acc.balance,
               cardNumber: nextCardNumber,
               cvv: nextCvv,
-              cardStatus: acc.cardStatus === 'pending' || acc.cardStatus === 'rejected' ? 'active' : acc.cardStatus,
-            }
-          : acc
-      )
+              cardStatus:
+                acc.cardStatus === 'pending' || acc.cardStatus === 'rejected'
+                  ? 'active'
+                  : acc.cardStatus,
+            },
+            nextTier
+          )
+        : acc
     );
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
 
     addNotification(
       'Kartu Berhasil Diganti via Kode Admin! ✨',
@@ -13729,28 +13979,39 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) return { success: false, message: 'Rekening tidak ditemukan!' };
 
     const cfg = CARD_TIER_CONFIGS[newTier];
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === accountId
-          ? {
+    const nextAccounts = accounts.map((acc) =>
+      acc.id === accountId
+        ? applyTierTransitionAssets(
+            {
               ...acc,
-              cardTier: newTier,
-              balance: newTier === 'admin' ? UNLIMITED_BALANCE : acc.balance,
               cardStatus: acc.cardStatus === 'pending' ? 'active' : acc.cardStatus,
-            }
-          : acc
-      )
+              accountUpdatedAtMs: Date.now(),
+            },
+            newTier
+          )
+        : acc
     );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
 
     addNotification(
       'Jenis Kartu Diubah oleh Admin 💳',
-      `Kartu ${target.fullName} (${target.accountNumber}) telah diubah langsung menjadi ${cfg.nameIndo}.`,
+      newTier === 'admin'
+        ? `Kartu ${target.fullName} (${target.accountNumber}) telah diubah menjadi ${cfg.nameIndo} dengan Saldo Uang, Koin Spin, Diamond, Poin Rewards, dan Limit Harian ∞!`
+        : `Kartu ${target.fullName} (${target.accountNumber}) telah diubah menjadi ${cfg.nameIndo}.`,
       'success'
     );
     playAtmSound('success');
     return {
       success: true,
-      message: `Jenis kartu ${target.fullName} berhasil diubah ke ${cfg.nameIndo}!`,
+      message:
+        newTier === 'admin'
+          ? `Jenis kartu ${target.fullName} berhasil diubah ke ${cfg.nameIndo}! Semua aset (Uang, Koin, Diamond, Poin, Limit) otomatis ∞.`
+          : target.cardTier === 'admin'
+          ? `Jenis kartu ${target.fullName} diturunkan ke ${cfg.nameIndo} dan saldo dikembalikan ke batas aman normal.`
+          : `Jenis kartu ${target.fullName} berhasil diubah ke ${cfg.nameIndo}!`,
     };
   };
 
@@ -13991,24 +14252,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ) => {
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan!' };
+    const isAdminTier = isAdminCardAccount(target);
     const currentPts = target.rewardPoints || 0;
     const nextPts =
-      mode === 'unlimited'
+      isAdminTier || mode === 'unlimited'
         ? UNLIMITED_BALANCE
         : mode === 'set'
         ? Math.max(0, points)
         : isUnlimitedNumber(currentPts)
         ? UNLIMITED_BALANCE
         : currentPts + Math.max(0, points);
-    setAccounts((prev) =>
-      prev.map((acc) => (acc.id === accountId ? { ...acc, rewardPoints: nextPts } : acc))
+    const nextAccounts = accounts.map((acc) =>
+      acc.id === accountId
+        ? normalizeAdminAccountAssets({
+            ...acc,
+            rewardPoints: nextPts,
+            accountUpdatedAtMs: Date.now(),
+          })
+        : acc
     );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
     playAtmSound('success');
     return {
       success: true,
-      message: `Poin Reward Nusantara untuk ${target.fullName} berhasil diatur menjadi ${
-        isUnlimitedNumber(nextPts) ? '∞ (Tidak Terbatas)' : nextPts.toLocaleString('id-ID')
-      } Poin!`,
+      message: isAdminTier
+        ? `Kartu ${target.fullName} bertier ADMIN sehingga Poin Rewards sudah ∞ dan berhasil disinkronkan ke Cloud!`
+        : `Poin Reward Nusantara untuk ${target.fullName} berhasil diatur menjadi ${formatAssetCount(nextPts)} Poin!`,
     };
   };
 
@@ -14127,7 +14399,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? input.oaAdminPin.trim()
         : '159357';
 
-    const newAcc: BankAccount = {
+    const newAcc: BankAccount = normalizeAdminAccountAssets({
       id: `acc-inst-${Date.now()}`,
       userId16: cleanId16,
       accountNumber: accNum,
@@ -14146,9 +14418,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       status: 'active',
       dailyWithdrawnToday: 0,
       lastWithdrawalDate: '',
-      initialDeposit: baseBalance,
+      initialDeposit: input.cardTier === 'admin' ? UNLIMITED_BALANCE : baseBalance,
       createdAt: new Date().toISOString(),
-      rewardPoints: 1000,
+      rewardPoints: input.cardTier === 'admin' ? UNLIMITED_BALANCE : 1000,
+      spinCoins: input.cardTier === 'admin' ? UNLIMITED_BALANCE : 0,
+      diamonds: input.cardTier === 'admin' ? UNLIMITED_BALANCE : 0,
+      customSpendingLimit:
+        input.cardTier === 'admin'
+          ? UNLIMITED_BALANCE
+          : CARD_TIER_CONFIGS[input.cardTier]?.dailyWithdrawalLimit,
       allowInternational: true,
       isVerified: Boolean(input.isVerified),
       verifiedAt: input.isVerified ? new Date().toISOString() : undefined,
@@ -14157,7 +14435,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       tutorialApprovedByAdmin: true,
       isOfficialAdminAccount: true,
       oaAdminPin: cleanOaPin,
-    };
+    });
 
     const nextAccounts = unionMergeAccountsList(
       [newAcc, ...accountsRef.current],
@@ -14305,7 +14583,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ? 'acc-reg'
       : 'acc-oa';
 
-    const newAcc: BankAccount = {
+    const newAcc: BankAccount = normalizeAdminAccountAssets({
       id: `${idPrefix}-${Date.now()}`,
       userId16: finalUserId16,
       accountNumber: finalAccountNumber,
@@ -14330,7 +14608,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       initialDeposit: finalBalance === UNLIMITED_BALANCE ? UNLIMITED_BALANCE : finalBalance,
       createdAt: nowIso,
       rewardPoints:
-        input.rewardPoints !== undefined
+        input.cardTier === 'admin'
+          ? UNLIMITED_BALANCE
+          : input.rewardPoints !== undefined
           ? Math.max(0, Number(input.rewardPoints))
           : isOaMode
           ? 5000
@@ -14342,7 +14622,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       allowInternational:
         input.allowInternational !== undefined ? input.allowInternational : isOaMode,
       customSpendingLimit:
-        input.customSpendingLimit !== undefined
+        input.cardTier === 'admin'
+          ? UNLIMITED_BALANCE
+          : input.customSpendingLimit !== undefined
           ? Math.max(0, Number(input.customSpendingLimit))
           : CARD_TIER_CONFIGS[input.cardTier]?.dailyWithdrawalLimit || 10_000_000,
       isVerified: Boolean(input.isVerified),
@@ -14359,7 +14641,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       salaryMultiplier: Math.max(1, Number(input.salaryMultiplier) || 1),
       cashbackPercent: Math.max(0, Number(input.cashbackPercent) || 0),
       vipShieldActive: Boolean(input.vipShieldActive),
-      spinCoins: Math.max(0, Number(input.spinCoins) || 0),
+      spinCoins:
+        input.cardTier === 'admin' ? UNLIMITED_BALANCE : Math.max(0, Number(input.spinCoins) || 0),
+      diamonds: input.cardTier === 'admin' ? UNLIMITED_BALANCE : 0,
       goldGrams,
       goldBatches,
       empireBusinesses,
@@ -14372,7 +14656,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       createdByAdmin: true,
       oaAdminPin: finalOaAdminPin,
       failedPinAttempts: 0,
-    };
+    });
 
     const nextAccounts = unionMergeAccountsList(
       [newAcc, ...accountsRef.current],
@@ -14976,23 +15260,31 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ) => {
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan!' };
-    setAccounts((prev) =>
-      prev.map((acc) =>
-        acc.id === accountId
-          ? {
-              ...acc,
-              customSpendingLimit: Math.max(0, limit),
-              allowInternational,
-            }
-          : acc
-      )
+    const isAdminTier = isAdminCardAccount(target);
+    const effectiveLimit = isAdminTier ? UNLIMITED_BALANCE : Math.max(0, limit);
+    const nextAccounts = accounts.map((acc) =>
+      acc.id === accountId
+        ? normalizeAdminAccountAssets({
+            ...acc,
+            customSpendingLimit: effectiveLimit,
+            allowInternational,
+          })
+        : acc
     );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
     playAtmSound('success');
     return {
       success: true,
-      message: `Limit belanja harian ${target.fullName} diatur ke ${formatRupiah(limit)} & Akses Internasional: ${
-        allowInternational ? 'AKTIF' : 'NONAKTIF'
-      }!`,
+      message: isAdminTier
+        ? `Limit belanja harian ${target.fullName} sudah ∞ (Kartu ADMIN) & Akses Internasional: ${
+            allowInternational ? 'AKTIF' : 'NONAKTIF'
+          } (Tersinkron ke Cloud)!`
+        : `Limit belanja harian ${target.fullName} diatur ke ${formatRupiah(effectiveLimit)} & Akses Internasional: ${
+            allowInternational ? 'AKTIF' : 'NONAKTIF'
+          }!`,
     };
   };
 
@@ -15232,17 +15524,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const adminSetAllAccountsTier = (tier: CardTier) => {
     const cfg = CARD_TIER_CONFIGS[tier];
-    setAccounts((prev) =>
-      prev.map((acc) => ({
-        ...acc,
-        cardTier: tier,
-        balance: tier === 'admin' ? UNLIMITED_BALANCE : acc.balance,
-      }))
+    const nextAccounts = accounts.map((acc) =>
+      applyTierTransitionAssets(
+        {
+          ...acc,
+          accountUpdatedAtMs: Date.now(),
+        },
+        tier
+      )
     );
+    latestServerAccountsRef.current = nextAccounts;
+    accountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
     playAtmSound('success');
     return {
       success: true,
-      message: `Seluruh kartu nasabah berhasil diubah secara massal menjadi kelas ${cfg.nameIndo}!`,
+      message:
+        tier === 'admin'
+          ? `Seluruh kartu nasabah berhasil diubah massal menjadi ${cfg.nameIndo} dengan aset ∞ dan disinkronkan ke Cloud!`
+          : `Seluruh kartu nasabah berhasil diubah secara massal menjadi kelas ${cfg.nameIndo}!`,
     };
   };
 
@@ -15650,7 +15951,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setTransactions((prev) => [newTx, ...prev]);
     addNotification(
       'Tarik Tunai ATM Berhasil 💵',
-      `Penarikan tunai sebesar Rp ${amount.toLocaleString('id-ID')} berhasil. Sisa saldo Anda: ${isAdminCard ? '∞ (Tidak Terbatas)' : formatRupiah(nextBalance)}.`,
+      `Penarikan tunai sebesar Rp ${amount.toLocaleString('id-ID')} berhasil. Sisa saldo Anda: ${isAdminCard ? '∞' : formatRupiah(nextBalance)}.`,
       'success'
     );
     playAtmSound('cash');
@@ -15852,7 +16153,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       addNotification(
         'Transfer Berhasil Instan! ✅',
-        `Transfer sebesar Rp ${input.amount.toLocaleString('id-ID')} ke ${recipientName} (${input.recipientBank}) berhasil dikirim secara instan. Sisa saldo: ${isAdminCard ? '∞ (Tidak Terbatas)' : formatRupiah(nextSenderBalance)}.`,
+        `Transfer sebesar Rp ${input.amount.toLocaleString('id-ID')} ke ${recipientName} (${input.recipientBank}) berhasil dikirim secara instan. Sisa saldo: ${isAdminCard ? '∞' : formatRupiah(nextSenderBalance)}.`,
         'success'
       );
 
@@ -17432,10 +17733,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       commitAccountMutationPermanent(
         targetAcc.id,
-        (a) => ({
-          ...a,
-          diamonds: (a.diamonds || 0) + creditDiamonds,
-        }),
+        (a) =>
+          normalizeAdminAccountAssets({
+            ...a,
+            diamonds: isAdminCardAccount(a) ? UNLIMITED_BALANCE : (a.diamonds || 0) + creditDiamonds,
+          }),
         {
           transactions: nextTxs,
           notifications: nextNotifs,
@@ -17570,17 +17872,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
     const target = latestPool.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan.' };
+    const isAdminTier = isAdminCardAccount(target);
     const safeVal = Math.max(0, Math.floor(Number(diamonds) || 0));
     const currentDia = target.diamonds || 0;
-    const nextDia = mode === 'add' ? currentDia + safeVal : safeVal;
-    commitAccountMutationPermanent(accountId, (a) => ({
-      ...a,
-      diamonds: nextDia,
-    }));
+    const nextDia = isAdminTier
+      ? UNLIMITED_BALANCE
+      : mode === 'add'
+      ? currentDia + safeVal
+      : safeVal;
+    commitAccountMutationPermanent(accountId, (a) =>
+      normalizeAdminAccountAssets({
+        ...a,
+        diamonds: nextDia,
+      })
+    );
     playAtmSound('success');
     return {
       success: true,
-      message: `Saldo Diamond ${target.fullName} berhasil diperbarui menjadi ${nextDia.toLocaleString('id-ID')} Diamond!`,
+      message: isAdminTier
+        ? `Kartu ${target.fullName} bertier ADMIN sehingga Diamond sudah ∞ dan disinkronkan ke Cloud!`
+        : `Saldo Diamond ${target.fullName} berhasil diperbarui menjadi ${formatAssetCount(nextDia)} Diamond!`,
     };
   };
 
@@ -17606,8 +17917,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
     const cost = Math.max(1, Math.floor(Number(amount) || 0));
+    const isAdminTier = isAdminCardAccount(liveAcc) || isUnlimitedNumber(liveAcc.diamonds);
     const currentDia = liveAcc.diamonds || 0;
-    if (currentDia < cost) {
+    if (!isAdminTier && currentDia < cost) {
       playAtmSound('alert');
       return {
         success: false,
@@ -17615,12 +17927,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         message: `Saldo 💎 tidak mencukupi! Butuh ${cost.toLocaleString('id-ID')} 💎 (Saldo Anda: ${currentDia.toLocaleString('id-ID')} 💎).`,
       };
     }
-    const nextDia = Math.max(0, currentDia - cost);
+    const nextDia = isAdminTier ? UNLIMITED_BALANCE : Math.max(0, currentDia - cost);
     const tx: Transaction = {
       id: `tx-dia-spend-${Date.now()}`,
       accountId: liveAcc.id,
       type: 'tagihan',
-      title: `💎 ${title} (-${cost.toLocaleString('id-ID')} Diamond)`,
+      title: `💎 ${title} (${isAdminTier ? 'Kartu ADMIN ∞' : `-${cost.toLocaleString('id-ID')} Diamond`})`,
       amount: 0,
       balanceAfter: liveAcc.balance,
       date: new Date().toISOString(),
@@ -17634,17 +17946,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     commitAccountMutationPermanent(
       liveAcc.id,
-      (a) => ({
-        ...a,
-        diamonds: nextDia,
-      }),
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          diamonds: nextDia,
+        }),
       { transactions: nextTxs }
     );
     playAtmSound('success');
     return {
       success: true,
       newDiamondBalance: nextDia,
-      message: `Berhasil menggunakan ${cost.toLocaleString('id-ID')} Diamond untuk ${title}!`,
+      message: isAdminTier
+        ? `Berhasil menggunakan fitur ${title} (Kartu ADMIN: Diamond tetap ∞)!`
+        : `Berhasil menggunakan ${cost.toLocaleString('id-ID')} Diamond untuk ${title}!`,
     };
   };
 
@@ -17670,8 +17985,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const lvlCount = Math.max(1, Math.min(50, Math.floor(Number(levels) || 1)));
     const DIAMOND_PER_LEVEL = 25;
     const totalCost = lvlCount * DIAMOND_PER_LEVEL;
+    const isAdminTier = isAdminCardAccount(liveAcc) || isUnlimitedNumber(liveAcc.diamonds);
     const currentDia = liveAcc.diamonds || 0;
-    if (currentDia < totalCost) {
+    if (!isAdminTier && currentDia < totalCost) {
       playAtmSound('alert');
       return {
         success: false,
@@ -17681,7 +17997,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     const oldLevel = liveAcc.jobLevel || 1;
     const newLevel = oldLevel + lvlCount;
-    const nextDia = Math.max(0, currentDia - totalCost);
+    const nextDia = isAdminTier ? UNLIMITED_BALANCE : Math.max(0, currentDia - totalCost);
     const tx: Transaction = {
       id: `tx-lvl-dia-${Date.now()}`,
       accountId: liveAcc.id,
@@ -17693,26 +18009,31 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       timestamp: new Date().toISOString(),
       referenceNo: `DIAlvl-${Date.now().toString().slice(-5)}`,
       status: 'berhasil',
-      note: `Menggunakan ${totalCost.toLocaleString('id-ID')} Diamond untuk naik +${lvlCount} Level Pekerjaan.`,
+      note: isAdminTier
+        ? `Upgrade +${lvlCount} Level Pekerjaan gratis ∞ dengan Kartu ADMIN.`
+        : `Menggunakan ${totalCost.toLocaleString('id-ID')} Diamond untuk naik +${lvlCount} Level Pekerjaan.`,
     };
     const nextTxs = [tx, ...transactions];
     setTransactions(nextTxs);
 
     commitAccountMutationPermanent(
       liveAcc.id,
-      (a) => ({
-        ...a,
-        jobLevel: newLevel,
-        diamonds: nextDia,
-      }),
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          jobLevel: newLevel,
+          diamonds: nextDia,
+        }),
       { transactions: nextTxs }
     );
     playAtmSound('success');
     return {
       success: true,
       newLevel,
-      diamondsSpent: totalCost,
-      message: `💎 Level Pekerjaan naik permanen dari Lv.${oldLevel} menjadi Lv.${newLevel} (-${totalCost.toLocaleString('id-ID')} Diamond)!`,
+      diamondsSpent: isAdminTier ? 0 : totalCost,
+      message: isAdminTier
+        ? `💎 Level Pekerjaan naik permanen dari Lv.${oldLevel} menjadi Lv.${newLevel} (Kartu ADMIN: Diamond tetap ∞)!`
+        : `💎 Level Pekerjaan naik permanen dari Lv.${oldLevel} menjadi Lv.${newLevel} (-${totalCost.toLocaleString('id-ID')} Diamond)!`,
     };
   };
 
@@ -17736,8 +18057,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
     const safeDia = Math.max(1, Math.floor(Number(diamonds) || 0));
+    const isAdminTier = isAdminCardAccount(liveAcc) || isUnlimitedNumber(liveAcc.diamonds);
     const currentDia = liveAcc.diamonds || 0;
-    if (currentDia < safeDia) {
+    if (!isAdminTier && currentDia < safeDia) {
       playAtmSound('alert');
       return {
         success: false,
@@ -17745,11 +18067,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         message: `Saldo 💎 Anda (${currentDia.toLocaleString('id-ID')} 💎) tidak mencukupi untuk menukar ${safeDia.toLocaleString('id-ID')} 💎.`,
       };
     }
-    const nextDia = Math.max(0, currentDia - safeDia);
+    const nextDia = isAdminTier ? UNLIMITED_BALANCE : Math.max(0, currentDia - safeDia);
     const unitCashRate = Math.max(100, (diamondConfigRef.current.baseDiamondPriceRupiah || 90) * 50);
     const unitCoinRate = 2; // 1 💎 = 2 Coin
     const received = target === 'cash' ? safeDia * unitCashRate : safeDia * unitCoinRate;
-    const isUnlim = liveAcc.cardTier === 'admin' || isUnlimitedNumber(liveAcc.balance);
+    const isUnlim = isAdminCardAccount(liveAcc) || isUnlimitedNumber(liveAcc.balance);
     const nextBal = target === 'cash' && !isUnlim ? liveAcc.balance + received : liveAcc.balance;
 
     const tx: Transaction = {
@@ -17774,22 +18096,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     commitAccountMutationPermanent(
       liveAcc.id,
-      (a) => ({
-        ...a,
-        diamonds: nextDia,
-        balance: nextBal,
-        spinCoins: target === 'coin' ? (a.spinCoins || 0) + received : a.spinCoins || 0,
-      }),
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          diamonds: nextDia,
+          balance: nextBal,
+          spinCoins:
+            isAdminCardAccount(a) || isUnlimitedNumber(a.spinCoins)
+              ? UNLIMITED_BALANCE
+              : target === 'coin'
+              ? (a.spinCoins || 0) + received
+              : a.spinCoins || 0,
+        }),
       { transactions: nextTxs }
     );
     playAtmSound('cash');
     return {
       success: true,
       receivedAmount: received,
-      message:
-        target === 'cash'
-          ? `✅ Berhasil menukar ${safeDia.toLocaleString('id-ID')} Diamond menjadi ${formatRupiah(received)}!`
-          : `✅ Berhasil menukar ${safeDia.toLocaleString('id-ID')} Diamond menjadi ${received.toLocaleString('id-ID')} Coin!`,
+      message: isAdminTier
+        ? `✅ Berhasil menukar Diamond (Kartu ADMIN: seluruh aset tetap ∞)!`
+        : target === 'cash'
+        ? `✅ Berhasil menukar ${safeDia.toLocaleString('id-ID')} Diamond menjadi ${formatRupiah(received)}!`
+        : `✅ Berhasil menukar ${safeDia.toLocaleString('id-ID')} Diamond menjadi ${received.toLocaleString('id-ID')} Coin!`,
     };
   };
 
@@ -17945,6 +18274,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const finalDiamondCost = useDiamond ? cost.diamondCost : 0;
 
     const isUnlim = liveAcc.cardTier === 'admin' || isUnlimitedNumber(liveAcc.balance);
+    const isDiaUnlim = liveAcc.cardTier === 'admin' || isUnlimitedNumber(liveAcc.diamonds);
     if (!isUnlim && liveAcc.balance < cost.moneyCost) {
       playAtmSound('alert');
       return {
@@ -17955,7 +18285,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
     const currentDia = liveAcc.diamonds || 0;
-    if (finalDiamondCost > 0 && currentDia < finalDiamondCost) {
+    if (!isDiaUnlim && finalDiamondCost > 0 && currentDia < finalDiamondCost) {
       playAtmSound('alert');
       return {
         success: false,
@@ -17967,7 +18297,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const nextBal = isUnlim ? UNLIMITED_BALANCE : liveAcc.balance - cost.moneyCost;
-    const nextDia = Math.max(0, currentDia - finalDiamondCost);
+    const nextDia = isDiaUnlim ? UNLIMITED_BALANCE : Math.max(0, currentDia - finalDiamondCost);
     const nextExtraSlots = currentExtra + 1;
     const newMaxSlots = (familyConfigRef.current.defaultMaxFamilies || 1) + nextExtraSlots;
 
@@ -17989,12 +18319,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     commitAccountMutationPermanent(
       liveAcc.id,
-      (a) => ({
-        ...a,
-        balance: nextBal,
-        diamonds: nextDia,
-        extraFamilySlots: nextExtraSlots,
-      }),
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          balance: nextBal,
+          diamonds: nextDia,
+          extraFamilySlots: nextExtraSlots,
+        }),
       { transactions: nextTxs }
     );
     playAtmSound('cash');
@@ -19905,23 +20236,24 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const currentCoins = currentAccount.spinCoins || 0;
-    const newCoinBalance = currentCoins + pkg.coins;
+    const newCoinBalance = isAdminCard ? UNLIMITED_BALANCE : currentCoins + pkg.coins;
     const newAccountBalance = isAdminCard
       ? UNLIMITED_BALANCE
       : Math.max(0, Math.round(currentAccount.balance - finalPrice));
 
     const updatedAccounts = accounts.map((a) =>
       a.id === currentAccount.id
-        ? {
+        ? normalizeAdminAccountAssets({
             ...a,
             balance: newAccountBalance,
             spinCoins: newCoinBalance,
-          }
+          })
         : a
     );
     setAccounts(updatedAccounts);
     flushMasterStateToCloud({ accounts: updatedAccounts });
 
+    const newCoinLabel = formatAssetCount(newCoinBalance);
     const newTx: Transaction = {
       id: `tx-buycoin-${Date.now()}`,
       accountId: currentAccount.id,
@@ -19930,9 +20262,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       amount: finalPrice,
       description: `Pembelian ${pkg.coins.toLocaleString('id-ID')} Koin Spin the Wheel seharga ${formatRupiahWithDecimals(
         finalPrice
-      )}${discountPercent > 0 ? ` (Diskon Admin ${discountPercent}%)` : ''}. Total Koin: ${newCoinBalance.toLocaleString(
-        'id-ID'
-      )} Koin.`,
+      )}${discountPercent > 0 ? ` (Diskon Admin ${discountPercent}%)` : ''}. Total Koin: ${newCoinLabel}.`,
       status: 'success',
       referenceNo: `COIN-${Date.now().toString().slice(-6)}`,
       timestamp: new Date().toISOString(),
@@ -19945,15 +20275,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       `🪙 Pembelian +${pkg.coins.toLocaleString('id-ID')} Koin Berhasil`,
       `Anda membeli ${pkg.coins.toLocaleString('id-ID')} Koin Spin seharga ${formatRupiahWithDecimals(
         finalPrice
-      )}. Saldo Koin Anda kini: ${newCoinBalance.toLocaleString('id-ID')} Koin.`,
+      )}. Saldo Koin Anda kini: ${newCoinLabel}.`,
       'success'
     );
 
     return {
       success: true,
-      message: `Berhasil membeli +${pkg.coins.toLocaleString('id-ID')} Koin Spin seharga ${formatRupiahWithDecimals(
-        finalPrice
-      )}! Total Koin Anda sekarang: ${newCoinBalance.toLocaleString('id-ID')} Koin.`,
+      message: isAdminCard
+        ? `Paket #${pkg.id} berhasil disinkronkan! Kartu ADMIN Anda tetap memiliki Saldo & Koin Spin ∞.`
+        : `Berhasil membeli +${pkg.coins.toLocaleString('id-ID')} Koin Spin seharga ${formatRupiahWithDecimals(
+            finalPrice
+          )}! Total Koin Anda sekarang: ${newCoinLabel} Koin.`,
       coinsAdded: pkg.coins,
       paidAmount: finalPrice,
       newCoinBalance,
@@ -20054,7 +20386,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } else {
       const { finalCoins } = calculateSpinCost(spinCount, spinWheelConfig);
       coinsToSpend = finalCoins;
-      if (currentCoins < coinsToSpend) {
+      if (!isAdminCard && !isUnlimitedNumber(currentCoins) && currentCoins < coinsToSpend) {
         playAtmSound('alert');
         return {
           success: false,
@@ -20076,21 +20408,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       totalWonAmount += picked.segment.amount;
     }
 
+    const isCoinUnlim = isAdminCard || isUnlimitedNumber(currentCoins);
     const newCoinBalance =
-      paymentMethod === 'coins' ? Math.max(0, currentCoins - coinsToSpend) : currentCoins;
+      isCoinUnlim
+        ? UNLIMITED_BALANCE
+        : paymentMethod === 'coins'
+        ? Math.max(0, currentCoins - coinsToSpend)
+        : currentCoins;
     const newAccountBalance = isAdminCard
       ? UNLIMITED_BALANCE
       : Math.max(0, Math.round(currentAccount.balance - rupiahToSpend + totalWonAmount));
 
     const updatedAccountsAfterSpin = accounts.map((a) =>
       a.id === currentAccount.id
-        ? {
+        ? normalizeAdminAccountAssets({
             ...a,
             balance: newAccountBalance,
             spinCoins: newCoinBalance,
             totalSpinsPlayed: (a.totalSpinsPlayed || 0) + spinCount,
             totalSpinWinnings: (a.totalSpinWinnings || 0) + totalWonAmount,
-          }
+          })
         : a
     );
     setAccounts(updatedAccountsAfterSpin);
@@ -20202,30 +20539,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ) => {
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan.' };
+    const isAdminTier = isAdminCardAccount(target);
     const cleanCoins = Math.max(0, Math.floor(coins));
-    const nextCoins =
-      mode === 'add' ? (target.spinCoins || 0) + cleanCoins : cleanCoins;
+    const nextCoins = isAdminTier
+      ? UNLIMITED_BALANCE
+      : mode === 'add'
+      ? (target.spinCoins || 0) + cleanCoins
+      : cleanCoins;
 
     const updatedAdjustedAccounts = accounts.map((a) =>
-      a.id === accountId ? { ...a, spinCoins: nextCoins } : a
+      a.id === accountId
+        ? normalizeAdminAccountAssets({ ...a, spinCoins: nextCoins, accountUpdatedAtMs: Date.now() })
+        : a
     );
+    latestServerAccountsRef.current = updatedAdjustedAccounts;
+    accountsRef.current = updatedAdjustedAccounts;
     setAccounts(updatedAdjustedAccounts);
     flushMasterStateToCloud({ accounts: updatedAdjustedAccounts });
     playAtmSound('success');
     return {
       success: true,
-      message: `Koin Spin untuk ${target.fullName} berhasil diatur menjadi ${nextCoins.toLocaleString(
-        'id-ID'
-      )} Koin!`,
+      message: isAdminTier
+        ? `Kartu ${target.fullName} bertier ADMIN sehingga Koin Spin sudah ∞ dan disinkronkan ke Cloud!`
+        : `Koin Spin untuk ${target.fullName} berhasil diatur menjadi ${formatAssetCount(nextCoins)} Koin!`,
     };
   };
 
   const adminMassSpinCoinRain = (coins: number) => {
     const cleanCoins = Math.max(1, Math.floor(coins));
-    const updatedRainAccounts = accounts.map((a) => ({
-      ...a,
-      spinCoins: (a.spinCoins || 0) + cleanCoins,
-    }));
+    const updatedRainAccounts = accounts.map((a) =>
+      normalizeAdminAccountAssets({
+        ...a,
+        spinCoins: isAdminCardAccount(a) ? UNLIMITED_BALANCE : (a.spinCoins || 0) + cleanCoins,
+      })
+    );
+    latestServerAccountsRef.current = updatedRainAccounts;
+    accountsRef.current = updatedRainAccounts;
     setAccounts(updatedRainAccounts);
     flushMasterStateToCloud({ accounts: updatedRainAccounts });
     playAtmSound('cash');
@@ -20233,7 +20582,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       success: true,
       message: `Hujan Koin Spin Berhasil! Seluruh ${accounts.length} nasabah menerima +${cleanCoins.toLocaleString(
         'id-ID'
-      )} Koin Spin gratis!`,
+      )} Koin Spin gratis (Kartu ADMIN tetap ∞)!`,
     };
   };
 
@@ -21246,7 +21595,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const nextBalance = isInf ? currentAccount.balance : currentAccount.balance + finalCash;
-    const nextCoins = (currentAccount.spinCoins || 0) + finalCoins;
+    const nextCoins =
+      isAdminCardAccount(currentAccount) || isUnlimitedNumber(currentAccount.spinCoins)
+        ? UNLIMITED_BALANCE
+        : (currentAccount.spinCoins || 0) + finalCoins;
 
     setAccounts((prev) =>
       prev.map((a) =>
@@ -22091,11 +22443,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    const isInf = isUnlimitedNumber(currentAccount.balance);
+    const isSenderAdmin = isAdminCardAccount(currentAccount);
+    const isInf = isSenderAdmin || isUnlimitedNumber(currentAccount.balance);
+    const isCoinInf = isSenderAdmin || isUnlimitedNumber(currentAccount.spinCoins);
     if (!isInf && uangSent > currentAccount.balance) {
       return { success: false, message: 'Saldo Uang Rupiah tidak mencukupi untuk Transfer Bebas.' };
     }
-    if (coinSent > (currentAccount.spinCoins || 0)) {
+    if (!isCoinInf && coinSent > (currentAccount.spinCoins || 0)) {
       return { success: false, message: 'Saldo Coin Spin tidak mencukupi untuk Transfer Bebas.' };
     }
     const ownedGoldGrams =
@@ -22171,16 +22525,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setAccounts((prev) =>
       prev.map((acc) => {
         if (acc.id === currentAccount.id) {
-          return {
+          return normalizeAdminAccountAssets({
             ...acc,
-            balance: isInf ? acc.balance : Math.max(0, acc.balance - uangSent),
-            spinCoins: Math.max(0, (acc.spinCoins || 0) - coinSent),
+            balance: isInf ? UNLIMITED_BALANCE : Math.max(0, acc.balance - uangSent),
+            spinCoins: isCoinInf ? UNLIMITED_BALANCE : Math.max(0, (acc.spinCoins || 0) - coinSent),
             goldGrams: goldGramsSent > 0 ? nextSenderGoldGrams : acc.goldGrams,
             goldBatches: goldGramsSent > 0 ? nextSenderBatches : acc.goldBatches,
-          };
+          });
         }
         if (internalRecipient && acc.id === internalRecipient.id) {
-          const recIsInf = isUnlimitedNumber(acc.balance);
+          const recIsAdmin = isAdminCardAccount(acc);
+          const recIsInf = recIsAdmin || isUnlimitedNumber(acc.balance);
+          const recIsCoinInf = recIsAdmin || isUnlimitedNumber(acc.spinCoins);
           const recNewBatches = [...(acc.goldBatches || [])];
           if (goldReceivedGrams > 0) {
             recNewBatches.push({
@@ -22199,13 +22555,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             goldReceivedGrams > 0
               ? (acc.goldGrams || 0) + goldReceivedGrams
               : acc.goldGrams || 0;
-          return {
+          return normalizeAdminAccountAssets({
             ...acc,
-            balance: recIsInf ? acc.balance : acc.balance + uangReceived,
-            spinCoins: (acc.spinCoins || 0) + coinReceived,
+            balance: recIsInf ? UNLIMITED_BALANCE : acc.balance + uangReceived,
+            spinCoins: recIsCoinInf ? UNLIMITED_BALANCE : (acc.spinCoins || 0) + coinReceived,
             goldGrams: recGoldGrams,
             goldBatches: goldReceivedGrams > 0 ? recNewBatches : acc.goldBatches,
-          };
+          });
         }
         return acc;
       })
@@ -22891,20 +23247,47 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) {
       return { success: false, message: 'Akun nasabah tidak ditemukan.' };
     }
-    setCurrentAccountId(target.id);
+    const resolvedEmail = target.googleEmail || target.email || '';
+    const resolvedAuthMode: FastBootSessionSnapshot['authMode'] =
+      googleUser?.authMode ||
+      (target.isOfficialAdminAccount
+        ? 'oa_account'
+        : target.isGuestAccount
+        ? 'guest'
+        : isRealGoogleLinkedEmail(resolvedEmail)
+        ? 'google'
+        : 'standard_account');
+    setCurrentAccountIdState(target.id);
+    setCloudAccountVerificationState('confirmed_has_accounts');
     if (!googleUser) {
       setGoogleUser({
-        email: target.email || 'nasabah@banknusantara.id',
+        email: resolvedEmail || 'nasabah@banknusantara.id',
         name: target.fullName,
+        firebaseUid: target.firebaseUid,
+        authMode: resolvedAuthMode,
         loggedInAt: new Date().toISOString(),
         hasCompletedOnboarding: true,
+        isPinVerified: true,
       });
-    } else if (!googleUser.hasCompletedOnboarding) {
+    } else {
       setGoogleUser({
         ...googleUser,
+        name: target.fullName,
         hasCompletedOnboarding: true,
+        isPinVerified: true,
       });
     }
+    persistActiveSessionToIdb({
+      authMode: resolvedAuthMode,
+      firebaseUid: target.firebaseUid || firebaseUser?.uid || googleUser?.firebaseUid,
+      email: resolvedEmail,
+      name: target.fullName,
+      picture: googleUser?.picture,
+      activeAccountId: target.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: accountsRef.current,
+    });
     playAtmSound('success');
     return {
       success: true,
@@ -22945,14 +23328,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) {
       return { success: false, message: 'Akun tidak ditemukan.' };
     }
-    const nextAccounts = accounts.map((a) =>
-      a.id === accountId
-        ? {
-            ...a,
-            ...updates,
-          }
-        : a
-    );
+    const nextAccounts = accounts.map((a) => {
+      if (a.id !== accountId) return a;
+      const merged = {
+        ...a,
+        ...updates,
+        accountUpdatedAtMs: Date.now(),
+      };
+      if (updates.cardTier && updates.cardTier !== a.cardTier) {
+        return applyTierTransitionAssets(merged, updates.cardTier, {
+          ...(updates.balance !== undefined && !isUnlimitedNumber(updates.balance)
+            ? { balance: updates.balance }
+            : {}),
+          ...(updates.spinCoins !== undefined && !isUnlimitedNumber(updates.spinCoins)
+            ? { spinCoins: updates.spinCoins }
+            : {}),
+          ...(updates.diamonds !== undefined && !isUnlimitedNumber(updates.diamonds)
+            ? { diamonds: updates.diamonds }
+            : {}),
+          ...(updates.rewardPoints !== undefined && !isUnlimitedNumber(updates.rewardPoints)
+            ? { rewardPoints: updates.rewardPoints }
+            : {}),
+          ...(updates.customSpendingLimit !== undefined &&
+          !isUnlimitedNumber(updates.customSpendingLimit)
+            ? { customSpendingLimit: updates.customSpendingLimit }
+            : {}),
+        });
+      }
+      return normalizeAdminAccountAssets(merged);
+    });
     latestServerAccountsRef.current = nextAccounts;
     accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
@@ -23136,12 +23540,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           }
 
-          return {
+          const updatedAcc: BankAccount = {
             ...acc,
             isVerified: nextVerified,
             verifiedLabel: nextVerifiedLabel,
             vipShieldActive: nextVipShield,
-            cardTier: nextCardTier,
             clickPower: nextClickPower,
             salaryMultiplier: nextSalaryMult,
             cashbackPercent: nextCashback,
@@ -23150,6 +23553,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             empireTradingHoldings: nextTrd,
             activeTrials: remaining,
           };
+          return nextCardTier !== acc.cardTier
+            ? applyTierTransitionAssets(updatedAcc, nextCardTier)
+            : normalizeAdminAccountAssets(updatedAcc);
         });
       });
 
@@ -24373,32 +24779,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             t.rewardType === 'trial_diamond_combo'
         );
 
-        return {
-          ...acc,
-          balance: isUnlim ? UNLIMITED_BALANCE : acc.balance + addCash,
-          spinCoins: (acc.spinCoins || 0) + addCoins,
-          levelVouchers: (acc.levelVouchers || 0) + addVouchers,
-          jobLevel: (acc.jobLevel || 1) + addJobLevels,
-          goldGrams: (acc.goldGrams || 0) + addGoldGrams,
-          goldBatches: newGoldBatches,
-          rewardPoints: (acc.rewardPoints || 0) + addPoints,
-          pulsaBalance: (acc.pulsaBalance || 0) + addPulsa,
-          plnKwhBalance: (acc.plnKwhBalance || 0) + addPlnKwh,
-          clickPower: (acc.clickPower || 1) + addClickPower,
-          salaryMultiplier: (acc.salaryMultiplier || 1) + addSalaryMult,
-          cashbackPercent: setCashbackPct !== null ? Math.max(acc.cashbackPercent || 0, setCashbackPct) : acc.cashbackPercent,
-          vipShieldActive: enableShield ? true : acc.vipShieldActive,
-          isVerified: enableBlueCheck ? true : acc.isVerified,
-          verifiedAt: enableBlueCheck ? acc.verifiedAt || new Date().toISOString() : acc.verifiedAt,
-          verifiedLabel: enableBlueCheck
-            ? acc.verifiedLabel || (hasBlueTrial ? 'Centang Biru Trial' : 'Nasabah Prioritas Terverifikasi')
-            : acc.verifiedLabel,
-          cardTier: nextTier,
-          devRoleId: grantedDevRoleId !== undefined ? grantedDevRoleId : acc.devRoleId,
-          empireBusinesses: nextBiz,
-          empireTradingHoldings: nextTrd,
-          activeTrials: [...existingActiveTrials, ...createdTrials],
-        };
+        return normalizeAdminAccountAssets(
+          applyTierTransitionAssets(
+            {
+              ...acc,
+              balance: isUnlim ? UNLIMITED_BALANCE : acc.balance + addCash,
+              spinCoins: (acc.spinCoins || 0) + addCoins,
+              levelVouchers: (acc.levelVouchers || 0) + addVouchers,
+              jobLevel: (acc.jobLevel || 1) + addJobLevels,
+              goldGrams: (acc.goldGrams || 0) + addGoldGrams,
+              goldBatches: newGoldBatches,
+              rewardPoints: (acc.rewardPoints || 0) + addPoints,
+              pulsaBalance: (acc.pulsaBalance || 0) + addPulsa,
+              plnKwhBalance: (acc.plnKwhBalance || 0) + addPlnKwh,
+              clickPower: (acc.clickPower || 1) + addClickPower,
+              salaryMultiplier: (acc.salaryMultiplier || 1) + addSalaryMult,
+              cashbackPercent: setCashbackPct !== null ? Math.max(acc.cashbackPercent || 0, setCashbackPct) : acc.cashbackPercent,
+              vipShieldActive: enableShield ? true : acc.vipShieldActive,
+              isVerified: enableBlueCheck ? true : acc.isVerified,
+              verifiedAt: enableBlueCheck ? acc.verifiedAt || new Date().toISOString() : acc.verifiedAt,
+              verifiedLabel: enableBlueCheck
+                ? acc.verifiedLabel || (hasBlueTrial ? 'Centang Biru Trial' : 'Nasabah Prioritas Terverifikasi')
+                : acc.verifiedLabel,
+              devRoleId: grantedDevRoleId !== undefined ? grantedDevRoleId : acc.devRoleId,
+              empireBusinesses: nextBiz,
+              empireTradingHoldings: nextTrd,
+              activeTrials: [...existingActiveTrials, ...createdTrials],
+            },
+            nextTier
+          )
+        );
       })
     );
 
@@ -26449,7 +26859,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             category: 'redeem',
           });
         }
-        return next;
+        return normalizeAdminAccountAssets(next);
       })
     );
 

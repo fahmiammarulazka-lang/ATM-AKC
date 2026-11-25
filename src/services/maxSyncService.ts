@@ -151,25 +151,75 @@ function generateUuidV4(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+const DEVICE_ID_LS_KEY = 'bn_persistent_device_id_v1';
+const ACTIVE_BOOT_SESSION_LS_KEY = 'bn_active_boot_session_envelope_v1';
+let deviceIdInitPromise: Promise<string> | null = null;
+
+function readDeviceIdLocalFallback(): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const v = window.localStorage.getItem(DEVICE_ID_LS_KEY);
+      if (v && v.length >= 12) return v;
+    }
+  } catch {
+    // ignore storage restriction
+  }
+  return null;
+}
+
+function writeDeviceIdLocalFallback(deviceId: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(DEVICE_ID_LS_KEY, deviceId);
+    }
+  } catch {
+    // ignore storage restriction
+  }
+}
+
 export async function getOrCreatePersistentDeviceId(): Promise<string> {
   if (memoryDeviceId) return memoryDeviceId;
-  const stored = await idbGet<string>(STORE_META, 'last_device_id');
-  if (stored && typeof stored === 'string' && stored.length >= 12) {
-    memoryDeviceId = stored;
-    return stored;
+  if (deviceIdInitPromise) return deviceIdInitPromise;
+
+  deviceIdInitPromise = (async () => {
+    const storedIdb = await idbGet<string>(STORE_META, 'last_device_id');
+    if (storedIdb && typeof storedIdb === 'string' && storedIdb.length >= 12) {
+      memoryDeviceId = storedIdb;
+      writeDeviceIdLocalFallback(storedIdb);
+      return storedIdb;
+    }
+
+    const storedLs = readDeviceIdLocalFallback();
+    if (storedLs) {
+      memoryDeviceId = storedLs;
+      await idbPut(STORE_META, 'last_device_id', storedLs);
+      return storedLs;
+    }
+
+    const created = `dev-${generateUuidV4()}`;
+    memoryDeviceId = created;
+    writeDeviceIdLocalFallback(created);
+    await idbPut(STORE_META, 'last_device_id', created);
+    return created;
+  })();
+
+  try {
+    return await deviceIdInitPromise;
+  } finally {
+    deviceIdInitPromise = null;
   }
-  const created = `dev-${generateUuidV4()}`;
-  memoryDeviceId = created;
-  await idbPut(STORE_META, 'last_device_id', created);
-  return created;
 }
 
 export function getDeviceIdSync(): string {
-  if (!memoryDeviceId) {
-    memoryDeviceId = `dev-${generateUuidV4()}`;
-    void idbPut(STORE_META, 'last_device_id', memoryDeviceId);
+  if (memoryDeviceId) return memoryDeviceId;
+  const fromLs = readDeviceIdLocalFallback();
+  if (fromLs) {
+    memoryDeviceId = fromLs;
+    void idbPut(STORE_META, 'last_device_id', fromLs);
+    return fromLs;
   }
-  return memoryDeviceId;
+  void getOrCreatePersistentDeviceId();
+  return `dev-${generateUuidV4()}`;
 }
 
 export async function stageRescuePayload(key: string, data: unknown): Promise<void> {
@@ -319,7 +369,7 @@ export function saveGiftAndSealRegistryIdb(
 // ACTIVE BOOT SESSION ENVELOPE (INDEXEDDB — TAHAN REFRESH GOOGLE, OA & GUEST)
 // ============================================================================
 export interface FastBootSessionSnapshot {
-  authMode: 'google' | 'oa_account' | 'guest' | 'standard_account';
+  authMode: 'email_direct' | 'google' | 'oa_account' | 'guest' | 'standard_account';
   firebaseUid?: string;
   email: string;
   emailKey?: string;
@@ -500,13 +550,86 @@ export async function readDeviceLobbyCreatedAccountId(): Promise<string | null> 
   return null;
 }
 
-export async function saveActiveBootSession(session: FastBootSessionSnapshot): Promise<void> {
-  memoryActiveBootSession = session;
+let activeSessionIdbChain: Promise<void> = Promise.resolve();
+let activeSessionWriteSeq = 0;
+
+export function getActiveBootSessionWriteSeq(): number {
+  return activeSessionWriteSeq;
+}
+
+function writeCompactSessionMirrorLs(session: FastBootSessionSnapshot): void {
   try {
-    await idbPut(STORE_STAGING, ACTIVE_BOOT_SESSION_KEY, session);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const compact: FastBootSessionSnapshot = {
+        authMode: session.authMode,
+        firebaseUid: session.firebaseUid,
+        email: session.email,
+        emailKey: session.emailKey,
+        name: session.name,
+        picture: session.picture,
+        activeAccountId: session.activeAccountId,
+        isPinVerified: session.isPinVerified,
+        hasCompletedOnboarding: session.hasCompletedOnboarding,
+        accountBackups: Array.isArray(session.accountBackups)
+          ? session.accountBackups.filter((a) => a && a.id === session.activeAccountId).slice(0, 1)
+          : [],
+        deviceId: session.deviceId,
+        verifiedAtMs: session.verifiedAtMs,
+        savedAtMs: session.savedAtMs,
+      };
+      window.localStorage.setItem(ACTIVE_BOOT_SESSION_LS_KEY, JSON.stringify(compact));
+    }
   } catch {
-    // abaikan jika IndexedDB dibatasi browser privat
+    // abaikan quota/restriction browser
   }
+}
+
+function readCompactSessionMirrorLs(): FastBootSessionSnapshot | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(ACTIVE_BOOT_SESSION_LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as FastBootSessionSnapshot;
+        if (parsed && parsed.activeAccountId && parsed.authMode) {
+          return parsed;
+        }
+      }
+    }
+  } catch {
+    // abaikan
+  }
+  return null;
+}
+
+function clearCompactSessionMirrorLs(): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(ACTIVE_BOOT_SESSION_LS_KEY);
+    }
+  } catch {
+    // abaikan
+  }
+}
+
+export async function saveActiveBootSession(
+  session: FastBootSessionSnapshot,
+  expectedSeq?: number
+): Promise<void> {
+  if (typeof expectedSeq === 'number' && expectedSeq !== activeSessionWriteSeq) {
+    return;
+  }
+  const writeSeq = typeof expectedSeq === 'number' ? expectedSeq : ++activeSessionWriteSeq;
+  memoryActiveBootSession = session;
+  writeCompactSessionMirrorLs(session);
+  activeSessionIdbChain = activeSessionIdbChain
+    .then(async () => {
+      if (writeSeq !== activeSessionWriteSeq) return;
+      await idbPut(STORE_STAGING, ACTIVE_BOOT_SESSION_KEY, session);
+    })
+    .catch(() => {
+      // abaikan jika IndexedDB dibatasi browser privat
+    });
+  return activeSessionIdbChain;
 }
 
 export async function readActiveBootSession(): Promise<FastBootSessionSnapshot | null> {
@@ -517,21 +640,33 @@ export async function readActiveBootSession(): Promise<FastBootSessionSnapshot |
     const stored = await idbGet<FastBootSessionSnapshot>(STORE_STAGING, ACTIVE_BOOT_SESSION_KEY);
     if (stored && stored.activeAccountId && stored.authMode) {
       memoryActiveBootSession = stored;
+      writeCompactSessionMirrorLs(stored);
       return stored;
     }
   } catch {
-    // fallback ke Cloud
+    // fallback ke mirror lokal
+  }
+  const lsMirror = readCompactSessionMirrorLs();
+  if (lsMirror) {
+    memoryActiveBootSession = lsMirror;
+    return lsMirror;
   }
   return null;
 }
 
 export async function clearActiveBootSession(): Promise<void> {
+  const clearSeq = ++activeSessionWriteSeq;
   memoryActiveBootSession = null;
-  try {
-    await idbDelete(STORE_STAGING, ACTIVE_BOOT_SESSION_KEY);
-  } catch {
-    // abaikan error cleanup
-  }
+  clearCompactSessionMirrorLs();
+  activeSessionIdbChain = activeSessionIdbChain
+    .then(async () => {
+      if (clearSeq !== activeSessionWriteSeq) return;
+      await idbDelete(STORE_STAGING, ACTIVE_BOOT_SESSION_KEY);
+    })
+    .catch(() => {
+      // abaikan error cleanup
+    });
+  return activeSessionIdbChain;
 }
 
 // ============================================================================

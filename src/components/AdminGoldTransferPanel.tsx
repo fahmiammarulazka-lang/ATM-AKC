@@ -17,7 +17,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
-import { formatRupiah } from '../utils/bankUtils';
+import { formatRupiah, formatAssetCount, isAdminCardAccount } from '../utils/bankUtils';
 
 export const AdminGoldTransferPanel: React.FC = () => {
   const {
@@ -321,7 +321,7 @@ export const AdminGoldTransferPanel: React.FC = () => {
             >
               {accounts.map((acc) => (
                 <option key={acc.id} value={acc.id}>
-                  {acc.fullName} · {(acc.goldGrams || 0).toFixed(4)}g · {(acc.spinCoins || 0).toLocaleString('id-ID')} Coin
+                  {acc.fullName} · {(acc.goldGrams || 0).toFixed(4)}g · {formatAssetCount(acc.spinCoins, { isAdmin: isAdminCardAccount(acc) })} Coin
                 </option>
               ))}
             </select>
@@ -370,35 +370,53 @@ export const AdminGoldTransferPanel: React.FC = () => {
           </div>
 
           {/* Coin Injection Box */}
-          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2.5">
-            <div className="font-bold text-amber-300 flex items-center gap-1.5">
-              <Coins className="w-3.5 h-3.5" />
-              <span>Saldo Coin Spin</span>
-            </div>
-            <input
-              type="number"
-              min={0}
-              value={coinInjectValue}
-              onChange={(e) => setCoinInjectValue(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 text-amber-200 rounded-xl p-2.5 font-mono tabular-nums font-bold"
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => handleAdjustCoins('add')}
-                className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
-              >
-                + Tambah Coin
-              </button>
-              <button
-                type="button"
-                onClick={() => handleAdjustCoins('set')}
-                className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold cursor-pointer"
-              >
-                Set Saldo Coin
-              </button>
-            </div>
-          </div>
+          {(() => {
+            const selectedTarget = accounts.find((a) => a.id === targetAccId);
+            const targetIsAdmin = isAdminCardAccount(selectedTarget);
+            return (
+              <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                    <Coins className="w-3.5 h-3.5" />
+                    <span>Saldo Coin Spin</span>
+                  </div>
+                  {targetIsAdmin && (
+                    <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/50 text-amber-300 font-black text-[10px]">
+                      Sudah ∞ (Kartu ADMIN)
+                    </span>
+                  )}
+                </div>
+                {targetIsAdmin && (
+                  <p className="text-[11px] text-amber-200/90">
+                    Akun bertier ADMIN memiliki Coin Spin ∞. Klik tombol di bawah untuk tetap sinkronkan ke Cloud.
+                  </p>
+                )}
+                <input
+                  type="number"
+                  min={0}
+                  value={coinInjectValue}
+                  onChange={(e) => setCoinInjectValue(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 text-amber-200 rounded-xl p-2.5 font-mono tabular-nums font-bold"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustCoins('add')}
+                    className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                  >
+                    + Tambah Coin
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAdjustCoins('set')}
+                    className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold cursor-pointer"
+                  >
+                    Set Saldo Coin
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>

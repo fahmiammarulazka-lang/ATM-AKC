@@ -1044,8 +1044,11 @@ export const GiftLetterOverlayAndCornerPopup: React.FC = () => {
                               <div className="truncate">
                                 <span className="text-[9px] text-slate-400 block">Koin &amp; Emas 24K</span>
                                 <strong className="tabular-nums">
-                                  {(currentAccount.spinCoins || 0).toLocaleString('id-ID')} Coin •{' '}
-                                  {(currentAccount.goldGrams || 0).toLocaleString('id-ID')}g
+                                  {currentAccount.cardTier === 'admin' ||
+                                  (currentAccount.spinCoins || 0) >= 900_000_000_000_000
+                                    ? '∞'
+                                    : `${(currentAccount.spinCoins || 0).toLocaleString('id-ID')} Coin`}{' '}
+                                  • {(currentAccount.goldGrams || 0).toLocaleString('id-ID')}g
                                 </strong>
                               </div>
                             </div>

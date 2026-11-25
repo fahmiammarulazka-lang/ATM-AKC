@@ -454,10 +454,10 @@ export function splitRupiahRecehParts(amount: number): {
 } {
   if (!Number.isFinite(amount) || amount >= 900_000_000_000_000) {
     return {
-      prefix: 'Rp ',
+      prefix: '',
       mainPart: '∞',
       recehPart: '',
-      fullText: 'Rp ∞ (Tidak Terbatas)',
+      fullText: '∞',
     };
   }
   const rounded = Math.round(amount);
@@ -483,7 +483,7 @@ export function splitRupiahRecehParts(amount: number): {
  * Format angka Rupiah sesuai permintaan user: "Rp xxx.XXX" (bulat dengan pemisah titik ribuan tanpa koma).
  */
 export function formatRupiahWithDecimals(amount: number): string {
-  if (!Number.isFinite(amount) || amount >= 900_000_000_000_000) return 'Rp ∞ (Tidak Terbatas)';
+  if (!Number.isFinite(amount) || amount >= 900_000_000_000_000) return '∞';
   const rounded = Math.round(amount);
   return `Rp ${rounded.toLocaleString('id-ID')}`;
 }

@@ -354,7 +354,12 @@ export const DiamondStoreModal: React.FC = () => {
                 <span>Anda</span>
               </p>
               <p className="flex items-center justify-end gap-1.5 text-base font-black text-white tabular-nums">
-                <span>{(currentAccount?.diamonds || 0).toLocaleString('id-ID')}</span>
+                <span>
+                  {currentAccount?.cardTier === 'admin' ||
+                  (currentAccount?.diamonds || 0) >= 900_000_000_000_000
+                    ? '∞'
+                    : (currentAccount?.diamonds || 0).toLocaleString('id-ID')}
+                </span>
                 <DiamondIcon tone="bright" className="h-4 w-4" />
               </p>
             </div>

@@ -216,8 +216,8 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
                 <span>Saldo Rupiah</span>
               </div>
               <span className="font-mono tabular-nums font-bold text-sm text-white">
-                {isUnlimitedNumber(currentAccount.balance)
-                  ? 'Rp ∞ (Tak Terbatas)'
+                {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
+                  ? '∞'
                   : formatRupiah(currentAccount.balance)}
               </span>
             </div>
@@ -227,7 +227,9 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
                 <span>Saldo Coin Spin</span>
               </div>
               <span className="font-mono tabular-nums font-bold text-sm text-amber-300">
-                {(currentAccount.spinCoins ?? 0).toLocaleString('id-ID')} Coin
+                {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.spinCoins)
+                  ? '∞'
+                  : `${(currentAccount.spinCoins ?? 0).toLocaleString('id-ID')} Coin`}
               </span>
             </div>
             <div className="rounded-xl bg-slate-950/90 border border-slate-800 px-3.5 py-2.5 flex items-center justify-between">

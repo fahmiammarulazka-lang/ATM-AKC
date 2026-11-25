@@ -225,8 +225,8 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
               <span>Saldo Uang</span>
             </div>
             <div className="font-mono tabular-nums font-bold text-white mt-0.5">
-              {isUnlimitedNumber(currentAccount.balance)
-                ? '∞ UNLIMITED'
+              {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
+                ? '∞'
                 : formatRupiah(currentAccount.balance)}
             </div>
           </div>
@@ -236,7 +236,9 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
               <span>Saldo Coin Spin</span>
             </div>
             <div className="font-mono tabular-nums font-bold text-amber-300 mt-0.5">
-              {(currentAccount.spinCoins || 0).toLocaleString('id-ID')} Koin
+              {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.spinCoins)
+                ? '∞'
+                : `${(currentAccount.spinCoins || 0).toLocaleString('id-ID')} Koin`}
             </div>
           </div>
           <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">

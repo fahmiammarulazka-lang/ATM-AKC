@@ -202,15 +202,15 @@ export const LiveSyncTelemetryHud: React.FC<LiveSyncTelemetryHudProps> = ({
     <div
       className={`inline-flex items-center rounded-lg border overflow-hidden shrink-0 transition-colors ${statusMeta.wrapperBorder}`}
     >
-      {/* Badge Status Berlebar Terkunci (Anti-Jitter) — Klik buka Command Center */}
+      {/* Badge Status Adaptif (Kompak di HP/Tablet, Penuh di Desktop lg+) — Klik buka Command Center */}
       <button
         type="button"
         onClick={() => onOpenCommandCenter('telemetry')}
-        className={`h-8 px-2 sm:w-[144px] flex items-center justify-center gap-1.5 text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${statusMeta.statusText}`}
+        className={`h-7 px-1.5 sm:h-8 sm:px-2 lg:w-[136px] flex items-center justify-center gap-1.5 text-[11px] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${statusMeta.statusText}`}
         title={statusMeta.tooltip}
       >
         {statusMeta.icon}
-        <span className="hidden sm:inline truncate font-mono tabular-nums">{statusMeta.label}</span>
+        <span className="hidden lg:inline truncate font-mono tabular-nums">{statusMeta.label}</span>
       </button>
 
       {/* Tombol 1-Klik Sync Cepat Instan langsung di samping HUD */}
@@ -218,7 +218,7 @@ export const LiveSyncTelemetryHud: React.FC<LiveSyncTelemetryHudProps> = ({
         type="button"
         onClick={handleQuickSync}
         disabled={isBusy}
-        className={`h-8 w-8 border-l flex items-center justify-center shrink-0 cursor-pointer transition-colors disabled:opacity-60 ${statusMeta.divider} ${statusMeta.syncBtn}`}
+        className={`h-7 w-7 sm:h-8 sm:w-8 border-l flex items-center justify-center shrink-0 cursor-pointer transition-colors disabled:opacity-60 ${statusMeta.divider} ${statusMeta.syncBtn}`}
         title={
           syncTelemetry.status === 'error'
             ? 'Coba sinkronisasi ulang ke Cloud sekarang (1-Klik)'

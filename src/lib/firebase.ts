@@ -131,6 +131,10 @@ export async function ensureBrowserLocalPersistence(): Promise<void> {
       authPersistenceMode = 'memory';
     }
   }
+  const authWithReady = auth as Auth & { authStateReady?: () => Promise<void> };
+  if (typeof authWithReady.authStateReady === 'function') {
+    await authWithReady.authStateReady().catch(() => {});
+  }
 }
 
 export const authPersistenceReady: Promise<void> = ensureBrowserLocalPersistence();

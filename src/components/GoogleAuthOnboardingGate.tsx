@@ -1929,7 +1929,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                           No. Rek: <span className="text-cyan-300 font-bold">{acc.accountNumber}</span> • Saldo:{' '}
                           <span className="text-emerald-300 font-bold">
                             {acc.cardTier === 'admin' || isUnlimitedNumber(acc.balance)
-                              ? '∞ Unlimited'
+                              ? '∞'
                               : formatRupiah(acc.balance)}
                           </span>
                         </p>

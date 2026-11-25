@@ -412,7 +412,7 @@ export const DebtManagementView: React.FC<{
                 <span>Saldo Rekening Tersedia</span>
               </div>
               <span className="font-mono font-bold text-emerald-300 text-xs sm:text-sm tabular-nums">
-                {isInf ? '∞ UNLIMITED' : formatRupiah(currentAccount.balance)}
+                {isInf ? '∞' : formatRupiah(currentAccount.balance)}
               </span>
             </div>
 

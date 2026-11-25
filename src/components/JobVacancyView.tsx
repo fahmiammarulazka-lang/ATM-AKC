@@ -655,7 +655,7 @@ export const JobVacancyView: React.FC = () => {
               </span>
               <span className="text-xs sm:text-sm font-black text-emerald-400 font-mono block mt-1.5 tabular-nums">
                 {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
-                  ? '∞ UNLIMITED'
+                  ? '∞'
                   : formatRupiah(currentAccount.balance)}
               </span>
             </div>
@@ -666,7 +666,10 @@ export const JobVacancyView: React.FC = () => {
                 <span>Saldo Coin</span>
               </span>
               <span className="text-xl font-black text-amber-300 font-mono block mt-0.5 tabular-nums">
-                🪙 {(currentAccount.spinCoins ?? 0).toLocaleString('id-ID')}
+                🪙{' '}
+                {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.spinCoins)
+                  ? '∞'
+                  : (currentAccount.spinCoins ?? 0).toLocaleString('id-ID')}
               </span>
             </div>
 
@@ -857,7 +860,13 @@ export const JobVacancyView: React.FC = () => {
                   <span className="inline-flex items-center gap-1 font-mono font-bold text-cyan-200 text-xs tabular-nums">
                     <span>25</span>
                     <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
-                    <span>/ +1 Lv (Saldo: {(currentAccount.diamonds || 0).toLocaleString('id-ID')}</span>
+                    <span>
+                      / +1 Lv (Saldo:{' '}
+                      {currentAccount.cardTier === 'admin' ||
+                      (currentAccount.diamonds || 0) >= 900_000_000_000_000
+                        ? '∞'
+                        : (currentAccount.diamonds || 0).toLocaleString('id-ID')}
+                    </span>
                     <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
                     <span>)</span>
                   </span>
@@ -880,7 +889,9 @@ export const JobVacancyView: React.FC = () => {
                     <DiamondIcon tone="cyan" className="w-3.5 h-3.5" />
                     <span>➔ Lv.{userLevel + 1}</span>
                   </button>
-                  {(currentAccount.diamonds || 0) < 25 && (
+                  {currentAccount.cardTier !== 'admin' &&
+                    (currentAccount.diamonds || 0) < 900_000_000_000_000 &&
+                    (currentAccount.diamonds || 0) < 25 && (
                     <button
                       type="button"
                       onClick={() => setIsDiamondStoreOpen(true)}

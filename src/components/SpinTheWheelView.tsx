@@ -119,8 +119,11 @@ export const SpinTheWheelView: React.FC = () => {
     const { finalCoins } = calculateSpinCost(spinCount, spinWheelConfig);
     const cashCost = calculateCashSpinCost(spinCount, spinWheelConfig);
 
+    const isAdminCard = currentAccount.cardTier === 'admin';
+    const isUnlimitedCoin = isAdminCard || userCoins >= 900_000_000_000_000;
+
     if (spinPaymentMethod === 'cash') {
-      const isUnlimitedBal = currentAccount.balance >= 900_000_000_000_000;
+      const isUnlimitedBal = isAdminCard || currentAccount.balance >= 900_000_000_000_000;
       if (!isUnlimitedBal && currentAccount.balance < cashCost.finalRupiah) {
         setFeedback({
           type: 'error',
@@ -131,7 +134,7 @@ export const SpinTheWheelView: React.FC = () => {
         });
         return;
       }
-    } else if (userCoins < finalCoins) {
+    } else if (!isUnlimitedCoin && userCoins < finalCoins) {
       setFeedback({
         type: 'error',
         title: `Koin Spin Kurang (Butuh ${finalCoins.toLocaleString('id-ID')} Koin)`,
@@ -283,7 +286,9 @@ export const SpinTheWheelView: React.FC = () => {
                   Koin Spin
                 </span>
                 <span className="text-xl sm:text-2xl font-black text-white font-mono leading-none block">
-                  {userCoins.toLocaleString('id-ID')}
+                  {currentAccount.cardTier === 'admin' || userCoins >= 900_000_000_000_000
+                    ? '∞'
+                    : userCoins.toLocaleString('id-ID')}
                 </span>
               </div>
 
@@ -723,11 +728,22 @@ export const SpinTheWheelView: React.FC = () => {
               </span>
               {spinPaymentMethod === 'coins' ? (
                 <span className="text-[11px] text-slate-400 font-mono tabular-nums">
-                  Koin Anda: <strong className="text-white">{userCoins.toLocaleString('id-ID')} 🪙</strong>
+                  Koin Anda:{' '}
+                  <strong className="text-white">
+                    {currentAccount.cardTier === 'admin' || userCoins >= 900_000_000_000_000
+                      ? '∞'
+                      : userCoins.toLocaleString('id-ID')}{' '}
+                    🪙
+                  </strong>
                 </span>
               ) : (
                 <span className="text-[11px] text-slate-400 font-mono tabular-nums">
-                  Saldo Rekening: <strong className="text-emerald-400">{formatRupiahWithDecimals(currentAccount.balance)}</strong>
+                  Saldo Rekening:{' '}
+                  <strong className="text-emerald-400">
+                    {currentAccount.cardTier === 'admin'
+                      ? '∞'
+                      : formatRupiahWithDecimals(currentAccount.balance)}
+                  </strong>
                 </span>
               )}
             </div>
@@ -737,10 +753,13 @@ export const SpinTheWheelView: React.FC = () => {
                 const cost = calculateSpinCost(cnt, spinWheelConfig);
                 const cashCost = calculateCashSpinCost(cnt, spinWheelConfig);
                 const isCashMode = spinPaymentMethod === 'cash';
-                const canAfford = isCashMode
-                  ? currentAccount.balance >= 900_000_000_000_000 ||
-                    currentAccount.balance >= cashCost.finalRupiah
-                  : userCoins >= cost.finalCoins;
+                const canAfford =
+                  currentAccount.cardTier === 'admin'
+                    ? true
+                    : isCashMode
+                    ? currentAccount.balance >= 900_000_000_000_000 ||
+                      currentAccount.balance >= cashCost.finalRupiah
+                    : userCoins >= 900_000_000_000_000 || userCoins >= cost.finalCoins;
 
                 return (
                   <button

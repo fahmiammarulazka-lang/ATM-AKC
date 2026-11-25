@@ -3081,6 +3081,37 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v13-35-43',
+    version: 'v13.35.43',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v13.35.43: Pelindungan Judul BANK NUSANTARA & Sync di Profil, Profil Responsif Anti-Terpotong, Anti-Logout Update & Kartu ADMIN Infinity (∞)',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 12:00 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 12:00 WIB',
+    description:
+      'Pembaruan v13.35.43 merapikan Navbar agar tulisan BANK NUSANTARA selalu utuh terlindungi dengan memindahkan status Sync serta tombol Sync 1-Klik ke dalam popup Profil, membuat jendela Profil dan Navbar responsif bebas terpotong, mengaktifkan keistimewaan Infinity (∞) seragam bagi Kartu ADMIN, serta menjaga sistem update real-time terus berjalan selamanya tanpa membuat akun logout.',
+    highlights: [
+      'Pelindungan Penuh BANK NUSANTARA & Sync di Profil: Status Sync berwarna serta tombol Sync 1-Klik kini dipindahkan rapi ke dalam menu Profil sehingga judul BANK NUSANTARA dan tombol Profil di Navbar selalu tampil lega tanpa saling menutupi.',
+      'Popup Profil Responsif & Anti-Terpotong: Nama lengkap, email, dan ID 16 digit membungkus rapi ke baris baru, isi tengah dapat digulir penuh dengan header/footer tetap, grid aset 2 kolom seimbang, dan nominal besar diringkas otomatis menjadi K/JT/M/T.',
+      'Kartu ADMIN Infinity (∞) Seragam: Seluruh pemegang kartu tier ADMIN otomatis memiliki simbol ∞ pada Saldo Uang, Koin Spin, Permata, Poin Rewards, dan Limit Harian, serta tetap ∞ saat bertransaksi maupun bermain di Spin Wheel dan Toko Permata.',
+      'Sistem Update Real-Time Berjalan Selamanya & Anti-Logout: Pembaruan katalog resmi maupun sinkronisasi Cloud terus aktif otomatis mempromosikan rilis terbaru tanpa pernah mengeluarkan sesi login akun Anda.',
+      'Panel Admin — Pengelolaan Infinity & Turun Tier Aman: Daftar akun, tool suntik saldo/koin spin/diamond/poin, dan pembuatan akun di Panel Admin otomatis mengenali Kartu ADMIN sebagai ∞ serta mengembalikan batas aman saat diturunkan ke tier normal.',
+    ],
+    changes: [
+      'Pelindungan Penuh BANK NUSANTARA & Sync di Profil: Status Sync berwarna serta tombol Sync 1-Klik kini dipindahkan rapi ke dalam menu Profil sehingga judul BANK NUSANTARA dan tombol Profil di Navbar selalu tampil lega tanpa saling menutupi.',
+      'Popup Profil Responsif & Anti-Terpotong: Nama lengkap, email, dan ID 16 digit membungkus rapi ke baris baru, isi tengah dapat digulir penuh dengan header/footer tetap, grid aset 2 kolom seimbang, dan nominal besar diringkas otomatis menjadi K/JT/M/T.',
+      'Kartu ADMIN Infinity (∞) Seragam: Seluruh pemegang kartu tier ADMIN otomatis memiliki simbol ∞ pada Saldo Uang, Koin Spin, Permata, Poin Rewards, dan Limit Harian, serta tetap ∞ saat bertransaksi maupun bermain di Spin Wheel dan Toko Permata.',
+      'Sistem Update Real-Time Berjalan Selamanya & Anti-Logout: Pembaruan katalog resmi maupun sinkronisasi Cloud terus aktif otomatis mempromosikan rilis terbaru tanpa pernah mengeluarkan sesi login akun Anda.',
+      'Panel Admin — Pengelolaan Infinity & Turun Tier Aman: Daftar akun, tool suntik saldo/koin spin/diamond/poin, dan pembuatan akun di Panel Admin otomatis mengenali Kartu ADMIN sebagai ∞ serta mengembalikan batas aman saat diturunkan ke tier normal.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-25T05:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v13-34-00',
     version: 'v13.34.00',
     releaseType: 'major',
@@ -3105,8 +3136,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Fitur Keluarga di Navbar (Sebelah Mobile Banking): Buat & Join Keluarga dengan ID 4x3 (XXXX XXXX XXXX) otomatis spasi, Tambah Slot bertingkat (Rp 2,5jt+100D -> Rp 5jt+200D -> Rp 7,5jt+300D), jabatan Wakil Kepala Keluarga (Co-Leader), izin ganda ganti Name Tag/Nama Keluarga, dan akses Kepala Keluarga melihat info pribadi anggota sepenuhnya.',
       'Tombol Donasi QRIS & Hadiah Laporan Bug: Tombol Donasi cepat hadir di sebelah ikon WhatsApp pojok kanan bawah menuju halaman dukungan QRIS Nusantara, serta pelapor bug kini dapat menerima apresiasi hadiah lengkap beserta pesan resmi.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-24T12:30:00.000Z',
     isAutoDetected: true,

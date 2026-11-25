@@ -304,7 +304,10 @@ export const FamilyWorkspaceView: React.FC = () => {
               <Plus className="h-4 w-4" />
               Tambah Slot
             </button>
-            {slotDiamondNeeded > 0 && (currentAccount.diamonds || 0) < slotDiamondNeeded && (
+            {currentAccount.cardTier !== 'admin' &&
+              (currentAccount.diamonds || 0) < 900_000_000_000_000 &&
+              slotDiamondNeeded > 0 &&
+              (currentAccount.diamonds || 0) < slotDiamondNeeded && (
               <button
                 type="button"
                 onClick={() => setIsDiamondStoreOpen(true)}
