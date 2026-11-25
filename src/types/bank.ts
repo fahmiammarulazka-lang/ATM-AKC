@@ -321,6 +321,9 @@ export interface BankAccount {
   dismissedWarningMap?: Record<string, number>;
   // Kontak nasabah tersimpan untuk Chat Privat (sinkron Cloud per akun)
   savedChatContacts?: PrivateChatContact[];
+  // Pesan berbintang / bookmark & grup yang dibisukan notifikasinya (sinkron Cloud per akun)
+  bookmarkedChatIds?: string[];
+  mutedGroupIds?: string[];
 }
 
 export interface DebtHistoryEntry {
@@ -447,6 +450,74 @@ export interface WebsiteSystemPopupNotification {
   dismissed: boolean;
 }
 
+export interface ChatReadReceiptEntry {
+  accountId: string;
+  accountName: string;
+  readAt: string;
+  readAtMs: number;
+}
+
+export interface ChatPollOption {
+  id: string;
+  text: string;
+}
+
+export interface ChatPollData {
+  question: string;
+  options: ChatPollOption[];
+  votesByAccountId: Record<string, string[]>;
+  allowMultiple?: boolean;
+  closed?: boolean;
+}
+
+export interface ChatForwardInfo {
+  originalSenderName: string;
+  sourceRoomLabel?: string;
+}
+
+export interface GlobalChatMutedUser {
+  accountId: string;
+  accountName: string;
+  accountNumber?: string;
+  mutedUntilMs: number | null;
+  isPermanent: boolean;
+  durationLabel: string;
+  reason?: string;
+  mutedBy: string;
+  mutedAt: string;
+}
+
+export interface ChatModerationLog {
+  id: string;
+  action:
+    | 'delete_msg'
+    | 'bulk_delete'
+    | 'mute_user'
+    | 'unmute_user'
+    | 'warn_user'
+    | 'pin_msg'
+    | 'unpin_msg'
+    | 'toggle_lock'
+    | 'slow_mode'
+    | 'banned_words'
+    | 'clear_chat'
+    | 'announcement'
+    | 'edit_msg';
+  adminName: string;
+  targetName?: string;
+  targetAccountId?: string;
+  detail: string;
+  timestamp: string;
+  createdAtMs: number;
+}
+
+export interface ChatTypingStateEntry {
+  roomKey: string;
+  accountId: string;
+  accountName: string;
+  expiresAtMs: number;
+}
+
 export interface GlobalChatMessage {
   id: string;
   senderName: string;
@@ -460,17 +531,29 @@ export interface GlobalChatMessage {
   text: string;
   timestamp: string;
   createdAtMs?: number;
+  updatedAtMs?: number;
+  editedAt?: string;
+  editedAtMs?: number;
   isPinned?: boolean;
   isOfficialAnnouncement?: boolean;
+  isAdminHighlight?: boolean;
   replyToId?: string;
   replyToSender?: string;
   replyToPreview?: string;
+  reactions?: Record<string, string[]>;
+  poll?: ChatPollData;
+  forwardedFrom?: ChatForwardInfo;
+  mentions?: string[];
 }
 
 export interface GlobalChatConfig {
   adminOnlyLock: boolean;
   cooldownMs: number;
   lockedBy?: string;
+  mutedUsers?: Record<string, GlobalChatMutedUser>;
+  bannedWords?: string[];
+  bannedWordMode?: 'censor' | 'block';
+  adminHighlightDefault?: boolean;
   updatedAtMs: number;
 }
 
@@ -488,10 +571,14 @@ export interface PrivateChatContact {
 export interface PrivateChatGroup {
   id: string;
   name: string;
+  description?: string;
+  rules?: string;
   iconKey: string;
   accentColor: string;
   creatorAccountId: string;
+  coAdminAccountIds?: string[];
   memberAccountIds: string[];
+  pinnedMessageIds?: string[];
   createdAt: string;
   updatedAtMs: number;
 }
@@ -994,6 +1081,8 @@ export interface ChatMessage {
   senderAccountId?: string;
   senderAccount: string;
   senderName: string;
+  senderRole?: 'admin' | 'customer';
+  senderCardTier?: CardTier;
   recipientAccountId?: string;
   recipientAccount: string;
   receiverAccount?: string;
@@ -1002,10 +1091,19 @@ export interface ChatMessage {
   text: string;
   timestamp: string;
   createdAtMs?: number;
+  updatedAtMs?: number;
+  editedAt?: string;
+  editedAtMs?: number;
   replyToId?: string;
   replyToSender?: string;
   replyToPreview?: string;
   deleted?: boolean;
+  isPinned?: boolean;
+  reactions?: Record<string, string[]>;
+  readBy?: Record<string, ChatReadReceiptEntry>;
+  poll?: ChatPollData;
+  forwardedFrom?: ChatForwardInfo;
+  mentions?: string[];
   transferAttachment?: {
     amount: number;
     referenceNo: string;
@@ -2354,7 +2452,9 @@ export type AdminDeletableCollectionKey =
   | 'accounts'
   | 'families'
   | 'banPresets'
-  | 'suggestions';
+  | 'suggestions'
+  | 'privateChats'
+  | 'privateChatGroups';
 
 export type DeletedAdminItemIdsMap = Partial<Record<AdminDeletableCollectionKey, string[]>>;
 

@@ -3081,6 +3081,37 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v15-40-49',
+    version: 'v15.40.49',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v15.40.49 (Format S — Fitur Baru Besar + Perbaikan Bug): Anti-Timpa Chat Lintas HP, Anti-Terpotong, Tombol Simpan Nasabah ala WhatsApp, Info Dibaca Grup, Edit 15m & Moderasi Admin Lengkap',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 23:59 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 23:59 WIB',
+    description:
+      'Pembaruan besar Chat Global & Priv v15.40.49 memperbaiki bug pesan chat lintas HP yang sempat menghilang dalam 1–5 detik melalui penyimpanan terpisah per ID pesan di Cloud & Server + penggabungan Union-Merge anti-timpa + Tombstone ID global + tombol Segarkan Chat. Memperbaiki tampilan layar terpotong di HP & Laptop menggunakan modal full-body Portal dan grid responsif. Menghadirkan tombol "Simpan Nasabah" ala WhatsApp (banner atas, header DM, & Info Grup) dengan pengisian otomatis User ID & No. Rekening, aturan privasi ketat Buat Grup Baru khusus nasabah tersimpan, fitur Info Dibaca khusus Grup Privat & centang biru DM, Edit Pesan 15 menit, Reaksi Emoji, Polling Cepat, Mention @nama, Indikator Sedang Mengetik, Bookmark Bintang, Teruskan Pesan, serta Suite Moderasi Admin lengkap.',
+    highlights: [
+      'Sinkronisasi Chat Lintas HP Anti-Hilang & Anti-Timpa: Pesan Global, Privat 1-on-1, Grup Privat, dan Pengumuman Admin kini disimpan terpisah per ID pesan di Cloud & Server dengan Union-Merge anti-timpa, Tombstone ID terhapus global, serta tombol Segarkan Chat halus di header.',
+      'Perbaikan Total Layar Terpotong (HP & Laptop) + Alur Tambah Nasabah Rapi: Seluruh modal chat kini tampil penuh di layar (Portal) dengan scroll mulus dan tombol konfirmasi selalu terlihat; konfirmasi Tambah Nasabah manual kembali rapi ke daftar kontak Chat Privat.',
+      'Tombol "Simpan Nasabah" ala WhatsApp: Pengirim pesan masuk yang belum disimpan menampilkan No. Rekening + nama terdaftar + label Belum Disimpan (plus lencana ADMIN RESMI bila Admin), banner atas (Simpan Nasabah + Tutup sementara), tombol cepat di header DM & Info Grup, dengan User ID & No. Rekening otomatis terisi serta langsung masuk daftar pilihan Buat Grup Baru.',
+      'Privasi Ketat Buat Grup Baru + Fitur Nasabah Lengkap: Buat Grup Baru hanya menampilkan daftar nasabah tersimpan (kosong dulu + tombol Tambah Nasabah Dulu), dilengkapi Info Dibaca khusus Grup (nama + jam dibaca & daftar belum baca), centang biru DM, Edit Pesan 15 menit, Reaksi Emoji, Polling Grup, Mention @nama, Sedang Mengetik, Bookmark Bintang, Teruskan Pesan, & status Online/Last Seen.',
+      'Suite Moderasi & Siaran Admin Chat Global: Gelembung emas elegan + lencana ADMIN RESMI + Mode Sorotan, Mute Fleksibel (Detik/Menit/Jam/Hari/Permanen + Buka Mute), Slow Mode preset (Off–60d), Filter Kata Terlarang (Sensor ***/Blokir), Multi-Pin Pengumuman + Pop-up, Tegur Langsung, Hapus Massal pesan 1 user, Polling Resmi, Log Moderasi Admin, dan Salin/Ekspor Rekap (.txt).',
+    ],
+    changes: [
+      'Sinkronisasi Chat Lintas HP Anti-Hilang & Anti-Timpa: Pesan Global, Privat 1-on-1, Grup Privat, dan Pengumuman Admin kini disimpan terpisah per ID pesan di Cloud & Server dengan Union-Merge anti-timpa, Tombstone ID terhapus global, serta tombol Segarkan Chat halus di header.',
+      'Perbaikan Total Layar Terpotong (HP & Laptop) + Alur Tambah Nasabah Rapi: Seluruh modal chat kini tampil penuh di layar (Portal) dengan scroll mulus dan tombol konfirmasi selalu terlihat; konfirmasi Tambah Nasabah manual kembali rapi ke daftar kontak Chat Privat.',
+      'Tombol "Simpan Nasabah" ala WhatsApp: Pengirim pesan masuk yang belum disimpan menampilkan No. Rekening + nama terdaftar + label Belum Disimpan (plus lencana ADMIN RESMI bila Admin), banner atas (Simpan Nasabah + Tutup sementara), tombol cepat di header DM & Info Grup, dengan User ID & No. Rekening otomatis terisi serta langsung masuk daftar pilihan Buat Grup Baru.',
+      'Privasi Ketat Buat Grup Baru + Fitur Nasabah Lengkap: Buat Grup Baru hanya menampilkan daftar nasabah tersimpan (kosong dulu + tombol Tambah Nasabah Dulu), dilengkapi Info Dibaca khusus Grup (nama + jam dibaca & daftar belum baca), centang biru DM, Edit Pesan 15 menit, Reaksi Emoji, Polling Grup, Mention @nama, Sedang Mengetik, Bookmark Bintang, Teruskan Pesan, & status Online/Last Seen.',
+      'Suite Moderasi & Siaran Admin Chat Global: Gelembung emas elegan + lencana ADMIN RESMI + Mode Sorotan, Mute Fleksibel (Detik/Menit/Jam/Hari/Permanen + Buka Mute), Slow Mode preset (Off–60d), Filter Kata Terlarang (Sensor ***/Blokir), Multi-Pin Pengumuman + Pop-up, Tegur Langsung, Hapus Massal pesan 1 user, Polling Resmi, Log Moderasi Admin, dan Salin/Ekspor Rekap (.txt).',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-25T22:55:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v15-39-49',
     version: 'v15.39.49',
     releaseType: 'major',
@@ -3105,8 +3136,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Tambah & Kelola Grup Privat + Kirim/Minta Uang: Buat grup dengan nama, ikon, warna, tambah anggota lewat User ID atau No. Rekening, lihat daftar anggota, ubah nama, keluar grup, serta hak pembuat grup mengeluarkan anggota atau menghapus grup — lengkap dengan fitur Kirim Uang & Minta Uang aktif di Chat Privat & Grup.',
       'Tombol Saran & Program Hadiah di Paling Bawah (Sebelah Lapor Bug): Nasabah dapat mengirim ide fitur & saran (judul, kategori, prioritas, penjelasan, foto/mockup opsional), memantau Riwayat Saran, serta menerima hadiah 7 aset otomatis/manual saat saran diterima Admin.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-25T16:59:00.000Z',
     isAutoDetected: true,

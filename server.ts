@@ -34,17 +34,29 @@ export interface ServerGlobalChatMessage {
   text: string;
   timestamp: string;
   createdAtMs?: number;
+  updatedAtMs?: number;
+  editedAt?: string;
+  editedAtMs?: number;
   isPinned?: boolean;
   isOfficialAnnouncement?: boolean;
+  isAdminHighlight?: boolean;
   replyToId?: string;
   replyToSender?: string;
   replyToPreview?: string;
+  reactions?: Record<string, string[]>;
+  poll?: Record<string, unknown>;
+  forwardedFrom?: Record<string, unknown>;
+  mentions?: string[];
 }
 
 export interface ServerGlobalChatConfig {
   adminOnlyLock: boolean;
   cooldownMs: number;
   lockedBy?: string;
+  mutedUsers?: Record<string, Record<string, unknown>>;
+  bannedWords?: string[];
+  bannedWordMode?: 'censor' | 'block';
+  adminHighlightDefault?: boolean;
   updatedAtMs: number;
 }
 
@@ -53,6 +65,8 @@ export interface ServerPrivateChatMessage {
   senderAccountId?: string;
   senderAccount: string;
   senderName: string;
+  senderRole?: 'admin' | 'customer';
+  senderCardTier?: string;
   recipientAccountId?: string;
   recipientAccount: string;
   receiverAccount?: string;
@@ -61,22 +75,46 @@ export interface ServerPrivateChatMessage {
   text: string;
   timestamp: string;
   createdAtMs?: number;
+  updatedAtMs?: number;
+  editedAt?: string;
+  editedAtMs?: number;
   replyToId?: string;
   replyToSender?: string;
   replyToPreview?: string;
   deleted?: boolean;
+  isPinned?: boolean;
+  reactions?: Record<string, string[]>;
+  readBy?: Record<string, { accountId: string; accountName: string; readAt: string; readAtMs: number }>;
+  poll?: Record<string, unknown>;
+  forwardedFrom?: Record<string, unknown>;
+  mentions?: string[];
   transferAttachment?: Record<string, unknown>;
 }
 
 export interface ServerPrivateChatGroup {
   id: string;
   name: string;
+  description?: string;
+  rules?: string;
   iconKey: string;
   accentColor: string;
   creatorAccountId: string;
+  coAdminAccountIds?: string[];
   memberAccountIds: string[];
+  pinnedMessageIds?: string[];
   createdAt: string;
   updatedAtMs: number;
+}
+
+export interface ServerChatModerationLog {
+  id: string;
+  action: string;
+  adminName: string;
+  targetName?: string;
+  targetAccountId?: string;
+  detail: string;
+  timestamp: string;
+  createdAtMs: number;
 }
 
 export interface ServerSuggestionRecord {
@@ -178,6 +216,7 @@ interface PersistedGlobalState {
   globalChatConfig: ServerGlobalChatConfig;
   privateChatMessages: ServerPrivateChatMessage[];
   privateChatGroups: ServerPrivateChatGroup[];
+  chatModerationLogs: ServerChatModerationLog[];
   websitePopups: ServerPopupNotification[];
   bugReports: ServerBugReport[];
   suggestions: ServerSuggestionRecord[];
@@ -223,10 +262,15 @@ const DEFAULT_STATE: PersistedGlobalState = {
   globalChatConfig: {
     adminOnlyLock: false,
     cooldownMs: 2500,
+    mutedUsers: {},
+    bannedWords: [],
+    bannedWordMode: 'censor',
+    adminHighlightDefault: true,
     updatedAtMs: Date.now(),
   },
   privateChatMessages: [],
   privateChatGroups: [],
+  chatModerationLogs: [],
   websitePopups: [],
   bugReports: [
     {
@@ -283,13 +327,23 @@ function loadPersistedState(): PersistedGlobalState {
           parsed.globalChatConfig && typeof parsed.globalChatConfig === 'object'
             ? {
                 adminOnlyLock: Boolean(parsed.globalChatConfig.adminOnlyLock),
-                cooldownMs: Math.max(0, Number(parsed.globalChatConfig.cooldownMs ?? 2500) || 2500),
+                cooldownMs: Math.max(0, Number(parsed.globalChatConfig.cooldownMs ?? 2500) || 0),
                 lockedBy: parsed.globalChatConfig.lockedBy ? String(parsed.globalChatConfig.lockedBy) : undefined,
+                mutedUsers:
+                  parsed.globalChatConfig.mutedUsers && typeof parsed.globalChatConfig.mutedUsers === 'object'
+                    ? parsed.globalChatConfig.mutedUsers
+                    : {},
+                bannedWords: Array.isArray(parsed.globalChatConfig.bannedWords)
+                  ? parsed.globalChatConfig.bannedWords.map((w: unknown) => String(w || '').trim()).filter(Boolean)
+                  : [],
+                bannedWordMode: parsed.globalChatConfig.bannedWordMode === 'block' ? 'block' : 'censor',
+                adminHighlightDefault: parsed.globalChatConfig.adminHighlightDefault !== false,
                 updatedAtMs: Number(parsed.globalChatConfig.updatedAtMs) || Date.now(),
               }
             : DEFAULT_STATE.globalChatConfig,
         privateChatMessages: Array.isArray(parsed.privateChatMessages) ? parsed.privateChatMessages : [],
         privateChatGroups: Array.isArray(parsed.privateChatGroups) ? parsed.privateChatGroups : [],
+        chatModerationLogs: Array.isArray(parsed.chatModerationLogs) ? parsed.chatModerationLogs : [],
         websitePopups: Array.isArray(parsed.websitePopups) ? parsed.websitePopups : [],
         bugReports: Array.isArray(parsed.bugReports) ? parsed.bugReports : DEFAULT_STATE.bugReports,
         suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
@@ -448,6 +502,7 @@ async function startServer() {
             globalChatConfig: serverState.globalChatConfig,
             privateChatMessages: serverState.privateChatMessages,
             privateChatGroups: serverState.privateChatGroups,
+            chatModerationLogs: serverState.chatModerationLogs,
             websitePopups: serverState.websitePopups,
             bugReports: serverState.bugReports,
             suggestions: serverState.suggestions,
@@ -492,6 +547,16 @@ async function startServer() {
           handleNewPrivateChatMessage(msg.payload);
         } else if (msg.type === 'private_group:upsert' && msg.payload) {
           handleUpsertPrivateGroup(msg.payload);
+        } else if (msg.type === 'chat:typing' && msg.payload) {
+          broadcastToAll({
+            type: 'chat:typing',
+            payload: {
+              roomKey: String(msg.payload.roomKey || ''),
+              accountId: String(msg.payload.accountId || ''),
+              accountName: String(msg.payload.accountName || 'Nasabah').slice(0, 60),
+              expiresAtMs: Date.now() + 4500,
+            },
+          });
         } else if (msg.type === 'website_popup:send' && msg.payload) {
           handleNewPopup(msg.payload);
         } else if (msg.type === 'bug_report:send' && msg.payload) {
@@ -791,21 +856,73 @@ async function startServer() {
     isVerified?: boolean;
     title?: string;
     text: string;
+    timestamp?: string;
+    createdAtMs?: number;
     isPinned?: boolean;
     isOfficialAnnouncement?: boolean;
+    isAdminHighlight?: boolean;
     replyToId?: string;
     replyToSender?: string;
     replyToPreview?: string;
+    reactions?: Record<string, string[]>;
+    poll?: Record<string, unknown>;
+    forwardedFrom?: { originalSenderName: string; sourceRoomLabel?: string };
+    mentions?: string[];
     showPopupOnAllPhones?: boolean;
   }): { message?: ServerGlobalChatMessage; popup?: ServerPopupNotification | null; error?: string } | null {
     const cleanText = String(input.text || '').trim();
     if (!cleanText) return { error: 'Pesan Chat Global tidak boleh kosong.' };
     const isAdminSender = input.senderRole === 'admin';
 
+    let processedText = cleanText;
+
     if (!isAdminSender) {
       if (serverState.globalChatConfig?.adminOnlyLock) {
         return { error: 'Ruang Chat Global sedang dalam Mode Khusus Admin sementara.' };
       }
+
+      // Check Mute status
+      const senderAccId = String(input.senderAccountId || '');
+      const mutedEntry = senderAccId && serverState.globalChatConfig?.mutedUsers
+        ? (serverState.globalChatConfig.mutedUsers[senderAccId] as {
+            isPermanent?: boolean;
+            mutedUntilMs?: number | null;
+            durationLabel?: string;
+            reason?: string;
+          } | undefined)
+        : undefined;
+      if (mutedEntry) {
+        const untilMs = Number(mutedEntry.mutedUntilMs || 0);
+        if (mutedEntry.isPermanent || (untilMs > 0 && untilMs > Date.now())) {
+          const reasonSuffix = mutedEntry.reason ? ` (${mutedEntry.reason})` : '';
+          return {
+            error: mutedEntry.isPermanent
+              ? `Akun Anda dibisukan permanen di Chat Global oleh Admin${reasonSuffix}.`
+              : `Akun Anda sedang dibisukan di Chat Global (${mutedEntry.durationLabel || 'sementara'})${reasonSuffix}.`,
+          };
+        }
+      }
+
+      // Check Banned Words filter
+      const bannedWords = Array.isArray(serverState.globalChatConfig?.bannedWords)
+        ? serverState.globalChatConfig.bannedWords
+        : [];
+      if (bannedWords.length > 0 && processedText) {
+        const mode = serverState.globalChatConfig?.bannedWordMode === 'block' ? 'block' : 'censor';
+        for (const rawWord of bannedWords) {
+          const w = String(rawWord || '').trim();
+          if (!w) continue;
+          const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(escaped, 'gi');
+          if (regex.test(processedText)) {
+            if (mode === 'block') {
+              return { error: 'Pesan ditolak karena mengandung kata terlarang di Chat Global.' };
+            }
+            processedText = processedText.replace(regex, '*'.repeat(Math.max(3, w.length)));
+          }
+        }
+      }
+
       const cooldownMs = Math.max(0, Number(serverState.globalChatConfig?.cooldownMs ?? 2500) || 0);
       const senderKey = String(input.senderAccountId || input.senderAccount || input.senderName || 'anon');
       const lastSent = globalChatLastSentMs.get(senderKey) || 0;
@@ -832,14 +949,20 @@ async function startServer() {
       senderCardTier: input.senderCardTier ? String(input.senderCardTier) : undefined,
       isVerified: isAdminSender ? true : Boolean(input.isVerified),
       title: isAdminSender ? String(input.title || 'Pesan dari Admin') : 'Chat Global Nasabah',
-      text: cleanText.slice(0, 1000),
-      timestamp: new Date(nowMs).toISOString(),
-      createdAtMs: nowMs,
+      text: processedText.slice(0, 1200),
+      timestamp: input.timestamp || new Date(nowMs).toISOString(),
+      createdAtMs: Number(input.createdAtMs) || nowMs,
+      updatedAtMs: nowMs,
       isPinned: isAdminSender ? Boolean(input.isPinned) : false,
       isOfficialAnnouncement: isAdminSender ? Boolean(input.isOfficialAnnouncement ?? input.showPopupOnAllPhones) : false,
+      isAdminHighlight: isAdminSender ? Boolean(input.isAdminHighlight ?? serverState.globalChatConfig?.adminHighlightDefault ?? true) : false,
       replyToId: input.replyToId ? String(input.replyToId) : undefined,
       replyToSender: input.replyToSender ? String(input.replyToSender).slice(0, 80) : undefined,
       replyToPreview: input.replyToPreview ? String(input.replyToPreview).slice(0, 140) : undefined,
+      reactions: input.reactions && typeof input.reactions === 'object' ? input.reactions : undefined,
+      poll: input.poll && typeof input.poll === 'object' ? input.poll : undefined,
+      forwardedFrom: input.forwardedFrom && typeof input.forwardedFrom === 'object' ? input.forwardedFrom : undefined,
+      mentions: Array.isArray(input.mentions) ? input.mentions.map((x) => String(x)).slice(0, 20) : undefined,
     };
 
     serverState.globalChats = [newMsg, ...serverState.globalChats].slice(0, 300);
@@ -852,7 +975,7 @@ async function startServer() {
         type: 'admin_chat',
         title: 'Pesan dari Admin',
         subtitle: 'PESAN RESMI DARI PANEL ADMIN BANK NUSANTARA',
-        message: cleanText,
+        message: processedText,
         senderName: newMsg.senderName,
         accountName: 'Seluruh HP & Nasabah Bank Nusantara',
         accountNumber: 'PESAN DARI ADMIN',
@@ -878,7 +1001,7 @@ async function startServer() {
 
   function handleNewPrivateChatMessage(input: Partial<ServerPrivateChatMessage>) {
     const cleanText = String(input.text || '').trim();
-    if (!cleanText && !input.transferAttachment) return null;
+    if (!cleanText && !input.transferAttachment && !input.poll) return null;
     const msgId = input.id || `pchat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const existing = serverState.privateChatMessages.find((m) => m.id === msgId);
     if (existing) return existing;
@@ -889,6 +1012,8 @@ async function startServer() {
       senderAccountId: input.senderAccountId ? String(input.senderAccountId) : undefined,
       senderAccount: String(input.senderAccount || ''),
       senderName: String(input.senderName || 'Nasabah').slice(0, 80),
+      senderRole: input.senderRole === 'admin' ? 'admin' : 'customer',
+      senderCardTier: input.senderCardTier ? String(input.senderCardTier) : undefined,
       recipientAccountId: input.recipientAccountId ? String(input.recipientAccountId) : undefined,
       recipientAccount: String(input.recipientAccount || ''),
       receiverAccount: input.receiverAccount ? String(input.receiverAccount) : undefined,
@@ -897,10 +1022,17 @@ async function startServer() {
       text: cleanText.slice(0, 1500),
       timestamp: input.timestamp || new Date(nowMs).toISOString(),
       createdAtMs: Number(input.createdAtMs) || nowMs,
+      updatedAtMs: nowMs,
       replyToId: input.replyToId ? String(input.replyToId) : undefined,
       replyToSender: input.replyToSender ? String(input.replyToSender).slice(0, 80) : undefined,
       replyToPreview: input.replyToPreview ? String(input.replyToPreview).slice(0, 140) : undefined,
       deleted: Boolean(input.deleted),
+      isPinned: Boolean(input.isPinned),
+      reactions: input.reactions && typeof input.reactions === 'object' ? input.reactions : undefined,
+      readBy: input.readBy && typeof input.readBy === 'object' ? input.readBy : undefined,
+      poll: input.poll && typeof input.poll === 'object' ? input.poll : undefined,
+      forwardedFrom: input.forwardedFrom && typeof input.forwardedFrom === 'object' ? input.forwardedFrom : undefined,
+      mentions: Array.isArray(input.mentions) ? input.mentions.map((x) => String(x)).slice(0, 20) : undefined,
       transferAttachment:
         input.transferAttachment && typeof input.transferAttachment === 'object'
           ? input.transferAttachment
@@ -928,13 +1060,23 @@ async function startServer() {
       )
     );
     const existing = serverState.privateChatGroups.find((g) => g.id === grpId);
+    const coAdminIds = Array.isArray(input.coAdminAccountIds)
+      ? Array.from(new Set(input.coAdminAccountIds.map((x) => String(x || '').trim()).filter((x) => memberIds.includes(x))))
+      : existing?.coAdminAccountIds || [];
+    const pinnedIds = Array.isArray(input.pinnedMessageIds)
+      ? Array.from(new Set(input.pinnedMessageIds.map((x) => String(x || '').trim()).filter(Boolean)))
+      : existing?.pinnedMessageIds || [];
     const nextGroup: ServerPrivateChatGroup = {
       id: grpId,
       name: cleanName.slice(0, 80),
+      description: input.description !== undefined ? String(input.description || '').slice(0, 300) : existing?.description,
+      rules: input.rules !== undefined ? String(input.rules || '').slice(0, 600) : existing?.rules,
       iconKey: String(input.iconKey || existing?.iconKey || 'users'),
       accentColor: String(input.accentColor || existing?.accentColor || 'indigo'),
       creatorAccountId: String(existing?.creatorAccountId || input.creatorAccountId),
+      coAdminAccountIds: coAdminIds,
       memberAccountIds: memberIds,
+      pinnedMessageIds: pinnedIds,
       createdAt: existing?.createdAt || input.createdAt || new Date().toISOString(),
       updatedAtMs: Date.now(),
     };
@@ -1086,6 +1228,7 @@ async function startServer() {
       globalChatConfig: serverState.globalChatConfig,
       privateChatMessages: serverState.privateChatMessages,
       privateChatGroups: serverState.privateChatGroups,
+      chatModerationLogs: serverState.chatModerationLogs,
       websitePopups: serverState.websitePopups,
       bugReports: serverState.bugReports,
       suggestions: serverState.suggestions,
@@ -1665,14 +1808,52 @@ async function startServer() {
     });
   });
 
+  app.patch('/api/global-chat/:id', (req, res) => {
+    const targetId = String(req.params.id || '');
+    const nowMs = Date.now();
+    let updatedMsg: ServerGlobalChatMessage | null = null;
+    serverState.globalChats = serverState.globalChats.map((m) => {
+      if (m.id !== targetId) return m;
+      const next: ServerGlobalChatMessage = {
+        ...m,
+        ...(typeof req.body?.text === 'string' && req.body.text.trim()
+          ? {
+              text: req.body.text.trim().slice(0, 1200),
+              editedAt: req.body?.editedAt || new Date(nowMs).toISOString(),
+              editedAtMs: Number(req.body?.editedAtMs) || nowMs,
+            }
+          : {}),
+        ...(typeof req.body?.isPinned === 'boolean' ? { isPinned: req.body.isPinned } : {}),
+        ...(req.body?.reactions && typeof req.body.reactions === 'object'
+          ? { reactions: req.body.reactions as Record<string, string[]> }
+          : {}),
+        ...(req.body?.poll && typeof req.body.poll === 'object'
+          ? { poll: req.body.poll as Record<string, unknown> }
+          : {}),
+        updatedAtMs: nowMs,
+      };
+      updatedMsg = next;
+      return next;
+    });
+    savePersistedState();
+    if (updatedMsg) {
+      broadcastToAll({
+        type: 'global_chat:updated',
+        payload: { message: updatedMsg, lastUpdated: serverState.lastUpdated },
+      });
+    }
+    res.json({ success: Boolean(updatedMsg), message: updatedMsg });
+  });
+
   app.post('/api/global-chat/:id/pin', (req, res) => {
     const targetId = String(req.params.id || '');
     const desiredPin = typeof req.body?.isPinned === 'boolean' ? req.body.isPinned : undefined;
+    const nowMs = Date.now();
     let updatedMsg: ServerGlobalChatMessage | null = null;
     serverState.globalChats = serverState.globalChats.map((m) => {
       if (m.id === targetId) {
         const nextPin = desiredPin !== undefined ? desiredPin : !m.isPinned;
-        updatedMsg = { ...m, isPinned: nextPin };
+        updatedMsg = { ...m, isPinned: nextPin, updatedAtMs: nowMs };
         return updatedMsg;
       }
       return m;
@@ -1688,15 +1869,34 @@ async function startServer() {
   });
 
   app.post('/api/global-chat/lock', (req, res) => {
-    const nextLocked = Boolean(req.body?.adminOnlyLock);
+    const nextLocked =
+      typeof req.body?.adminOnlyLock === 'boolean'
+        ? req.body.adminOnlyLock
+        : Boolean(serverState.globalChatConfig?.adminOnlyLock);
     const nextCooldown =
       req.body?.cooldownMs !== undefined
-        ? Math.max(0, Math.min(30000, Number(req.body.cooldownMs) || 2500))
+        ? Math.max(0, Math.min(120000, Number(req.body.cooldownMs) || 0))
         : serverState.globalChatConfig?.cooldownMs ?? 2500;
     serverState.globalChatConfig = {
+      ...serverState.globalChatConfig,
       adminOnlyLock: nextLocked,
       cooldownMs: nextCooldown,
-      lockedBy: req.body?.lockedBy ? String(req.body.lockedBy) : undefined,
+      lockedBy: req.body?.lockedBy !== undefined ? String(req.body.lockedBy || '') || undefined : serverState.globalChatConfig?.lockedBy,
+      mutedUsers:
+        req.body?.mutedUsers && typeof req.body.mutedUsers === 'object'
+          ? (req.body.mutedUsers as Record<string, Record<string, unknown>>)
+          : serverState.globalChatConfig?.mutedUsers || {},
+      bannedWords: Array.isArray(req.body?.bannedWords)
+        ? (req.body.bannedWords as unknown[]).map((w) => String(w || '').trim()).filter(Boolean)
+        : serverState.globalChatConfig?.bannedWords || [],
+      bannedWordMode:
+        req.body?.bannedWordMode === 'block' || req.body?.bannedWordMode === 'censor'
+          ? req.body.bannedWordMode
+          : serverState.globalChatConfig?.bannedWordMode || 'censor',
+      adminHighlightDefault:
+        typeof req.body?.adminHighlightDefault === 'boolean'
+          ? req.body.adminHighlightDefault
+          : serverState.globalChatConfig?.adminHighlightDefault ?? true,
       updatedAtMs: Date.now(),
     };
     savePersistedState();
@@ -1705,6 +1905,57 @@ async function startServer() {
       payload: { globalChatConfig: serverState.globalChatConfig, lastUpdated: serverState.lastUpdated },
     });
     res.json({ success: true, globalChatConfig: serverState.globalChatConfig });
+  });
+
+  app.post('/api/global-chat/bulk-delete-user', (req, res) => {
+    const targetAccountId = String(req.body?.accountId || '').trim();
+    const targetAccountNo = String(req.body?.accountNumber || '').trim();
+    if (!targetAccountId && !targetAccountNo) {
+      res.status(400).json({ success: false, message: 'ID akun target wajib diisi.' });
+      return;
+    }
+    const removedIds = serverState.globalChats
+      .filter(
+        (m) =>
+          (targetAccountId && m.senderAccountId === targetAccountId) ||
+          (targetAccountNo && m.senderAccount === targetAccountNo)
+      )
+      .map((m) => m.id);
+    if (removedIds.length > 0) {
+      recordServerTombstones('globalChats', removedIds);
+      bumpServerConfigRevision('globalChats');
+      serverState.globalChats = serverState.globalChats.filter((m) => !removedIds.includes(m.id));
+      savePersistedState();
+      broadcastToAll({
+        type: 'global_chat:bulk_delete',
+        payload: {
+          ids: removedIds,
+          deletedAdminItemIds: serverState.deletedAdminItemIds,
+          lastUpdated: serverState.lastUpdated,
+        },
+      });
+    }
+    res.json({ success: true, removedCount: removedIds.length, removedIds });
+  });
+
+  app.post('/api/global-chat/mod-log', (req, res) => {
+    const entry: ServerChatModerationLog = {
+      id: String(req.body?.id || `modlog-${Date.now()}-${Math.floor(Math.random() * 1000)}`),
+      action: String(req.body?.action || 'delete_msg'),
+      adminName: String(req.body?.adminName || 'Admin Bank Nusantara').slice(0, 80),
+      targetName: req.body?.targetName ? String(req.body.targetName).slice(0, 80) : undefined,
+      targetAccountId: req.body?.targetAccountId ? String(req.body.targetAccountId) : undefined,
+      detail: String(req.body?.detail || '').slice(0, 300),
+      timestamp: req.body?.timestamp || new Date().toISOString(),
+      createdAtMs: Number(req.body?.createdAtMs) || Date.now(),
+    };
+    serverState.chatModerationLogs = [entry, ...serverState.chatModerationLogs.filter((l) => l.id !== entry.id)].slice(0, 200);
+    savePersistedState();
+    broadcastToAll({
+      type: 'global_chat:mod_log',
+      payload: { entry, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, entry });
   });
 
   app.delete('/api/global-chat/:id', (req, res) => {
@@ -1750,6 +2001,8 @@ async function startServer() {
       globalChatConfig: serverState.globalChatConfig,
       privateChatMessages: serverState.privateChatMessages,
       privateChatGroups: serverState.privateChatGroups,
+      chatModerationLogs: serverState.chatModerationLogs,
+      deletedAdminItemIds: serverState.deletedAdminItemIds || {},
       lastUpdated: serverState.lastUpdated,
     });
   });
@@ -1763,8 +2016,59 @@ async function startServer() {
     res.json({ success: true, message: created, privateChatMessages: serverState.privateChatMessages });
   });
 
+  app.post('/api/private-chat/read-receipts', (req, res) => {
+    const messageIds = Array.isArray(req.body?.messageIds)
+      ? (req.body.messageIds as unknown[]).map((x) => String(x || '')).filter(Boolean)
+      : [];
+    const readerAccountId = String(req.body?.accountId || '').trim();
+    const readerName = String(req.body?.accountName || 'Nasabah').trim().slice(0, 80);
+    if (!readerAccountId || messageIds.length === 0) {
+      res.json({ success: true, updatedMessages: [] });
+      return;
+    }
+    const nowMs = Date.now();
+    const readIso = new Date(nowMs).toISOString();
+    const idSet = new Set(messageIds);
+    const updatedMessages: ServerPrivateChatMessage[] = [];
+    serverState.privateChatMessages = serverState.privateChatMessages.map((m) => {
+      if (!idSet.has(m.id)) return m;
+      if (m.readBy && m.readBy[readerAccountId]) return m;
+      const next: ServerPrivateChatMessage = {
+        ...m,
+        readBy: {
+          ...(m.readBy || {}),
+          [readerAccountId]: {
+            accountId: readerAccountId,
+            accountName: readerName,
+            readAt: readIso,
+            readAtMs: nowMs,
+          },
+        },
+        updatedAtMs: nowMs,
+      };
+      updatedMessages.push(next);
+      return next;
+    });
+    if (updatedMessages.length > 0) {
+      savePersistedState();
+      broadcastToAll({
+        type: 'private_chat:read_receipts',
+        payload: {
+          messages: updatedMessages,
+          readerAccountId,
+          readerName,
+          readAt: readIso,
+          readAtMs: nowMs,
+          lastUpdated: serverState.lastUpdated,
+        },
+      });
+    }
+    res.json({ success: true, updatedMessages });
+  });
+
   app.patch('/api/private-chat/:id', (req, res) => {
     const targetId = String(req.params.id || '');
+    const nowMs = Date.now();
     let updatedMsg: ServerPrivateChatMessage | null = null;
     serverState.privateChatMessages = serverState.privateChatMessages.map((m) => {
       if (m.id === targetId) {
@@ -1772,10 +2076,30 @@ async function startServer() {
           req.body?.transferAttachment && typeof req.body.transferAttachment === 'object'
             ? { ...(m.transferAttachment || {}), ...(req.body.transferAttachment as Record<string, unknown>) }
             : m.transferAttachment;
+        const mergedReadBy =
+          req.body?.readBy && typeof req.body.readBy === 'object'
+            ? { ...(m.readBy || {}), ...(req.body.readBy as Record<string, { accountId: string; accountName: string; readAt: string; readAtMs: number }>) }
+            : m.readBy;
         updatedMsg = {
           ...m,
+          ...(typeof req.body?.text === 'string' && req.body.text.trim()
+            ? {
+                text: req.body.text.trim().slice(0, 1500),
+                editedAt: req.body?.editedAt || new Date(nowMs).toISOString(),
+                editedAtMs: Number(req.body?.editedAtMs) || nowMs,
+              }
+            : {}),
           ...(typeof req.body?.deleted === 'boolean' ? { deleted: req.body.deleted } : {}),
+          ...(typeof req.body?.isPinned === 'boolean' ? { isPinned: req.body.isPinned } : {}),
+          ...(req.body?.reactions && typeof req.body.reactions === 'object'
+            ? { reactions: req.body.reactions as Record<string, string[]> }
+            : {}),
+          ...(req.body?.poll && typeof req.body.poll === 'object'
+            ? { poll: req.body.poll as Record<string, unknown> }
+            : {}),
+          ...(mergedReadBy ? { readBy: mergedReadBy } : {}),
           ...(nextAttachment ? { transferAttachment: nextAttachment } : {}),
+          updatedAtMs: nowMs,
         };
         return updatedMsg;
       }
@@ -1791,6 +2115,22 @@ async function startServer() {
     res.json({ success: Boolean(updatedMsg), message: updatedMsg });
   });
 
+  app.delete('/api/private-chat/:id', (req, res) => {
+    const targetId = String(req.params.id || '');
+    recordServerTombstones('privateChats', [targetId]);
+    serverState.privateChatMessages = serverState.privateChatMessages.filter((m) => m.id !== targetId);
+    savePersistedState();
+    broadcastToAll({
+      type: 'private_chat:delete',
+      payload: {
+        id: targetId,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
+    });
+    res.json({ success: true, id: targetId });
+  });
+
   app.post('/api/private-groups', (req, res) => {
     const group = handleUpsertPrivateGroup(req.body || {});
     if (!group) {
@@ -1802,12 +2142,17 @@ async function startServer() {
 
   app.delete('/api/private-groups/:id', (req, res) => {
     const targetId = String(req.params.id || '');
+    recordServerTombstones('privateChatGroups', [targetId]);
     serverState.privateChatGroups = serverState.privateChatGroups.filter((g) => g.id !== targetId);
     serverState.privateChatMessages = serverState.privateChatMessages.filter((m) => m.groupId !== targetId);
     savePersistedState();
     broadcastToAll({
       type: 'private_group:deleted',
-      payload: { id: targetId, lastUpdated: serverState.lastUpdated },
+      payload: {
+        id: targetId,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
     });
     res.json({ success: true, id: targetId, privateChatGroups: serverState.privateChatGroups });
   });

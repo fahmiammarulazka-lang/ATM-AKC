@@ -1,19 +1,21 @@
 /**
- * Bank Nusantara — Chat Global & Priv (v15.39.49)
- * Antarmuka komunikasi modern bergaya WhatsApp/Telegram dengan 2 tab utama:
- * 1. Chat Global: Terbuka untuk semua nasabah & Admin (lencana ADMIN RESMI, Reply, Hapus, Pin, Anti-Spam, Mode Khusus Admin, tanpa Kirim/Minta Uang).
- * 2. Chat Privat: 1-on-1 & Grup Privat (privasi penuh antar peserta, Tambah Nasabah 3 kolom + pratinjau otomatis, Tambah & Kelola Grup lengkap, Kirim Uang & Minta Uang aktif).
+ * Bank Nusantara — Chat Global & Priv (v15.40.49)
+ * - Sinkronisasi lintas perangkat Anti-Timpa (Union-Merge + Penyimpanan Terpisah Per-ID Cloud & Server + Tombstone Registry)
+ * - Modal Full-Body Portal anti-terpotong di HP & Laptop + grid min-w-0 anti-overflow
+ * - Tombol "Simpan Nasabah" ala WhatsApp (Banner + Header DM + Info Grup) dengan prefill otomatis User ID & No. Rekening
+ * - Buat Grup Privat ketat hanya dari nasabah tersimpan + Info Dibaca khusus grup + Edit 15 menit + Reaksi Emoji + Polling + Mention @ + Sedang Mengetik + Teruskan + Bintang + Suite Moderasi Admin Lengkap
  */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  MessageSquare,
   Globe,
   Lock,
+  Unlock,
   Send,
   Search,
   UserPlus,
   Users,
   DollarSign,
+  Check,
   CheckCheck,
   ShieldCheck,
   Pin,
@@ -23,70 +25,64 @@ import {
   X,
   ArrowLeft,
   Info,
-  Crown,
-  LogOut,
   Edit3,
-  Check,
-  AlertCircle,
   HandCoins,
   Sparkles,
-  Briefcase,
-  Home,
+  RefreshCw,
+  MoreHorizontal,
+  Eye,
+  Copy,
   Star,
-  Heart,
-  Zap,
-  ShieldAlert,
+  Forward,
+  BarChart2,
+  SlidersHorizontal,
+  Ban,
+  AlertTriangle,
+  VolumeX,
+  ChevronDown,
+  ChevronUp,
+  MessageSquare,
+  Flame,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
-import { BankAccount, ChatMessage, GlobalChatMessage, PrivateChatGroup } from '../types/bank';
-import { formatRupiah, playAtmSound } from '../utils/bankUtils';
+import {
+  BankAccount,
+  ChatForwardInfo,
+  ChatMessage,
+  ChatPollData,
+  GlobalChatMessage,
+  PrivateChatContact,
+  PrivateChatGroup,
+} from '../types/bank';
+import { formatRupiah } from '../utils/bankUtils';
 import { PinPromptModal } from './PinPromptModal';
+import {
+  AddContactModal,
+  AdminModerationModal,
+  AdminWarnModal,
+  CreateGroupModal,
+  CreatePollModal,
+  ForwardMessageModal,
+  GroupInfoModal,
+  PortalModalShell,
+  ReadReceiptModal,
+  formatChatDateTime,
+  formatChatTimeShort,
+  getChatGroupColorClass,
+  renderChatGroupIcon,
+} from './ChatPortalModals';
 
 type MainChatTab = 'global' | 'private';
 type PrivateFilter = 'all' | 'dm' | 'group';
 
 interface ActivePrivateTarget {
   type: 'dm' | 'group';
-  id: string; // accountId (or accountNumber fallback) for dm, groupId for group
+  id: string;
   accountNumber?: string;
 }
 
-const GROUP_ICON_OPTIONS = [
-  { key: 'users', label: 'Komunitas', Icon: Users },
-  { key: 'briefcase', label: 'Bisnis', Icon: Briefcase },
-  { key: 'home', label: 'Keluarga', Icon: Home },
-  { key: 'star', label: 'VIP', Icon: Star },
-  { key: 'heart', label: 'Sahabat', Icon: Heart },
-  { key: 'zap', label: 'Cepat', Icon: Zap },
-];
-
-const GROUP_COLOR_OPTIONS: Array<{ key: string; label: string; bgClass: string; ringClass: string }> = [
-  { key: 'indigo', label: 'Indigo', bgClass: 'bg-indigo-600 text-white', ringClass: 'ring-indigo-400' },
-  { key: 'emerald', label: 'Emerald', bgClass: 'bg-emerald-600 text-white', ringClass: 'ring-emerald-400' },
-  { key: 'sky', label: 'Biru', bgClass: 'bg-sky-600 text-white', ringClass: 'ring-sky-400' },
-  { key: 'amber', label: 'Emas', bgClass: 'bg-amber-500 text-slate-950', ringClass: 'ring-amber-300' },
-  { key: 'rose', label: 'Rose', bgClass: 'bg-rose-600 text-white', ringClass: 'ring-rose-400' },
-  { key: 'violet', label: 'Violet', bgClass: 'bg-violet-600 text-white', ringClass: 'ring-violet-400' },
-];
-
-function renderGroupIcon(iconKey: string, className = 'w-5 h-5') {
-  const found = GROUP_ICON_OPTIONS.find((item) => item.key === iconKey) || GROUP_ICON_OPTIONS[0];
-  const IconComp = found.Icon;
-  return <IconComp className={className} />;
-}
-
-function getGroupColorClass(colorKey: string): string {
-  return (
-    GROUP_COLOR_OPTIONS.find((c) => c.key === colorKey)?.bgClass || 'bg-indigo-600 text-white'
-  );
-}
-
-function formatShortTime(iso?: string): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-}
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '🙏', '🔥'];
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 export const NusantaraChat: React.FC = () => {
   const {
@@ -94,12 +90,26 @@ export const NusantaraChat: React.FC = () => {
     accounts,
     adminUnlocked,
     connectedDevicesCount,
+    customerPresenceMap,
     globalChats,
     globalChatConfig,
+    chatModerationLogs,
+    chatTypingMap,
+    emitChatTyping,
+    refreshChatSyncNow,
     sendGlobalChatMessage,
+    editGlobalChatMessage,
+    toggleGlobalChatReaction,
+    voteGlobalChatPoll,
     togglePinGlobalChatMessage,
     toggleGlobalChatAdminLock,
+    adminUpdateGlobalChatConfig,
+    adminMuteGlobalChatUser,
+    adminUnmuteGlobalChatUser,
+    adminBulkDeleteUserGlobalChats,
+    adminWarnUserFromChat,
     deleteGlobalChatMessage,
+    clearGlobalChatMessages,
     chats,
     sendChatMessage,
     transferMoney,
@@ -111,9 +121,17 @@ export const NusantaraChat: React.FC = () => {
     addPrivateChatContact,
     removePrivateChatContact,
     markChatRequestPaid,
+    editPrivateChatMessage,
+    deletePrivateChatMessage,
+    togglePrivateChatReaction,
+    votePrivateChatPoll,
+    togglePinPrivateChatMessage,
+    markPrivateMessagesRead,
+    toggleBookmarkChatMessage,
+    toggleMutePrivateGroup,
     createPrivateChatGroup,
+    updatePrivateChatGroupDetails,
     addMemberToPrivateGroup,
-    renamePrivateChatGroup,
     removeMemberFromPrivateGroup,
     leavePrivateChatGroup,
     deletePrivateChatGroup,
@@ -121,50 +139,71 @@ export const NusantaraChat: React.FC = () => {
 
   const [mainTab, setMainTab] = useState<MainChatTab>('global');
   const [toastBanner, setToastBanner] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [refreshingChat, setRefreshingChat] = useState(false);
+
+  // Auto-draft per room key (disimpan selama sesi)
+  const [draftByRoom, setDraftByRoom] = useState<Record<string, string>>({});
 
   // Global Chat states
-  const [globalText, setGlobalText] = useState<string>('');
   const [globalReplyTarget, setGlobalReplyTarget] = useState<GlobalChatMessage | null>(null);
-  const [globalCooldownLeft, setGlobalCooldownLeft] = useState<number>(0);
-  const [globalSending, setGlobalSending] = useState<boolean>(false);
+  const [globalEditTarget, setGlobalEditTarget] = useState<GlobalChatMessage | null>(null);
+  const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [globalBookmarkedOnly, setGlobalBookmarkedOnly] = useState(false);
+  const [globalPinnedExpanded, setGlobalPinnedExpanded] = useState(false);
+  const [adminHighlightMode, setAdminHighlightMode] = useState(true);
+  const [globalCooldownLeft, setGlobalCooldownLeft] = useState(0);
+  const [globalSending, setGlobalSending] = useState(false);
   const globalEndRef = useRef<HTMLDivElement | null>(null);
 
   // Private Chat states
   const [privateFilter, setPrivateFilter] = useState<PrivateFilter>('all');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState('');
   const [activeTarget, setActiveTarget] = useState<ActivePrivateTarget | null>(null);
-  const [privateText, setPrivateText] = useState<string>('');
   const [privateReplyTarget, setPrivateReplyTarget] = useState<ChatMessage | null>(null);
+  const [privateEditTarget, setPrivateEditTarget] = useState<ChatMessage | null>(null);
+  const [privateRoomSearchOpen, setPrivateRoomSearchOpen] = useState(false);
+  const [privateRoomSearchQuery, setPrivateRoomSearchQuery] = useState('');
+  const [privateBookmarkedOnly, setPrivateBookmarkedOnly] = useState(false);
+  const [groupPinnedExpanded, setGroupPinnedExpanded] = useState(false);
+  const [dismissedUnsavedBannerKeys, setDismissedUnsavedBannerKeys] = useState<Record<string, boolean>>({});
   const privateEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Modal: Tambah Nasabah (3 kolom: Nama opsional, User ID, No. Rekening — isi salah satu)
-  const [showAddContactModal, setShowAddContactModal] = useState<boolean>(false);
-  const [contactCustomName, setContactCustomName] = useState<string>('');
-  const [contactUserIdInput, setContactUserIdInput] = useState<string>('');
-  const [contactAccNoInput, setContactAccNoInput] = useState<string>('');
+  // Popover `···` state (only 1 open at a time)
+  const [openMenuMsgId, setOpenMenuMsgId] = useState<string | null>(null);
+  const [showEditedTipId, setShowEditedTipId] = useState<string | null>(null);
 
-  // Modal: Tambah Grup
-  const [showCreateGroupModal, setShowCreateGroupModal] = useState<boolean>(false);
-  const [groupNameInput, setGroupNameInput] = useState<string>('');
-  const [groupIconKey, setGroupIconKey] = useState<string>('users');
-  const [groupAccentColor, setGroupAccentColor] = useState<string>('indigo');
-  const [groupSelectedMemberIds, setGroupSelectedMemberIds] = useState<string[]>([]);
-  const [groupQuickLookup, setGroupQuickLookup] = useState<string>('');
+  // Mention `@` autocomplete state
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
 
-  // Modal: Info & Pengaturan Grup
-  const [showGroupInfoModal, setShowGroupInfoModal] = useState<boolean>(false);
-  const [renameGroupInput, setRenameGroupInput] = useState<string>('');
-  const [groupAddLookupInput, setGroupAddLookupInput] = useState<string>('');
-  const [confirmDeleteGroupStep, setConfirmDeleteGroupStep] = useState<boolean>(false);
+  // Modals (all rendered via Portal in ChatPortalModals.tsx)
+  const [addContactModalState, setAddContactModalState] = useState<{
+    open: boolean;
+    prefill?: { customName?: string; userId?: string; accountNumber?: string; isQuickSave?: boolean } | null;
+  }>({ open: false, prefill: null });
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showGroupInfoModal, setShowGroupInfoModal] = useState(false);
+  const [readReceiptModalMsg, setReadReceiptModalMsg] = useState<ChatMessage | null>(null);
+  const [forwardModalPayload, setForwardModalPayload] = useState<{
+    text: string;
+    meta: ChatForwardInfo;
+  } | null>(null);
+  const [pollModalScope, setPollModalScope] = useState<'global' | 'group' | null>(null);
+  const [adminModModalState, setAdminModModalState] = useState<{
+    open: boolean;
+    tab?: 'broadcast' | 'moderation' | 'filter' | 'logs';
+    muteTarget?: { accountId: string; name: string; accountNumber?: string } | null;
+  }>({ open: false });
+  const [warnModalTarget, setWarnModalTarget] = useState<{ accountId: string; name: string } | null>(null);
 
-  // Modal: Kirim Uang / Minta Uang (Privat 1-on-1 & Grup Privat)
-  const [showMoneyModal, setShowMoneyModal] = useState<boolean>(false);
-  const [isRequestMoneyMode, setIsRequestMoneyMode] = useState<boolean>(false);
-  const [moneyAmountInput, setMoneyAmountInput] = useState<string>('');
-  const [moneyNoteInput, setMoneyNoteInput] = useState<string>('');
-  const [moneyGroupTargetAccountId, setMoneyGroupTargetAccountId] = useState<string>('');
+  // Money Transfer / Request Money Modal (Portal)
+  const [showMoneyModal, setShowMoneyModal] = useState(false);
+  const [isRequestMoneyMode, setIsRequestMoneyMode] = useState(false);
+  const [moneyAmountInput, setMoneyAmountInput] = useState('');
+  const [moneyNoteInput, setMoneyNoteInput] = useState('');
+  const [moneyGroupTargetAccountId, setMoneyGroupTargetAccountId] = useState('');
   const [pendingPayRequestMsg, setPendingPayRequestMsg] = useState<ChatMessage | null>(null);
-  const [showPinPrompt, setShowPinPrompt] = useState<boolean>(false);
+  const [showPinPrompt, setShowPinPrompt] = useState(false);
 
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToastBanner({ text, type });
@@ -180,7 +219,62 @@ export const NusantaraChat: React.FC = () => {
       currentAccount?.id === 'acc-admin'
   );
 
-  // Cooldown timer tick for Global Chat anti-spam
+  const bookmarkedIdSet = useMemo(
+    () => new Set<string>(currentAccount?.bookmarkedChatIds || []),
+    [currentAccount?.bookmarkedChatIds]
+  );
+
+  const mutedGroupIdSet = useMemo(
+    () => new Set<string>(currentAccount?.mutedGroupIds || []),
+    [currentAccount?.mutedGroupIds]
+  );
+
+  const mySavedContacts = useMemo<PrivateChatContact[]>(() => {
+    if (!currentAccount) return [];
+    return Array.isArray(currentAccount.savedChatContacts) ? currentAccount.savedChatContacts : [];
+  }, [currentAccount]);
+
+  const myGroups = useMemo<PrivateChatGroup[]>(() => {
+    if (!currentAccount) return [];
+    return privateChatGroups
+      .filter((g) => Array.isArray(g.memberAccountIds) && g.memberAccountIds.includes(currentAccount.id))
+      .sort((a, b) => (b.updatedAtMs || 0) - (a.updatedAtMs || 0));
+  }, [privateChatGroups, currentAccount]);
+
+  const activeGroup = useMemo<PrivateChatGroup | null>(() => {
+    if (!activeTarget || activeTarget.type !== 'group') return null;
+    return myGroups.find((g) => g.id === activeTarget.id) || null;
+  }, [activeTarget, myGroups]);
+
+  const activeRoomKey = useMemo(() => {
+    if (mainTab === 'global') return 'global';
+    if (!activeTarget) return 'private:none';
+    return activeTarget.type === 'group' ? `group:${activeTarget.id}` : `dm:${activeTarget.id}`;
+  }, [mainTab, activeTarget]);
+
+  const activeDraftText = draftByRoom[activeRoomKey] || '';
+  const setActiveDraftText = (val: string) => {
+    setDraftByRoom((prev) => ({ ...prev, [activeRoomKey]: val }));
+    const match = val.match(/@([a-zA-Z0-9_ ]{0,24})$/);
+    if (match && (mainTab === 'global' || activeTarget?.type === 'group')) {
+      setMentionQuery(match[1].toLowerCase());
+    } else {
+      setMentionQuery(null);
+    }
+    if (val.trim()) {
+      emitChatTyping(activeRoomKey);
+    }
+  };
+
+  // Close `···` menu when clicking outside
+  useEffect(() => {
+    if (!openMenuMsgId) return;
+    const close = () => setOpenMenuMsgId(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [openMenuMsgId]);
+
+  // Cooldown tick
   useEffect(() => {
     if (globalCooldownLeft <= 0) return;
     const t = window.setInterval(() => {
@@ -189,780 +283,803 @@ export const NusantaraChat: React.FC = () => {
     return () => window.clearInterval(t);
   }, [globalCooldownLeft]);
 
-  // Mark Global Chat read when viewing Global tab
+  // Mark Global Chat read when viewing
   useEffect(() => {
     if (mainTab === 'global' && currentAccount) {
       markChatRoomRead('global');
     }
   }, [mainTab, globalChats.length, currentAccount?.id]);
 
-  // Auto-scroll Global Chat to bottom
+  // Auto-scroll Global Chat
   useEffect(() => {
-    if (mainTab === 'global') {
+    if (mainTab === 'global' && !globalSearchQuery && !globalBookmarkedOnly) {
       globalEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [mainTab, globalChats.length]);
 
-  // Mark active private room read when open
-  useEffect(() => {
-    if (mainTab === 'private' && activeTarget && currentAccount) {
-      const roomKey = activeTarget.type === 'group' ? `group:${activeTarget.id}` : `dm:${activeTarget.id}`;
-      markChatRoomRead(roomKey);
-      if (activeTarget.type === 'dm' && activeTarget.accountNumber) {
-        markChatRoomRead(`dm:${activeTarget.accountNumber}`);
-      }
-    }
-  }, [mainTab, activeTarget?.type, activeTarget?.id, chats.length, currentAccount?.id]);
-
-  // Auto-scroll Private Chat to bottom
-  useEffect(() => {
-    if (mainTab === 'private' && activeTarget) {
-      privateEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
-  }, [mainTab, activeTarget?.id, chats.length]);
-
-  // Sorted Global Chats (oldest -> newest like WhatsApp/Telegram)
-  const orderedGlobalChats = useMemo(() => {
-    return [...globalChats].sort((a, b) => {
-      const ta = a.createdAtMs || Date.parse(a.timestamp || '') || 0;
-      const tb = b.createdAtMs || Date.parse(b.timestamp || '') || 0;
-      return ta - tb;
-    });
-  }, [globalChats]);
-
-  const pinnedGlobalMessages = useMemo(
-    () => orderedGlobalChats.filter((m) => m.isPinned),
-    [orderedGlobalChats]
-  );
-
-  // Strict privacy: Only groups where currentAccount is a member
-  const myPrivateGroups = useMemo(() => {
-    if (!currentAccount) return [];
-    return privateChatGroups.filter((g) => g.memberAccountIds.includes(currentAccount.id));
-  }, [privateChatGroups, currentAccount]);
-
-  // Saved contacts for current account
-  const mySavedContacts = useMemo(() => {
-    return Array.isArray(currentAccount?.savedChatContacts)
-      ? currentAccount!.savedChatContacts!
-      : [];
-  }, [currentAccount?.savedChatContacts]);
-
-  // Unified private sidebar thread items (strictly filtered to currentAccount's DMs and Groups!)
-  const privateSidebarItems = useMemo(() => {
-    if (!currentAccount) return [];
-    const items: Array<{
-      type: 'dm' | 'group';
-      id: string;
-      accountNumber?: string;
-      userId16?: string;
-      displayName: string;
-      subtitle: string;
-      avatarChar: string;
-      iconKey?: string;
-      accentColor?: string;
-      cardTier?: string;
-      lastMessagePreview: string;
-      lastMessageTime: string;
-      lastActivityMs: number;
-      unreadCount: number;
-      memberCount?: number;
-      isSavedContact?: boolean;
-    }> = [];
-
-    // 1. Collect all DM peers from saved contacts + private 1-on-1 messages involving currentAccount
-    const dmPeerMap = new Map<
-      string,
-      {
-        accountId: string;
-        accountNumber: string;
-        userId16?: string;
-        customName?: string;
-        registeredName: string;
-        cardTier?: string;
-        isSavedContact: boolean;
-      }
-    >();
-
-    for (const c of mySavedContacts) {
-      const liveAcc = accounts.find(
-        (a) => a.id === c.targetAccountId || a.accountNumber === c.targetAccountNumber
-      );
-      const key = liveAcc?.id || c.targetAccountId || c.targetAccountNumber;
-      dmPeerMap.set(key, {
-        accountId: liveAcc?.id || c.targetAccountId,
-        accountNumber: liveAcc?.accountNumber || c.targetAccountNumber,
-        userId16: liveAcc?.userId16 || c.targetUserId16,
-        customName: c.customName,
-        registeredName: liveAcc?.fullName || c.registeredName,
-        cardTier: liveAcc?.cardTier || c.cardTier,
-        isSavedContact: true,
-      });
-    }
-
-    for (const m of chats) {
-      if (m.groupId || m.deleted) continue;
-      const isMeSender =
-        (m.senderAccountId && m.senderAccountId === currentAccount.id) ||
-        m.senderAccount === currentAccount.accountNumber;
-      const isMeRecipient =
-        (m.recipientAccountId && m.recipientAccountId === currentAccount.id) ||
-        m.recipientAccount === currentAccount.accountNumber;
-      if (!isMeSender && !isMeRecipient) continue;
-
-      const peerAccNo = isMeSender ? m.recipientAccount : m.senderAccount;
-      const peerAccId = isMeSender ? m.recipientAccountId : m.senderAccountId;
-      const liveAcc = accounts.find(
-        (a) => (peerAccId && a.id === peerAccId) || a.accountNumber === peerAccNo
-      );
-      if (liveAcc?.id === currentAccount.id) continue;
-      const key = liveAcc?.id || peerAccId || peerAccNo;
-      if (!key || dmPeerMap.has(key)) continue;
-
-      dmPeerMap.set(key, {
-        accountId: liveAcc?.id || peerAccId || peerAccNo,
-        accountNumber: liveAcc?.accountNumber || peerAccNo,
-        userId16: liveAcc?.userId16,
-        registeredName: liveAcc?.fullName || (isMeSender ? m.recipientName : m.senderName) || peerAccNo,
-        cardTier: liveAcc?.cardTier,
-        isSavedContact: false,
-      });
-    }
-
-    // Build DM sidebar rows
-    for (const peer of dmPeerMap.values()) {
-      const threadMsgs = chats.filter((m) => {
-        if (m.groupId || m.deleted) return false;
-        const fromMeToPeer =
-          ((m.senderAccountId && m.senderAccountId === currentAccount.id) ||
-            m.senderAccount === currentAccount.accountNumber) &&
-          ((m.recipientAccountId && m.recipientAccountId === peer.accountId) ||
-            m.recipientAccount === peer.accountNumber);
-        const fromPeerToMe =
-          ((m.senderAccountId && m.senderAccountId === peer.accountId) ||
-            m.senderAccount === peer.accountNumber) &&
-          ((m.recipientAccountId && m.recipientAccountId === currentAccount.id) ||
-            m.recipientAccount === currentAccount.accountNumber);
-        return fromMeToPeer || fromPeerToMe;
-      });
-
-      const lastMsg = threadMsgs[threadMsgs.length - 1];
-      const lastRead = Math.max(
-        chatLastReadMap[`dm:${peer.accountId}`] || 0,
-        chatLastReadMap[`dm:${peer.accountNumber}`] || 0
-      );
-      const unreadCount = threadMsgs.filter((m) => {
-        const ts = m.createdAtMs || Date.parse(m.timestamp || '') || 0;
-        const isMine =
-          (m.senderAccountId && m.senderAccountId === currentAccount.id) ||
-          m.senderAccount === currentAccount.accountNumber;
-        return !isMine && ts > lastRead;
-      }).length;
-
-      const displayName = peer.customName
-        ? `${peer.customName}`
-        : peer.registeredName;
-
-      items.push({
-        type: 'dm',
-        id: peer.accountId,
-        accountNumber: peer.accountNumber,
-        userId16: peer.userId16,
-        displayName,
-        subtitle: peer.customName
-          ? `${peer.registeredName} • Rek ${peer.accountNumber}`
-          : `Rek ${peer.accountNumber}${peer.userId16 ? ` • ID ${peer.userId16.slice(0, 6)}...` : ''}`,
-        avatarChar: displayName.charAt(0).toUpperCase() || 'N',
-        cardTier: peer.cardTier,
-        lastMessagePreview: lastMsg
-          ? lastMsg.transferAttachment
-            ? lastMsg.transferAttachment.isRequest
-              ? `Minta Uang ${formatRupiah(lastMsg.transferAttachment.amount)}`
-              : `Kirim Uang ${formatRupiah(lastMsg.transferAttachment.amount)}`
-            : lastMsg.text
-          : 'Belum ada pesan — ketuk untuk mulai chat',
-        lastMessageTime: lastMsg ? formatShortTime(lastMsg.timestamp) : '',
-        lastActivityMs: lastMsg
-          ? lastMsg.createdAtMs || Date.parse(lastMsg.timestamp || '') || 0
-          : 0,
-        unreadCount,
-        isSavedContact: peer.isSavedContact,
-      });
-    }
-
-    // 2. Build Group sidebar rows
-    for (const grp of myPrivateGroups) {
-      const grpMsgs = chats.filter((m) => m.groupId === grp.id && !m.deleted);
-      const lastMsg = grpMsgs[grpMsgs.length - 1];
-      const lastRead = chatLastReadMap[`group:${grp.id}`] || 0;
-      const unreadCount = grpMsgs.filter((m) => {
-        const ts = m.createdAtMs || Date.parse(m.timestamp || '') || 0;
-        const isMine =
-          (m.senderAccountId && m.senderAccountId === currentAccount.id) ||
-          m.senderAccount === currentAccount.accountNumber;
-        return !isMine && ts > lastRead;
-      }).length;
-
-      items.push({
-        type: 'group',
-        id: grp.id,
-        displayName: grp.name,
-        subtitle: `${grp.memberAccountIds.length} anggota • Grup Privat`,
-        avatarChar: grp.name.charAt(0).toUpperCase() || 'G',
-        iconKey: grp.iconKey,
-        accentColor: grp.accentColor,
-        lastMessagePreview: lastMsg
-          ? `${lastMsg.senderName.split(' ')[0]}: ${
-              lastMsg.transferAttachment
-                ? lastMsg.transferAttachment.isRequest
-                  ? `Minta Uang ${formatRupiah(lastMsg.transferAttachment.amount)}`
-                  : `Kirim Uang ${formatRupiah(lastMsg.transferAttachment.amount)}`
-                : lastMsg.text
-            }`
-          : 'Grup dibuat — mulai percakapan',
-        lastMessageTime: lastMsg ? formatShortTime(lastMsg.timestamp) : formatShortTime(grp.createdAt),
-        lastActivityMs: lastMsg
-          ? lastMsg.createdAtMs || Date.parse(lastMsg.timestamp || '') || grp.updatedAtMs
-          : grp.updatedAtMs || Date.parse(grp.createdAt || '') || 0,
-        unreadCount,
-        memberCount: grp.memberAccountIds.length,
-      });
-    }
-
-    return items.sort((a, b) => b.lastActivityMs - a.lastActivityMs);
-  }, [currentAccount, mySavedContacts, accounts, chats, myPrivateGroups, chatLastReadMap]);
-
-  const filteredSidebarItems = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return privateSidebarItems.filter((item) => {
-      if (privateFilter === 'dm' && item.type !== 'dm') return false;
-      if (privateFilter === 'group' && item.type !== 'group') return false;
-      if (!q) return true;
-      return (
-        item.displayName.toLowerCase().includes(q) ||
-        item.subtitle.toLowerCase().includes(q) ||
-        (item.accountNumber || '').includes(q) ||
-        (item.userId16 || '').includes(q)
-      );
-    });
-  }, [privateSidebarItems, privateFilter, searchQuery]);
-
-  // Active DM details or Group details
-  const activeDmAccount = useMemo<BankAccount | null>(() => {
-    if (!activeTarget || activeTarget.type !== 'dm') return null;
-    return (
-      accounts.find(
-        (a) =>
-          a.id === activeTarget.id ||
-          (activeTarget.accountNumber && a.accountNumber === activeTarget.accountNumber)
-      ) || null
-    );
-  }, [activeTarget, accounts]);
-
-  const activeDmSavedContact = useMemo(() => {
-    if (!activeTarget || activeTarget.type !== 'dm') return null;
-    return (
-      mySavedContacts.find(
-        (c) =>
-          c.targetAccountId === activeTarget.id ||
-          (activeTarget.accountNumber && c.targetAccountNumber === activeTarget.accountNumber)
-      ) || null
-    );
-  }, [activeTarget, mySavedContacts]);
-
-  const activeGroup = useMemo<PrivateChatGroup | null>(() => {
-    if (!activeTarget || activeTarget.type !== 'group') return null;
-    return myPrivateGroups.find((g) => g.id === activeTarget.id) || null;
-  }, [activeTarget, myPrivateGroups]);
-
+  // Mark active private room read + auto-send Read Receipts
   const activePrivateMessages = useMemo<ChatMessage[]>(() => {
     if (!currentAccount || !activeTarget) return [];
     if (activeTarget.type === 'group') {
-      if (!activeGroup) return [];
-      return chats.filter((m) => m.groupId === activeGroup.id && !m.deleted);
+      return chats
+        .filter((m) => !m.deleted && m.groupId === activeTarget.id)
+        .sort((a, b) => (a.createdAtMs || Date.parse(a.timestamp || '')) - (b.createdAtMs || Date.parse(b.timestamp || '')));
     }
-    const peerAccNo = activeDmAccount?.accountNumber || activeTarget.accountNumber || '';
-    const peerAccId = activeDmAccount?.id || activeTarget.id;
-    return chats.filter((m) => {
-      if (m.groupId || m.deleted) return false;
-      const fromMeToPeer =
-        ((m.senderAccountId && m.senderAccountId === currentAccount.id) ||
-          m.senderAccount === currentAccount.accountNumber) &&
-        ((m.recipientAccountId && m.recipientAccountId === peerAccId) ||
-          (peerAccNo && m.recipientAccount === peerAccNo));
-      const fromPeerToMe =
-        ((m.senderAccountId && m.senderAccountId === peerAccId) ||
-          (peerAccNo && m.senderAccount === peerAccNo)) &&
-        ((m.recipientAccountId && m.recipientAccountId === currentAccount.id) ||
-          m.recipientAccount === currentAccount.accountNumber);
-      return fromMeToPeer || fromPeerToMe;
-    });
-  }, [currentAccount, activeTarget, activeGroup, activeDmAccount, chats]);
+    const targetAccId = activeTarget.id;
+    const targetAccNo = activeTarget.accountNumber;
+    return chats
+      .filter((m) => {
+        if (m.deleted || m.groupId) return false;
+        const fromMeToTarget =
+          (m.senderAccountId === currentAccount.id || m.senderAccount === currentAccount.accountNumber) &&
+          (m.recipientAccountId === targetAccId || (targetAccNo && m.recipientAccount === targetAccNo));
+        const fromTargetToMe =
+          (m.senderAccountId === targetAccId || (targetAccNo && m.senderAccount === targetAccNo)) &&
+          (m.recipientAccountId === currentAccount.id || m.recipientAccount === currentAccount.accountNumber);
+        return fromMeToTarget || fromTargetToMe;
+      })
+      .sort((a, b) => (a.createdAtMs || Date.parse(a.timestamp || '')) - (b.createdAtMs || Date.parse(b.timestamp || '')));
+  }, [chats, currentAccount, activeTarget]);
 
-  // Live Lookup Preview for 3-column Tambah Nasabah Modal
-  const addContactLookup = useMemo(() => {
-    const cleanUid = contactUserIdInput.replace(/\D/g, '').trim();
-    const cleanAcc = contactAccNoInput.replace(/\D/g, '').trim();
-    if (!cleanUid && !cleanAcc) {
-      return { status: 'empty' as const, account: null as BankAccount | null, error: '' };
+  useEffect(() => {
+    if (mainTab !== 'private' || !activeTarget || !currentAccount) return;
+    const roomKey = activeTarget.type === 'group' ? `group:${activeTarget.id}` : `dm:${activeTarget.id}`;
+    markChatRoomRead(roomKey);
+    if (activeTarget.type === 'dm' && activeTarget.accountNumber) {
+      markChatRoomRead(`dm:${activeTarget.accountNumber}`);
     }
-    const byUid = cleanUid
-      ? accounts.find((a) => String(a.userId16 || '').replace(/\D/g, '') === cleanUid)
-      : undefined;
-    const byAcc = cleanAcc
-      ? accounts.find((a) => String(a.accountNumber || '').replace(/\D/g, '') === cleanAcc)
-      : undefined;
+    const unreadIncomingIds = activePrivateMessages
+      .filter((m) => {
+        const isMine =
+          (m.senderAccountId && m.senderAccountId === currentAccount.id) ||
+          m.senderAccount === currentAccount.accountNumber;
+        return !isMine && !m.readBy?.[currentAccount.id];
+      })
+      .map((m) => m.id);
+    if (unreadIncomingIds.length > 0) {
+      void markPrivateMessagesRead(unreadIncomingIds);
+    }
+  }, [mainTab, activeTarget?.type, activeTarget?.id, activePrivateMessages.length, currentAccount?.id]);
 
-    if (cleanUid && cleanAcc) {
-      if (!byUid || !byAcc) {
-        return {
-          status: 'not_found' as const,
-          account: null,
-          error: 'User ID atau No. Rekening tidak cocok di database akun.',
+  // Auto-scroll Private Chat
+  useEffect(() => {
+    if (mainTab === 'private' && activeTarget && !privateRoomSearchQuery && !privateBookmarkedOnly) {
+      privateEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [mainTab, activeTarget?.id, activePrivateMessages.length]);
+
+  // Build DM Conversation List (Saved Contacts + Unsaved Incoming/Sent Peers)
+  interface DmSidebarItem {
+    peerAccountId: string;
+    peerAccountNumber: string;
+    peerUserId16?: string;
+    displayName: string;
+    registeredName: string;
+    isSaved: boolean;
+    isAdminPeer: boolean;
+    lastMessageText: string;
+    lastMessageTime?: string;
+    lastMessageMs: number;
+    unreadCount: number;
+    contactRecord?: PrivateChatContact;
+  }
+
+  const dmSidebarItems = useMemo<DmSidebarItem[]>(() => {
+    if (!currentAccount) return [];
+    const byPeerKey = new Map<string, DmSidebarItem>();
+
+    // 1. Seed from saved contacts first
+    for (const c of mySavedContacts) {
+      const acc = accounts.find(
+        (a) => a.id === c.targetAccountId || a.accountNumber === c.targetAccountNumber
+      );
+      const peerId = acc?.id || c.targetAccountId;
+      const peerNo = acc?.accountNumber || c.targetAccountNumber;
+      byPeerKey.set(peerId, {
+        peerAccountId: peerId,
+        peerAccountNumber: peerNo,
+        peerUserId16: acc?.userId16 || c.targetUserId16,
+        displayName: c.customName || acc?.fullName || c.registeredName,
+        registeredName: acc?.fullName || c.registeredName,
+        isSaved: true,
+        isAdminPeer: Boolean(acc?.cardTier === 'admin' || c.cardTier === 'admin' || peerId === 'acc-admin'),
+        lastMessageText: 'Belum ada pesan — ketuk untuk mulai chat',
+        lastMessageMs: Date.parse(c.addedAt || '') || 0,
+        unreadCount: 0,
+        contactRecord: c,
+      });
+    }
+
+    // 2. Scan DM messages for last message, unread counts, and UNSAVED senders!
+    for (const m of chats) {
+      if (m.deleted || m.groupId) continue;
+      const isFromMe =
+        (m.senderAccountId && m.senderAccountId === currentAccount.id) ||
+        m.senderAccount === currentAccount.accountNumber;
+      const isToMe =
+        (m.recipientAccountId && m.recipientAccountId === currentAccount.id) ||
+        m.recipientAccount === currentAccount.accountNumber;
+      if (!isFromMe && !isToMe) continue;
+
+      const peerAccNo = isFromMe ? m.recipientAccount : m.senderAccount;
+      const peerAccIdRaw = isFromMe ? m.recipientAccountId : m.senderAccountId;
+      const matchedAcc = accounts.find(
+        (a) => (peerAccIdRaw && a.id === peerAccIdRaw) || (peerAccNo && a.accountNumber === peerAccNo)
+      );
+      const peerId = matchedAcc?.id || peerAccIdRaw || peerAccNo;
+      if (!peerId || peerId === currentAccount.id) continue;
+
+      const peerNo = matchedAcc?.accountNumber || peerAccNo || peerId;
+      const peerRegName =
+        matchedAcc?.fullName || (isFromMe ? m.recipientName : m.senderName) || `Nasabah ${peerNo}`;
+      const ts = m.createdAtMs || Date.parse(m.timestamp || '') || 0;
+
+      let item = byPeerKey.get(peerId);
+      if (!item) {
+        const savedByNo = mySavedContacts.find((c) => c.targetAccountNumber === peerNo);
+        item = {
+          peerAccountId: peerId,
+          peerAccountNumber: peerNo,
+          peerUserId16: matchedAcc?.userId16 || savedByNo?.targetUserId16,
+          displayName: savedByNo?.customName || peerRegName,
+          registeredName: peerRegName,
+          isSaved: Boolean(savedByNo),
+          isAdminPeer: Boolean(
+            matchedAcc?.cardTier === 'admin' ||
+              (!isFromMe && (m.senderRole === 'admin' || m.senderCardTier === 'admin')) ||
+              peerId === 'acc-admin'
+          ),
+          lastMessageText: '',
+          lastMessageMs: 0,
+          unreadCount: 0,
+          contactRecord: savedByNo,
         };
+        byPeerKey.set(peerId, item);
       }
-      if (byUid.id !== byAcc.id) {
-        return {
-          status: 'mismatch' as const,
-          account: null,
-          error: 'User ID dan No. Rekening milik dua akun berbeda! Cukup isi salah satu saja.',
-        };
+
+      if (ts >= item.lastMessageMs) {
+        item.lastMessageMs = ts;
+        item.lastMessageTime = m.timestamp;
+        item.lastMessageText = m.transferAttachment
+          ? `${m.transferAttachment.isRequest ? 'Minta Uang' : 'Kirim Uang'} ${formatRupiah(m.transferAttachment.amount)}`
+          : m.poll
+            ? `Polling: ${m.poll.question}`
+            : m.text;
+      }
+
+      if (!isFromMe) {
+        const lastRead = Math.max(chatLastReadMap[`dm:${peerId}`] || 0, chatLastReadMap[`dm:${peerNo}`] || 0);
+        if (ts > lastRead) {
+          item.unreadCount += 1;
+        }
       }
     }
 
-    const found = byUid || byAcc || null;
-    if (!found) {
-      return {
-        status: 'not_found' as const,
-        account: null,
-        error: 'Akun belum ditemukan. Pastikan angka User ID (16 digit) atau No. Rekening (10 digit) benar.',
-      };
-    }
-    if (currentAccount && found.id === currentAccount.id) {
-      return {
-        status: 'self' as const,
-        account: found,
-        error: 'Ini adalah akun Anda sendiri.',
-      };
-    }
-    return { status: 'found' as const, account: found, error: '' };
-  }, [contactUserIdInput, contactAccNoInput, accounts, currentAccount]);
+    return Array.from(byPeerKey.values()).sort((a, b) => b.lastMessageMs - a.lastMessageMs);
+  }, [mySavedContacts, accounts, chats, currentAccount, chatLastReadMap]);
 
-  // Quick lookup for adding member in Create Group / Group Info
-  const findAccountByUidOrAccNo = (raw: string): BankAccount | null => {
-    const digits = raw.replace(/\D/g, '').trim();
-    if (!digits) return null;
+  const activeDmItem = useMemo<DmSidebarItem | null>(() => {
+    if (!activeTarget || activeTarget.type !== 'dm') return null;
     return (
-      accounts.find(
-        (a) =>
-          String(a.userId16 || '').replace(/\D/g, '') === digits ||
-          String(a.accountNumber || '').replace(/\D/g, '') === digits
+      dmSidebarItems.find(
+        (d) =>
+          d.peerAccountId === activeTarget.id ||
+          (activeTarget.accountNumber && d.peerAccountNumber === activeTarget.accountNumber)
       ) || null
     );
+  }, [activeTarget, dmSidebarItems]);
+
+  // Helper: Presence status text
+  const getPresenceStatusLabel = (accId?: string): { online: boolean; label: string } => {
+    if (!accId) return { online: false, label: 'Offline' };
+    const p = customerPresenceMap?.[accId];
+    if (!p) return { online: false, label: 'Terakhir dilihat baru-baru ini' };
+    if (p.status === 'online') return { online: true, label: 'Online sekarang' };
+    if (p.status === 'idle') return { online: true, label: 'Aktif (Idle)' };
+    const lastIso = p.lastOfflineAt || p.lastOfflineAtIso || p.lastActiveAt || p.lastActiveAtIso;
+    if (lastIso) {
+      return { online: false, label: `Terakhir dilihat ${formatChatDateTime(lastIso)}` };
+    }
+    return { online: false, label: 'Offline' };
   };
 
-  const groupQuickPreview = useMemo(
-    () => findAccountByUidOrAccNo(groupQuickLookup),
-    [groupQuickLookup, accounts]
+  const activeGroupOnlineCount = useMemo(() => {
+    if (!activeGroup) return 0;
+    return activeGroup.memberAccountIds.filter((id) => {
+      if (id === currentAccount?.id) return true;
+      const st = customerPresenceMap?.[id]?.status;
+      return st === 'online' || st === 'idle';
+    }).length;
+  }, [activeGroup, customerPresenceMap, currentAccount?.id]);
+
+  // Global Chat chronological list + pinned + filters
+  const globalPinnedMessages = useMemo(
+    () =>
+      globalChats
+        .filter((m) => m.isPinned)
+        .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0)),
+    [globalChats]
   );
 
-  const groupInfoAddPreview = useMemo(
-    () => findAccountByUidOrAccNo(groupAddLookupInput),
-    [groupAddLookupInput, accounts]
-  );
+  const visibleGlobalMessages = useMemo(() => {
+    const q = globalSearchQuery.trim().toLowerCase();
+    return [...globalChats]
+      .sort(
+        (a, b) =>
+          (a.createdAtMs || Date.parse(a.timestamp || '')) -
+          (b.createdAtMs || Date.parse(b.timestamp || ''))
+      )
+      .filter((m) => {
+        if (globalBookmarkedOnly && !bookmarkedIdSet.has(m.id)) return false;
+        if (!q) return true;
+        return (
+          m.text.toLowerCase().includes(q) ||
+          m.senderName.toLowerCase().includes(q) ||
+          (m.senderAccount || '').includes(q)
+        );
+      });
+  }, [globalChats, globalSearchQuery, globalBookmarkedOnly, bookmarkedIdSet]);
 
-  if (!currentAccount) return null;
+  const groupPinnedMessages = useMemo(() => {
+    if (!activeGroup) return [];
+    const pinSet = new Set(activeGroup.pinnedMessageIds || []);
+    return activePrivateMessages.filter((m) => m.isPinned || pinSet.has(m.id));
+  }, [activeGroup, activePrivateMessages]);
 
-  // ==================== HANDLERS ====================
-  const handleSendGlobal = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!globalText.trim() || globalSending) return;
-    if (!isAdminUser && globalCooldownLeft > 0) return;
+  const visiblePrivateMessages = useMemo(() => {
+    const q = privateRoomSearchQuery.trim().toLowerCase();
+    return activePrivateMessages.filter((m) => {
+      if (privateBookmarkedOnly && !bookmarkedIdSet.has(m.id)) return false;
+      if (!q) return true;
+      return (
+        m.text.toLowerCase().includes(q) ||
+        m.senderName.toLowerCase().includes(q) ||
+        (m.poll?.question || '').toLowerCase().includes(q)
+      );
+    });
+  }, [activePrivateMessages, privateRoomSearchQuery, privateBookmarkedOnly, bookmarkedIdSet]);
+
+  // Mention candidates
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const pool =
+      mainTab === 'global'
+        ? accounts.filter((a) => a.id !== currentAccount?.id)
+        : activeGroup
+          ? accounts.filter(
+              (a) => a.id !== currentAccount?.id && activeGroup.memberAccountIds.includes(a.id)
+            )
+          : [];
+    return pool
+      .filter((a) => a.fullName.toLowerCase().includes(mentionQuery))
+      .slice(0, 6);
+  }, [mentionQuery, mainTab, accounts, currentAccount?.id, activeGroup]);
+
+  const insertMention = (fullName: string) => {
+    const nextVal = activeDraftText.replace(/@([a-zA-Z0-9_ ]{0,24})$/, `@${fullName} `);
+    setDraftByRoom((prev) => ({ ...prev, [activeRoomKey]: nextVal }));
+    setMentionQuery(null);
+  };
+
+  // Typing users in current room
+  const activeTypingUsers = useMemo(() => {
+    const entries = chatTypingMap[activeRoomKey] || [];
+    return entries.filter((e) => e.accountId !== currentAccount?.id && e.expiresAtMs > Date.now());
+  }, [chatTypingMap, activeRoomKey, currentAccount?.id]);
+
+  // Handlers
+  const handleManualRefresh = async () => {
+    if (refreshingChat) return;
+    setRefreshingChat(true);
+    try {
+      const res = await refreshChatSyncNow();
+      showToast(res.message, res.success ? 'success' : 'error');
+    } finally {
+      window.setTimeout(() => setRefreshingChat(false), 500);
+    }
+  };
+
+  const handleSendGlobal = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const text = activeDraftText.trim();
+    if (!text || globalSending) return;
+
+    if (globalEditTarget) {
+      setGlobalSending(true);
+      try {
+        const res = await editGlobalChatMessage(globalEditTarget.id, text);
+        showToast(res.message, res.success ? 'success' : 'error');
+        if (res.success) {
+          setGlobalEditTarget(null);
+          setDraftByRoom((prev) => ({ ...prev, global: '' }));
+        }
+      } finally {
+        setGlobalSending(false);
+      }
+      return;
+    }
 
     setGlobalSending(true);
-    const res = await sendGlobalChatMessage({
-      text: globalText.trim(),
-      asAdmin: isAdminUser,
-      senderName: currentAccount.fullName,
-      showPopupOnAllPhones: false,
-      replyToId: globalReplyTarget?.id,
-      replyToSender: globalReplyTarget?.senderName,
-      replyToPreview: globalReplyTarget?.text.slice(0, 120),
-    });
-    setGlobalSending(false);
-
-    if (!res.success) {
-      showToast(res.message, 'error');
-      return;
-    }
-
-    setGlobalText('');
-    setGlobalReplyTarget(null);
-    markChatRoomRead('global');
-    if (!isAdminUser && (globalChatConfig.cooldownMs || 2500) > 0) {
-      setGlobalCooldownLeft(Math.max(1, Math.ceil((globalChatConfig.cooldownMs || 2500) / 1000)));
+    try {
+      const mentions = Array.from(text.matchAll(/@([A-Za-z0-9_]+)/g)).map((m) => m[1]);
+      const res = await sendGlobalChatMessage({
+        text,
+        asAdmin: isAdminUser,
+        isAdminHighlight: isAdminUser ? adminHighlightMode : false,
+        replyToId: globalReplyTarget?.id,
+        replyToSender: globalReplyTarget?.senderName,
+        replyToPreview: globalReplyTarget?.text?.slice(0, 90),
+        mentions: mentions.length ? mentions : undefined,
+      });
+      if (!res.success) {
+        showToast(res.message, 'error');
+      } else {
+        setDraftByRoom((prev) => ({ ...prev, global: '' }));
+        setGlobalReplyTarget(null);
+        setMentionQuery(null);
+        if (!isAdminUser && (globalChatConfig.cooldownMs || 0) > 0) {
+          setGlobalCooldownLeft(Math.ceil((globalChatConfig.cooldownMs || 0) / 1000));
+        }
+      }
+    } finally {
+      setGlobalSending(false);
     }
   };
 
-  const handleSaveNewContact = (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = addPrivateChatContact({
-      customName: contactCustomName,
-      userId: contactUserIdInput,
-      accountNumber: contactAccNoInput,
-    });
-    if (!res.success || !res.contact) {
-      showToast(res.message, 'error');
+  const handleSendPrivate = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!currentAccount || !activeTarget) return;
+    const text = activeDraftText.trim();
+    if (!text) return;
+
+    if (privateEditTarget) {
+      const res = await editPrivateChatMessage(privateEditTarget.id, text);
+      showToast(res.message, res.success ? 'success' : 'error');
+      if (res.success) {
+        setPrivateEditTarget(null);
+        setDraftByRoom((prev) => ({ ...prev, [activeRoomKey]: '' }));
+      }
       return;
     }
-    showToast(res.message, 'success');
-    setShowAddContactModal(false);
-    setContactCustomName('');
-    setContactUserIdInput('');
-    setContactAccNoInput('');
-    setMainTab('private');
-    setActiveTarget({
-      type: 'dm',
-      id: res.contact.targetAccountId,
-      accountNumber: res.contact.targetAccountNumber,
-    });
-  };
 
-  const handleCreateGroupSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = await createPrivateChatGroup({
-      name: groupNameInput,
-      iconKey: groupIconKey,
-      accentColor: groupAccentColor,
-      memberAccountIds: groupSelectedMemberIds,
-    });
-    if (!res.success || !res.group) {
-      showToast(res.message, 'error');
-      return;
-    }
-    showToast(res.message, 'success');
-    setShowCreateGroupModal(false);
-    setGroupNameInput('');
-    setGroupSelectedMemberIds([]);
-    setGroupQuickLookup('');
-    setMainTab('private');
-    setActiveTarget({ type: 'group', id: res.group.id });
-  };
-
-  const handleSendPrivateMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!privateText.trim() || !activeTarget) return;
-
+    const mentions = Array.from(text.matchAll(/@([A-Za-z0-9_]+)/g)).map((m) => m[1]);
     if (activeTarget.type === 'group' && activeGroup) {
       sendChatMessage({
+        groupId: activeGroup.id,
         recipientAccount: `group:${activeGroup.id}`,
         recipientName: activeGroup.name,
-        groupId: activeGroup.id,
-        text: privateText.trim(),
+        text,
         replyToId: privateReplyTarget?.id,
         replyToSender: privateReplyTarget?.senderName,
-        replyToPreview: privateReplyTarget?.text.slice(0, 120),
+        replyToPreview: privateReplyTarget?.text?.slice(0, 90),
+        mentions: mentions.length ? mentions : undefined,
       });
-      markChatRoomRead(`group:${activeGroup.id}`);
-    } else if (activeTarget.type === 'dm') {
-      const targetAccNo = activeDmAccount?.accountNumber || activeTarget.accountNumber || activeTarget.id;
-      const targetName =
-        activeDmSavedContact?.customName || activeDmAccount?.fullName || `Rek ${targetAccNo}`;
+    } else if (activeDmItem) {
       sendChatMessage({
-        recipientAccountId: activeDmAccount?.id || activeTarget.id,
-        recipientAccount: targetAccNo,
-        recipientName: targetName,
-        text: privateText.trim(),
+        recipientAccountId: activeDmItem.peerAccountId,
+        recipientAccount: activeDmItem.peerAccountNumber,
+        recipientName: activeDmItem.displayName,
+        text,
         replyToId: privateReplyTarget?.id,
         replyToSender: privateReplyTarget?.senderName,
-        replyToPreview: privateReplyTarget?.text.slice(0, 120),
+        replyToPreview: privateReplyTarget?.text?.slice(0, 90),
       });
-      markChatRoomRead(`dm:${activeTarget.id}`);
     }
-
-    setPrivateText('');
+    setDraftByRoom((prev) => ({ ...prev, [activeRoomKey]: '' }));
     setPrivateReplyTarget(null);
-    playAtmSound('beep');
+    setMentionQuery(null);
   };
 
-  const openMoneyModal = (asRequest: boolean) => {
-    setIsRequestMoneyMode(asRequest);
+  const handleAddContactSubmit = (input: {
+    customName?: string;
+    userId?: string;
+    accountNumber?: string;
+    isQuickSave?: boolean;
+  }) => {
+    const res = addPrivateChatContact({
+      customName: input.customName,
+      userId: input.userId,
+      accountNumber: input.accountNumber,
+    });
+    showToast(res.message, res.success ? 'success' : 'error');
+    if (res.success) {
+      setAddContactModalState({ open: false, prefill: null });
+      if (!input.isQuickSave) {
+        // Confirmed behavior: manual Tambah Nasabah closes modal and returns to Daftar Kontak Chat Privat first!
+        setMainTab('private');
+        setActiveTarget(null);
+      }
+    }
+  };
+
+  const handleCopyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('Teks pesan berhasil disalin.', 'success');
+    } catch {
+      showToast('Gagal menyalin teks ke clipboard.', 'error');
+    }
+  };
+
+  const buildGlobalChatRecapText = () => {
+    const lines = [
+      '=== REKAP CHAT GLOBAL BANK NUSANTARA ===',
+      `Waktu Ekspor: ${new Date().toLocaleString('id-ID')}`,
+      `Total Pesan: ${globalChats.length}`,
+      '----------------------------------------',
+      ...visibleGlobalMessages.map(
+        (m) =>
+          `[${formatChatDateTime(m.timestamp)}] ${m.senderName}${m.senderRole === 'admin' ? ' [ADMIN RESMI]' : ''}: ${m.text}`
+      ),
+    ];
+    return lines.join('\n');
+  };
+
+  const handleCopyGlobalRecap = async () => {
+    await handleCopyText(buildGlobalChatRecapText());
+  };
+
+  const handleDownloadGlobalRecap = () => {
+    const blob = new Blob([buildGlobalChatRecapText()], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rekap-chat-global-${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast('File rekap Chat Global (.txt) berhasil diunduh.', 'success');
+  };
+
+  const canEditWithinWindow = (createdAtMs?: number, timestamp?: string, isOwnerAdmin = false) => {
+    if (isOwnerAdmin) return true;
+    const ms = createdAtMs || Date.parse(timestamp || '') || 0;
+    return Date.now() - ms <= EDIT_WINDOW_MS;
+  };
+
+  // Money modal helpers
+  const openMoneyDialog = (requestMode: boolean) => {
+    setIsRequestMoneyMode(requestMode);
     setMoneyAmountInput('');
     setMoneyNoteInput('');
-    setPendingPayRequestMsg(null);
-    if (activeTarget?.type === 'group' && activeGroup) {
-      const firstOther = activeGroup.memberAccountIds.find((id) => id !== currentAccount.id) || '';
-      setMoneyGroupTargetAccountId(firstOther);
+    if (activeTarget?.type === 'group' && activeGroup && currentAccount) {
+      const other = activeGroup.memberAccountIds.find((id) => id !== currentAccount.id) || '';
+      setMoneyGroupTargetAccountId(other);
     } else {
       setMoneyGroupTargetAccountId('');
     }
+    setPendingPayRequestMsg(null);
     setShowMoneyModal(true);
   };
 
-  const handleConfirmMoneyModal = (e: React.FormEvent) => {
-    e.preventDefault();
-    const amt = parseInt(moneyAmountInput.replace(/\D/g, ''), 10);
-    if (!amt || amt < 1000) {
+  const handleMoneyModalConfirm = () => {
+    const amount = Number(moneyAmountInput.replace(/\D/g, '')) || 0;
+    if (amount < 1000) {
       showToast('Nominal minimal Rp 1.000.', 'error');
       return;
     }
-
-    if (activeTarget?.type === 'group' && activeGroup) {
-      const targetAcc = accounts.find((a) => a.id === moneyGroupTargetAccountId);
-      if (!isRequestMoneyMode && !targetAcc) {
-        showToast('Pilih anggota grup tujuan transfer terlebih dahulu.', 'error');
-        return;
-      }
-      if (isRequestMoneyMode) {
+    if (isRequestMoneyMode) {
+      const reqRef = `REQ-${Date.now()}`;
+      if (activeTarget?.type === 'group' && activeGroup) {
         sendChatMessage({
+          groupId: activeGroup.id,
           recipientAccount: `group:${activeGroup.id}`,
           recipientName: activeGroup.name,
-          groupId: activeGroup.id,
-          text: targetAcc
-            ? `Meminta dana ${formatRupiah(amt)} dari ${targetAcc.fullName}${moneyNoteInput ? ` — "${moneyNoteInput}"` : ''}`
-            : `Meminta patungan ${formatRupiah(amt)} di grup${moneyNoteInput ? ` — "${moneyNoteInput}"` : ''}`,
+          text: moneyNoteInput.trim() || `Meminta transfer ${formatRupiah(amount)}`,
           transferAttachment: {
-            amount: amt,
-            referenceNo: `REQ-${Date.now().toString().slice(-6)}`,
-            note: moneyNoteInput || 'Patungan Grup Privat',
             isRequest: true,
+            amount,
+            referenceNo: reqRef,
+            note: moneyNoteInput.trim() || undefined,
             status: 'pending',
-            targetAccountNumber: targetAcc?.accountNumber,
-            targetName: targetAcc?.fullName,
           },
         });
-        setShowMoneyModal(false);
-        showToast('Permintaan dana terkirim ke grup!', 'success');
-      } else {
-        setShowMoneyModal(false);
-        setShowPinPrompt(true);
+      } else if (activeDmItem) {
+        sendChatMessage({
+          recipientAccountId: activeDmItem.peerAccountId,
+          recipientAccount: activeDmItem.peerAccountNumber,
+          recipientName: activeDmItem.displayName,
+          text: moneyNoteInput.trim() || `Meminta transfer ${formatRupiah(amount)}`,
+          transferAttachment: {
+            isRequest: true,
+            amount,
+            referenceNo: reqRef,
+            note: moneyNoteInput.trim() || undefined,
+            status: 'pending',
+          },
+        });
       }
+      setShowMoneyModal(false);
+      showToast('Permintaan uang dikirim ke ruang chat.', 'success');
       return;
     }
-
-    if (activeTarget?.type === 'dm') {
-      const targetAccNo = activeDmAccount?.accountNumber || activeTarget.accountNumber || '';
-      const targetName =
-        activeDmSavedContact?.customName || activeDmAccount?.fullName || `Rek ${targetAccNo}`;
-      if (isRequestMoneyMode) {
-        sendChatMessage({
-          recipientAccountId: activeDmAccount?.id || activeTarget.id,
-          recipientAccount: targetAccNo,
-          recipientName: targetName,
-          text: `Meminta dana ${formatRupiah(amt)}${moneyNoteInput ? ` untuk "${moneyNoteInput}"` : ''}`,
-          transferAttachment: {
-            amount: amt,
-            referenceNo: `REQ-${Date.now().toString().slice(-6)}`,
-            note: moneyNoteInput || 'Permintaan dana privat',
-            isRequest: true,
-            status: 'pending',
-            targetAccountNumber: targetAccNo,
-            targetName,
-          },
-        });
-        setShowMoneyModal(false);
-        showToast('Permintaan dana terkirim!', 'success');
-      } else {
-        setShowMoneyModal(false);
-        setShowPinPrompt(true);
-      }
-    }
-  };
-
-  const handlePayIncomingRequest = (msg: ChatMessage) => {
-    if (!msg.transferAttachment || msg.transferAttachment.status === 'paid') return;
-    setPendingPayRequestMsg(msg);
-    setMoneyAmountInput(String(msg.transferAttachment.amount));
-    setMoneyNoteInput(msg.transferAttachment.note || 'Pelunasan permintaan dana');
+    // Send money requires PIN
+    setShowMoneyModal(false);
     setShowPinPrompt(true);
   };
 
-  const executeTransferAfterPin = () => {
-    setShowPinPrompt(false);
-
-    // Case 1: Paying an incoming money request bubble
+  const executeVerifiedMoneyTransfer = async (pin: string) => {
+    if (!currentAccount) return;
     if (pendingPayRequestMsg && pendingPayRequestMsg.transferAttachment) {
-      const reqMsg = pendingPayRequestMsg;
-      const reqAtt = pendingPayRequestMsg.transferAttachment;
-      const amt = reqAtt.amount;
+      const targetNo = pendingPayRequestMsg.senderAccount;
+      const amount = pendingPayRequestMsg.transferAttachment.amount;
       const res = transferMoney({
-        recipientAccount: reqMsg.senderAccount,
+        recipientAccount: targetNo,
         recipientBank: 'Bank Nusantara',
-        amount: amt,
-        note: `Bayar Minta Uang (${reqAtt.referenceNo})`,
-        pin: currentAccount.pin,
+        amount,
+        note: `Bayar permintaan chat: ${pendingPayRequestMsg.transferAttachment.note || 'Transfer Chat'}`,
+        pin,
       });
-      setPendingPayRequestMsg(null);
-      if (res.success && res.transaction) {
-        void markChatRequestPaid(reqMsg.id, currentAccount.fullName);
-        if (reqMsg.groupId && activeGroup) {
-          sendChatMessage({
-            recipientAccount: `group:${activeGroup.id}`,
-            recipientName: activeGroup.name,
-            groupId: activeGroup.id,
-            text: `Melunasi permintaan ${formatRupiah(amt)} kepada ${reqMsg.senderName}`,
-            transferAttachment: {
-              amount: amt,
-              referenceNo: res.transaction.referenceNo,
-              note: `Lunas: ${reqAtt.note || 'Patungan'}`,
-              targetAccountNumber: reqMsg.senderAccount,
-              targetName: reqMsg.senderName,
-            },
-          });
-        } else {
-          sendChatMessage({
-            recipientAccountId: reqMsg.senderAccountId,
-            recipientAccount: reqMsg.senderAccount,
-            recipientName: reqMsg.senderName,
-            text: `Melunasi permintaan dana ${formatRupiah(amt)}`,
-            transferAttachment: {
-              amount: amt,
-              referenceNo: res.transaction.referenceNo,
-              note: `Lunas: ${reqAtt.note || 'Permintaan dana'}`,
-            },
-          });
-        }
-        showToast(`Pembayaran ${formatRupiah(amt)} ke ${reqMsg.senderName} berhasil!`, 'success');
+      setShowPinPrompt(false);
+      if (res.success) {
+        await markChatRequestPaid(pendingPayRequestMsg.id, currentAccount.fullName);
+        showToast(`Permintaan ${formatRupiah(amount)} berhasil dibayar!`, 'success');
       } else {
-        showToast(res.message || 'Transfer gagal.', 'error');
+        showToast(res.message, 'error');
       }
+      setPendingPayRequestMsg(null);
       return;
     }
 
-    // Case 2: Direct Kirim Uang in DM or Group
-    const amt = parseInt(moneyAmountInput.replace(/\D/g, ''), 10);
-    if (activeTarget?.type === 'group' && activeGroup) {
-      const targetAcc = accounts.find((a) => a.id === moneyGroupTargetAccountId);
-      if (!targetAcc) {
-        showToast('Anggota tujuan tidak ditemukan.', 'error');
-        return;
-      }
-      const res = transferMoney({
-        recipientAccount: targetAcc.accountNumber,
-        recipientBank: 'Bank Nusantara',
-        amount: amt,
-        note: moneyNoteInput || `Transfer Grup ${activeGroup.name}`,
-        pin: currentAccount.pin,
-      });
-      if (res.success && res.transaction) {
+    const amount = Number(moneyAmountInput.replace(/\D/g, '')) || 0;
+    let targetAcc: BankAccount | undefined;
+    if (activeTarget?.type === 'group') {
+      targetAcc = accounts.find((a) => a.id === moneyGroupTargetAccountId);
+    } else if (activeDmItem) {
+      targetAcc = accounts.find(
+        (a) => a.id === activeDmItem.peerAccountId || a.accountNumber === activeDmItem.peerAccountNumber
+      );
+    }
+    if (!targetAcc) {
+      setShowPinPrompt(false);
+      showToast('Rekening tujuan tidak ditemukan.', 'error');
+      return;
+    }
+    const res = transferMoney({
+      recipientAccount: targetAcc.accountNumber,
+      recipientBank: 'Bank Nusantara',
+      amount,
+      note: moneyNoteInput.trim() || 'Transfer via Chat Privat Bank Nusantara',
+      pin,
+    });
+    setShowPinPrompt(false);
+    if (res.success) {
+      const refNo = res.transaction?.referenceNo || `TRF-${Date.now()}`;
+      if (activeTarget?.type === 'group' && activeGroup) {
         sendChatMessage({
+          groupId: activeGroup.id,
           recipientAccount: `group:${activeGroup.id}`,
           recipientName: activeGroup.name,
-          groupId: activeGroup.id,
-          text: `Mengirim ${formatRupiah(amt)} kepada ${targetAcc.fullName}`,
+          text: moneyNoteInput.trim() || `Kirim uang ke ${targetAcc.fullName}`,
           transferAttachment: {
-            amount: amt,
-            referenceNo: res.transaction.referenceNo,
-            note: moneyNoteInput || `Transfer di grup ${activeGroup.name}`,
+            isRequest: false,
+            amount,
+            referenceNo: refNo,
+            note: moneyNoteInput.trim() || undefined,
+            status: 'paid',
             targetAccountNumber: targetAcc.accountNumber,
             targetName: targetAcc.fullName,
+            paidByAccountId: currentAccount.id,
+            paidByName: currentAccount.fullName,
+            paidAt: new Date().toISOString(),
           },
         });
-        showToast(`Transfer ${formatRupiah(amt)} ke ${targetAcc.fullName} berhasil!`, 'success');
-      } else {
-        showToast(res.message || 'Transfer gagal.', 'error');
-      }
-      return;
-    }
-
-    if (activeTarget?.type === 'dm') {
-      const targetAccNo = activeDmAccount?.accountNumber || activeTarget.accountNumber || '';
-      const targetName =
-        activeDmSavedContact?.customName || activeDmAccount?.fullName || `Rek ${targetAccNo}`;
-      const res = transferMoney({
-        recipientAccount: targetAccNo,
-        recipientBank: 'Bank Nusantara',
-        amount: amt,
-        note: moneyNoteInput || 'Transfer lewat Chat Privat',
-        pin: currentAccount.pin,
-      });
-      if (res.success && res.transaction) {
+      } else if (activeDmItem) {
         sendChatMessage({
-          recipientAccountId: activeDmAccount?.id || activeTarget.id,
-          recipientAccount: targetAccNo,
-          recipientName: targetName,
-          text: `Mentransfer ${formatRupiah(amt)} via Chat Privat`,
+          recipientAccountId: activeDmItem.peerAccountId,
+          recipientAccount: activeDmItem.peerAccountNumber,
+          recipientName: activeDmItem.displayName,
+          text: moneyNoteInput.trim() || `Kirim uang ${formatRupiah(amount)}`,
           transferAttachment: {
-            amount: amt,
-            referenceNo: res.transaction.referenceNo,
-            note: moneyNoteInput || 'Transfer dana privat',
+            isRequest: false,
+            amount,
+            referenceNo: refNo,
+            note: moneyNoteInput.trim() || undefined,
+            status: 'paid',
+            targetAccountNumber: targetAcc.accountNumber,
+            targetName: targetAcc.fullName,
+            paidByAccountId: currentAccount.id,
+            paidByName: currentAccount.fullName,
+            paidAt: new Date().toISOString(),
           },
         });
-        showToast(`Transfer ${formatRupiah(amt)} ke ${targetName} berhasil!`, 'success');
-      } else {
-        showToast(res.message || 'Transfer gagal.', 'error');
       }
+      showToast(`Transfer ${formatRupiah(amount)} ke ${targetAcc.fullName} berhasil!`, 'success');
+    } else {
+      showToast(res.message, 'error');
     }
   };
 
-  const activeGroupMembers = useMemo(() => {
-    if (!activeGroup) return [];
-    return activeGroup.memberAccountIds
-      .map((id) => accounts.find((a) => a.id === id))
-      .filter((a): a is BankAccount => Boolean(a));
-  }, [activeGroup, accounts]);
+  // Render interactive Poll card
+  const renderPollCard = (poll: ChatPollData, onVote: (optId: string) => void) => {
+    const votesMap = poll.votesByAccountId || {};
+    const allVotes = Object.values(votesMap).flat();
+    const totalVotes = allVotes.length;
+    const myVotes = currentAccount ? votesMap[currentAccount.id] || [] : [];
+    return (
+      <div className="mt-2 p-3 rounded-2xl bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 space-y-2">
+        <div className="flex items-center gap-1.5 text-xs font-extrabold">
+          <BarChart2 className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+          <span>{poll.question}</span>
+        </div>
+        <div className="space-y-1.5">
+          {poll.options.map((opt) => {
+            const votes = allVotes.filter((v) => v === opt.id).length;
+            const pct = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
+            const voted = myVotes.includes(opt.id);
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => onVote(opt.id)}
+                className={`w-full relative overflow-hidden rounded-xl border px-3 py-2 text-left text-xs transition-all ${
+                  voted
+                    ? 'border-violet-500 bg-violet-500/15 font-bold'
+                    : 'border-slate-300/60 dark:border-slate-600/60 hover:bg-black/5 dark:hover:bg-white/5'
+                }`}
+              >
+                <div
+                  className="absolute inset-y-0 left-0 bg-violet-500/20 transition-all duration-300"
+                  style={{ width: `${pct}%` }}
+                />
+                <div className="relative flex items-center justify-between gap-2">
+                  <span className="truncate flex items-center gap-1.5">
+                    {voted && <Check className="w-3.5 h-3.5 text-violet-600 dark:text-violet-300 shrink-0" />}
+                    {opt.text}
+                  </span>
+                  <span className="shrink-0 font-bold text-[11px] opacity-80">
+                    {votes} ({pct}%)
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[10px] opacity-70">
+          Total {totalVotes} suara {poll.allowMultiple ? '• Multi-pilihan' : '• 1 pilihan'}
+        </p>
+      </div>
+    );
+  };
 
-  const pinDescription = pendingPayRequestMsg?.transferAttachment
-    ? `Bayar permintaan dana ${formatRupiah(pendingPayRequestMsg.transferAttachment.amount)} ke ${pendingPayRequestMsg.senderName}`
-    : activeTarget?.type === 'group'
-    ? `Transfer ${formatRupiah(parseInt(moneyAmountInput.replace(/\D/g, ''), 10) || 0)} ke ${
-        accounts.find((a) => a.id === moneyGroupTargetAccountId)?.fullName || 'Anggota Grup'
-      }`
-    : `Transfer ${formatRupiah(parseInt(moneyAmountInput.replace(/\D/g, ''), 10) || 0)} ke ${
-        activeDmSavedContact?.customName || activeDmAccount?.fullName || 'Nasabah'
-      }`;
+  // Filter sidebar items
+  const filteredDmItems = useMemo(() => {
+    const q = sidebarSearchQuery.trim().toLowerCase();
+    return dmSidebarItems.filter(
+      (item) =>
+        !q ||
+        item.displayName.toLowerCase().includes(q) ||
+        item.registeredName.toLowerCase().includes(q) ||
+        item.peerAccountNumber.includes(q)
+    );
+  }, [dmSidebarItems, sidebarSearchQuery]);
+
+  const filteredGroups = useMemo(() => {
+    const q = sidebarSearchQuery.trim().toLowerCase();
+    return myGroups.filter((g) => !q || g.name.toLowerCase().includes(q));
+  }, [myGroups, sidebarSearchQuery]);
+
+  if (!currentAccount) {
+    return (
+      <div className="p-8 text-center rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+        <p className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+          Silakan masuk ke rekening Bank Nusantara terlebih dahulu untuk menggunakan Chat Global & Priv.
+        </p>
+      </div>
+    );
+  }
+
+  const slowModePresets = [
+    { label: 'Off', ms: 0 },
+    { label: '3d', ms: 3000 },
+    { label: '5d', ms: 5000 },
+    { label: '15d', ms: 15000 },
+    { label: '30d', ms: 30000 },
+    { label: '60d', ms: 60000 },
+  ];
 
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-3">
-      {/* TOP BAR: HEADER & 2 MAIN TABS (CHAT GLOBAL & CHAT PRIVAT) */}
-      <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-cyan-500 text-white flex items-center justify-center shrink-0 shadow-md">
-            <MessageSquare className="w-5 h-5" />
+    <div className="w-full max-w-full min-w-0 overflow-x-hidden space-y-3">
+      {/* Toast Notification Banner */}
+      {toastBanner && (
+        <div
+          className={`rounded-2xl px-4 py-3 text-xs font-bold flex items-center justify-between gap-3 border shadow-sm ${
+            toastBanner.type === 'success'
+              ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+              : toastBanner.type === 'error'
+                ? 'bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200'
+                : 'bg-sky-50 dark:bg-sky-950/50 border-sky-200 dark:border-sky-800 text-sky-800 dark:text-sky-200'
+          }`}
+        >
+          <span className="min-w-0 break-words">{toastBanner.text}</span>
+          <button type="button" onClick={() => setToastBanner(null)} className="shrink-0 opacity-70 hover:opacity-100">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* TOP WORKSPACE HEADER (Segmented Tabs + Subtle Segarkan Chat Button) */}
+      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 sm:p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white flex items-center justify-center shadow-sm shrink-0">
+              <MessageSquare className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight truncate">
+                  Chat Global & Priv
+                </h2>
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200/80 dark:border-emerald-800 px-2 py-0.5 rounded-lg">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  {connectedDevicesCount} Aktif
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                Sinkronisasi lintas perangkat aman • Ruang Global, 1-on-1 & Grup Privat
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight truncate">
-              Chat Global &amp; Priv
-            </h2>
-            <p className="text-[11px] text-slate-400 truncate">
-              Real-Time Lintas HP, Laptop &amp; Cloud • {Math.max(1, connectedDevicesCount)} perangkat tersinkron
-            </p>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Subtle Segarkan Chat Button */}
+            <button
+              type="button"
+              onClick={handleManualRefresh}
+              disabled={refreshingChat}
+              className="px-3 py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 inline-flex items-center gap-1.5 transition-colors"
+              title="Segarkan ulang riwayat Chat Global & Privat dari Server & Cloud"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshingChat ? 'animate-spin text-emerald-600' : ''}`} />
+              <span>Segarkan Chat</span>
+            </button>
+
+            {isAdminUser && mainTab === 'global' && (
+              <button
+                type="button"
+                onClick={() => setAdminModModalState({ open: true, tab: 'broadcast', muteTarget: null })}
+                className="px-3 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 inline-flex items-center gap-1.5 shadow-sm"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+                <span>Moderasi Admin</span>
+              </button>
+            )}
           </div>
         </div>
 
-        {/* 2 MAIN TABS */}
-        <div className="grid grid-cols-2 sm:flex items-center gap-1.5 bg-slate-950/90 p-1 rounded-xl border border-slate-800">
+        {/* Main 2-Tab Switcher */}
+        <div className="mt-3 grid grid-cols-2 gap-2 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800/90">
           <button
             type="button"
             onClick={() => setMainTab('global')}
-            className={`min-h-[42px] px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 transition-all ${
               mainTab === 'global'
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Globe className="w-4 h-4 shrink-0" />
             <span>Chat Global</span>
             {globalChatUnreadCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black tabular-nums">
+              <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-600 text-white">
                 {globalChatUnreadCount > 99 ? '99+' : globalChatUnreadCount}
               </span>
             )}
           </button>
-
           <button
             type="button"
             onClick={() => setMainTab('private')}
-            className={`min-h-[42px] px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer ${
+            className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 transition-all ${
               mainTab === 'private'
-                ? 'bg-emerald-600 text-white shadow-md'
-                : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
             <Lock className="w-4 h-4 shrink-0" />
             <span>Chat Privat</span>
             {privateChatUnreadCount > 0 && (
-              <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black tabular-nums">
+              <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-600 text-white">
                 {privateChatUnreadCount > 99 ? '99+' : privateChatUnreadCount}
               </span>
             )}
@@ -970,233 +1087,525 @@ export const NusantaraChat: React.FC = () => {
         </div>
       </div>
 
-      {/* IN-APP TOAST NOTIFICATION */}
-      {toastBanner && (
-        <div
-          className={`px-4 py-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 ${
-            toastBanner.type === 'error'
-              ? 'bg-rose-500/15 border-rose-500/40 text-rose-200'
-              : toastBanner.type === 'success'
-              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
-              : 'bg-sky-500/15 border-sky-500/40 text-sky-200'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{toastBanner.text}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setToastBanner(null)}
-            className="text-current opacity-70 hover:opacity-100 cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
       {/* ==================== TAB 1: CHAT GLOBAL ==================== */}
       {mainTab === 'global' && (
-        <div className="bg-slate-900/95 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[640px] sm:h-[680px]">
-          {/* Global Sub-header + Admin Moderation Bar */}
-          <div className="px-4 py-3 border-b border-slate-800 bg-slate-950/70 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
-                <Globe className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-bold text-white">Ruang Grup Global Bank Nusantara</span>
-                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
-                    {accounts.length} Nasabah
+        <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col h-[calc(100dvh-230px)] min-h-[520px] max-h-[780px] min-w-0 overflow-hidden">
+          {/* Global Room Top Bar */}
+          <div className="shrink-0 px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/95 space-y-2.5">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 min-w-0">
+                <Globe className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="text-sm font-extrabold text-slate-900 dark:text-white truncate">
+                  Ruang Chat Global Bank Nusantara
+                </span>
+                {globalChatConfig.adminOnlyLock && (
+                  <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                    KHUSUS ADMIN
                   </span>
-                  {globalChatConfig.adminOnlyLock && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                      Mode Khusus Admin
-                    </span>
-                  )}
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  Semua nasabah dapat saling berdiskusi di sini • Fitur Kirim &amp; Minta Uang khusus di tab Chat Privat
-                </p>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setGlobalSearchOpen((v) => !v)}
+                  className={`p-2 rounded-xl text-xs font-bold transition-colors ${
+                    globalSearchOpen
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300/70'
+                  }`}
+                  title="Cari pesan / nama nasabah"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGlobalBookmarkedOnly((v) => !v)}
+                  className={`p-2 rounded-xl text-xs font-bold transition-colors ${
+                    globalBookmarkedOnly
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300/70'
+                  }`}
+                  title="Filter pesan berbintang (Bookmark)"
+                >
+                  <Star className="w-4 h-4" />
+                </button>
+                {isAdminUser && (
+                  <button
+                    type="button"
+                    onClick={() => setPollModalScope('global')}
+                    className="p-2 rounded-xl bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300 hover:bg-violet-200"
+                    title="Buat Polling Resmi Admin"
+                  >
+                    <BarChart2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
 
+            {/* Admin Quick Slow-Mode & Lock Bar */}
             {isAdminUser && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const res = await toggleGlobalChatAdminLock(!globalChatConfig.adminOnlyLock);
-                    showToast(res.message, 'info');
-                  }}
-                  className={`min-h-[36px] px-3 py-1.5 rounded-lg text-xs font-bold border transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                    globalChatConfig.adminOnlyLock
-                      ? 'bg-amber-500 text-slate-950 border-amber-400 hover:bg-amber-400'
-                      : 'bg-slate-800 text-amber-300 border-slate-700 hover:bg-slate-700'
-                  }`}
-                >
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>
-                    {globalChatConfig.adminOnlyLock
-                      ? 'Buka Chat Nasabah'
-                      : 'Kunci Khusus Admin'}
-                  </span>
-                </button>
+              <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t border-slate-200/70 dark:border-slate-800">
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase text-slate-500 mr-1">Slow Mode:</span>
+                  {slowModePresets.map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => void toggleGlobalChatAdminLock(globalChatConfig.adminOnlyLock, p.ms)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-extrabold transition-colors ${
+                        (globalChatConfig.cooldownMs || 0) === p.ms
+                          ? 'bg-amber-500 text-slate-950'
+                          : 'bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setAdminHighlightMode((v) => !v)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold inline-flex items-center gap-1 ${
+                      adminHighlightMode
+                        ? 'bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-400/60'
+                        : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+                    }`}
+                  >
+                    <Sparkles className="w-3 h-3" /> Sorotan Admin: {adminHighlightMode ? 'ON' : 'OFF'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void toggleGlobalChatAdminLock(!globalChatConfig.adminOnlyLock)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold inline-flex items-center gap-1 ${
+                      globalChatConfig.adminOnlyLock
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-emerald-600 text-white'
+                    }`}
+                  >
+                    {globalChatConfig.adminOnlyLock ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                    {globalChatConfig.adminOnlyLock ? 'Terkunci' : 'Terbuka'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Collapsible Search Bar */}
+            {globalSearchOpen && (
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={globalSearchQuery}
+                  onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                  placeholder="Cari pesan atau nama nasabah di Chat Global..."
+                  className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                />
+                {globalSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setGlobalSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             )}
           </div>
 
-          {/* Pinned Announcement Bar */}
-          {pinnedGlobalMessages.length > 0 && (
-            <div className="px-4 py-2.5 bg-amber-500/10 border-b border-amber-500/25 flex items-start justify-between gap-3">
-              <div className="flex items-start gap-2 min-w-0">
-                <Pin className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <div className="min-w-0 text-xs">
-                  <span className="font-bold text-amber-300 mr-1.5">
-                    Disematkan ({pinnedGlobalMessages[pinnedGlobalMessages.length - 1].senderName}):
-                  </span>
-                  <span className="text-slate-200 break-words">
-                    {pinnedGlobalMessages[pinnedGlobalMessages.length - 1].text}
-                  </span>
+          {/* Multi-Pin Announcements Banner */}
+          {globalPinnedMessages.length > 0 && (
+            <div className="shrink-0 bg-amber-50/95 dark:bg-amber-950/35 border-b border-amber-200 dark:border-amber-800/60 px-4 py-2.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-amber-800 dark:text-amber-300">
+                    <Pin className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      Pesan Disematkan {globalPinnedMessages.length > 1 ? `(${globalPinnedMessages.length})` : ''} •{' '}
+                      {globalPinnedMessages[0].senderName}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-800 dark:text-amber-100/90 line-clamp-2 mt-0.5">
+                    {globalPinnedMessages[0].text}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {globalPinnedMessages.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setGlobalPinnedExpanded((v) => !v)}
+                      className="p-1.5 rounded-lg text-amber-800 dark:text-amber-300 hover:bg-amber-200/60 dark:hover:bg-amber-900/50"
+                    >
+                      {globalPinnedExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                  )}
+                  {isAdminUser && (
+                    <button
+                      type="button"
+                      onClick={() => void togglePinGlobalChatMessage(globalPinnedMessages[0].id)}
+                      className="p-1.5 rounded-lg text-amber-800 dark:text-amber-300 hover:bg-amber-200/60"
+                      title="Lepas sematan"
+                    >
+                      <PinOff className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
-              {isAdminUser && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    void togglePinGlobalChatMessage(
-                      pinnedGlobalMessages[pinnedGlobalMessages.length - 1].id
-                    )
-                  }
-                  className="text-[11px] font-semibold text-amber-300 hover:text-amber-200 whitespace-nowrap cursor-pointer"
-                >
-                  Lepas Pin
-                </button>
+              {globalPinnedExpanded && globalPinnedMessages.length > 1 && (
+                <div className="mt-2 pt-2 border-t border-amber-200/70 dark:border-amber-800/50 space-y-1.5 max-h-36 overflow-y-auto">
+                  {globalPinnedMessages.slice(1).map((pm) => (
+                    <div key={pm.id} className="flex items-start justify-between gap-2 text-xs">
+                      <p className="text-slate-700 dark:text-amber-100/80 min-w-0">
+                        <strong className="text-amber-900 dark:text-amber-300">{pm.senderName}:</strong> {pm.text}
+                      </p>
+                      {isAdminUser && (
+                        <button
+                          type="button"
+                          onClick={() => void togglePinGlobalChatMessage(pm.id)}
+                          className="shrink-0 text-amber-700 hover:text-amber-950"
+                        >
+                          <PinOff className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}
 
           {/* Global Messages Feed */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-950/40">
-            {orderedGlobalChats.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 text-xs space-y-2 py-12">
-                <Globe className="w-10 h-10 text-slate-600" />
-                <p className="font-semibold text-slate-200">Belum ada percakapan di Chat Global</p>
-                <p>Jadilah yang pertama menyapa nasabah Bank Nusantara lainnya!</p>
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-5 py-4 space-y-3 bg-slate-50/50 dark:bg-slate-950/40">
+            {visibleGlobalMessages.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center py-12 text-slate-400">
+                <Globe className="w-10 h-10 mb-2 opacity-40" />
+                <p className="text-sm font-bold text-slate-600 dark:text-slate-300">
+                  {globalBookmarkedOnly
+                    ? 'Belum ada pesan berbintang di Chat Global'
+                    : globalSearchQuery
+                      ? 'Pesan tidak ditemukan'
+                      : 'Belum ada pesan di Chat Global'}
+                </p>
+                <p className="text-xs mt-1">Mulai obrolan santai dengan sesama nasabah & Admin Bank Nusantara.</p>
               </div>
             ) : (
-              orderedGlobalChats.map((msg) => {
+              visibleGlobalMessages.map((msg) => {
                 const isMine =
                   (msg.senderAccountId && msg.senderAccountId === currentAccount.id) ||
                   (msg.senderAccount && msg.senderAccount === currentAccount.accountNumber);
-                const isMsgAdmin = msg.senderRole === 'admin';
-                const canDelete = isMine || isAdminUser;
+                const isMsgAdmin = msg.senderRole === 'admin' || msg.senderCardTier === 'admin';
+                const isBookmarked = bookmarkedIdSet.has(msg.id);
+                const canEdit =
+                  (isMine || (isAdminUser && isMsgAdmin)) &&
+                  canEditWithinWindow(msg.createdAtMs, msg.timestamp, isAdminUser);
+                const reactionEntries = Object.entries(msg.reactions || {}).filter(
+                  ([, ids]) => Array.isArray(ids) && ids.length > 0
+                );
+
+                // Amber-Gold elegant bubble for Admin messages
+                const bubbleClasses = isMsgAdmin
+                  ? 'bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-100/90 dark:from-amber-950/80 dark:via-amber-900/50 dark:to-yellow-950/70 border border-amber-400/80 dark:border-amber-500/60 text-slate-900 dark:text-amber-50 shadow-sm'
+                  : isMine
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 shadow-sm';
 
                 return (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
-                  >
-                    <div
-                      className={`group max-w-[88%] sm:max-w-[72%] rounded-2xl px-3.5 py-2.5 text-xs shadow-md border ${
-                        isMsgAdmin
-                          ? 'bg-amber-500/15 border-amber-400/40 text-amber-50'
-                          : isMine
-                          ? 'bg-blue-600 border-blue-500 text-white rounded-tr-sm'
-                          : 'bg-slate-800/95 border-slate-700/80 text-slate-100 rounded-tl-sm'
-                      }`}
-                    >
-                      {/* Sender Header */}
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span
-                            className={`font-bold text-[11px] ${
-                              isMsgAdmin
-                                ? 'text-amber-300'
-                                : isMine
-                                ? 'text-blue-100'
-                                : 'text-sky-300'
+                  <div key={msg.id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                    <div className="relative max-w-[88%] sm:max-w-[76%] min-w-0">
+                      <div className={`rounded-2xl px-3.5 py-2.5 ${bubbleClasses}`}>
+                        {/* Sender header */}
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                            <span
+                              className={`text-xs font-extrabold truncate ${
+                                isMsgAdmin
+                                  ? 'text-amber-900 dark:text-amber-300'
+                                  : isMine
+                                    ? 'text-emerald-50'
+                                    : 'text-slate-900 dark:text-white'
+                              }`}
+                            >
+                              {msg.senderName}
+                            </span>
+                            {isMsgAdmin && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[9px] font-black tracking-wide bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 shadow-[0_0_10px_rgba(245,158,11,0.45)]">
+                                <ShieldCheck className="w-3 h-3" /> ADMIN RESMI
+                              </span>
+                            )}
+                            {msg.isAdminHighlight && isMsgAdmin && (
+                              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300">
+                                <Flame className="w-3 h-3" /> Sorotan
+                              </span>
+                            )}
+                            {isBookmarked && <Star className="w-3 h-3 fill-amber-400 text-amber-400 shrink-0" />}
+                          </div>
+
+                          {/* `···` Action Popover Trigger */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuMsgId((prev) => (prev === msg.id ? null : msg.id));
+                            }}
+                            className={`p-1 rounded-lg transition-colors shrink-0 ${
+                              isMine && !isMsgAdmin
+                                ? 'text-emerald-100 hover:bg-emerald-700/60'
+                                : 'text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'
+                            }`}
+                            aria-label="Menu pesan"
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* Forwarded tag */}
+                        {msg.forwardedFrom && (
+                          <div className="text-[10px] italic opacity-75 mb-1 inline-flex items-center gap-1">
+                            <Forward className="w-3 h-3" /> Diteruskan dari {msg.forwardedFrom.originalSenderName}
+                          </div>
+                        )}
+
+                        {/* Reply quote */}
+                        {msg.replyToPreview && (
+                          <div
+                            className={`mb-1.5 px-2.5 py-1.5 rounded-xl border-l-2 text-[11px] ${
+                              isMine && !isMsgAdmin
+                                ? 'bg-emerald-700/50 border-emerald-200 text-emerald-50'
+                                : 'bg-black/5 dark:bg-white/5 border-amber-500 text-slate-600 dark:text-slate-300'
                             }`}
                           >
-                            {msg.senderName}
-                          </span>
-                          {isMsgAdmin && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[9px] font-black tracking-wide">
-                              <ShieldCheck className="w-2.5 h-2.5" />
-                              ADMIN RESMI
-                            </span>
+                            <p className="font-bold truncate">{msg.replyToSender}</p>
+                            <p className="truncate opacity-85">{msg.replyToPreview}</p>
+                          </div>
+                        )}
+
+                        {/* Body Text */}
+                        {msg.text && (
+                          <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{msg.text}</p>
+                        )}
+
+                        {/* Official Poll */}
+                        {msg.poll && renderPollCard(msg.poll, (optId) => void voteGlobalChatPoll(msg.id, optId))}
+
+                        {/* Footer: Time + Diedit */}
+                        <div
+                          className={`mt-1.5 flex items-center justify-end gap-2 text-[10px] ${
+                            isMine && !isMsgAdmin
+                              ? 'text-emerald-100/90'
+                              : isMsgAdmin
+                                ? 'text-amber-800/80 dark:text-amber-300/80'
+                                : 'text-slate-400'
+                          }`}
+                        >
+                          {msg.editedAt && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setShowEditedTipId((prev) => (prev === msg.id ? null : msg.id))
+                              }
+                              title={`Diedit pada ${formatChatDateTime(msg.editedAt)}`}
+                              className="italic underline decoration-dotted hover:opacity-100"
+                            >
+                              (Diedit{showEditedTipId === msg.id ? ` ${formatChatTimeShort(msg.editedAt)}` : ''})
+                            </button>
                           )}
-                          {!isMsgAdmin && msg.isVerified && (
-                            <ShieldCheck className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                          )}
-                          {msg.isPinned && (
-                            <Pin className="w-3 h-3 text-amber-400 shrink-0" />
-                          )}
+                          <span>{formatChatTimeShort(msg.timestamp)}</span>
                         </div>
-                        <span className="text-[10px] opacity-70 tabular-nums shrink-0">
-                          {formatShortTime(msg.timestamp)}
-                        </span>
                       </div>
 
-                      {/* Reply Quote */}
-                      {msg.replyToPreview && (
-                        <div className="mb-2 px-2.5 py-1.5 rounded-lg bg-black/25 border-l-2 border-sky-400 text-[11px]">
-                          <span className="font-bold text-sky-300 block">
-                            Membalas {msg.replyToSender || 'Pesan'}
-                          </span>
-                          <span className="text-slate-300 line-clamp-2">{msg.replyToPreview}</span>
+                      {/* Reactions Display Row */}
+                      {reactionEntries.length > 0 && (
+                        <div className={`mt-1 flex flex-wrap gap-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
+                          {reactionEntries.map(([emoji, voterIds]) => {
+                            const iReacted = voterIds.includes(currentAccount.id);
+                            return (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => void toggleGlobalChatReaction(msg.id, emoji)}
+                                className={`px-2 py-0.5 rounded-full text-xs border transition-all inline-flex items-center gap-1 ${
+                                  iReacted
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/70 border-emerald-400 text-emerald-900 dark:text-emerald-200 font-bold'
+                                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
+                                <span>{emoji}</span>
+                                <span className="text-[10px]">{voterIds.length}</span>
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
 
-                      {/* Message Body */}
-                      <p className="leading-relaxed whitespace-pre-wrap break-words text-[13px]">
-                        {msg.text}
-                      </p>
-
-                      {/* Action Row (Reply / Pin / Delete) */}
-                      <div className="flex items-center justify-end gap-2.5 mt-1.5 pt-1 border-t border-white/10 text-[10px]">
-                        <button
-                          type="button"
-                          onClick={() => setGlobalReplyTarget(msg)}
-                          className="inline-flex items-center gap-1 opacity-80 hover:opacity-100 cursor-pointer"
+                      {/* Popover Menu `···` */}
+                      {openMenuMsgId === msg.id && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className={`absolute z-40 mt-1 w-56 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 space-y-1 ${
+                            isMine ? 'right-0' : 'left-0'
+                          }`}
                         >
-                          <Reply className="w-3 h-3" />
-                          <span>Balas</span>
-                        </button>
-                        {isAdminUser && (
+                          {/* Quick Emoji Bar */}
+                          <div className="flex items-center justify-between px-1.5 py-1 border-b border-slate-100 dark:border-slate-800">
+                            {QUICK_REACTIONS.map((emoji) => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => {
+                                  void toggleGlobalChatReaction(msg.id, emoji);
+                                  setOpenMenuMsgId(null);
+                                }}
+                                className="w-7 h-7 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-base flex items-center justify-center transition-transform hover:scale-125"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
                           <button
                             type="button"
-                            onClick={async () => {
-                              const res = await togglePinGlobalChatMessage(msg.id);
-                              showToast(res.message, 'info');
+                            onClick={() => {
+                              setGlobalReplyTarget(msg);
+                              setGlobalEditTarget(null);
+                              setOpenMenuMsgId(null);
                             }}
-                            className="inline-flex items-center gap-1 text-amber-300 hover:text-amber-200 cursor-pointer"
+                            className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                           >
-                            {msg.isPinned ? (
-                              <>
-                                <PinOff className="w-3 h-3" />
-                                <span>Lepas Pin</span>
-                              </>
-                            ) : (
-                              <>
-                                <Pin className="w-3 h-3" />
-                                <span>Pin</span>
-                              </>
-                            )}
+                            <Reply className="w-3.5 h-3.5" /> Balas Pesan
                           </button>
-                        )}
-                        {canDelete && (
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setGlobalEditTarget(msg);
+                                setGlobalReplyTarget(null);
+                                setDraftByRoom((prev) => ({ ...prev, global: msg.text }));
+                                setOpenMenuMsgId(null);
+                              }}
+                              className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" /> Edit Pesan
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => void deleteGlobalChatMessage(msg.id)}
-                            className="inline-flex items-center gap-1 text-rose-300 hover:text-rose-200 cursor-pointer"
+                            onClick={() => {
+                              void handleCopyText(msg.text);
+                              setOpenMenuMsgId(null);
+                            }}
+                            className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                           >
-                            <Trash2 className="w-3 h-3" />
-                            <span>Hapus</span>
+                            <Copy className="w-3.5 h-3.5" /> Salin Teks
                           </button>
-                        )}
-                      </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = toggleBookmarkChatMessage(msg.id);
+                              showToast(r.message, 'info');
+                              setOpenMenuMsgId(null);
+                            }}
+                            className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                          >
+                            <Star className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-amber-400 text-amber-400' : ''}`} />
+                            {isBookmarked ? 'Hapus Bintang' : 'Tandai Bintang'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForwardModalPayload({
+                                text: msg.text,
+                                meta: { originalSenderName: msg.senderName, sourceRoomLabel: 'Chat Global' },
+                              });
+                              setOpenMenuMsgId(null);
+                            }}
+                            className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                          >
+                            <Forward className="w-3.5 h-3.5" /> Teruskan Pesan
+                          </button>
+
+                          {/* Admin Moderation Actions on Bubble */}
+                          {isAdminUser && (
+                            <div className="pt-1 mt-1 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const r = await togglePinGlobalChatMessage(msg.id);
+                                  showToast(r.message, 'info');
+                                  setOpenMenuMsgId(null);
+                                }}
+                                className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40 flex items-center gap-2"
+                              >
+                                {msg.isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                                {msg.isPinned ? 'Lepas Sematan' : 'Sematkan Pesan'}
+                              </button>
+                              {!isMsgAdmin && msg.senderAccountId && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAdminModModalState({
+                                        open: true,
+                                        tab: 'moderation',
+                                        muteTarget: {
+                                          accountId: msg.senderAccountId!,
+                                          name: msg.senderName,
+                                          accountNumber: msg.senderAccount,
+                                        },
+                                      });
+                                      setOpenMenuMsgId(null);
+                                    }}
+                                    className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2"
+                                  >
+                                    <Ban className="w-3.5 h-3.5" /> Mute Pengirim
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setWarnModalTarget({
+                                        accountId: msg.senderAccountId!,
+                                        name: msg.senderName,
+                                      });
+                                      setOpenMenuMsgId(null);
+                                    }}
+                                    className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 flex items-center gap-2"
+                                  >
+                                    <AlertTriangle className="w-3.5 h-3.5" /> Tegur Langsung
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const r = await adminBulkDeleteUserGlobalChats(
+                                        msg.senderAccountId!,
+                                        msg.senderName,
+                                        msg.senderAccount
+                                      );
+                                      showToast(r.message, r.success ? 'success' : 'error');
+                                      setOpenMenuMsgId(null);
+                                    }}
+                                    className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" /> Hapus Semua Pesan User Ini
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+
+                          {(isMine || isAdminUser) && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await deleteGlobalChatMessage(msg.id);
+                                showToast('Pesan dihapus permanen.', 'info');
+                                setOpenMenuMsgId(null);
+                              }}
+                              className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Hapus Pesan
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1205,456 +1614,975 @@ export const NusantaraChat: React.FC = () => {
             <div ref={globalEndRef} />
           </div>
 
-          {/* Reply Preview Bar */}
-          {globalReplyTarget && (
-            <div className="px-4 py-2 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-2 text-xs">
-              <div className="min-w-0">
-                <span className="text-[11px] font-bold text-sky-400">
-                  Membalas {globalReplyTarget.senderName}
-                </span>
-                <p className="text-slate-300 truncate">{globalReplyTarget.text}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setGlobalReplyTarget(null)}
-                className="p-1 text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+          {/* Typing Indicator */}
+          {activeTypingUsers.length > 0 && (
+            <div className="shrink-0 px-4 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
+              {activeTypingUsers.map((u) => u.accountName).join(', ')} sedang mengetik...
             </div>
           )}
 
-          {/* Global Input Box */}
-          {globalChatConfig.adminOnlyLock && !isAdminUser ? (
-            <div className="p-4 border-t border-slate-800 bg-amber-500/10 text-amber-200 text-xs font-semibold flex items-center justify-center gap-2">
-              <Lock className="w-4 h-4 shrink-0" />
-              <span>Ruang Chat Global sedang dalam Mode Khusus Admin sementara.</span>
-            </div>
-          ) : (
-            <form
-              onSubmit={handleSendGlobal}
-              className="p-3 border-t border-slate-800 bg-slate-950/90 flex items-center gap-2"
-            >
+          {/* Global Composer */}
+          <div className="shrink-0 p-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 relative">
+            {/* Mention Autocomplete Dropdown */}
+            {mentionCandidates.length > 0 && (
+              <div className="absolute bottom-full left-3 right-3 mb-1.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 max-h-44 overflow-y-auto z-30">
+                <p className="px-2 py-1 text-[10px] font-bold uppercase text-slate-400">Mention Nasabah (@)</p>
+                {mentionCandidates.map((acc) => (
+                  <button
+                    key={acc.id}
+                    type="button"
+                    onClick={() => insertMention(acc.fullName)}
+                    className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 flex items-center justify-between"
+                  >
+                    <span>@{acc.fullName}</span>
+                    <span className="text-[10px] font-mono text-slate-400">{acc.accountNumber}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Reply / Edit Banner */}
+            {(globalReplyTarget || globalEditTarget) && (
+              <div className="mb-2 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-between gap-2 text-xs">
+                <div className="min-w-0">
+                  <p className="font-bold text-emerald-700 dark:text-emerald-400">
+                    {globalEditTarget ? 'Mengedit Pesan Anda' : `Membalas ${globalReplyTarget?.senderName}`}
+                  </p>
+                  <p className="text-slate-600 dark:text-slate-300 truncate">
+                    {globalEditTarget ? globalEditTarget.text : globalReplyTarget?.text}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGlobalReplyTarget(null);
+                    setGlobalEditTarget(null);
+                  }}
+                  className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            <form onSubmit={handleSendGlobal} className="flex items-center gap-2 min-w-0">
               <input
                 type="text"
-                value={globalText}
-                onChange={(e) => setGlobalText(e.target.value)}
+                value={activeDraftText}
+                onChange={(e) => setActiveDraftText(e.target.value)}
+                disabled={!isAdminUser && globalChatConfig.adminOnlyLock}
                 placeholder={
-                  isAdminUser
-                    ? 'Ketik pesan resmi Admin ke ruang Chat Global...'
-                    : 'Ketik pesan ke semua nasabah di Chat Global...'
+                  !isAdminUser && globalChatConfig.adminOnlyLock
+                    ? 'Chat Global sedang dikunci Khusus Admin...'
+                    : globalEditTarget
+                      ? 'Ubah isi pesan Anda...'
+                      : 'Tulis pesan di Chat Global (ketik @nama untuk mention)...'
                 }
-                maxLength={1000}
-                className="flex-1 min-h-[44px] bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-blue-500"
+                className="flex-1 min-w-0 px-3.5 py-2.5 rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
               />
               <button
                 type="submit"
-                disabled={!globalText.trim() || globalSending || (!isAdminUser && globalCooldownLeft > 0)}
-                className="min-h-[44px] px-4 sm:px-5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition"
+                disabled={
+                  globalSending ||
+                  !activeDraftText.trim() ||
+                  (!isAdminUser && (globalChatConfig.adminOnlyLock || globalCooldownLeft > 0))
+                }
+                className="shrink-0 px-4 py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-45 text-white text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm transition-colors"
               >
-                {!isAdminUser && globalCooldownLeft > 0 ? (
-                  <span className="tabular-nums">Tunggu {globalCooldownLeft}d</span>
-                ) : (
-                  <>
-                    <span>Kirim</span>
-                    <Send className="w-3.5 h-3.5" />
-                  </>
-                )}
+                <Send className="w-4 h-4" />
+                <span className="hidden sm:inline">
+                  {globalEditTarget ? 'Simpan' : globalCooldownLeft > 0 ? `${globalCooldownLeft}d` : 'Kirim'}
+                </span>
               </button>
             </form>
-          )}
+          </div>
         </div>
       )}
 
       {/* ==================== TAB 2: CHAT PRIVAT (1-ON-1 & GRUP PRIVAT) ==================== */}
       {mainTab === 'private' && (
-        <div className="bg-slate-900/95 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden grid grid-cols-1 md:grid-cols-[340px_1fr] h-[640px] sm:h-[680px]">
-          {/* LEFT SIDEBAR: CONTACTS & GROUPS */}
+        <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm grid grid-cols-1 md:grid-cols-[330px_minmax(0,1fr)] h-[calc(100dvh-230px)] min-h-[520px] max-h-[780px] min-w-0 overflow-hidden">
+          {/* LEFT SIDEBAR: Daftar Kontak & Grup (hidden on mobile when room open) */}
           <div
             className={`${
               activeTarget ? 'hidden md:flex' : 'flex'
-            } flex-col border-r border-slate-800 bg-slate-950/75 min-h-0`}
+            } flex-col min-w-0 min-h-0 border-r border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/95`}
           >
-            {/* Action Buttons: Tambah Nasabah & Tambah Grup */}
-            <div className="p-3 border-b border-slate-800 space-y-2.5">
+            {/* Sidebar Actions */}
+            <div className="shrink-0 p-3 space-y-2.5 border-b border-slate-200 dark:border-slate-800">
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setContactCustomName('');
-                    setContactUserIdInput('');
-                    setContactAccNoInput('');
-                    setShowAddContactModal(true);
-                  }}
-                  className="min-h-[42px] px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer shadow-sm transition"
+                  onClick={() => setAddContactModalState({ open: true, prefill: null })}
+                  className="py-2.5 px-3 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                 >
                   <UserPlus className="w-4 h-4 shrink-0" />
-                  <span>Tambah Nasabah</span>
+                  <span className="truncate">Tambah Nasabah</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setGroupNameInput('');
-                    setGroupIconKey('users');
-                    setGroupAccentColor('indigo');
-                    setGroupSelectedMemberIds([]);
-                    setGroupQuickLookup('');
-                    setShowCreateGroupModal(true);
-                  }}
-                  className="min-h-[42px] px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer shadow-sm transition"
+                  onClick={() => setShowCreateGroupModal(true)}
+                  className="py-2.5 px-3 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white inline-flex items-center justify-center gap-1.5 shadow-sm transition-colors"
                 >
                   <Users className="w-4 h-4 shrink-0" />
-                  <span>Tambah Grup</span>
+                  <span className="truncate">Buat Grup</span>
                 </button>
               </div>
 
-              {/* Search Input */}
               <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Cari nama, User ID, No. Rek, atau grup..."
-                  className="w-full min-h-[38px] bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                  value={sidebarSearchQuery}
+                  onChange={(e) => setSidebarSearchQuery(e.target.value)}
+                  placeholder="Cari kontak, no. rek, atau grup..."
+                  className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
                 />
               </div>
 
-              {/* Filter Tabs */}
-              <div className="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                {(['all', 'dm', 'group'] as PrivateFilter[]).map((f) => (
+              <div className="grid grid-cols-3 gap-1 p-1 rounded-xl bg-slate-200/70 dark:bg-slate-800">
+                {[
+                  { id: 'all' as const, label: 'Semua' },
+                  { id: 'dm' as const, label: '1-on-1' },
+                  { id: 'group' as const, label: 'Grup' },
+                ].map((f) => (
                   <button
-                    key={f}
+                    key={f.id}
                     type="button"
-                    onClick={() => setPrivateFilter(f)}
-                    className={`py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                      privateFilter === f
-                        ? 'bg-slate-800 text-white'
-                        : 'text-slate-400 hover:text-slate-200'
+                    onClick={() => setPrivateFilter(f.id)}
+                    className={`py-1.5 rounded-lg text-[11px] font-bold transition-all ${
+                      privateFilter === f.id
+                        ? 'bg-white dark:bg-slate-900 text-indigo-700 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-600 dark:text-slate-400'
                     }`}
                   >
-                    {f === 'all' ? 'Semua' : f === 'dm' ? 'Personal' : 'Grup'}
+                    {f.label}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Thread List */}
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {filteredSidebarItems.length === 0 ? (
-                <div className="p-6 text-center text-slate-400 text-xs space-y-2">
-                  <Lock className="w-8 h-8 text-slate-600 mx-auto" />
-                  <p className="font-semibold text-slate-200">Belum ada obrolan privat</p>
-                  <p>
-                    Klik <strong>Tambah Nasabah</strong> (pakai User ID atau No. Rekening) atau{' '}
-                    <strong>Tambah Grup</strong> untuk mulai chat tertutup.
-                  </p>
-                </div>
-              ) : (
-                filteredSidebarItems.map((item) => {
-                  const isSelected =
-                    activeTarget?.type === item.type && activeTarget?.id === item.id;
+            {/* Sidebar Scrollable List */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1.5">
+              {/* Private Groups */}
+              {(privateFilter === 'all' || privateFilter === 'group') &&
+                filteredGroups.map((grp) => {
+                  const isSelected = activeTarget?.type === 'group' && activeTarget.id === grp.id;
+                  const lastRead = chatLastReadMap[`group:${grp.id}`] || 0;
+                  const groupMsgs = chats.filter((m) => !m.deleted && m.groupId === grp.id);
+                  const lastMsg = groupMsgs[groupMsgs.length - 1];
+                  const unread = groupMsgs.filter((m) => {
+                    const isMine =
+                      m.senderAccountId === currentAccount.id || m.senderAccount === currentAccount.accountNumber;
+                    return !isMine && (m.createdAtMs || Date.parse(m.timestamp || '')) > lastRead;
+                  }).length;
+                  const isMuted = mutedGroupIdSet.has(grp.id);
+
                   return (
                     <button
-                      key={`${item.type}:${item.id}`}
+                      key={grp.id}
                       type="button"
-                      onClick={() =>
-                        setActiveTarget({
-                          type: item.type,
-                          id: item.id,
-                          accountNumber: item.accountNumber,
-                        })
-                      }
-                      className={`w-full p-2.5 rounded-xl text-left transition flex items-center gap-3 cursor-pointer border ${
+                      onClick={() => {
+                        setActiveTarget({ type: 'group', id: grp.id });
+                        setPrivateReplyTarget(null);
+                        setPrivateEditTarget(null);
+                      }}
+                      className={`w-full flex items-center gap-3 p-3 rounded-2xl text-left transition-all border ${
                         isSelected
-                          ? 'bg-blue-600/20 border-blue-500/50 text-white'
-                          : 'border-transparent hover:bg-slate-900/90 text-slate-200'
+                          ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-300 dark:border-indigo-700'
+                          : 'bg-white dark:bg-slate-900/70 border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/70'
                       }`}
                     >
-                      {item.type === 'group' ? (
-                        <div
-                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${getGroupColorClass(
-                            item.accentColor || 'indigo'
-                          )}`}
-                        >
-                          {renderGroupIcon(item.iconKey || 'users', 'w-5 h-5')}
-                        </div>
-                      ) : (
-                        <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 text-amber-300 font-bold flex items-center justify-center shrink-0 text-sm">
-                          {item.avatarChar}
-                        </div>
-                      )}
-
+                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${getChatGroupColorClass(grp.accentColor)}`}>
+                        {renderChatGroupIcon(grp.iconKey, 'w-5 h-5')}
+                      </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-bold text-xs truncate text-white">
-                            {item.displayName}
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-sm font-bold text-slate-900 dark:text-white truncate flex items-center gap-1">
+                            {grp.name}
+                            {isMuted && <VolumeX className="w-3 h-3 text-slate-400 shrink-0" />}
                           </span>
-                          <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
-                            {item.lastMessageTime}
-                          </span>
+                          {lastMsg && (
+                            <span className="text-[10px] text-slate-400 shrink-0">
+                              {formatChatTimeShort(lastMsg.timestamp)}
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center justify-between gap-2 mt-0.5">
-                          <p className="text-[11px] text-slate-400 truncate">
-                            {item.lastMessagePreview}
+                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                            {lastMsg
+                              ? `${lastMsg.senderName}: ${lastMsg.text || 'Polling'}`
+                              : `${grp.memberAccountIds.length} anggota`}
                           </p>
-                          {item.unreadCount > 0 && (
-                            <span className="px-1.5 py-0.5 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-black tabular-nums shrink-0">
-                              {item.unreadCount}
+                          {unread > 0 && (
+                            <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-indigo-600 text-white">
+                              {unread}
                             </span>
                           )}
                         </div>
                       </div>
                     </button>
                   );
-                })
-              )}
-            </div>
+                })}
 
-            {/* Privacy Footer */}
-            <div className="px-3 py-2.5 border-t border-slate-800 bg-slate-950 text-[10px] text-slate-400 flex items-center gap-1.5">
-              <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>Privasi penuh: hanya peserta obrolan / anggota grup yang dapat melihat pesan.</span>
+              {/* 1-on-1 DMs (Saved Contacts + Unsaved Incoming Senders) */}
+              {(privateFilter === 'all' || privateFilter === 'dm') &&
+                filteredDmItems.map((dm) => {
+                  const isSelected = activeTarget?.type === 'dm' && activeTarget.id === dm.peerAccountId;
+                  const presence = getPresenceStatusLabel(dm.peerAccountId);
+
+                  return (
+                    <button
+                      key={dm.peerAccountId}
+                      type="button"
+                      onClick={() => {
+                        setActiveTarget({
+                          type: 'dm',
+                          id: dm.peerAccountId,
+                          accountNumber: dm.peerAccountNumber,
+                        });
+                        setPrivateReplyTarget(null);
+                        setPrivateEditTarget(null);
+                      }}
+                      className={`w-full flex items-center gap-3 p-3 rounded-2xl text-left transition-all border ${
+                        isSelected
+                          ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700'
+                          : 'bg-white dark:bg-slate-900/70 border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/70'
+                      }`}
+                    >
+                      <div className="relative shrink-0">
+                        <div
+                          className={`w-10 h-10 rounded-2xl flex items-center justify-center font-extrabold text-sm ${
+                            dm.isAdminPeer
+                              ? 'bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-950'
+                              : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200'
+                          }`}
+                        >
+                          {dm.displayName.charAt(0).toUpperCase()}
+                        </div>
+                        {presence.online && (
+                          <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                            {dm.isSaved ? dm.displayName : dm.peerAccountNumber}
+                          </span>
+                          {dm.lastMessageTime && (
+                            <span className="text-[10px] text-slate-400 shrink-0">
+                              {formatChatTimeShort(dm.lastMessageTime)}
+                            </span>
+                          )}
+                        </div>
+                        {/* Unsaved sender label + registered name + ADMIN RESMI */}
+                        <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                          {dm.isAdminPeer && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/20 text-amber-800 dark:text-amber-300">
+                              <ShieldCheck className="w-2.5 h-2.5" /> ADMIN RESMI
+                            </span>
+                          )}
+                          {!dm.isSaved && (
+                            <>
+                              <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300 truncate max-w-[110px]">
+                                {dm.registeredName}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700">
+                                Belum Disimpan
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-0.5">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                            {dm.lastMessageText}
+                          </p>
+                          {dm.unreadCount > 0 && (
+                            <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-600 text-white">
+                              {dm.unreadCount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+
+              {filteredDmItems.length === 0 && filteredGroups.length === 0 && (
+                <div className="text-center py-10 px-4 space-y-2">
+                  <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    Belum ada kontak atau grup privat
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Tekan <strong>Tambah Nasabah</strong> dengan User ID atau No. Rekening untuk mulai chat privat atau membuat grup.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* RIGHT PANE: CONVERSATION WINDOW */}
+          {/* RIGHT PANE: Active Private Conversation Room (DM or Group) */}
           <div
             className={`${
               activeTarget ? 'flex' : 'hidden md:flex'
-            } flex-col min-h-0 bg-slate-900/60`}
+            } flex-col min-w-0 min-h-0 bg-white dark:bg-slate-900 overflow-hidden`}
           >
             {!activeTarget ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 space-y-3">
-                <div className="w-14 h-14 rounded-2xl bg-slate-800/80 border border-slate-700 flex items-center justify-center text-emerald-400">
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 space-y-3">
+                <div className="w-14 h-14 rounded-3xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
                   <Lock className="w-7 h-7" />
                 </div>
-                <div className="space-y-1 max-w-sm">
-                  <h3 className="text-base font-bold text-white">Chat Privat &amp; Grup Tertutup</h3>
-                  <p className="text-xs leading-relaxed">
-                    Pilih percakapan di sebelah kiri, atau klik <strong>Tambah Nasabah</strong> /{' '}
-                    <strong>Tambah Grup</strong> untuk mulai mengobrol dan mengirim uang secara privat.
+                <div>
+                  <p className="text-base font-extrabold text-slate-900 dark:text-white">
+                    Pilih Kontak atau Grup Privat
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mt-1">
+                    Semua percakapan 1-on-1 & Grup Privat bersifat tertutup antar peserta, mendukung Kirim/Minta Uang, Info Dibaca, Edit Pesan, Polling & Reaksi Emoji.
                   </p>
                 </div>
               </div>
             ) : (
               <>
                 {/* Conversation Header */}
-                <div className="px-3 sm:px-4 py-3 border-b border-slate-800 bg-slate-950/80 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => setActiveTarget(null)}
-                      className="md:hidden p-2 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 cursor-pointer shrink-0"
-                      aria-label="Kembali ke daftar chat"
-                    >
-                      <ArrowLeft className="w-4 h-4" />
-                    </button>
-
-                    {activeTarget.type === 'group' && activeGroup ? (
-                      <div
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${getGroupColorClass(
-                          activeGroup.accentColor
-                        )}`}
+                <div className="shrink-0 px-3 sm:px-4 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/95 space-y-2">
+                  <div className="flex items-center justify-between gap-2 min-w-0">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTarget(null)}
+                        className="md:hidden p-2 rounded-xl bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200 shrink-0"
+                        aria-label="Kembali ke daftar kontak"
                       >
-                        {renderGroupIcon(activeGroup.iconKey, 'w-4 h-4')}
-                      </div>
-                    ) : (
-                      <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-yellow-600 text-slate-950 font-bold flex items-center justify-center shrink-0">
-                        {(
-                          activeDmSavedContact?.customName ||
-                          activeDmAccount?.fullName ||
-                          'N'
-                        ).charAt(0)}
-                      </div>
-                    )}
+                        <ArrowLeft className="w-4 h-4" />
+                      </button>
 
-                    <div className="min-w-0">
-                      <h3 className="font-bold text-white text-sm truncate">
-                        {activeTarget.type === 'group' && activeGroup
-                          ? activeGroup.name
-                          : activeDmSavedContact?.customName ||
-                            activeDmAccount?.fullName ||
-                            `Rek ${activeTarget.accountNumber || activeTarget.id}`}
-                      </h3>
-                      <p className="text-[11px] text-slate-400 truncate font-mono">
-                        {activeTarget.type === 'group' && activeGroup
-                          ? `${activeGroup.memberAccountIds.length} anggota • Grup Privat`
-                          : `Rek: ${activeDmAccount?.accountNumber || activeTarget.accountNumber || '-'}${
-                              activeDmAccount?.userId16
-                                ? ` • ID: ${activeDmAccount.userId16}`
-                                : ''
-                            }`}
-                      </p>
+                      {activeTarget.type === 'group' && activeGroup ? (
+                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${getChatGroupColorClass(activeGroup.accentColor)}`}>
+                          {renderChatGroupIcon(activeGroup.iconKey, 'w-5 h-5')}
+                        </div>
+                      ) : (
+                        <div
+                          className={`w-10 h-10 rounded-2xl flex items-center justify-center font-extrabold text-sm shrink-0 ${
+                            activeDmItem?.isAdminPeer
+                              ? 'bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-950'
+                              : 'bg-emerald-600 text-white'
+                          }`}
+                        >
+                          {(activeDmItem?.displayName || 'N').charAt(0).toUpperCase()}
+                        </div>
+                      )}
+
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h3 className="text-sm font-extrabold text-slate-900 dark:text-white truncate">
+                            {activeTarget.type === 'group' && activeGroup
+                              ? activeGroup.name
+                              : activeDmItem?.isSaved
+                                ? activeDmItem.displayName
+                                : `${activeDmItem?.peerAccountNumber || ''} (${activeDmItem?.registeredName || 'Nasabah'})`}
+                          </h3>
+                          {activeTarget.type === 'dm' && activeDmItem?.isAdminPeer && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950">
+                              <ShieldCheck className="w-3 h-3" /> ADMIN RESMI
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                          {activeTarget.type === 'group' && activeGroup
+                            ? `${activeGroup.memberAccountIds.length} anggota • ${activeGroupOnlineCount} online`
+                            : getPresenceStatusLabel(activeDmItem?.peerAccountId).label}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Header Right Action Buttons */}
+                    <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                      {/* Quick Simpan Nasabah button in Header for Unsaved DM */}
+                      {activeTarget.type === 'dm' && activeDmItem && !activeDmItem.isSaved && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAddContactModalState({
+                              open: true,
+                              prefill: {
+                                userId: activeDmItem.peerUserId16,
+                                accountNumber: activeDmItem.peerAccountNumber,
+                                isQuickSave: true,
+                              },
+                            })
+                          }
+                          className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1 shadow-sm"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Simpan Nasabah</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => openMoneyDialog(false)}
+                        className="p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200"
+                        title="Kirim Uang"
+                      >
+                        <DollarSign className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openMoneyDialog(true)}
+                        className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 hover:bg-amber-200"
+                        title="Minta Uang"
+                      >
+                        <HandCoins className="w-4 h-4" />
+                      </button>
+                      {activeTarget.type === 'group' && (
+                        <button
+                          type="button"
+                          onClick={() => setPollModalScope('group')}
+                          className="p-2 rounded-xl bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 hover:bg-violet-200"
+                          title="Buat Polling Grup"
+                        >
+                          <BarChart2 className="w-4 h-4" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setPrivateRoomSearchOpen((v) => !v)}
+                        className={`p-2 rounded-xl ${
+                          privateRoomSearchOpen
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                        }`}
+                        title="Cari di ruang chat ini"
+                      >
+                        <Search className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPrivateBookmarkedOnly((v) => !v)}
+                        className={`p-2 rounded-xl ${
+                          privateBookmarkedOnly
+                            ? 'bg-amber-500 text-slate-950'
+                            : 'bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                        }`}
+                        title="Filter pesan berbintang"
+                      >
+                        <Star className="w-4 h-4" />
+                      </button>
+                      {activeTarget.type === 'group' && (
+                        <button
+                          type="button"
+                          onClick={() => setShowGroupInfoModal(true)}
+                          className="p-2 rounded-xl bg-indigo-100 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200"
+                          title="Info & Pengaturan Grup"
+                        >
+                          <Info className="w-4 h-4" />
+                        </button>
+                      )}
+                      {activeTarget.type === 'dm' && activeDmItem?.isSaved && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const r = removePrivateChatContact(activeDmItem.peerAccountId);
+                            showToast(r.message, 'info');
+                          }}
+                          className="p-2 rounded-xl bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 hover:bg-rose-200"
+                          title="Hapus dari daftar kontak tersimpan"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Header Actions: Kirim Uang, Minta Uang, Info Grup */}
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => openMoneyModal(false)}
-                      className="min-h-[36px] px-2.5 sm:px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap cursor-pointer transition"
-                    >
-                      <DollarSign className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Kirim Uang</span>
-                      <span className="sm:hidden">Kirim</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openMoneyModal(true)}
-                      className="min-h-[36px] px-2.5 sm:px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 whitespace-nowrap cursor-pointer transition"
-                    >
-                      <HandCoins className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Minta Uang</span>
-                      <span className="sm:hidden">Minta</span>
-                    </button>
-                    {activeTarget.type === 'group' && activeGroup && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRenameGroupInput(activeGroup.name);
-                          setGroupAddLookupInput('');
-                          setConfirmDeleteGroupStep(false);
-                          setShowGroupInfoModal(true);
-                        }}
-                        className="min-h-[36px] px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
-                        title="Info & Pengaturan Grup"
-                      >
-                        <Info className="w-4 h-4" />
-                        <span className="hidden lg:inline">Info Grup</span>
-                      </button>
-                    )}
-                    {activeTarget.type === 'dm' && activeDmSavedContact && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const res = removePrivateChatContact(activeDmSavedContact.targetAccountId);
-                          showToast(res.message, 'info');
-                        }}
-                        className="min-h-[36px] px-2 py-1.5 bg-slate-800 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-slate-700 rounded-lg text-xs cursor-pointer"
-                        title="Hapus dari daftar kontak tersimpan"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
+                  {/* In-room Search Bar */}
+                  {privateRoomSearchOpen && (
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={privateRoomSearchQuery}
+                        onChange={(e) => setPrivateRoomSearchQuery(e.target.value)}
+                        placeholder="Cari pesan di percakapan ini..."
+                        className="w-full pl-9 pr-8 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+                      />
+                      {privateRoomSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setPrivateRoomSearchQuery('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {/* Private Messages Thread */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-950/35">
-                  {activePrivateMessages.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center text-slate-400 text-xs space-y-2 py-10">
-                      <Sparkles className="w-8 h-8 text-slate-600" />
-                      <p className="font-semibold text-slate-200">Ruang obrolan privat siap digunakan</p>
-                      <p>Kirim pesan teks, kirim uang langsung, atau minta patungan di sini.</p>
+                {/* WHATSAPP-STYLE TOP BANNER FOR UNSAVED INCOMING SENDER */}
+                {activeTarget.type === 'dm' &&
+                  activeDmItem &&
+                  !activeDmItem.isSaved &&
+                  !dismissedUnsavedBannerKeys[activeDmItem.peerAccountId] && (
+                    <div className="shrink-0 px-4 py-3 bg-emerald-50/95 dark:bg-emerald-950/45 border-b border-emerald-200 dark:border-emerald-800/70 flex flex-wrap items-center justify-between gap-2.5">
+                      <div className="min-w-0">
+                        <p className="text-xs font-extrabold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5 flex-wrap">
+                          <span>Pengirim ini belum tersimpan di kontak Anda</span>
+                          {activeDmItem.isAdminPeer && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-400 text-slate-950">
+                              ADMIN RESMI
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80">
+                          {activeDmItem.registeredName} • Rek {activeDmItem.peerAccountNumber}. Simpan agar mudah ditemukan & bisa dipilih saat Buat Grup Baru.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAddContactModalState({
+                              open: true,
+                              prefill: {
+                                userId: activeDmItem.peerUserId16,
+                                accountNumber: activeDmItem.peerAccountNumber,
+                                isQuickSave: true,
+                              },
+                            })
+                          }
+                          className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1.5 shadow-sm"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" /> Simpan Nasabah
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDismissedUnsavedBannerKeys((prev) => ({
+                              ...prev,
+                              [activeDmItem.peerAccountId]: true,
+                            }))
+                          }
+                          className="px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-900 dark:text-emerald-200 bg-emerald-200/70 dark:bg-emerald-900/60 hover:bg-emerald-200"
+                        >
+                          Tutup
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                {/* Group Pinned Messages Strip */}
+                {activeTarget.type === 'group' && groupPinnedMessages.length > 0 && (
+                  <div className="shrink-0 bg-indigo-50/90 dark:bg-indigo-950/35 border-b border-indigo-200 dark:border-indigo-800/60 px-4 py-2 flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[11px] font-extrabold text-indigo-800 dark:text-indigo-300 flex items-center gap-1">
+                        <Pin className="w-3 h-3" /> Disematkan ({groupPinnedMessages.length}) •{' '}
+                        {groupPinnedMessages[groupPinnedMessages.length - 1].senderName}
+                      </p>
+                      <p className="text-xs text-slate-700 dark:text-indigo-100/90 truncate">
+                        {groupPinnedMessages[groupPinnedMessages.length - 1].text}
+                      </p>
+                      {groupPinnedExpanded && groupPinnedMessages.length > 1 && (
+                        <div className="mt-1.5 pt-1.5 border-t border-indigo-200/60 space-y-1">
+                          {groupPinnedMessages.slice(0, -1).map((pm) => (
+                            <p key={pm.id} className="text-[11px] text-slate-600 dark:text-indigo-200/80 truncate">
+                              <strong>{pm.senderName}:</strong> {pm.text}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {groupPinnedMessages.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setGroupPinnedExpanded((v) => !v)}
+                        className="p-1 rounded-lg text-indigo-700 dark:text-indigo-300"
+                      >
+                        {groupPinnedExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Private Messages List */}
+                <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-5 py-4 space-y-3 bg-slate-50/50 dark:bg-slate-950/40">
+                  {visiblePrivateMessages.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center py-10 text-slate-400">
+                      <Lock className="w-9 h-9 mb-2 opacity-40" />
+                      <p className="text-sm font-bold text-slate-600 dark:text-slate-300">
+                        {privateBookmarkedOnly
+                          ? 'Belum ada pesan berbintang di ruang ini'
+                          : 'Belum ada percakapan di sini'}
+                      </p>
+                      <p className="text-xs mt-1">Kirim pesan pertama atau lampirkan Kirim/Minta Uang.</p>
                     </div>
                   ) : (
-                    activePrivateMessages.map((msg) => {
+                    visiblePrivateMessages.map((msg) => {
                       const isMine =
                         (msg.senderAccountId && msg.senderAccountId === currentAccount.id) ||
                         msg.senderAccount === currentAccount.accountNumber;
-                      const att = msg.transferAttachment;
-                      const canPayRequest =
-                        att && att.isRequest && att.status !== 'paid' && !isMine;
+                      const isMsgAdmin = msg.senderRole === 'admin' || msg.senderCardTier === 'admin';
+                      const isBookmarked = bookmarkedIdSet.has(msg.id);
+                      const canEdit = isMine && canEditWithinWindow(msg.createdAtMs, msg.timestamp, isAdminUser);
+                      const isGroupAdmin = Boolean(
+                        activeGroup &&
+                          (activeGroup.creatorAccountId === currentAccount.id ||
+                            (activeGroup.coAdminAccountIds || []).includes(currentAccount.id))
+                      );
+                      const canViewGroupReceipts = Boolean(activeGroup && (isMine || isGroupAdmin));
+
+                      // Read receipts summary
+                      const groupOtherCount = activeGroup
+                        ? Math.max(0, activeGroup.memberAccountIds.filter((id) => id !== msg.senderAccountId).length)
+                        : 0;
+                      const groupReaderCount = activeGroup
+                        ? activeGroup.memberAccountIds.filter(
+                            (id) => id !== msg.senderAccountId && Boolean(msg.readBy?.[id])
+                          ).length
+                        : 0;
+                      const allGroupRead = groupOtherCount > 0 && groupReaderCount >= groupOtherCount;
+
+                      const dmPeerReadEntry =
+                        !activeGroup && activeDmItem ? msg.readBy?.[activeDmItem.peerAccountId] : undefined;
+
+                      const reactionEntries = Object.entries(msg.reactions || {}).filter(
+                        ([, ids]) => Array.isArray(ids) && ids.length > 0
+                      );
+
+                      const bubbleClasses = isMsgAdmin
+                        ? 'bg-gradient-to-br from-amber-50 via-yellow-50 to-amber-100/90 dark:from-amber-950/80 dark:via-amber-900/50 dark:to-yellow-950/70 border border-amber-400/80 dark:border-amber-500/60 text-slate-900 dark:text-amber-50 shadow-sm'
+                        : isMine
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100 shadow-sm';
 
                       return (
-                        <div
-                          key={msg.id}
-                          className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}
-                        >
-                          <div
-                            className={`max-w-[88%] sm:max-w-[72%] rounded-2xl px-3.5 py-2.5 text-xs shadow-md border ${
-                              isMine
-                                ? 'bg-blue-600 border-blue-500 text-white rounded-tr-sm'
-                                : 'bg-slate-800/95 border-slate-700 text-slate-100 rounded-tl-sm'
-                            }`}
-                          >
-                            {/* Sender name in Group chats */}
-                            {activeTarget.type === 'group' && !isMine && (
-                              <span className="block text-[11px] font-bold text-amber-300 mb-1">
-                                {msg.senderName}
-                              </span>
-                            )}
+                        <div key={msg.id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                          <div className="relative max-w-[88%] sm:max-w-[76%] min-w-0">
+                            <div className={`rounded-2xl px-3.5 py-2.5 ${bubbleClasses}`}>
+                              {/* Sender Name & Menu */}
+                              <div className="flex items-center justify-between gap-2 mb-1">
+                                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                  {(activeTarget.type === 'group' || isMsgAdmin || !isMine) && (
+                                    <span
+                                      className={`text-xs font-extrabold truncate ${
+                                        isMsgAdmin
+                                          ? 'text-amber-900 dark:text-amber-300'
+                                          : isMine
+                                            ? 'text-indigo-100'
+                                            : 'text-slate-900 dark:text-white'
+                                      }`}
+                                    >
+                                      {msg.senderName}
+                                    </span>
+                                  )}
+                                  {isMsgAdmin && (
+                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950">
+                                      <ShieldCheck className="w-3 h-3" /> ADMIN RESMI
+                                    </span>
+                                  )}
+                                  {isBookmarked && <Star className="w-3 h-3 fill-amber-400 text-amber-400" />}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenMenuMsgId((prev) => (prev === msg.id ? null : msg.id));
+                                  }}
+                                  className={`p-1 rounded-lg shrink-0 ${
+                                    isMine && !isMsgAdmin
+                                      ? 'text-indigo-100 hover:bg-indigo-700/60'
+                                      : 'text-slate-400 hover:text-slate-700 dark:hover:text-white'
+                                  }`}
+                                >
+                                  <MoreHorizontal className="w-4 h-4" />
+                                </button>
+                              </div>
 
-                            {/* Reply Quote */}
-                            {msg.replyToPreview && (
-                              <div className="mb-2 px-2.5 py-1.5 rounded-lg bg-black/25 border-l-2 border-sky-300 text-[11px]">
-                                <span className="font-bold text-sky-200 block">
-                                  {msg.replyToSender || 'Balasan'}
-                                </span>
-                                <span className="opacity-85 line-clamp-2">{msg.replyToPreview}</span>
+                              {msg.forwardedFrom && (
+                                <div className="text-[10px] italic opacity-75 mb-1 inline-flex items-center gap-1">
+                                  <Forward className="w-3 h-3" /> Diteruskan dari {msg.forwardedFrom.originalSenderName}
+                                </div>
+                              )}
+
+                              {msg.replyToPreview && (
+                                <div
+                                  className={`mb-1.5 px-2.5 py-1.5 rounded-xl border-l-2 text-[11px] ${
+                                    isMine && !isMsgAdmin
+                                      ? 'bg-indigo-700/50 border-indigo-200 text-indigo-50'
+                                      : 'bg-black/5 dark:bg-white/5 border-indigo-500 text-slate-600 dark:text-slate-300'
+                                  }`}
+                                >
+                                  <p className="font-bold truncate">{msg.replyToSender}</p>
+                                  <p className="truncate opacity-85">{msg.replyToPreview}</p>
+                                </div>
+                              )}
+
+                              {/* Transfer / Request Money Attachment */}
+                              {msg.transferAttachment && (
+                                <div
+                                  className={`mb-2 p-3 rounded-xl border ${
+                                    msg.transferAttachment.status === 'paid'
+                                      ? 'bg-emerald-500/15 border-emerald-400/50'
+                                      : 'bg-amber-500/15 border-amber-400/50'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2 text-[11px] font-extrabold uppercase">
+                                    <span>
+                                      {msg.transferAttachment.isRequest
+                                        ? 'Permintaan Uang'
+                                        : 'Transfer Masuk'}
+                                    </span>
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                        msg.transferAttachment.status === 'paid'
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-amber-500 text-slate-950'
+                                      }`}
+                                    >
+                                      {msg.transferAttachment.status === 'paid' ? 'LUNAS' : 'MENUNGGU'}
+                                    </span>
+                                  </div>
+                                  <p className="text-lg font-black mt-1">
+                                    {formatRupiah(msg.transferAttachment.amount)}
+                                  </p>
+                                  {msg.transferAttachment.note && (
+                                    <p className="text-xs opacity-85 mt-0.5">{msg.transferAttachment.note}</p>
+                                  )}
+                                  {msg.transferAttachment.isRequest &&
+                                    msg.transferAttachment.status !== 'paid' &&
+                                    !isMine && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setPendingPayRequestMsg(msg);
+                                          setShowPinPrompt(true);
+                                        }}
+                                        className="mt-2 w-full py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-sm"
+                                      >
+                                        Bayar Sekarang
+                                      </button>
+                                    )}
+                                </div>
+                              )}
+
+                              {msg.text && (
+                                <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">{msg.text}</p>
+                              )}
+
+                              {msg.poll && renderPollCard(msg.poll, (optId) => void votePrivateChatPoll(msg.id, optId))}
+
+                              {/* Footer: Time + Diedit + Read Receipts */}
+                              <div
+                                className={`mt-1.5 flex items-center justify-end gap-2 flex-wrap text-[10px] ${
+                                  isMine && !isMsgAdmin
+                                    ? 'text-indigo-100/90'
+                                    : isMsgAdmin
+                                      ? 'text-amber-800/80 dark:text-amber-300/80'
+                                      : 'text-slate-400'
+                                }`}
+                              >
+                                {msg.editedAt && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setShowEditedTipId((prev) => (prev === msg.id ? null : msg.id))
+                                    }
+                                    title={`Diedit pada ${formatChatDateTime(msg.editedAt)}`}
+                                    className="italic underline decoration-dotted"
+                                  >
+                                    (Diedit{showEditedTipId === msg.id ? ` ${formatChatTimeShort(msg.editedAt)}` : ''})
+                                  </button>
+                                )}
+
+                                {/* GROUP READ RECEIPT CHIP + EYE BUTTON */}
+                                {activeTarget.type === 'group' && canViewGroupReceipts && groupOtherCount > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setReadReceiptModalMsg(msg)}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-black/10 dark:bg-white/10 hover:bg-black/20 font-semibold transition-colors"
+                                    title="Lihat siapa saja yang sudah membaca"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                    <span>
+                                      Dilihat {groupReaderCount} dari {groupOtherCount} anggota
+                                    </span>
+                                    {allGroupRead && <CheckCheck className="w-3.5 h-3.5 text-sky-300" />}
+                                  </button>
+                                )}
+
+                                <span>{formatChatTimeShort(msg.timestamp)}</span>
+
+                                {/* DM 1-on-1 Sent / Blue Double Check + Read Time */}
+                                {activeTarget.type === 'dm' && isMine && (
+                                  <span className="inline-flex items-center gap-1">
+                                    {dmPeerReadEntry ? (
+                                      <>
+                                        <CheckCheck className="w-3.5 h-3.5 text-sky-300" />
+                                        <span className="text-[9px] font-semibold text-sky-200">
+                                          Dibaca {formatChatTimeShort(dmPeerReadEntry.readAt)}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <Check className="w-3.5 h-3.5 opacity-80" />
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Reactions Display */}
+                            {reactionEntries.length > 0 && (
+                              <div className={`mt-1 flex flex-wrap gap-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
+                                {reactionEntries.map(([emoji, voterIds]) => {
+                                  const iReacted = voterIds.includes(currentAccount.id);
+                                  return (
+                                    <button
+                                      key={emoji}
+                                      type="button"
+                                      onClick={() => void togglePrivateChatReaction(msg.id, emoji)}
+                                      className={`px-2 py-0.5 rounded-full text-xs border inline-flex items-center gap-1 ${
+                                        iReacted
+                                          ? 'bg-indigo-100 dark:bg-indigo-950/70 border-indigo-400 text-indigo-900 dark:text-indigo-200 font-bold'
+                                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                                      }`}
+                                    >
+                                      <span>{emoji}</span>
+                                      <span className="text-[10px]">{voterIds.length}</span>
+                                    </button>
+                                  );
+                                })}
                               </div>
                             )}
 
-                            {/* Transfer / Money Request Attachment */}
-                            {att && (
+                            {/* Popover Menu `···` */}
+                            {openMenuMsgId === msg.id && (
                               <div
-                                className={`mb-2 p-2.5 rounded-xl border space-y-1.5 ${
-                                  att.isRequest
-                                    ? 'bg-amber-950/50 border-amber-400/40'
-                                    : 'bg-emerald-950/50 border-emerald-400/40'
+                                onClick={(e) => e.stopPropagation()}
+                                className={`absolute z-40 mt-1 w-52 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl p-1.5 space-y-1 ${
+                                  isMine ? 'right-0' : 'left-0'
                                 }`}
                               >
-                                <div className="flex items-center justify-between gap-2 text-[10px] font-bold">
-                                  <span className={att.isRequest ? 'text-amber-300' : 'text-emerald-300'}>
-                                    {att.isRequest
-                                      ? att.status === 'paid'
-                                        ? 'PERMINTAAN DANA • LUNAS'
-                                        : 'PERMINTAAN DANA (MINTA UANG)'
-                                      : 'TRANSFER DANA BERHASIL'}
-                                  </span>
-                                  <span className="font-mono opacity-80">{att.referenceNo}</span>
+                                <div className="flex items-center justify-between px-1.5 py-1 border-b border-slate-100 dark:border-slate-800">
+                                  {QUICK_REACTIONS.map((emoji) => (
+                                    <button
+                                      key={emoji}
+                                      type="button"
+                                      onClick={() => {
+                                        void togglePrivateChatReaction(msg.id, emoji);
+                                        setOpenMenuMsgId(null);
+                                      }}
+                                      className="w-7 h-7 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-base flex items-center justify-center hover:scale-125 transition-transform"
+                                    >
+                                      {emoji}
+                                    </button>
+                                  ))}
                                 </div>
-                                <div className="font-mono text-base font-extrabold text-white tabular-nums">
-                                  {formatRupiah(att.amount)}
-                                </div>
-                                {att.targetName && (
-                                  <div className="text-[11px] text-slate-200">
-                                    Tujuan: <strong>{att.targetName}</strong>
-                                  </div>
-                                )}
-                                {att.note && (
-                                  <div className="text-[11px] text-slate-300 italic">
-                                    &ldquo;{att.note}&rdquo;
-                                  </div>
-                                )}
-                                {att.status === 'paid' && att.paidByName && (
-                                  <div className="text-[10px] font-bold text-emerald-300 flex items-center gap-1">
-                                    <Check className="w-3 h-3" />
-                                    <span>Dilunasi oleh {att.paidByName}</span>
-                                  </div>
-                                )}
-                                {canPayRequest && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setPrivateReplyTarget(msg);
+                                    setPrivateEditTarget(null);
+                                    setOpenMenuMsgId(null);
+                                  }}
+                                  className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                                >
+                                  <Reply className="w-3.5 h-3.5" /> Balas Pesan
+                                </button>
+                                {canEdit && (
                                   <button
                                     type="button"
-                                    onClick={() => handlePayIncomingRequest(msg)}
-                                    className="w-full mt-1 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs cursor-pointer transition"
+                                    onClick={() => {
+                                      setPrivateEditTarget(msg);
+                                      setPrivateReplyTarget(null);
+                                      setDraftByRoom((prev) => ({ ...prev, [activeRoomKey]: msg.text }));
+                                      setOpenMenuMsgId(null);
+                                    }}
+                                    className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
                                   >
-                                    Bayar Sekarang ({formatRupiah(att.amount)})
+                                    <Edit3 className="w-3.5 h-3.5" /> Edit Pesan
+                                  </button>
+                                )}
+                                {activeTarget.type === 'group' && canViewGroupReceipts && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setReadReceiptModalMsg(msg);
+                                      setOpenMenuMsgId(null);
+                                    }}
+                                    className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-sky-700 dark:text-sky-300 hover:bg-sky-50 dark:hover:bg-sky-950/40 flex items-center gap-2"
+                                  >
+                                    <Eye className="w-3.5 h-3.5" /> Info Dibaca
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleCopyText(msg.text);
+                                    setOpenMenuMsgId(null);
+                                  }}
+                                  className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                                >
+                                  <Copy className="w-3.5 h-3.5" /> Salin Teks
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const r = toggleBookmarkChatMessage(msg.id);
+                                    showToast(r.message, 'info');
+                                    setOpenMenuMsgId(null);
+                                  }}
+                                  className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                                >
+                                  <Star className={`w-3.5 h-3.5 ${isBookmarked ? 'fill-amber-400 text-amber-400' : ''}`} />
+                                  {isBookmarked ? 'Hapus Bintang' : 'Tandai Bintang'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setForwardModalPayload({
+                                      text: msg.text,
+                                      meta: {
+                                        originalSenderName: msg.senderName,
+                                        sourceRoomLabel:
+                                          activeTarget.type === 'group' && activeGroup
+                                            ? `Grup ${activeGroup.name}`
+                                            : 'Chat Privat',
+                                      },
+                                    });
+                                    setOpenMenuMsgId(null);
+                                  }}
+                                  className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                                >
+                                  <Forward className="w-3.5 h-3.5" /> Teruskan Pesan
+                                </button>
+                                {activeTarget.type === 'group' && activeGroup && isGroupAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const r = await togglePinPrivateChatMessage(activeGroup.id, msg.id);
+                                      showToast(r.message, 'info');
+                                      setOpenMenuMsgId(null);
+                                    }}
+                                    className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center gap-2"
+                                  >
+                                    {msg.isPinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
+                                    {msg.isPinned ? 'Lepas Sematan Grup' : 'Sematkan di Grup'}
+                                  </button>
+                                )}
+                                {(isMine || isGroupAdmin || isAdminUser) && (
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const r = await deletePrivateChatMessage(msg.id);
+                                      showToast(r.message, r.success ? 'info' : 'error');
+                                      setOpenMenuMsgId(null);
+                                    }}
+                                    className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" /> Hapus Permanen
                                   </button>
                                 )}
                               </div>
                             )}
-
-                            <p className="leading-relaxed whitespace-pre-wrap break-words text-[13px]">
-                              {msg.text}
-                            </p>
-
-                            <div className="flex items-center justify-between gap-3 mt-1.5 text-[10px] opacity-75">
-                              <button
-                                type="button"
-                                onClick={() => setPrivateReplyTarget(msg)}
-                                className="inline-flex items-center gap-1 hover:opacity-100 cursor-pointer"
-                              >
-                                <Reply className="w-3 h-3" />
-                                <span>Balas</span>
-                              </button>
-                              <div className="flex items-center gap-1 tabular-nums">
-                                <span>{formatShortTime(msg.timestamp)}</span>
-                                {isMine && <CheckCheck className="w-3 h-3 text-sky-200" />}
-                              </div>
-                            </div>
                           </div>
                         </div>
                       );
@@ -1663,691 +2591,420 @@ export const NusantaraChat: React.FC = () => {
                   <div ref={privateEndRef} />
                 </div>
 
-                {/* Private Reply Preview */}
-                {privateReplyTarget && (
-                  <div className="px-4 py-2 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-2 text-xs">
-                    <div className="min-w-0">
-                      <span className="text-[11px] font-bold text-emerald-400">
-                        Membalas {privateReplyTarget.senderName}
-                      </span>
-                      <p className="text-slate-300 truncate">{privateReplyTarget.text}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setPrivateReplyTarget(null)}
-                      className="p-1 text-slate-400 hover:text-white cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
+                {/* Typing Indicator */}
+                {activeTypingUsers.length > 0 && (
+                  <div className="shrink-0 px-4 py-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800">
+                    {activeTypingUsers.map((u) => u.accountName).join(', ')} sedang mengetik...
                   </div>
                 )}
 
-                {/* Private Input Box */}
-                <form
-                  onSubmit={handleSendPrivateMessage}
-                  className="p-3 border-t border-slate-800 bg-slate-950/90 flex items-center gap-2"
-                >
-                  <input
-                    type="text"
-                    value={privateText}
-                    onChange={(e) => setPrivateText(e.target.value)}
-                    placeholder={
-                      activeTarget.type === 'group' && activeGroup
-                        ? `Ketik pesan ke grup ${activeGroup.name}...`
-                        : 'Ketik pesan privat...'
-                    }
-                    maxLength={1500}
-                    className="flex-1 min-h-[44px] bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 text-xs sm:text-sm focus:outline-none focus:border-emerald-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!privateText.trim()}
-                    className="min-h-[44px] px-4 sm:px-5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 whitespace-nowrap cursor-pointer transition"
-                  >
-                    <span>Kirim</span>
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
-                </form>
+                {/* Private Composer */}
+                <div className="shrink-0 p-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 relative">
+                  {mentionCandidates.length > 0 && (
+                    <div className="absolute bottom-full left-3 right-3 mb-1.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl p-1.5 max-h-44 overflow-y-auto z-30">
+                      <p className="px-2 py-1 text-[10px] font-bold uppercase text-slate-400">Mention Anggota (@)</p>
+                      {mentionCandidates.map((acc) => (
+                        <button
+                          key={acc.id}
+                          type="button"
+                          onClick={() => insertMention(acc.fullName)}
+                          className="w-full px-2.5 py-2 rounded-xl text-left text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 flex items-center justify-between"
+                        >
+                          <span>@{acc.fullName}</span>
+                          <span className="text-[10px] font-mono text-slate-400">{acc.accountNumber}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {(privateReplyTarget || privateEditTarget) && (
+                    <div className="mb-2 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-between gap-2 text-xs">
+                      <div className="min-w-0">
+                        <p className="font-bold text-indigo-700 dark:text-indigo-400">
+                          {privateEditTarget ? 'Mengedit Pesan Anda' : `Membalas ${privateReplyTarget?.senderName}`}
+                        </p>
+                        <p className="text-slate-600 dark:text-slate-300 truncate">
+                          {privateEditTarget ? privateEditTarget.text : privateReplyTarget?.text}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPrivateReplyTarget(null);
+                          setPrivateEditTarget(null);
+                        }}
+                        className="p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSendPrivate} className="flex items-center gap-2 min-w-0">
+                    <input
+                      type="text"
+                      value={activeDraftText}
+                      onChange={(e) => setActiveDraftText(e.target.value)}
+                      placeholder={
+                        privateEditTarget
+                          ? 'Ubah isi pesan Anda...'
+                          : activeTarget.type === 'group'
+                            ? 'Tulis pesan ke grup (ketik @nama untuk mention)...'
+                            : 'Tulis pesan privat...'
+                      }
+                      className="flex-1 min-w-0 px-3.5 py-2.5 rounded-2xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!activeDraftText.trim()}
+                      className="shrink-0 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-45 text-white text-xs font-extrabold inline-flex items-center gap-1.5 shadow-sm"
+                    >
+                      <Send className="w-4 h-4" />
+                      <span className="hidden sm:inline">{privateEditTarget ? 'Simpan' : 'Kirim'}</span>
+                    </button>
+                  </form>
+                </div>
               </>
             )}
           </div>
         </div>
       )}
 
-      {/* ==================== MODAL: TAMBAH NASABAH (3 KOLOM — ISI SALAH SATU) ==================== */}
-      {showAddContactModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <form
-            onSubmit={handleSaveNewContact}
-            className="bg-slate-900 border border-slate-700 text-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4 text-xs"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <h3 className="font-extrabold text-base text-white flex items-center gap-2">
-                  <UserPlus className="w-4 h-4 text-blue-400" />
-                  <span>Tambah Nasabah ke Chat Privat</span>
-                </h3>
-                <p className="text-slate-400 text-[11px] mt-1">
-                  Cukup isi <strong>salah satu</strong>: <strong>User ID</strong> atau{' '}
-                  <strong>No. Rekening</strong>. Nama panggilan bersifat opsional.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddContactModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* ==================== ALL PORTAL MODALS (ANTI-CLIPPING) ==================== */}
+      <AddContactModal
+        open={addContactModalState.open}
+        onClose={() => setAddContactModalState({ open: false, prefill: null })}
+        accounts={accounts}
+        currentAccountId={currentAccount.id}
+        initialPrefill={addContactModalState.prefill}
+        onSubmit={handleAddContactSubmit}
+      />
 
-            {/* 3 KOLOM INPUT SESUAI PERMINTAAN */}
-            <div className="space-y-3">
-              <div>
-                <label className="text-slate-300 font-bold block mb-1">
-                  1. Nama <span className="text-slate-500 font-normal">(Opsional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={contactCustomName}
-                  onChange={(e) => setContactCustomName(e.target.value)}
-                  placeholder="Kosongkan untuk memakai nama terdaftar otomatis"
-                  maxLength={60}
-                  className="w-full min-h-[42px] bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white text-xs focus:outline-none focus:border-blue-500"
-                />
-              </div>
+      <CreateGroupModal
+        open={showCreateGroupModal}
+        onClose={() => setShowCreateGroupModal(false)}
+        savedContacts={mySavedContacts}
+        accounts={accounts}
+        onOpenAddContactFirst={() => {
+          setShowCreateGroupModal(false);
+          setAddContactModalState({ open: true, prefill: null });
+        }}
+        onCreate={async (input) => {
+          const res = await createPrivateChatGroup(input);
+          showToast(res.message, res.success ? 'success' : 'error');
+          if (res.success && res.group) {
+            setShowCreateGroupModal(false);
+            setMainTab('private');
+            setActiveTarget({ type: 'group', id: res.group.id });
+          }
+        }}
+      />
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-300 font-bold block mb-1">
-                    2. User ID <span className="text-sky-400 font-normal">(Pilih salah satu)</span>
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={contactUserIdInput}
-                    onChange={(e) => setContactUserIdInput(e.target.value.replace(/\D/g, '').slice(0, 16))}
-                    placeholder="16 digit User ID"
-                    className="w-full min-h-[42px] bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
-                  />
-                </div>
+      <GroupInfoModal
+        open={showGroupInfoModal}
+        onClose={() => setShowGroupInfoModal(false)}
+        group={activeGroup}
+        currentAccount={currentAccount}
+        accounts={accounts}
+        savedContacts={mySavedContacts}
+        isGroupMuted={Boolean(activeGroup && mutedGroupIdSet.has(activeGroup.id))}
+        pinnedMessages={groupPinnedMessages}
+        onToggleMuteGroup={() => {
+          if (!activeGroup) return;
+          const r = toggleMutePrivateGroup(activeGroup.id);
+          showToast(r.message, 'info');
+        }}
+        onUpdateDetails={async (patch) => {
+          if (!activeGroup) return;
+          const r = await updatePrivateChatGroupDetails(activeGroup.id, patch);
+          showToast(r.message, r.success ? 'success' : 'error');
+        }}
+        onAddMember={async (memberId) => {
+          if (!activeGroup) return;
+          const r = await addMemberToPrivateGroup(activeGroup.id, memberId);
+          showToast(r.message, r.success ? 'success' : 'error');
+        }}
+        onRemoveMember={async (memberId) => {
+          if (!activeGroup) return;
+          const r = await removeMemberFromPrivateGroup(activeGroup.id, memberId);
+          showToast(r.message, r.success ? 'success' : 'error');
+        }}
+        onQuickSaveMemberContact={(acc) => {
+          setAddContactModalState({
+            open: true,
+            prefill: {
+              userId: acc.userId16,
+              accountNumber: acc.accountNumber,
+              isQuickSave: true,
+            },
+          });
+        }}
+        onUnpinMessage={async (mid) => {
+          if (!activeGroup) return;
+          const r = await togglePinPrivateChatMessage(activeGroup.id, mid);
+          showToast(r.message, 'info');
+        }}
+        onLeaveGroup={async () => {
+          if (!activeGroup) return;
+          const r = await leavePrivateChatGroup(activeGroup.id);
+          showToast(r.message, r.success ? 'info' : 'error');
+          if (r.success) {
+            setShowGroupInfoModal(false);
+            setActiveTarget(null);
+          }
+        }}
+        onDeleteGroup={async () => {
+          if (!activeGroup) return;
+          const r = await deletePrivateChatGroup(activeGroup.id);
+          showToast(r.message, r.success ? 'success' : 'error');
+          if (r.success) {
+            setShowGroupInfoModal(false);
+            setActiveTarget(null);
+          }
+        }}
+      />
 
-                <div>
-                  <label className="text-slate-300 font-bold block mb-1">
-                    3. No. Rekening <span className="text-sky-400 font-normal">(Atau ini)</span>
-                  </label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={contactAccNoInput}
-                    onChange={(e) => setContactAccNoInput(e.target.value.replace(/\D/g, '').slice(0, 14))}
-                    placeholder="10 digit No. Rek"
-                    className="w-full min-h-[42px] bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-            </div>
+      <ReadReceiptModal
+        open={Boolean(readReceiptModalMsg)}
+        onClose={() => setReadReceiptModalMsg(null)}
+        message={readReceiptModalMsg}
+        group={activeGroup}
+        accounts={accounts}
+      />
 
-            {/* LIVE AUTO-LOOKUP PREVIEW CARD */}
-            {addContactLookup.status === 'found' && addContactLookup.account && (
-              <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-950 font-black flex items-center justify-center shrink-0">
-                  {addContactLookup.account.fullName.charAt(0)}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-extrabold text-emerald-200 truncate">
-                      {addContactLookup.account.fullName}
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded bg-emerald-500/30 text-emerald-100 text-[9px] font-bold uppercase">
-                      {addContactLookup.account.cardTier}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-emerald-200/80 font-mono truncate">
-                    Rek: {addContactLookup.account.accountNumber}
-                    {addContactLookup.account.userId16
-                      ? ` • ID: ${addContactLookup.account.userId16}`
-                      : ''}
-                  </p>
-                </div>
-                <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
-              </div>
-            )}
+      <ForwardMessageModal
+        open={Boolean(forwardModalPayload)}
+        onClose={() => setForwardModalPayload(null)}
+        sourceText={forwardModalPayload?.text || ''}
+        forwardMeta={forwardModalPayload?.meta || null}
+        savedContacts={mySavedContacts}
+        groups={myGroups}
+        onForwardToGlobal={async () => {
+          if (!forwardModalPayload) return;
+          const r = await sendGlobalChatMessage({
+            text: forwardModalPayload.text,
+            asAdmin: isAdminUser,
+            forwardedFrom: forwardModalPayload.meta,
+          });
+          showToast(r.success ? 'Pesan diteruskan ke Chat Global!' : r.message, r.success ? 'success' : 'error');
+        }}
+        onForwardToDm={(contact) => {
+          if (!forwardModalPayload) return;
+          sendChatMessage({
+            recipientAccountId: contact.targetAccountId,
+            recipientAccount: contact.targetAccountNumber,
+            recipientName: contact.customName || contact.registeredName,
+            text: forwardModalPayload.text,
+            forwardedFrom: forwardModalPayload.meta,
+          });
+          showToast(`Pesan diteruskan ke ${contact.customName || contact.registeredName}.`, 'success');
+        }}
+        onForwardToGroup={(grp) => {
+          if (!forwardModalPayload) return;
+          sendChatMessage({
+            groupId: grp.id,
+            recipientAccount: `group:${grp.id}`,
+            recipientName: grp.name,
+            text: forwardModalPayload.text,
+            forwardedFrom: forwardModalPayload.meta,
+          });
+          showToast(`Pesan diteruskan ke grup "${grp.name}".`, 'success');
+        }}
+      />
 
-            {(addContactLookup.status === 'not_found' ||
-              addContactLookup.status === 'mismatch' ||
-              addContactLookup.status === 'self') && (
-              <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-200 text-[11px] flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{addContactLookup.error}</span>
-              </div>
-            )}
+      <CreatePollModal
+        open={pollModalScope !== null}
+        onClose={() => setPollModalScope(null)}
+        title={pollModalScope === 'global' ? 'Buat Polling Resmi Admin (Chat Global)' : 'Buat Polling Grup Privat'}
+        onCreatePoll={(poll) => {
+          if (pollModalScope === 'global') {
+            void sendGlobalChatMessage({
+              text: `Polling Resmi: ${poll.question}`,
+              asAdmin: isAdminUser,
+              isAdminHighlight: true,
+              poll,
+            }).then((r) => showToast(r.message, r.success ? 'success' : 'error'));
+          } else if (pollModalScope === 'group' && activeGroup) {
+            sendChatMessage({
+              groupId: activeGroup.id,
+              recipientAccount: `group:${activeGroup.id}`,
+              recipientName: activeGroup.name,
+              text: `Polling Grup: ${poll.question}`,
+              poll,
+            });
+            showToast('Polling grup berhasil dikirim!', 'success');
+          }
+        }}
+      />
 
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                type="submit"
-                disabled={addContactLookup.status !== 'found'}
-                className="flex-1 min-h-[42px] py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-45 text-white font-bold rounded-xl cursor-pointer transition"
-              >
-                Simpan &amp; Mulai Chat
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAddContactModal(false)}
-                className="px-4 min-h-[42px] py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl cursor-pointer"
-              >
-                Batal
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      <AdminModerationModal
+        open={adminModModalState.open}
+        initialTab={adminModModalState.tab}
+        prefillMuteTarget={adminModModalState.muteTarget}
+        onClose={() => setAdminModModalState({ open: false })}
+        globalChats={globalChats}
+        globalChatConfig={globalChatConfig}
+        connectedDevicesCount={connectedDevicesCount}
+        accounts={accounts}
+        moderationLogs={chatModerationLogs}
+        onSendAnnouncement={async (input) => {
+          const r = await sendGlobalChatMessage({
+            text: input.text,
+            asAdmin: true,
+            showPopupOnAllPhones: input.showPopupOnAllPhones,
+            isPinned: input.isPinned,
+            isAdminHighlight: input.isAdminHighlight,
+          });
+          showToast(r.message, r.success ? 'success' : 'error');
+        }}
+        onOpenAdminPoll={() => setPollModalScope('global')}
+        onToggleLock={async (locked, cooldownMs) => {
+          const r = await toggleGlobalChatAdminLock(locked, cooldownMs);
+          showToast(r.message, 'info');
+        }}
+        onUpdateConfig={async (partial, logDetail) => {
+          const r = await adminUpdateGlobalChatConfig(partial, logDetail);
+          showToast(r.message, 'success');
+        }}
+        onMuteUser={async (input) => {
+          const r = await adminMuteGlobalChatUser(input);
+          showToast(r.message, r.success ? 'success' : 'error');
+        }}
+        onUnmuteUser={async (accountId) => {
+          const r = await adminUnmuteGlobalChatUser(accountId);
+          showToast(r.message, r.success ? 'success' : 'error');
+        }}
+        onClearAllGlobal={async () => {
+          await clearGlobalChatMessages();
+          showToast('Seluruh pesan Chat Global berhasil dibersihkan.', 'info');
+        }}
+        onCopyRecap={handleCopyGlobalRecap}
+        onDownloadRecap={handleDownloadGlobalRecap}
+      />
 
-      {/* ==================== MODAL: TAMBAH GRUP PRIVAT ==================== */}
-      {showCreateGroupModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <form
-            onSubmit={handleCreateGroupSubmit}
-            className="bg-slate-900 border border-slate-700 text-white rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 text-xs max-h-[90vh] overflow-y-auto"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <h3 className="font-extrabold text-base text-white flex items-center gap-2">
-                  <Users className="w-4 h-4 text-emerald-400" />
-                  <span>Buat Grup Privat Baru</span>
-                </h3>
-                <p className="text-slate-400 text-[11px] mt-0.5">
-                  Hanya anggota grup yang dapat membaca isi obrolan &amp; bertransaksi di dalamnya.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCreateGroupModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      <AdminWarnModal
+        open={Boolean(warnModalTarget)}
+        onClose={() => setWarnModalTarget(null)}
+        target={warnModalTarget}
+        onSubmit={async (reason) => {
+          if (!warnModalTarget) return;
+          const r = await adminWarnUserFromChat(warnModalTarget.accountId, warnModalTarget.name, reason);
+          showToast(r.message, r.success ? 'success' : 'error');
+        }}
+      />
 
-            {/* Nama Grup */}
+      {/* Kirim Uang / Minta Uang Portal Modal */}
+      <PortalModalShell
+        open={showMoneyModal}
+        onClose={() => setShowMoneyModal(false)}
+        title={isRequestMoneyMode ? 'Minta Uang di Chat Privat' : 'Kirim Uang di Chat Privat'}
+        subtitle={
+          activeTarget?.type === 'group' && activeGroup
+            ? `Grup: ${activeGroup.name}`
+            : `Tujuan: ${activeDmItem?.displayName || ''}`
+        }
+        icon={
+          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-white ${isRequestMoneyMode ? 'bg-amber-500' : 'bg-emerald-600'}`}>
+            {isRequestMoneyMode ? <HandCoins className="w-5 h-5" /> : <DollarSign className="w-5 h-5" />}
+          </div>
+        }
+        footer={
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowMoneyModal(false)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              onClick={handleMoneyModalConfirm}
+              className={`px-5 py-2 rounded-xl text-xs font-bold text-white ${
+                isRequestMoneyMode ? 'bg-amber-500 hover:bg-amber-600 text-slate-950' : 'bg-emerald-600 hover:bg-emerald-700'
+              }`}
+            >
+              {isRequestMoneyMode ? 'Kirim Permintaan' : 'Lanjut Masukkan PIN'}
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          {!isRequestMoneyMode && activeTarget?.type === 'group' && activeGroup && (
             <div>
-              <label className="text-slate-300 font-bold block mb-1">Nama Grup</label>
-              <input
-                type="text"
-                required
-                value={groupNameInput}
-                onChange={(e) => setGroupNameInput(e.target.value)}
-                placeholder="Contoh: Keluarga Besar, Tim Bisnis, Arisan..."
-                maxLength={80}
-                className="w-full min-h-[42px] bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white text-xs focus:outline-none focus:border-emerald-500"
-              />
-            </div>
-
-            {/* Ikon & Warna Grup */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-slate-300 font-bold block mb-1.5">Ikon Grup</label>
-                <div className="grid grid-cols-6 gap-1.5">
-                  {GROUP_ICON_OPTIONS.map(({ key, Icon }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setGroupIconKey(key)}
-                      className={`h-9 rounded-lg flex items-center justify-center border cursor-pointer transition ${
-                        groupIconKey === key
-                          ? 'bg-emerald-600/30 border-emerald-400 text-white'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="text-slate-300 font-bold block mb-1.5">Warna Ikon</label>
-                <div className="grid grid-cols-6 gap-1.5">
-                  {GROUP_COLOR_OPTIONS.map((c) => (
-                    <button
-                      key={c.key}
-                      type="button"
-                      onClick={() => setGroupAccentColor(c.key)}
-                      className={`h-9 rounded-lg ${c.bgClass} flex items-center justify-center cursor-pointer transition ${
-                        groupAccentColor === c.key ? `ring-2 ring-offset-2 ring-offset-slate-900 ${c.ringClass}` : 'opacity-70 hover:opacity-100'
-                      }`}
-                      title={c.label}
-                    >
-                      {groupAccentColor === c.key && <Check className="w-4 h-4" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Tambah cepat anggota lewat User ID atau No. Rekening */}
-            <div className="space-y-1.5">
-              <label className="text-slate-300 font-bold block">
-                Tambah Anggota via User ID / No. Rekening
+              <label className="block text-xs font-bold uppercase text-slate-500 mb-1">
+                Pilih Penerima di Grup
               </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={groupQuickLookup}
-                  onChange={(e) => setGroupQuickLookup(e.target.value.replace(/\D/g, '').slice(0, 16))}
-                  placeholder="Ketik User ID (16 digit) atau No. Rek..."
-                  className="flex-1 min-h-[40px] bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-emerald-500"
-                />
-                <button
-                  type="button"
-                  disabled={!groupQuickPreview || groupQuickPreview.id === currentAccount.id}
-                  onClick={() => {
-                    if (!groupQuickPreview || groupQuickPreview.id === currentAccount.id) return;
-                    setGroupSelectedMemberIds((prev) =>
-                      prev.includes(groupQuickPreview.id) ? prev : [...prev, groupQuickPreview.id]
-                    );
-                    setGroupQuickLookup('');
-                  }}
-                  className="px-3.5 min-h-[40px] rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white font-bold whitespace-nowrap cursor-pointer"
-                >
-                  + Pilih
-                </button>
-              </div>
-              {groupQuickPreview && groupQuickPreview.id !== currentAccount.id && (
-                <div className="text-[11px] text-emerald-300 flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>
-                    Ditemukan: <strong>{groupQuickPreview.fullName}</strong> (Rek{' '}
-                    {groupQuickPreview.accountNumber})
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Pilih dari Daftar Kontak Tersimpan / Nasabah */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-slate-300 font-bold">
-                  Pilih Anggota ({groupSelectedMemberIds.length} dipilih)
-                </label>
-              </div>
-              <div className="max-h-44 overflow-y-auto space-y-1 bg-slate-950/70 border border-slate-800 rounded-xl p-2">
-                {accounts
-                  .filter((a) => a.id !== currentAccount.id)
-                  .map((acc) => {
-                    const checked = groupSelectedMemberIds.includes(acc.id);
-                    const saved = mySavedContacts.find((c) => c.targetAccountId === acc.id);
+              <select
+                value={moneyGroupTargetAccountId}
+                onChange={(e) => setMoneyGroupTargetAccountId(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
+              >
+                {activeGroup.memberAccountIds
+                  .filter((id) => id !== currentAccount.id)
+                  .map((id) => {
+                    const acc = accounts.find((a) => a.id === id);
                     return (
-                      <button
-                        key={acc.id}
-                        type="button"
-                        onClick={() =>
-                          setGroupSelectedMemberIds((prev) =>
-                            prev.includes(acc.id)
-                              ? prev.filter((id) => id !== acc.id)
-                              : [...prev, acc.id]
-                          )
-                        }
-                        className={`w-full px-3 py-2 rounded-lg text-left flex items-center justify-between gap-2 transition cursor-pointer ${
-                          checked
-                            ? 'bg-emerald-600/25 border border-emerald-500/40 text-white'
-                            : 'hover:bg-slate-900 text-slate-300 border border-transparent'
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <span className="font-bold block truncate">
-                            {saved?.customName ? `${saved.customName} (${acc.fullName})` : acc.fullName}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            Rek {acc.accountNumber}
-                          </span>
-                        </div>
-                        <div
-                          className={`w-5 h-5 rounded-md flex items-center justify-center border shrink-0 ${
-                            checked
-                              ? 'bg-emerald-500 border-emerald-400 text-slate-950'
-                              : 'border-slate-600'
-                          }`}
-                        >
-                          {checked && <Check className="w-3.5 h-3.5" />}
-                        </div>
-                      </button>
+                      <option key={id} value={id}>
+                        {acc?.fullName || id} {acc ? `(Rek ${acc.accountNumber})` : ''}
+                      </option>
                     );
                   })}
-              </div>
+              </select>
             </div>
+          )}
 
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                type="submit"
-                disabled={!groupNameInput.trim() || groupSelectedMemberIds.length === 0}
-                className="flex-1 min-h-[42px] py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white font-bold rounded-xl cursor-pointer transition"
-              >
-                Buat Grup ({groupSelectedMemberIds.length + 1} Anggota)
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowCreateGroupModal(false)}
-                className="px-4 min-h-[42px] py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl cursor-pointer"
-              >
-                Batal
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-500 mb-1">
+              Nominal (Rupiah)
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={moneyAmountInput}
+              onChange={(e) => setMoneyAmountInput(e.target.value.replace(/[^\d]/g, ''))}
+              placeholder="Contoh: 50000"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-900 dark:text-white"
+            />
+            {Number(moneyAmountInput) > 0 && (
+              <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                {formatRupiah(Number(moneyAmountInput))}
+              </p>
+            )}
+          </div>
 
-      {/* ==================== MODAL: INFO & PENGATURAN GRUP ==================== */}
-      {showGroupInfoModal && activeGroup && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 text-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4 text-xs max-h-[90vh] overflow-y-auto">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-3 min-w-0">
-                <div
-                  className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${getGroupColorClass(
-                    activeGroup.accentColor
-                  )}`}
-                >
-                  {renderGroupIcon(activeGroup.iconKey, 'w-5 h-5')}
-                </div>
-                <div className="min-w-0">
-                  <h3 className="font-extrabold text-base text-white truncate">{activeGroup.name}</h3>
-                  <p className="text-[11px] text-slate-400">
-                    {activeGroupMembers.length} anggota • Grup Privat
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowGroupInfoModal(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Ubah Nama Grup */}
-            <div className="space-y-1.5">
-              <label className="text-slate-300 font-bold block">Ubah Nama Grup</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={renameGroupInput}
-                  onChange={(e) => setRenameGroupInput(e.target.value)}
-                  maxLength={80}
-                  className="flex-1 min-h-[40px] bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const res = await renamePrivateChatGroup(activeGroup.id, renameGroupInput);
-                    showToast(res.message, res.success ? 'success' : 'error');
-                  }}
-                  className="px-3.5 min-h-[40px] rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center gap-1 whitespace-nowrap cursor-pointer"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Simpan</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Tambah Anggota Baru via User ID / No. Rekening */}
-            <div className="space-y-1.5">
-              <label className="text-slate-300 font-bold block">
-                Tambah Anggota Baru (User ID / No. Rekening)
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={groupAddLookupInput}
-                  onChange={(e) =>
-                    setGroupAddLookupInput(e.target.value.replace(/\D/g, '').slice(0, 16))
-                  }
-                  placeholder="Masukkan User ID atau No. Rek..."
-                  className="flex-1 min-h-[40px] bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-white font-mono text-xs"
-                />
-                <button
-                  type="button"
-                  disabled={!groupInfoAddPreview}
-                  onClick={async () => {
-                    if (!groupInfoAddPreview) return;
-                    const res = await addMemberToPrivateGroup(activeGroup.id, groupInfoAddPreview.id);
-                    showToast(res.message, res.success ? 'success' : 'error');
-                    if (res.success) setGroupAddLookupInput('');
-                  }}
-                  className="px-3.5 min-h-[40px] rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-45 text-white font-bold whitespace-nowrap cursor-pointer"
-                >
-                  + Tambah
-                </button>
-              </div>
-              {groupInfoAddPreview && (
-                <p className="text-[11px] text-emerald-300">
-                  Ditemukan: <strong>{groupInfoAddPreview.fullName}</strong> (Rek{' '}
-                  {groupInfoAddPreview.accountNumber})
-                </p>
-              )}
-            </div>
-
-            {/* Daftar Anggota */}
-            <div className="space-y-1.5">
-              <label className="text-slate-300 font-bold block">
-                Daftar Anggota ({activeGroupMembers.length})
-              </label>
-              <div className="max-h-48 overflow-y-auto space-y-1.5 bg-slate-950/70 border border-slate-800 rounded-xl p-2">
-                {activeGroupMembers.map((member) => {
-                  const isCreator = member.id === activeGroup.creatorAccountId;
-                  const canKick =
-                    activeGroup.creatorAccountId === currentAccount.id &&
-                    member.id !== currentAccount.id;
-                  return (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-slate-900/90 border border-slate-800"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-white truncate">
-                            {member.fullName}
-                            {member.id === currentAccount.id ? ' (Anda)' : ''}
-                          </span>
-                          {isCreator && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 text-[9px] font-bold">
-                              <Crown className="w-2.5 h-2.5" />
-                              Pembuat
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          Rek {member.accountNumber}
-                        </span>
-                      </div>
-                      {canKick && (
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const res = await removeMemberFromPrivateGroup(activeGroup.id, member.id);
-                            showToast(res.message, res.success ? 'info' : 'error');
-                          }}
-                          className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/35 text-rose-300 text-[10px] font-bold cursor-pointer shrink-0"
-                        >
-                          Keluarkan
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Keluar Grup & Hapus Grup (Khusus Pembuat) */}
-            <div className="pt-2 border-t border-slate-800 space-y-2">
-              <button
-                type="button"
-                onClick={async () => {
-                  const res = await leavePrivateChatGroup(activeGroup.id);
-                  showToast(res.message, 'info');
-                  setShowGroupInfoModal(false);
-                  setActiveTarget(null);
-                }}
-                className="w-full min-h-[40px] py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <LogOut className="w-4 h-4" />
-                <span>Keluar dari Grup</span>
-              </button>
-
-              {activeGroup.creatorAccountId === currentAccount.id && (
-                !confirmDeleteGroupStep ? (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDeleteGroupStep(true)}
-                    className="w-full min-h-[40px] py-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-300 font-bold flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    <span>Hapus Grup Permanen</span>
-                  </button>
-                ) : (
-                  <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 space-y-2">
-                    <p className="text-[11px] text-rose-200 font-semibold">
-                      Yakin ingin menghapus grup &ldquo;{activeGroup.name}&rdquo; beserta seluruh riwayat pesannya?
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const res = await deletePrivateChatGroup(activeGroup.id);
-                          showToast(res.message, res.success ? 'info' : 'error');
-                          setShowGroupInfoModal(false);
-                          setActiveTarget(null);
-                        }}
-                        className="flex-1 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold cursor-pointer"
-                      >
-                        Ya, Hapus Grup
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteGroupStep(false)}
-                        className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 font-semibold cursor-pointer"
-                      >
-                        Batal
-                      </button>
-                    </div>
-                  </div>
-                )
-              )}
-            </div>
+          <div>
+            <label className="block text-xs font-bold uppercase text-slate-500 mb-1">
+              Catatan <span className="font-normal normal-case text-slate-400">(Opsional)</span>
+            </label>
+            <input
+              type="text"
+              value={moneyNoteInput}
+              onChange={(e) => setMoneyNoteInput(e.target.value)}
+              maxLength={120}
+              placeholder="Contoh: Patungan makan siang"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
+            />
           </div>
         </div>
-      )}
+      </PortalModalShell>
 
-      {/* ==================== MODAL: KIRIM / MINTA UANG (PRIVAT & GRUP) ==================== */}
-      {showMoneyModal && activeTarget && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <form
-            onSubmit={handleConfirmMoneyModal}
-            className="bg-slate-900 border border-slate-700 text-white rounded-2xl max-w-sm w-full p-5 sm:p-6 shadow-2xl space-y-4 text-xs"
-          >
-            <div className="text-center">
-              <h3 className="font-extrabold text-base text-white">
-                {isRequestMoneyMode ? 'Minta Uang (Split Bill)' : 'Kirim Uang di Chat Privat'}
-              </h3>
-              <p className="text-slate-400 text-[11px] mt-0.5">
-                {activeTarget.type === 'group' && activeGroup
-                  ? `Ruang Grup: ${activeGroup.name}`
-                  : `Kepada: ${
-                      activeDmSavedContact?.customName || activeDmAccount?.fullName || 'Nasabah'
-                    }`}
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              {activeTarget.type === 'group' && activeGroup && (
-                <div>
-                  <label className="text-slate-300 font-bold block mb-1">
-                    {isRequestMoneyMode ? 'Ditujukan ke Anggota (Opsional):' : 'Pilih Anggota Tujuan:'}
-                  </label>
-                  <select
-                    value={moneyGroupTargetAccountId}
-                    onChange={(e) => setMoneyGroupTargetAccountId(e.target.value)}
-                    required={!isRequestMoneyMode}
-                    className="w-full min-h-[42px] bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
-                  >
-                    {isRequestMoneyMode && <option value="">Semua Anggota Grup (Patungan)</option>}
-                    {activeGroupMembers
-                      .filter((m) => m.id !== currentAccount.id)
-                      .map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.fullName} (Rek {m.accountNumber})
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <label className="text-slate-300 font-bold block mb-1">Nominal (Rp):</label>
-                <input
-                  type="number"
-                  min={1000}
-                  step={1000}
-                  required
-                  value={moneyAmountInput}
-                  onChange={(e) => setMoneyAmountInput(e.target.value)}
-                  placeholder="50000"
-                  className="w-full min-h-[44px] bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white font-mono text-base focus:outline-none focus:border-amber-400"
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-300 font-bold block mb-1">Catatan:</label>
-                <input
-                  type="text"
-                  value={moneyNoteInput}
-                  onChange={(e) => setMoneyNoteInput(e.target.value)}
-                  placeholder="Contoh: Patungan makan siang"
-                  maxLength={120}
-                  className="w-full min-h-[42px] bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="submit"
-                className={`flex-1 min-h-[42px] py-2.5 font-bold rounded-xl text-xs cursor-pointer shadow-lg ${
-                  isRequestMoneyMode
-                    ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
-                    : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                }`}
-              >
-                {isRequestMoneyMode ? 'Kirim Permintaan' : 'Lanjut ke PIN Kartu'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowMoneyModal(false)}
-                className="px-4 min-h-[42px] py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl cursor-pointer"
-              >
-                Batal
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* SECURE PIN PROMPT */}
       <PinPromptModal
         isOpen={showPinPrompt}
-        title="Otorisasi PIN Kartu Debit"
-        description={pinDescription}
+        targetAccountId={currentAccount.id}
         targetAccountName={currentAccount.fullName}
-        cardNumberSnippet={currentAccount.cardNumber}
         expectedPin={currentAccount.pin}
-        onSuccess={executeTransferAfterPin}
         onCancel={() => {
           setShowPinPrompt(false);
           setPendingPayRequestMsg(null);
         }}
+        onSuccess={(pin) => void executeVerifiedMoneyTransfer(pin || currentAccount.pin)}
+        title={pendingPayRequestMsg ? 'Konfirmasi Bayar Permintaan Uang' : 'Konfirmasi Kirim Uang'}
+        description={
+          pendingPayRequestMsg?.transferAttachment
+            ? `Masukkan PIN untuk membayar ${formatRupiah(pendingPayRequestMsg.transferAttachment.amount)} ke ${pendingPayRequestMsg.senderName}`
+            : `Masukkan PIN untuk mengirim ${formatRupiah(Number(moneyAmountInput) || 0)}`
+        }
       />
     </div>
   );
