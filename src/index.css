@@ -147,10 +147,47 @@
   animation: suitStreakFiveSparkle 1.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes topBadgeGoldSheen {
+  0% {
+    transform: translateX(-125%) skewX(-18deg);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.6;
+  }
+  55% {
+    transform: translateX(165%) skewX(-18deg);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(165%) skewX(-18deg);
+    opacity: 0;
+  }
+}
+
+.top-badge-gold-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.top-badge-gold-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 48%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.52), transparent);
+  pointer-events: none;
+  animation: topBadgeGoldSheen 3.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .suit-streak-red-fade,
   .suit-streak-five-sparkle {
     animation-duration: 0.4s;
+  }
+  .top-badge-gold-shimmer::after {
+    animation: none;
+    opacity: 0;
   }
 }
 

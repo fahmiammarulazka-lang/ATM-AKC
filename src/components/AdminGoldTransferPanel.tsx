@@ -4,8 +4,9 @@
  * mode penalti jual hari sama (-1% bawaan vs -5% vs kustom), biaya admin Transfer Bebas (5%),
  * menjalankan tombol Simulasi Tanggal 1 instan (+1 / +3 / +6 bulan), serta menyuntik/edit saldo Emas & Coin nasabah.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   CalendarClock,
   CheckCircle2,
   Coins,
@@ -57,13 +58,34 @@ export const AdminGoldTransferPanel: React.FC = () => {
 
   const [feedback, setFeedback] = useState<string>('');
 
+  const isConfigDirtyRef = useRef<boolean>(false);
+  const [confirmReset, setConfirmReset] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isConfigDirtyRef.current) {
+      setPriceDraft(String(goldMarketConfig.currentPricePerGram ?? 1_400_000));
+      setGrowthDraft(String(goldMarketConfig.monthlyGrowthPercent ?? 5));
+      setPenaltyMode(goldMarketConfig.sameDayPenaltyMode || '1%');
+      setCustomPenaltyDraft(String(goldMarketConfig.sameDayPenaltyPercent ?? 1));
+      setTransferFeeDraft(String(goldMarketConfig.transferBebasAdminFeePercent ?? 5));
+      setMinNominalDraft(String(goldMarketConfig.minNominalRupiah ?? 1000));
+    }
+  }, [goldMarketConfig]);
+
+  const parseDraftFloat = (raw: string, fallback: number, min: number, max: number) => {
+    const t = raw.trim();
+    if (t === '') return min;
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;
+  };
+
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanPrice = Math.max(1000, Math.round(Number(priceDraft) || 1_400_000));
-    const cleanGrowth = Math.max(0, Math.min(500, Number(growthDraft) || 0));
-    const cleanCustomPenalty = Math.max(0, Math.min(99, Number(customPenaltyDraft) || 0));
-    const cleanFee = Math.max(0, Math.min(50, Number(transferFeeDraft) || 0));
-    const cleanMin = Math.max(1000, Math.round(Number(minNominalDraft) || 1000));
+    const cleanPrice = Math.round(parseDraftFloat(priceDraft, 1_400_000, 0, 1_000_000_000));
+    const cleanGrowth = parseDraftFloat(growthDraft, 0, 0, 500);
+    const cleanCustomPenalty = parseDraftFloat(customPenaltyDraft, 0, 0, 99);
+    const cleanFee = parseDraftFloat(transferFeeDraft, 0, 0, 50);
+    const cleanMin = Math.round(parseDraftFloat(minNominalDraft, 0, 0, 1_000_000_000));
 
     const res = adminUpdateGoldMarketConfig({
       currentPricePerGram: cleanPrice,
@@ -75,17 +97,21 @@ export const AdminGoldTransferPanel: React.FC = () => {
       transferBebasAdminFeePercent: cleanFee,
       minNominalRupiah: cleanMin,
     });
+    isConfigDirtyRef.current = false;
     setFeedback(res.message);
   };
 
   const handleSimulateMonths = (months: number) => {
     const res = adminSimulateGoldNextMonth(months);
+    isConfigDirtyRef.current = false;
     setPriceDraft(String(res.newPricePerGram));
     setFeedback(res.message);
   };
 
   const handleReset = () => {
     const res = adminResetGoldMarketConfig();
+    isConfigDirtyRef.current = false;
+    setConfirmReset(false);
     setPriceDraft('1400000');
     setGrowthDraft('5');
     setPenaltyMode('1%');
@@ -179,7 +205,7 @@ export const AdminGoldTransferPanel: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={handleReset}
+              onClick={() => setConfirmReset(true)}
               className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold flex items-center gap-1 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -187,6 +213,30 @@ export const AdminGoldTransferPanel: React.FC = () => {
             </button>
           </div>
         </div>
+        {confirmReset && (
+          <div className="rounded-2xl border-2 border-rose-400 bg-rose-950/90 p-3.5 flex flex-wrap items-center justify-between gap-2 text-rose-100">
+            <span className="flex items-center gap-2 font-bold">
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+              Konfirmasi Reset Pengaturan Emas &amp; Transfer Bebas ke Standar Awal?
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmReset(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-white font-bold cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="px-3.5 py-1.5 rounded-lg bg-rose-500 text-white font-black cursor-pointer"
+              >
+                Ya, Reset
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Config Form & Customer Asset Injector */}
@@ -208,9 +258,12 @@ export const AdminGoldTransferPanel: React.FC = () => {
               </label>
               <input
                 type="number"
-                min={1000}
+                min={0}
                 value={priceDraft}
-                onChange={(e) => setPriceDraft(e.target.value)}
+                onChange={(e) => {
+                  isConfigDirtyRef.current = true;
+                  setPriceDraft(e.target.value);
+                }}
                 className="w-full bg-slate-950 border border-slate-700 text-amber-200 rounded-xl p-3 font-mono tabular-nums font-bold"
               />
             </div>
@@ -225,7 +278,10 @@ export const AdminGoldTransferPanel: React.FC = () => {
                 max={500}
                 step="0.5"
                 value={growthDraft}
-                onChange={(e) => setGrowthDraft(e.target.value)}
+                onChange={(e) => {
+                  isConfigDirtyRef.current = true;
+                  setGrowthDraft(e.target.value);
+                }}
                 className="w-full bg-slate-950 border border-slate-700 text-emerald-300 rounded-xl p-3 font-mono tabular-nums font-bold"
               />
             </div>
@@ -237,6 +293,7 @@ export const AdminGoldTransferPanel: React.FC = () => {
               <select
                 value={penaltyMode}
                 onChange={(e) => {
+                  isConfigDirtyRef.current = true;
                   const m = e.target.value as '1%' | '5%' | 'custom';
                   setPenaltyMode(m);
                   if (m === '1%') setCustomPenaltyDraft('1');

@@ -7,7 +7,7 @@
  * 4. Tinjauan Lupa PIN Kartu ATM (Tinjau permohonan lupa PIN dari ATM dan beritahu PIN-nya ke nasabah)
  * 5. Persetujuan Kartu Perdana, Upgrade Kartu, Pinjaman Online, Master Nasabah, & Brankas ATM
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   CheckCircle,
   XCircle,
@@ -56,6 +56,11 @@ import {
   EyeOff,
   AlertTriangle,
   Gem,
+  Trophy,
+  Target,
+  Cloud,
+  Save,
+  RotateCcw,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -123,6 +128,7 @@ import { AdminBanStudioView } from './AdminBanStudioView';
 import { AdminDebtManagementTab } from './AdminDebtManagementTab';
 import { AdminHelpCenterPanel } from './AdminHelpCenterPanel';
 import { AdminRedeemCodePanel } from './AdminRedeemCodePanel';
+import { AdminMissionsTab, AdminLeaderboardTab } from './AdminMissionsLeaderboardTab';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -279,10 +285,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     giftEvents,
     dashboardEffectEvents,
     supportFaqs,
+    missions,
+    leaderboardConfig,
+    adminConfigSyncTelemetry,
   } = useBank();
 
   const [activeAdminTab, setActiveAdminTab] = useState<
     | 'super_tools'
+    | 'missions_admin'
+    | 'leaderboard_admin'
     | 'help_center'
     | 'gift_letters'
     | 'dashboard_effects'
@@ -311,6 +322,67 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
 
   const [spinAdminCoinInput, setSpinAdminCoinInput] = useState<number>(1000);
   const [spinAdminFeedback, setSpinAdminFeedback] = useState<string>('');
+  const [confirmResetSpin, setConfirmResetSpin] = useState<boolean>(false);
+  const [confirmResetDiamondSpinTab, setConfirmResetDiamondSpinTab] = useState<boolean>(false);
+  const isSpinDraftDirtyRef = useRef<boolean>(false);
+  const [spinDraft, setSpinDraft] = useState(() => ({
+    baseCoinPriceRupiah: String(spinWheelConfig.baseCoinPriceRupiah ?? 10000),
+    coinPurchaseDiscountPercent: String(spinWheelConfig.coinPurchaseDiscountPercent ?? 0),
+    spinDiscountPercent: String(spinWheelConfig.spinDiscountPercent ?? 0),
+    bundleExtraDiscountPercent: {
+      1: String(spinWheelConfig.bundleExtraDiscountPercent?.[1] ?? 0),
+      3: String(spinWheelConfig.bundleExtraDiscountPercent?.[3] ?? 0),
+      5: String(spinWheelConfig.bundleExtraDiscountPercent?.[5] ?? 0),
+      7: String(spinWheelConfig.bundleExtraDiscountPercent?.[7] ?? 0),
+      10: String(spinWheelConfig.bundleExtraDiscountPercent?.[10] ?? 0),
+    } as Record<1 | 3 | 5 | 7 | 10, string>,
+  }));
+
+  useEffect(() => {
+    if (!isSpinDraftDirtyRef.current) {
+      setSpinDraft({
+        baseCoinPriceRupiah: String(spinWheelConfig.baseCoinPriceRupiah ?? 10000),
+        coinPurchaseDiscountPercent: String(spinWheelConfig.coinPurchaseDiscountPercent ?? 0),
+        spinDiscountPercent: String(spinWheelConfig.spinDiscountPercent ?? 0),
+        bundleExtraDiscountPercent: {
+          1: String(spinWheelConfig.bundleExtraDiscountPercent?.[1] ?? 0),
+          3: String(spinWheelConfig.bundleExtraDiscountPercent?.[3] ?? 0),
+          5: String(spinWheelConfig.bundleExtraDiscountPercent?.[5] ?? 0),
+          7: String(spinWheelConfig.bundleExtraDiscountPercent?.[7] ?? 0),
+          10: String(spinWheelConfig.bundleExtraDiscountPercent?.[10] ?? 0),
+        },
+      });
+    }
+  }, [spinWheelConfig]);
+
+  const isDiamondSpinDraftDirtyRef = useRef<boolean>(false);
+  const [diamondSpinDraft, setDiamondSpinDraft] = useState(() => ({
+    baseDiamondPriceRupiah: String(diamondConfig.baseDiamondPriceRupiah ?? 90),
+    diamondDiscountPercent: String(diamondConfig.diamondDiscountPercent ?? 0),
+  }));
+
+  useEffect(() => {
+    if (!isDiamondSpinDraftDirtyRef.current) {
+      setDiamondSpinDraft({
+        baseDiamondPriceRupiah: String(diamondConfig.baseDiamondPriceRupiah ?? 90),
+        diamondDiscountPercent: String(diamondConfig.diamondDiscountPercent ?? 0),
+      });
+    }
+  }, [diamondConfig]);
+
+  const parseAdminInt = (raw: string, min = 0, max = Number.MAX_SAFE_INTEGER) => {
+    const t = raw.trim();
+    if (t === '') return min;
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : min;
+  };
+  const parseAdminFloat = (raw: string, min = 0, max = Number.MAX_SAFE_INTEGER) => {
+    const t = raw.trim();
+    if (t === '') return min;
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : min;
+  };
+
   const [bugRewardDraftMap, setBugRewardDraftMap] = useState<
     Record<
       string,
@@ -327,28 +399,32 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     >
   >({});
   const [bugRejectionReasonMap, setBugRejectionReasonMap] = useState<Record<string, string>>({});
-  const [bugCfgDraft, setBugCfgDraft] = useState({
-    cashAmount: bugRewardConfig.cashAmount,
-    coinAmount: bugRewardConfig.coinAmount,
-    diamondAmount: bugRewardConfig.diamondAmount,
-    goldGrams: bugRewardConfig.goldGrams,
-    voucherAmount: bugRewardConfig.voucherAmount,
-    pointsAmount: bugRewardConfig.pointsAmount,
-    familySlotAmount: bugRewardConfig.familySlotAmount,
-    defaultRewardMessage: bugRewardConfig.defaultRewardMessage,
-  });
+  const isBugCfgDirtyRef = useRef<boolean>(false);
+  const [confirmResetBugCfg, setConfirmResetBugCfg] = useState<boolean>(false);
+  const [bugCfgDraft, setBugCfgDraft] = useState(() => ({
+    cashAmount: String(bugRewardConfig.cashAmount ?? 0),
+    coinAmount: String(bugRewardConfig.coinAmount ?? 0),
+    diamondAmount: String(bugRewardConfig.diamondAmount ?? 0),
+    goldGrams: String(bugRewardConfig.goldGrams ?? 0),
+    voucherAmount: String(bugRewardConfig.voucherAmount ?? 0),
+    pointsAmount: String(bugRewardConfig.pointsAmount ?? 0),
+    familySlotAmount: String(bugRewardConfig.familySlotAmount ?? 0),
+    defaultRewardMessage: bugRewardConfig.defaultRewardMessage ?? '',
+  }));
 
   useEffect(() => {
-    setBugCfgDraft({
-      cashAmount: bugRewardConfig.cashAmount,
-      coinAmount: bugRewardConfig.coinAmount,
-      diamondAmount: bugRewardConfig.diamondAmount,
-      goldGrams: bugRewardConfig.goldGrams,
-      voucherAmount: bugRewardConfig.voucherAmount,
-      pointsAmount: bugRewardConfig.pointsAmount,
-      familySlotAmount: bugRewardConfig.familySlotAmount,
-      defaultRewardMessage: bugRewardConfig.defaultRewardMessage,
-    });
+    if (!isBugCfgDirtyRef.current) {
+      setBugCfgDraft({
+        cashAmount: String(bugRewardConfig.cashAmount ?? 0),
+        coinAmount: String(bugRewardConfig.coinAmount ?? 0),
+        diamondAmount: String(bugRewardConfig.diamondAmount ?? 0),
+        goldGrams: String(bugRewardConfig.goldGrams ?? 0),
+        voucherAmount: String(bugRewardConfig.voucherAmount ?? 0),
+        pointsAmount: String(bugRewardConfig.pointsAmount ?? 0),
+        familySlotAmount: String(bugRewardConfig.familySlotAmount ?? 0),
+        defaultRewardMessage: bugRewardConfig.defaultRewardMessage ?? '',
+      });
+    }
   }, [bugRewardConfig]);
 
   const getBugTicketRewardDraft = (bugId: string) =>
@@ -371,15 +447,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
   const [deleteFeedback, setDeleteFeedback] = useState<string>('');
 
-  // Pengaturan Nomor WhatsApp & Email Tinjauan Akun Dibanned
+  // Pengaturan Nomor WhatsApp & Email Tinjauan Akun Dibanned (anti-reset dirty guard)
+  const isSupportContactDirtyRef = useRef<boolean>(false);
   const [waSupportInput, setWaSupportInput] = useState<string>(banSupportConfig.whatsappNumber || '');
   const [emailSupportInput, setEmailSupportInput] = useState<string>(banSupportConfig.emailAddress || '');
   const [supportSaveMsg, setSupportSaveMsg] = useState<string>('');
   const [appealNoteMap, setAppealNoteMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    setWaSupportInput(banSupportConfig.whatsappNumber || '');
-    setEmailSupportInput(banSupportConfig.emailAddress || '');
+    if (!isSupportContactDirtyRef.current) {
+      setWaSupportInput(banSupportConfig.whatsappNumber || '');
+      setEmailSupportInput(banSupportConfig.emailAddress || '');
+    }
   }, [banSupportConfig.whatsappNumber, banSupportConfig.emailAddress]);
 
 
@@ -755,15 +834,27 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            if (confirm('Reset seluruh data ke kondisi awal demo?')) resetAllData();
-          }}
-          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 cursor-pointer flex items-center gap-1.5 shrink-0"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          <span>Reset Data Demo</span>
-        </button>
+        <div className="flex flex-col items-start md:items-end gap-2 shrink-0">
+          <div className="px-3 py-1.5 rounded-xl bg-slate-950/85 border border-emerald-500/40 text-[11px] font-mono text-emerald-300 flex items-center gap-2">
+            <Cloud className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              {adminConfigSyncTelemetry.status === 'saving'
+                ? 'Menyimpan ke Cloud...'
+                : adminConfigSyncTelemetry.lastSavedWibLabel
+                ? `Tersimpan ${adminConfigSyncTelemetry.lastSavedWibLabel} (${adminConfigSyncTelemetry.lastConfigLabel || 'Pengaturan'})`
+                : 'Anti-Reset & Cloud Sync Real-Time Aktif'}
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              if (confirm('Reset seluruh data ke kondisi awal demo?')) resetAllData();
+            }}
+            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 cursor-pointer flex items-center gap-1.5 shrink-0"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Reset Data Demo</span>
+          </button>
+        </div>
       </div>
 
       {/* Metric Cards */}
@@ -868,6 +959,30 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         >
           <History className="w-4 h-4" />
           <span>🚀 Kelola Riwayat Update ({appUpdates.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('missions_admin')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'missions_admin'
+              ? 'bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 font-black shadow-lg shadow-emerald-500/30'
+              : 'text-emerald-300 hover:text-white hover:bg-emerald-950/60 border-2 border-emerald-400/60'
+          }`}
+        >
+          <Target className="w-4 h-4" />
+          <span>🎯 Misi Harian &amp; 7-Hari (25 Fitur • {missions.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('leaderboard_admin')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'leaderboard_admin'
+              ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-orange-400 text-slate-950 font-black shadow-lg shadow-amber-500/30'
+              : 'text-amber-300 hover:text-white hover:bg-amber-950/60 border-2 border-amber-400/60'
+          }`}
+        >
+          <Trophy className="w-4 h-4" />
+          <span>🏆 Leaderboard &amp; Badge Top 1–100 ({leaderboardConfig.categories.length})</span>
         </button>
 
         <button
@@ -1198,6 +1313,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
       {/* ================= ADMIN TAB: KELOLA HUTANG NASABAH, RISIKO RUGI & AUTO-BAN 1 HARI ================= */}
       {activeAdminTab === 'debt_admin' && <AdminDebtManagementTab />}
 
+      {/* ================= ADMIN TAB: MISI HARIAN, 7-HARI & BIASA (25 FITUR) ================= */}
+      {activeAdminTab === 'missions_admin' && <AdminMissionsTab />}
+
+      {/* ================= ADMIN TAB: LEADERBOARD MULTI-ASET & BADGE TOP 1–100 ================= */}
+      {activeAdminTab === 'leaderboard_admin' && <AdminLeaderboardTab />}
+
       {/* ================= ADMIN TAB: KONTROL SPIN THE WHEEL, DISKON KOIN (1-1 JUTA) & PROBABILITAS ================= */}
       {activeAdminTab === 'spin_wheel_admin' && (
         <div className="space-y-6 text-xs">
@@ -1214,17 +1335,69 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   Di sini Admin bisa memberikan diskon biaya Spin (1x, 3x, 5x, 7x, 10x), memurahkan harga dasar 1 Koin (normal Rp 10.000), memberi diskon pada 300 pilihan pembelian koin (1 s/d 10.000.000 Koin, format harga Rp xxx.xxx), serta memperbesar kemungkinan pendapatan saat nyepin!
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const res = adminResetSpinWheelConfig();
-                  setSpinAdminFeedback(res.message);
-                }}
-                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-xs cursor-pointer shrink-0 self-start"
-              >
-                Reset ke Standar Awal
-              </button>
+              <div className="flex items-center gap-2 shrink-0 self-start">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = adminUpdateSpinWheelConfig({
+                      baseCoinPriceRupiah: parseAdminInt(spinDraft.baseCoinPriceRupiah, 0, 1_000_000_000),
+                      coinPurchaseDiscountPercent: parseAdminInt(spinDraft.coinPurchaseDiscountPercent, 0, 99),
+                      spinDiscountPercent: parseAdminInt(spinDraft.spinDiscountPercent, 0, 100),
+                      bundleExtraDiscountPercent: {
+                        1: parseAdminInt(spinDraft.bundleExtraDiscountPercent[1], 0, 100),
+                        3: parseAdminInt(spinDraft.bundleExtraDiscountPercent[3], 0, 100),
+                        5: parseAdminInt(spinDraft.bundleExtraDiscountPercent[5], 0, 100),
+                        7: parseAdminInt(spinDraft.bundleExtraDiscountPercent[7], 0, 100),
+                        10: parseAdminInt(spinDraft.bundleExtraDiscountPercent[10], 0, 100),
+                      },
+                    });
+                    isSpinDraftDirtyRef.current = false;
+                    setSpinAdminFeedback(res.message);
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Simpan Pengaturan Spin</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmResetSpin(true)}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-xs cursor-pointer"
+                >
+                  Reset ke Standar Awal
+                </button>
+              </div>
             </div>
+
+            {confirmResetSpin && (
+              <div className="p-3.5 rounded-2xl bg-rose-950/90 border-2 border-rose-400 text-rose-100 flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-400" />
+                  Konfirmasi Reset Pengaturan Spin Wheel ke Standar Awal?
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmResetSpin(false)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-800 text-white font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminResetSpinWheelConfig();
+                      isSpinDraftDirtyRef.current = false;
+                      setConfirmResetSpin(false);
+                      setSpinAdminFeedback(res.message);
+                    }}
+                    className="px-3.5 py-1.5 rounded-lg bg-rose-500 text-white font-black cursor-pointer"
+                  >
+                    Ya, Reset Spin
+                  </button>
+                </div>
+              </div>
+            )}
 
             {spinAdminFeedback && (
               <div className="p-3.5 rounded-2xl bg-emerald-950/90 border border-emerald-400 text-emerald-200 font-bold flex items-center justify-between">
@@ -1262,11 +1435,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   </label>
                   <input
                     type="number"
-                    min={1}
-                    value={spinWheelConfig.baseCoinPriceRupiah}
+                    min={0}
+                    value={spinDraft.baseCoinPriceRupiah}
                     onChange={(e) => {
-                      const val = Math.max(1, Number(e.target.value) || 10000);
-                      adminUpdateSpinWheelConfig({ baseCoinPriceRupiah: val });
+                      isSpinDraftDirtyRef.current = true;
+                      setSpinDraft((prev) => ({
+                        ...prev,
+                        baseCoinPriceRupiah: e.target.value,
+                      }));
                     }}
                     className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold text-xs"
                   />
@@ -1276,6 +1452,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         key={price}
                         type="button"
                         onClick={() => {
+                          isSpinDraftDirtyRef.current = false;
                           const res = adminUpdateSpinWheelConfig({ baseCoinPriceRupiah: price });
                           setSpinAdminFeedback(res.message);
                         }}
@@ -1297,19 +1474,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                       Diskon Pembelian Koin (300 Pilihan):
                     </label>
                     <span className="font-mono font-black text-emerald-400 text-xs">
-                      {spinWheelConfig.coinPurchaseDiscountPercent}% OFF
+                      {parseAdminInt(spinDraft.coinPurchaseDiscountPercent, 0, 99)}% OFF
                     </span>
                   </div>
                   <input
                     type="range"
                     min={0}
                     max={99}
-                    value={spinWheelConfig.coinPurchaseDiscountPercent}
-                    onChange={(e) =>
-                      adminUpdateSpinWheelConfig({
-                        coinPurchaseDiscountPercent: Number(e.target.value),
-                      })
-                    }
+                    value={parseAdminInt(spinDraft.coinPurchaseDiscountPercent, 0, 99)}
+                    onChange={(e) => {
+                      isSpinDraftDirtyRef.current = true;
+                      setSpinDraft((prev) => ({
+                        ...prev,
+                        coinPurchaseDiscountPercent: e.target.value,
+                      }));
+                    }}
                     className="w-full accent-emerald-400 cursor-pointer"
                   />
                   <div className="flex flex-wrap gap-1.5">
@@ -1318,6 +1497,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         key={pct}
                         type="button"
                         onClick={() => {
+                          isSpinDraftDirtyRef.current = false;
                           const res = adminUpdateSpinWheelConfig({
                             coinPurchaseDiscountPercent: pct,
                           });
@@ -1394,19 +1574,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                       Diskon Semua Spin (Global):
                     </label>
                     <span className="font-mono font-black text-fuchsia-300 text-xs">
-                      {spinWheelConfig.spinDiscountPercent}% OFF
+                      {parseAdminInt(spinDraft.spinDiscountPercent, 0, 100)}% OFF
                     </span>
                   </div>
                   <input
                     type="range"
                     min={0}
                     max={100}
-                    value={spinWheelConfig.spinDiscountPercent}
-                    onChange={(e) =>
-                      adminUpdateSpinWheelConfig({
-                        spinDiscountPercent: Number(e.target.value),
-                      })
-                    }
+                    value={parseAdminInt(spinDraft.spinDiscountPercent, 0, 100)}
+                    onChange={(e) => {
+                      isSpinDraftDirtyRef.current = true;
+                      setSpinDraft((prev) => ({
+                        ...prev,
+                        spinDiscountPercent: e.target.value,
+                      }));
+                    }}
                     className="w-full accent-fuchsia-400 cursor-pointer"
                   />
                   <div className="flex flex-wrap gap-1.5">
@@ -1415,6 +1597,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         key={pct}
                         type="button"
                         onClick={() => {
+                          isSpinDraftDirtyRef.current = false;
                           const res = adminUpdateSpinWheelConfig({ spinDiscountPercent: pct });
                           setSpinAdminFeedback(res.message);
                         }}
@@ -1436,7 +1619,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   </span>
                   {([1, 3, 5, 7, 10] as const).map((cnt) => {
                     const cost = calculateSpinCost(cnt, spinWheelConfig);
-                    const extraDisc = spinWheelConfig.bundleExtraDiscountPercent?.[cnt] || 0;
+                    const extraDiscText = spinDraft.bundleExtraDiscountPercent?.[cnt] ?? '0';
                     return (
                       <div
                         key={cnt}
@@ -1456,15 +1639,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                             type="number"
                             min={0}
                             max={100}
-                            value={extraDisc}
-                            onChange={(e) =>
-                              adminUpdateSpinWheelConfig({
+                            value={extraDiscText}
+                            onChange={(e) => {
+                              isSpinDraftDirtyRef.current = true;
+                              setSpinDraft((prev) => ({
+                                ...prev,
                                 bundleExtraDiscountPercent: {
-                                  ...spinWheelConfig.bundleExtraDiscountPercent,
-                                  [cnt]: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                                  ...prev.bundleExtraDiscountPercent,
+                                  [cnt]: e.target.value,
                                 },
-                              })
-                            }
+                              }));
+                            }}
                             className="w-16 px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-amber-300 font-mono font-bold text-xs text-center"
                           />
                         </div>
@@ -1600,18 +1785,67 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     Terintegrasi langsung di Tab Diskon ini. Berlaku otomatis untuk seluruh 250 pilihan paket (1 – {MAX_DIAMOND_PACKAGE_AMOUNT.toLocaleString('id-ID')} <DiamondIcon tone="bright" className="w-3 h-3 mx-0.5" />) dan pembelian Custom dua arah via QRIS Nusantara dengan batas maksimal harga dasar {formatRupiah(MAX_DIAMOND_PURCHASE_RUPIAH)}.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const res = adminResetDiamondConfig();
-                    setSpinAdminFeedback(res.message);
-                  }}
-                  className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-[11px] cursor-pointer"
-                >
-                  <span>Reset Diskon</span>
-                  <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminUpdateDiamondConfig({
+                        baseDiamondPriceRupiah: parseAdminInt(
+                          diamondSpinDraft.baseDiamondPriceRupiah,
+                          0,
+                          1_000_000_000
+                        ),
+                        diamondDiscountPercent: parseAdminInt(
+                          diamondSpinDraft.diamondDiscountPercent,
+                          0,
+                          99
+                        ),
+                      });
+                      isDiamondSpinDraftDirtyRef.current = false;
+                      setSpinAdminFeedback(res.message);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-[11px] cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Simpan Pengaturan Permata</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmResetDiamondSpinTab(true)}
+                    className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-[11px] cursor-pointer"
+                  >
+                    <span>Reset Diskon</span>
+                    <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
+
+              {confirmResetDiamondSpinTab && (
+                <div className="p-3 rounded-xl bg-rose-950/90 border border-rose-400 text-rose-100 flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold">Konfirmasi Reset Diskon Permata ke Standar Awal?</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfirmResetDiamondSpinTab(false)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 text-white font-bold cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = adminResetDiamondConfig();
+                        isDiamondSpinDraftDirtyRef.current = false;
+                        setConfirmResetDiamondSpinTab(false);
+                        setSpinAdminFeedback(res.message);
+                      }}
+                      className="px-3 py-1 rounded-lg bg-rose-500 text-white font-black cursor-pointer"
+                    >
+                      Ya, Reset
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -1622,11 +1856,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   </label>
                   <input
                     type="number"
-                    min={1}
-                    value={diamondConfig.baseDiamondPriceRupiah}
+                    min={0}
+                    value={diamondSpinDraft.baseDiamondPriceRupiah}
                     onChange={(e) => {
-                      const val = Math.max(1, Number(e.target.value) || 90);
-                      adminUpdateDiamondConfig({ baseDiamondPriceRupiah: val });
+                      isDiamondSpinDraftDirtyRef.current = true;
+                      setDiamondSpinDraft((prev) => ({
+                        ...prev,
+                        baseDiamondPriceRupiah: e.target.value,
+                      }));
                     }}
                     className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono font-bold text-xs"
                   />
@@ -1636,6 +1873,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         key={p}
                         type="button"
                         onClick={() => {
+                          isDiamondSpinDraftDirtyRef.current = false;
                           const res = adminUpdateDiamondConfig({ baseDiamondPriceRupiah: p });
                           setSpinAdminFeedback(res.message);
                         }}
@@ -1663,19 +1901,21 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                       <span>(250 Paket + Custom):</span>
                     </label>
                     <span className="font-mono font-black text-cyan-300 text-xs">
-                      {diamondConfig.diamondDiscountPercent}% OFF
+                      {parseAdminInt(diamondSpinDraft.diamondDiscountPercent, 0, 99)}% OFF
                     </span>
                   </div>
                   <input
                     type="range"
                     min={0}
                     max={99}
-                    value={diamondConfig.diamondDiscountPercent}
-                    onChange={(e) =>
-                      adminUpdateDiamondConfig({
-                        diamondDiscountPercent: Number(e.target.value),
-                      })
-                    }
+                    value={parseAdminInt(diamondSpinDraft.diamondDiscountPercent, 0, 99)}
+                    onChange={(e) => {
+                      isDiamondSpinDraftDirtyRef.current = true;
+                      setDiamondSpinDraft((prev) => ({
+                        ...prev,
+                        diamondDiscountPercent: e.target.value,
+                      }));
+                    }}
                     className="w-full accent-cyan-400 cursor-pointer"
                   />
                   <div className="flex flex-wrap gap-1.5">
@@ -1684,6 +1924,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         key={pct}
                         type="button"
                         onClick={() => {
+                          isDiamondSpinDraftDirtyRef.current = false;
                           const res = adminUpdateDiamondConfig({ diamondDiscountPercent: pct });
                           setSpinAdminFeedback(res.message);
                         }}
@@ -2487,12 +2728,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   type="number"
                   min={0}
                   value={bugCfgDraft.cashAmount}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    isBugCfgDirtyRef.current = true;
                     setBugCfgDraft((prev) => ({
                       ...prev,
-                      cashAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                    }))
-                  }
+                      cashAmount: e.target.value,
+                    }));
+                  }}
                   className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-emerald-300 font-mono text-xs"
                 />
               </div>
@@ -2505,12 +2747,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   type="number"
                   min={0}
                   value={bugCfgDraft.coinAmount}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    isBugCfgDirtyRef.current = true;
                     setBugCfgDraft((prev) => ({
                       ...prev,
-                      coinAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                    }))
-                  }
+                      coinAmount: e.target.value,
+                    }));
+                  }}
                   className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-mono text-xs"
                 />
               </div>
@@ -2524,12 +2767,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   type="number"
                   min={0}
                   value={bugCfgDraft.diamondAmount}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    isBugCfgDirtyRef.current = true;
                     setBugCfgDraft((prev) => ({
                       ...prev,
-                      diamondAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                    }))
-                  }
+                      diamondAmount: e.target.value,
+                    }));
+                  }}
                   className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-cyan-300 font-mono text-xs"
                 />
               </div>
@@ -2543,12 +2787,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   min={0}
                   step="0.01"
                   value={bugCfgDraft.goldGrams}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    isBugCfgDirtyRef.current = true;
                     setBugCfgDraft((prev) => ({
                       ...prev,
-                      goldGrams: Math.max(0, Number(e.target.value) || 0),
-                    }))
-                  }
+                      goldGrams: e.target.value,
+                    }));
+                  }}
                   className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-yellow-300 font-mono text-xs"
                 />
               </div>
@@ -2561,12 +2806,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   type="number"
                   min={0}
                   value={bugCfgDraft.voucherAmount}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    isBugCfgDirtyRef.current = true;
                     setBugCfgDraft((prev) => ({
                       ...prev,
-                      voucherAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                    }))
-                  }
+                      voucherAmount: e.target.value,
+                    }));
+                  }}
                   className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-indigo-300 font-mono text-xs"
                 />
               </div>
@@ -2579,12 +2825,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   type="number"
                   min={0}
                   value={bugCfgDraft.pointsAmount}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    isBugCfgDirtyRef.current = true;
                     setBugCfgDraft((prev) => ({
                       ...prev,
-                      pointsAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                    }))
-                  }
+                      pointsAmount: e.target.value,
+                    }));
+                  }}
                   className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-fuchsia-300 font-mono text-xs"
                 />
               </div>
@@ -2597,12 +2844,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   type="number"
                   min={0}
                   value={bugCfgDraft.familySlotAmount}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    isBugCfgDirtyRef.current = true;
                     setBugCfgDraft((prev) => ({
                       ...prev,
-                      familySlotAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                    }))
-                  }
+                      familySlotAmount: e.target.value,
+                    }));
+                  }}
                   className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-teal-300 font-mono text-xs"
                 />
               </div>
@@ -2612,27 +2860,82 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               <input
                 type="text"
                 value={bugCfgDraft.defaultRewardMessage}
-                onChange={(e) =>
-                  setBugCfgDraft((prev) => ({ ...prev, defaultRewardMessage: e.target.value }))
-                }
-                placeholder="Pesan default hadiah saat laporan bug diverifikasi Admin..."
+                onChange={(e) => {
+                  isBugCfgDirtyRef.current = true;
+                  setBugCfgDraft((prev) => ({ ...prev, defaultRewardMessage: e.target.value }));
+                }}
+                placeholder="Pesan default hadiah saat laporan bug diverifikasi Admin (boleh dikosongkan)..."
                 className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
               />
               <button
                 type="button"
                 onClick={() => {
                   const res = adminUpdateBugRewardConfig({
-                    ...bugCfgDraft,
                     enabled: bugRewardConfig.enabled,
+                    cashAmount: parseAdminInt(bugCfgDraft.cashAmount, 0),
+                    coinAmount: parseAdminInt(bugCfgDraft.coinAmount, 0),
+                    diamondAmount: parseAdminInt(bugCfgDraft.diamondAmount, 0),
+                    goldGrams: parseAdminFloat(bugCfgDraft.goldGrams, 0),
+                    voucherAmount: parseAdminInt(bugCfgDraft.voucherAmount, 0),
+                    pointsAmount: parseAdminInt(bugCfgDraft.pointsAmount, 0),
+                    familySlotAmount: parseAdminInt(bugCfgDraft.familySlotAmount, 0),
+                    defaultRewardMessage: bugCfgDraft.defaultRewardMessage,
                   });
+                  isBugCfgDirtyRef.current = false;
                   setBugFeedback(res.message);
-                  setTimeout(() => setBugFeedback(''), 4000);
+                  setTimeout(() => setBugFeedback(''), 5000);
                 }}
-                className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shrink-0"
+                className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shrink-0 flex items-center gap-1.5"
               >
-                Simpan Paket Hadiah Default
+                <Save className="w-3.5 h-3.5" />
+                <span>Simpan Paket Hadiah Default</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmResetBugCfg(true)}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer shrink-0 flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset Default</span>
               </button>
             </div>
+            {confirmResetBugCfg && (
+              <div className="p-3 rounded-xl bg-rose-950/90 border border-rose-400 text-rose-100 flex flex-wrap items-center justify-between gap-2">
+                <span className="font-bold">Konfirmasi kembalikan paket hadiah laporan bug ke nilai standar?</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmResetBugCfg(false)}
+                    className="px-3 py-1 rounded-lg bg-slate-800 text-white font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminUpdateBugRewardConfig({
+                        enabled: true,
+                        cashAmount: 500_000,
+                        coinAmount: 25,
+                        diamondAmount: 10,
+                        goldGrams: 0.5,
+                        voucherAmount: 1,
+                        pointsAmount: 500,
+                        familySlotAmount: 0,
+                        defaultRewardMessage:
+                          'Terima kasih atas kontribusi laporan bug! Hadiah resmi Bank Nusantara telah dikirim ke rekening Anda.',
+                      });
+                      isBugCfgDirtyRef.current = false;
+                      setConfirmResetBugCfg(false);
+                      setBugFeedback(res.message);
+                    }}
+                    className="px-3 py-1 rounded-lg bg-rose-500 text-white font-black cursor-pointer"
+                  >
+                    Ya, Reset Standar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {bugFeedback && (
@@ -6665,7 +6968,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 <input
                   type="text"
                   value={waSupportInput}
-                  onChange={(e) => setWaSupportInput(e.target.value)}
+                  onChange={(e) => {
+                    isSupportContactDirtyRef.current = true;
+                    setWaSupportInput(e.target.value);
+                  }}
                   placeholder="Contoh: 6281234567890"
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-emerald-400"
                 />
@@ -6679,7 +6985,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 <input
                   type="email"
                   value={emailSupportInput}
-                  onChange={(e) => setEmailSupportInput(e.target.value)}
+                  onChange={(e) => {
+                    isSupportContactDirtyRef.current = true;
+                    setEmailSupportInput(e.target.value);
+                  }}
                   placeholder="Contoh: support@banknusantara.id"
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono focus:outline-none focus:border-sky-400"
                 />
@@ -6693,6 +7002,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                       whatsappNumber: waSupportInput,
                       emailAddress: emailSupportInput,
                     });
+                    isSupportContactDirtyRef.current = false;
                     setSupportSaveMsg(res.message);
                     setTimeout(() => setSupportSaveMsg(''), 4000);
                   }}

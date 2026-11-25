@@ -27,18 +27,30 @@ import {
   X,
 } from 'lucide-react';
 import { BankAccount, CardTier } from '../types/bank';
-import { CARD_TIER_CONFIGS, formatRupiah, formatBanRemainingTime } from '../utils/bankUtils';
+import {
+  CARD_TIER_CONFIGS,
+  formatRupiah,
+  formatBanRemainingTime,
+  formatAccountNumberDisplay,
+  maskCardNumberFull,
+} from '../utils/bankUtils';
 import { useBank } from '../context/BankContext';
 import { PinPromptModal } from './PinPromptModal';
 import { AdminPinModal } from './AdminPinModal';
 import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
+import { TopLeaderboardBadges } from './TopLeaderboardBadges';
 
 interface CardVisualizerProps {
   account: BankAccount;
   showInspector?: boolean;
+  disablePrivacyMask?: boolean;
 }
 
-export const CardVisualizer: React.FC<CardVisualizerProps> = ({ account, showInspector = true }) => {
+export const CardVisualizer: React.FC<CardVisualizerProps> = ({
+  account,
+  showInspector = true,
+  disablePrivacyMask = false,
+}) => {
   const {
     accounts,
     toggleCardFreezeWithPin,
@@ -97,7 +109,11 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({ account, showIns
   const selectedTargetSwitchAccount =
     accounts.find((a) => a.id === selectedSwitchAccountId) || account;
 
-  const displayCardNumber = showFullCardNumber
+  const isPrivacyMasked = !disablePrivacyMask && Boolean(account.hideSensitiveNumbers);
+
+  const displayCardNumber = isPrivacyMasked
+    ? maskCardNumberFull()
+    : showFullCardNumber
     ? account.cardNumber
     : `${account.cardNumber.slice(0, 4)} •••• •••• ${account.cardNumber.slice(-4)}`;
 
@@ -278,11 +294,19 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({ account, showIns
                 </div>
               </div>
 
-              <span
-                className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full backdrop-blur-md border border-white/20 ${tierConfig.badgeColor}`}
-              >
-                {tierConfig.name}
-              </span>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <span
+                  className={`text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full backdrop-blur-md border border-white/20 ${tierConfig.badgeColor}`}
+                >
+                  {tierConfig.name}
+                </span>
+                <TopLeaderboardBadges
+                  account={account}
+                  variant="card_corner"
+                  context="card"
+                  maxVisible={3}
+                />
+              </div>
             </div>
 
             {/* Middle Section: EMV Chip & Contactless wave */}
@@ -329,6 +353,7 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({ account, showIns
                       account={account}
                       variant="card"
                       showCopyButton={true}
+                      masked={isPrivacyMasked}
                     />
                   </div>
                   <div className="text-[9px] uppercase tracking-wider text-white/60">
@@ -591,6 +616,7 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({ account, showIns
             size="xs"
             showCopyButton={true}
             showPermanentTag={true}
+            masked={isPrivacyMasked}
           />
           {account.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
         </div>
@@ -602,7 +628,7 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({ account, showIns
               <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.2 rounded font-mono">10 Digit Unik</span>
             </div>
             <div className="font-mono text-base font-bold text-amber-300 tracking-wider mt-0.5 flex items-center gap-2">
-              <span>{account.accountNumber}</span>
+              <span>{formatAccountNumberDisplay(account.accountNumber, isPrivacyMasked)}</span>
               <button
                 onClick={handleCopyAcc}
                 title="Salin nomor rekening"

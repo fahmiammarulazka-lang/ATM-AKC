@@ -117,6 +117,8 @@ interface PersistedGlobalState {
   uiVisibilityConfig?: Record<string, unknown> | null;
   adminWarnings: Array<Record<string, unknown>>;
   bugRewardConfig?: Record<string, unknown> | null;
+  adminConfigs: Record<string, unknown>;
+  configUpdatedAtMsMap: Record<string, number>;
   sharedBankData: Record<string, unknown>;
   userSnapshotsByScope: Record<string, Record<string, unknown>>;
   qrisOrders: Record<string, ServerQrisOrder>;
@@ -162,6 +164,8 @@ const DEFAULT_STATE: PersistedGlobalState = {
   uiVisibilityConfig: null,
   adminWarnings: [],
   bugRewardConfig: null,
+  adminConfigs: {},
+  configUpdatedAtMsMap: {},
   lastUpdated: Date.now(),
 };
 
@@ -202,6 +206,14 @@ function loadPersistedState(): PersistedGlobalState {
           parsed.bugRewardConfig && typeof parsed.bugRewardConfig === 'object'
             ? parsed.bugRewardConfig
             : null,
+        adminConfigs:
+          parsed.adminConfigs && typeof parsed.adminConfigs === 'object'
+            ? parsed.adminConfigs
+            : {},
+        configUpdatedAtMsMap:
+          parsed.configUpdatedAtMsMap && typeof parsed.configUpdatedAtMsMap === 'object'
+            ? parsed.configUpdatedAtMsMap
+            : {},
         sharedBankData: parsed.sharedBankData || {},
         userSnapshotsByScope:
           parsed.userSnapshotsByScope && typeof parsed.userSnapshotsByScope === 'object'
@@ -278,6 +290,8 @@ async function startServer() {
             uiVisibilityConfig: serverState.uiVisibilityConfig || null,
             adminWarnings: serverState.adminWarnings || [],
             bugRewardConfig: serverState.bugRewardConfig || null,
+            adminConfigs: serverState.adminConfigs || {},
+            configUpdatedAtMsMap: serverState.configUpdatedAtMsMap || {},
             sharedBankData: serverState.sharedBankData,
             connectedDevices: clients.size,
             lastUpdated: serverState.lastUpdated,
@@ -336,47 +350,147 @@ async function startServer() {
             },
           });
         } else if (msg.type === 'diamond_config:sync' && msg.payload && typeof msg.payload === 'object') {
-          const rawCfg = msg.payload as Record<string, unknown>;
+          const rawCfg = (msg.payload.diamondConfig || msg.payload) as Record<string, unknown>;
+          const incomingTs = Number(msg.payload?.updatedAtMs ?? rawCfg.updatedAtMs) || 0;
+          const currentTs = Number(serverState.configUpdatedAtMsMap?.diamondConfig) || 0;
+          if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) return;
+          const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
+          const basePriceRaw = Number(rawCfg.baseDiamondPriceRupiah);
+          const discRaw = Number(rawCfg.diamondDiscountPercent);
+          const maxCustomRaw = Number(rawCfg.maxCustomDiamond);
+          const maxPurchRaw = Number(rawCfg.maxPurchaseRupiah);
           serverState.diamondConfig = {
             ...rawCfg,
-            baseDiamondPriceRupiah: Math.max(1, Math.round(Number(rawCfg.baseDiamondPriceRupiah) || 90)),
-            diamondDiscountPercent: Math.max(0, Math.min(99, Math.round(Number(rawCfg.diamondDiscountPercent) || 0))),
-            maxCustomDiamond: Math.max(1, Math.min(11_099, Math.round(Number(rawCfg.maxCustomDiamond) || 11_099))),
-            maxPurchaseRupiah: Math.max(1, Math.min(998_910, Math.round(Number(rawCfg.maxPurchaseRupiah) || 998_910))),
+            baseDiamondPriceRupiah: Math.max(1, Math.round(Number.isFinite(basePriceRaw) && rawCfg.baseDiamondPriceRupiah !== undefined ? basePriceRaw : 90)),
+            diamondDiscountPercent: Math.max(0, Math.min(99, Math.round(Number.isFinite(discRaw) ? discRaw : 0))),
+            maxCustomDiamond: Math.max(1, Math.min(11_099, Math.round(Number.isFinite(maxCustomRaw) && rawCfg.maxCustomDiamond !== undefined ? maxCustomRaw : 11_099))),
+            maxPurchaseRupiah: Math.max(1, Math.min(998_910, Math.round(Number.isFinite(maxPurchRaw) && rawCfg.maxPurchaseRupiah !== undefined ? maxPurchRaw : 998_910))),
             priceRevision: 3,
-            updatedAt: new Date().toISOString(),
+            updatedAtMs: nextTs,
+            updatedAt: new Date(nextTs).toISOString(),
+          };
+          serverState.configUpdatedAtMsMap = {
+            ...(serverState.configUpdatedAtMsMap || {}),
+            diamondConfig: nextTs,
+          };
+          serverState.adminConfigs = {
+            ...(serverState.adminConfigs || {}),
+            diamondConfig: serverState.diamondConfig,
           };
           savePersistedState();
           broadcastToAll({
             type: 'diamond_config:updated',
-            payload: { diamondConfig: serverState.diamondConfig, lastUpdated: serverState.lastUpdated },
+            payload: { diamondConfig: serverState.diamondConfig, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
           });
         } else if (msg.type === 'ui_visibility:sync' && msg.payload && typeof msg.payload === 'object') {
+          const rawVis = (msg.payload.uiVisibilityConfig || msg.payload) as Record<string, unknown>;
+          const incomingTs = Number(msg.payload?.updatedAtMs ?? rawVis.updatedAtMs) || 0;
+          const currentTs = Number(serverState.configUpdatedAtMsMap?.uiVisibilityConfig) || 0;
+          if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) return;
+          const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
           serverState.uiVisibilityConfig = {
-            ...(msg.payload as Record<string, unknown>),
-            updatedAt: new Date().toISOString(),
+            ...rawVis,
+            updatedAtMs: nextTs,
+            updatedAt: new Date(nextTs).toISOString(),
+          };
+          serverState.configUpdatedAtMsMap = {
+            ...(serverState.configUpdatedAtMsMap || {}),
+            uiVisibilityConfig: nextTs,
+          };
+          serverState.adminConfigs = {
+            ...(serverState.adminConfigs || {}),
+            uiVisibilityConfig: serverState.uiVisibilityConfig,
           };
           savePersistedState();
           broadcastToAll({
             type: 'ui_visibility:updated',
-            payload: { uiVisibilityConfig: serverState.uiVisibilityConfig, lastUpdated: serverState.lastUpdated },
+            payload: { uiVisibilityConfig: serverState.uiVisibilityConfig, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
           });
         } else if (msg.type === 'admin_warnings:sync' && Array.isArray(msg.payload?.adminWarnings)) {
+          const incomingTs = Number(msg.payload?.updatedAtMs) || 0;
+          const currentTs = Number(serverState.configUpdatedAtMsMap?.adminWarnings) || 0;
+          if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) return;
+          const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
           serverState.adminWarnings = (msg.payload.adminWarnings as Array<Record<string, unknown>>).slice(0, 100);
+          serverState.configUpdatedAtMsMap = {
+            ...(serverState.configUpdatedAtMsMap || {}),
+            adminWarnings: nextTs,
+          };
+          serverState.adminConfigs = {
+            ...(serverState.adminConfigs || {}),
+            adminWarnings: serverState.adminWarnings,
+          };
           savePersistedState();
           broadcastToAll({
             type: 'admin_warnings:updated',
-            payload: { adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated },
+            payload: { adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
           });
         } else if (msg.type === 'bug_reward_config:sync' && msg.payload && typeof msg.payload === 'object') {
+          const rawBug = (msg.payload.bugRewardConfig || msg.payload) as Record<string, unknown>;
+          const incomingTs = Number(msg.payload?.updatedAtMs ?? rawBug.updatedAtMs) || 0;
+          const currentTs = Number(serverState.configUpdatedAtMsMap?.bugRewardConfig) || 0;
+          if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) return;
+          const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
           serverState.bugRewardConfig = {
-            ...(msg.payload as Record<string, unknown>),
-            updatedAt: new Date().toISOString(),
+            ...rawBug,
+            enabled: Boolean(rawBug.enabled),
+            cashAmount: Math.max(0, Math.floor(Number(rawBug.cashAmount ?? 0) || 0)),
+            coinAmount: Math.max(0, Math.floor(Number(rawBug.coinAmount ?? 0) || 0)),
+            diamondAmount: Math.max(0, Math.floor(Number(rawBug.diamondAmount ?? 0) || 0)),
+            goldGrams: Math.max(0, Math.round((Number(rawBug.goldGrams ?? 0) || 0) * 100) / 100),
+            voucherAmount: Math.max(0, Math.floor(Number(rawBug.voucherAmount ?? 0) || 0)),
+            pointsAmount: Math.max(0, Math.floor(Number(rawBug.pointsAmount ?? 0) || 0)),
+            familySlotAmount: Math.max(0, Math.floor(Number(rawBug.familySlotAmount ?? 0) || 0)),
+            defaultRewardMessage: String(rawBug.defaultRewardMessage ?? rawBug.defaultMessage ?? '').slice(0, 300),
+            updatedAtMs: nextTs,
+            updatedAt: new Date(nextTs).toISOString(),
+          };
+          serverState.configUpdatedAtMsMap = {
+            ...(serverState.configUpdatedAtMsMap || {}),
+            bugRewardConfig: nextTs,
+          };
+          serverState.adminConfigs = {
+            ...(serverState.adminConfigs || {}),
+            bugRewardConfig: serverState.bugRewardConfig,
           };
           savePersistedState();
           broadcastToAll({
             type: 'bug_reward_config:updated',
-            payload: { bugRewardConfig: serverState.bugRewardConfig, lastUpdated: serverState.lastUpdated },
+            payload: { bugRewardConfig: serverState.bugRewardConfig, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
+          });
+        } else if (msg.type === 'admin_config:sync' && msg.payload && typeof msg.payload.key === 'string') {
+          const cfgKey = String(msg.payload.key).trim().slice(0, 80);
+          if (!cfgKey || msg.payload.value === undefined) return;
+          const incomingTs = Number(msg.payload.updatedAtMs) || 0;
+          const currentTs = Number(serverState.configUpdatedAtMsMap?.[cfgKey]) || 0;
+          if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) return;
+          const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
+          serverState.adminConfigs = {
+            ...(serverState.adminConfigs || {}),
+            [cfgKey]: msg.payload.value,
+          };
+          serverState.configUpdatedAtMsMap = {
+            ...(serverState.configUpdatedAtMsMap || {}),
+            [cfgKey]: nextTs,
+          };
+          if (cfgKey === 'bugRewardConfig' && msg.payload.value && typeof msg.payload.value === 'object') {
+            serverState.bugRewardConfig = msg.payload.value as Record<string, unknown>;
+          } else if (cfgKey === 'diamondConfig' && msg.payload.value && typeof msg.payload.value === 'object') {
+            serverState.diamondConfig = msg.payload.value as Record<string, unknown>;
+          } else if (cfgKey === 'uiVisibilityConfig' && msg.payload.value && typeof msg.payload.value === 'object') {
+            serverState.uiVisibilityConfig = msg.payload.value as Record<string, unknown>;
+          } else if (cfgKey === 'adminWarnings' && Array.isArray(msg.payload.value)) {
+            serverState.adminWarnings = msg.payload.value as Array<Record<string, unknown>>;
+          }
+          savePersistedState();
+          broadcastToAll({
+            type: 'admin_config:updated',
+            payload: {
+              key: cfgKey,
+              value: msg.payload.value,
+              updatedAtMs: nextTs,
+              lastUpdated: serverState.lastUpdated,
+            },
           });
         } else if (msg.type === 'bank_data:sync' && msg.payload) {
           serverState.sharedBankData = {
@@ -583,8 +697,76 @@ async function startServer() {
       uiVisibilityConfig: serverState.uiVisibilityConfig || null,
       adminWarnings: serverState.adminWarnings || [],
       bugRewardConfig: serverState.bugRewardConfig || null,
+      adminConfigs: serverState.adminConfigs || {},
+      configUpdatedAtMsMap: serverState.configUpdatedAtMsMap || {},
       sharedBankData: serverState.sharedBankData,
       connectedDevices: Math.max(1, clients.size),
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.get('/api/admin-config', (_req, res) => {
+    res.json({
+      success: true,
+      adminConfigs: serverState.adminConfigs || {},
+      configUpdatedAtMsMap: serverState.configUpdatedAtMsMap || {},
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/admin-config', (req, res) => {
+    const rawKey = typeof req.body?.key === 'string' ? req.body.key.trim().slice(0, 80) : '';
+    const value = req.body?.value;
+    if (!rawKey || value === undefined) {
+      res.status(400).json({ success: false, message: 'Parameter key/value tidak valid.' });
+      return;
+    }
+    const incomingTs = Number(req.body?.updatedAtMs) || 0;
+    const currentTs = Number(serverState.configUpdatedAtMsMap?.[rawKey]) || 0;
+    if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
+      res.json({
+        success: true,
+        ignoredStale: true,
+        key: rawKey,
+        value: serverState.adminConfigs?.[rawKey],
+        updatedAtMs: currentTs,
+        lastUpdated: serverState.lastUpdated,
+      });
+      return;
+    }
+    const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
+    serverState.adminConfigs = {
+      ...(serverState.adminConfigs || {}),
+      [rawKey]: value,
+    };
+    serverState.configUpdatedAtMsMap = {
+      ...(serverState.configUpdatedAtMsMap || {}),
+      [rawKey]: nextTs,
+    };
+    if (rawKey === 'bugRewardConfig' && value && typeof value === 'object') {
+      serverState.bugRewardConfig = value as Record<string, unknown>;
+    } else if (rawKey === 'diamondConfig' && value && typeof value === 'object') {
+      serverState.diamondConfig = value as Record<string, unknown>;
+    } else if (rawKey === 'uiVisibilityConfig' && value && typeof value === 'object') {
+      serverState.uiVisibilityConfig = value as Record<string, unknown>;
+    } else if (rawKey === 'adminWarnings' && Array.isArray(value)) {
+      serverState.adminWarnings = value as Array<Record<string, unknown>>;
+    }
+    savePersistedState();
+    broadcastToAll({
+      type: 'admin_config:updated',
+      payload: {
+        key: rawKey,
+        value,
+        updatedAtMs: nextTs,
+        lastUpdated: serverState.lastUpdated,
+      },
+    });
+    res.json({
+      success: true,
+      key: rawKey,
+      value,
+      updatedAtMs: nextTs,
       lastUpdated: serverState.lastUpdated,
     });
   });
@@ -593,6 +775,7 @@ async function startServer() {
     res.json({
       success: true,
       diamondConfig: serverState.diamondConfig || null,
+      updatedAtMs: serverState.configUpdatedAtMsMap?.diamondConfig || 0,
       lastUpdated: serverState.lastUpdated,
     });
   });
@@ -603,27 +786,48 @@ async function startServer() {
       res.status(400).json({ success: false, message: 'Konfigurasi tidak valid.' });
       return;
     }
+    const incomingTs = Number(req.body?.updatedAtMs ?? rawCfg.updatedAtMs) || 0;
+    const currentTs = Number(serverState.configUpdatedAtMsMap?.diamondConfig) || 0;
+    if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
+      res.json({ success: true, ignoredStale: true, diamondConfig: serverState.diamondConfig, updatedAtMs: currentTs, lastUpdated: serverState.lastUpdated });
+      return;
+    }
+    const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
+    const basePriceRaw = Number(rawCfg.baseDiamondPriceRupiah);
+    const discRaw = Number(rawCfg.diamondDiscountPercent);
+    const maxCustomRaw = Number(rawCfg.maxCustomDiamond);
+    const maxPurchRaw = Number(rawCfg.maxPurchaseRupiah);
     serverState.diamondConfig = {
       ...rawCfg,
-      baseDiamondPriceRupiah: Math.max(1, Math.round(Number(rawCfg.baseDiamondPriceRupiah) || 90)),
-      diamondDiscountPercent: Math.max(0, Math.min(99, Math.round(Number(rawCfg.diamondDiscountPercent) || 0))),
-      maxCustomDiamond: Math.max(1, Math.min(11_099, Math.round(Number(rawCfg.maxCustomDiamond) || 11_099))),
-      maxPurchaseRupiah: Math.max(1, Math.min(998_910, Math.round(Number(rawCfg.maxPurchaseRupiah) || 998_910))),
+      baseDiamondPriceRupiah: Math.max(1, Math.round(Number.isFinite(basePriceRaw) && rawCfg.baseDiamondPriceRupiah !== undefined ? basePriceRaw : 90)),
+      diamondDiscountPercent: Math.max(0, Math.min(99, Math.round(Number.isFinite(discRaw) ? discRaw : 0))),
+      maxCustomDiamond: Math.max(1, Math.min(11_099, Math.round(Number.isFinite(maxCustomRaw) && rawCfg.maxCustomDiamond !== undefined ? maxCustomRaw : 11_099))),
+      maxPurchaseRupiah: Math.max(1, Math.min(998_910, Math.round(Number.isFinite(maxPurchRaw) && rawCfg.maxPurchaseRupiah !== undefined ? maxPurchRaw : 998_910))),
       priceRevision: 3,
-      updatedAt: new Date().toISOString(),
+      updatedAtMs: nextTs,
+      updatedAt: new Date(nextTs).toISOString(),
+    };
+    serverState.configUpdatedAtMsMap = {
+      ...(serverState.configUpdatedAtMsMap || {}),
+      diamondConfig: nextTs,
+    };
+    serverState.adminConfigs = {
+      ...(serverState.adminConfigs || {}),
+      diamondConfig: serverState.diamondConfig,
     };
     savePersistedState();
     broadcastToAll({
       type: 'diamond_config:updated',
-      payload: { diamondConfig: serverState.diamondConfig, lastUpdated: serverState.lastUpdated },
+      payload: { diamondConfig: serverState.diamondConfig, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
     });
-    res.json({ success: true, diamondConfig: serverState.diamondConfig, lastUpdated: serverState.lastUpdated });
+    res.json({ success: true, diamondConfig: serverState.diamondConfig, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated });
   });
 
   app.get('/api/ui-visibility', (_req, res) => {
     res.json({
       success: true,
       uiVisibilityConfig: serverState.uiVisibilityConfig || null,
+      updatedAtMs: serverState.configUpdatedAtMsMap?.uiVisibilityConfig || 0,
       lastUpdated: serverState.lastUpdated,
     });
   });
@@ -634,27 +838,50 @@ async function startServer() {
       res.status(400).json({ success: false, message: 'Konfigurasi visibilitas tidak valid.' });
       return;
     }
+    const incomingTs = Number(req.body?.updatedAtMs ?? incoming.updatedAtMs) || 0;
+    const currentTs = Number(serverState.configUpdatedAtMsMap?.uiVisibilityConfig) || 0;
+    if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
+      res.json({ success: true, ignoredStale: true, uiVisibilityConfig: serverState.uiVisibilityConfig, updatedAtMs: currentTs, lastUpdated: serverState.lastUpdated });
+      return;
+    }
+    const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
     serverState.uiVisibilityConfig = {
       ...incoming,
-      updatedAt: new Date().toISOString(),
+      updatedAtMs: nextTs,
+      updatedAt: new Date(nextTs).toISOString(),
+    };
+    serverState.configUpdatedAtMsMap = {
+      ...(serverState.configUpdatedAtMsMap || {}),
+      uiVisibilityConfig: nextTs,
+    };
+    serverState.adminConfigs = {
+      ...(serverState.adminConfigs || {}),
+      uiVisibilityConfig: serverState.uiVisibilityConfig,
     };
     savePersistedState();
     broadcastToAll({
       type: 'ui_visibility:updated',
-      payload: { uiVisibilityConfig: serverState.uiVisibilityConfig, lastUpdated: serverState.lastUpdated },
+      payload: { uiVisibilityConfig: serverState.uiVisibilityConfig, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
     });
-    res.json({ success: true, uiVisibilityConfig: serverState.uiVisibilityConfig, lastUpdated: serverState.lastUpdated });
+    res.json({ success: true, uiVisibilityConfig: serverState.uiVisibilityConfig, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated });
   });
 
   app.get('/api/admin-warnings', (_req, res) => {
     res.json({
       success: true,
       adminWarnings: serverState.adminWarnings || [],
+      updatedAtMs: serverState.configUpdatedAtMsMap?.adminWarnings || 0,
       lastUpdated: serverState.lastUpdated,
     });
   });
 
   app.post('/api/admin-warnings', (req, res) => {
+    const incomingTs = Number(req.body?.updatedAtMs) || 0;
+    const currentTs = Number(serverState.configUpdatedAtMsMap?.adminWarnings) || 0;
+    if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
+      res.json({ success: true, ignoredStale: true, adminWarnings: serverState.adminWarnings, updatedAtMs: currentTs, lastUpdated: serverState.lastUpdated });
+      return;
+    }
     if (Array.isArray(req.body?.adminWarnings)) {
       serverState.adminWarnings = (req.body.adminWarnings as Array<Record<string, unknown>>).slice(0, 100);
     } else if (req.body && typeof req.body === 'object' && req.body.id) {
@@ -667,12 +894,21 @@ async function startServer() {
       res.status(400).json({ success: false, message: 'Data peringatan admin tidak valid.' });
       return;
     }
+    const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
+    serverState.configUpdatedAtMsMap = {
+      ...(serverState.configUpdatedAtMsMap || {}),
+      adminWarnings: nextTs,
+    };
+    serverState.adminConfigs = {
+      ...(serverState.adminConfigs || {}),
+      adminWarnings: serverState.adminWarnings,
+    };
     savePersistedState();
     broadcastToAll({
       type: 'admin_warnings:updated',
-      payload: { adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated },
+      payload: { adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
     });
-    res.json({ success: true, adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated });
+    res.json({ success: true, adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated });
   });
 
   app.patch('/api/admin-warnings/:id/resend', (req, res) => {
@@ -694,29 +930,48 @@ async function startServer() {
       res.status(404).json({ success: false, message: 'Peringatan tidak ditemukan.' });
       return;
     }
+    const nextTs = Date.now();
+    serverState.configUpdatedAtMsMap = {
+      ...(serverState.configUpdatedAtMsMap || {}),
+      adminWarnings: nextTs,
+    };
+    serverState.adminConfigs = {
+      ...(serverState.adminConfigs || {}),
+      adminWarnings: serverState.adminWarnings,
+    };
     savePersistedState();
     broadcastToAll({
       type: 'admin_warnings:updated',
-      payload: { adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated },
+      payload: { adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
     });
-    res.json({ success: true, adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated });
+    res.json({ success: true, adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated });
   });
 
   app.delete('/api/admin-warnings/:id', (req, res) => {
     const targetId = String(req.params.id || '');
     serverState.adminWarnings = serverState.adminWarnings.filter((w) => String(w.id) !== targetId);
+    const nextTs = Date.now();
+    serverState.configUpdatedAtMsMap = {
+      ...(serverState.configUpdatedAtMsMap || {}),
+      adminWarnings: nextTs,
+    };
+    serverState.adminConfigs = {
+      ...(serverState.adminConfigs || {}),
+      adminWarnings: serverState.adminWarnings,
+    };
     savePersistedState();
     broadcastToAll({
       type: 'admin_warnings:updated',
-      payload: { adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated },
+      payload: { adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
     });
-    res.json({ success: true, adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated });
+    res.json({ success: true, adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated });
   });
 
   app.get('/api/bug-reward-config', (_req, res) => {
     res.json({
       success: true,
       bugRewardConfig: serverState.bugRewardConfig || null,
+      updatedAtMs: serverState.configUpdatedAtMsMap?.bugRewardConfig || 0,
       lastUpdated: serverState.lastUpdated,
     });
   });
@@ -727,24 +982,41 @@ async function startServer() {
       res.status(400).json({ success: false, message: 'Konfigurasi hadiah bug tidak valid.' });
       return;
     }
+    const incomingTs = Number(req.body?.updatedAtMs ?? incoming.updatedAtMs) || 0;
+    const currentTs = Number(serverState.configUpdatedAtMsMap?.bugRewardConfig) || 0;
+    if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
+      res.json({ success: true, ignoredStale: true, bugRewardConfig: serverState.bugRewardConfig, updatedAtMs: currentTs, lastUpdated: serverState.lastUpdated });
+      return;
+    }
+    const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
     serverState.bugRewardConfig = {
+      ...incoming,
       enabled: Boolean(incoming.enabled),
-      cashAmount: Math.max(0, Math.floor(Number(incoming.cashAmount) || 0)),
-      coinAmount: Math.max(0, Math.floor(Number(incoming.coinAmount) || 0)),
-      diamondAmount: Math.max(0, Math.floor(Number(incoming.diamondAmount) || 0)),
-      goldGrams: Math.max(0, Math.round((Number(incoming.goldGrams) || 0) * 100) / 100),
-      voucherAmount: Math.max(0, Math.floor(Number(incoming.voucherAmount) || 0)),
-      pointsAmount: Math.max(0, Math.floor(Number(incoming.pointsAmount) || 0)),
-      familySlotAmount: Math.max(0, Math.floor(Number(incoming.familySlotAmount) || 0)),
+      cashAmount: Math.max(0, Math.floor(Number(incoming.cashAmount ?? 0) || 0)),
+      coinAmount: Math.max(0, Math.floor(Number(incoming.coinAmount ?? 0) || 0)),
+      diamondAmount: Math.max(0, Math.floor(Number(incoming.diamondAmount ?? 0) || 0)),
+      goldGrams: Math.max(0, Math.round((Number(incoming.goldGrams ?? 0) || 0) * 100) / 100),
+      voucherAmount: Math.max(0, Math.floor(Number(incoming.voucherAmount ?? 0) || 0)),
+      pointsAmount: Math.max(0, Math.floor(Number(incoming.pointsAmount ?? 0) || 0)),
+      familySlotAmount: Math.max(0, Math.floor(Number(incoming.familySlotAmount ?? 0) || 0)),
       defaultRewardMessage: String(incoming.defaultRewardMessage ?? incoming.defaultMessage ?? '').slice(0, 300),
-      updatedAt: new Date().toISOString(),
+      updatedAtMs: nextTs,
+      updatedAt: new Date(nextTs).toISOString(),
+    };
+    serverState.configUpdatedAtMsMap = {
+      ...(serverState.configUpdatedAtMsMap || {}),
+      bugRewardConfig: nextTs,
+    };
+    serverState.adminConfigs = {
+      ...(serverState.adminConfigs || {}),
+      bugRewardConfig: serverState.bugRewardConfig,
     };
     savePersistedState();
     broadcastToAll({
       type: 'bug_reward_config:updated',
-      payload: { bugRewardConfig: serverState.bugRewardConfig, lastUpdated: serverState.lastUpdated },
+      payload: { bugRewardConfig: serverState.bugRewardConfig, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
     });
-    res.json({ success: true, bugRewardConfig: serverState.bugRewardConfig, lastUpdated: serverState.lastUpdated });
+    res.json({ success: true, bugRewardConfig: serverState.bugRewardConfig, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated });
   });
 
   app.get('/api/gift-events', (_req, res) => {

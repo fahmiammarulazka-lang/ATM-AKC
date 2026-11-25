@@ -394,6 +394,12 @@ let memoryDeviceLobbyGuestId: string | null = null;
 let memoryDeviceLobbyCreatedAccountId: string | null = null;
 let adminPersistentIdbChain: Promise<void> = Promise.resolve();
 
+export interface AdminConfigCacheEntry {
+  value: unknown;
+  updatedAtMs: number;
+  updatedAtIso?: string;
+}
+
 export interface AdminPersistentDataCache {
   supportFaqs?: any[];
   supportFaqsUpdatedAtMs?: number;
@@ -405,6 +411,7 @@ export interface AdminPersistentDataCache {
   banPresetsUpdatedAtMs?: number;
   bankSettings?: any;
   bankSettingsUpdatedAtMs?: number;
+  configs?: Record<string, AdminConfigCacheEntry>;
   lastAdminSavedAtIso?: string;
   cachedAtMs: number;
 }
@@ -436,10 +443,30 @@ export function saveAdminPersistentDataIdb(
         )) || ({ cachedAtMs: 0 } as AdminPersistentDataCache);
 
       const nowMs = Date.now();
+      const nextConfigs: Record<string, AdminConfigCacheEntry> = {
+        ...(existing.configs || {}),
+      };
+
+      if (patch.configs && typeof patch.configs === 'object') {
+        for (const [key, entry] of Object.entries(patch.configs)) {
+          if (!entry || entry.value === undefined) continue;
+          const incomingTs = Number(entry.updatedAtMs) || nowMs;
+          const existingTs = Number(nextConfigs[key]?.updatedAtMs) || 0;
+          if (incomingTs >= existingTs) {
+            nextConfigs[key] = {
+              value: entry.value,
+              updatedAtMs: incomingTs,
+              updatedAtIso: entry.updatedAtIso || new Date(incomingTs).toISOString(),
+            };
+          }
+        }
+      }
+
       const next: AdminPersistentDataCache = {
         ...existing,
+        configs: nextConfigs,
         cachedAtMs: nowMs,
-        lastAdminSavedAtIso: patch.lastAdminSavedAtIso || new Date(nowMs).toISOString(),
+        lastAdminSavedAtIso: patch.lastAdminSavedAtIso || existing.lastAdminSavedAtIso || new Date(nowMs).toISOString(),
       };
 
       if (patch.supportFaqs !== undefined) {

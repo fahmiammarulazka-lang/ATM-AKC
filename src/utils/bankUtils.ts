@@ -26,6 +26,102 @@ export function formatAssetCount(
   return options?.suffix ? `${formatted} ${options.suffix}` : formatted;
 }
 
+export function formatCompactAssetCount(
+  val?: number,
+  options?: { isAdmin?: boolean }
+): string {
+  if (options?.isAdmin || isUnlimitedNumber(val)) {
+    return '∞';
+  }
+  const safeVal = Math.max(0, Math.round(val || 0));
+  const units: Array<{ threshold: number; suffix: string }> = [
+    { threshold: 1_000_000_000_000, suffix: 'T' },
+    { threshold: 1_000_000_000, suffix: 'M' },
+    { threshold: 1_000_000, suffix: 'JT' },
+    { threshold: 1_000, suffix: 'K' },
+  ];
+  for (const unit of units) {
+    if (safeVal >= unit.threshold) {
+      const scaled = safeVal / unit.threshold;
+      const decimals = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 1;
+      const numText = scaled.toFixed(decimals).replace(/\.0$/, '').replace('.', ',');
+      return `${numText}${unit.suffix}`;
+    }
+  }
+  return safeVal.toLocaleString('id-ID');
+}
+
+export function formatMobileCompactRupiah(
+  amount?: number,
+  options?: { isAdmin?: boolean; withPrefix?: boolean }
+): string {
+  if (options?.isAdmin || isUnlimitedNumber(amount)) {
+    return '∞';
+  }
+  const val = Math.max(0, Math.round(amount || 0));
+  const units: Array<{ threshold: number; suffix: string }> = [
+    { threshold: 1_000_000_000_000, suffix: 'T' },
+    { threshold: 1_000_000_000, suffix: 'M' },
+    { threshold: 1_000_000, suffix: 'JT' },
+    { threshold: 1_000, suffix: 'K' },
+  ];
+  const prefix = options?.withPrefix === false ? '' : 'Rp';
+  for (const unit of units) {
+    if (val >= unit.threshold) {
+      const scaled = val / unit.threshold;
+      const decimals = scaled >= 100 ? 0 : 1;
+      const numText = scaled.toFixed(decimals).replace(/\.0$/, '').replace('.', ',');
+      return `${prefix}${numText}${unit.suffix}`;
+    }
+  }
+  return `${prefix}${val.toLocaleString('id-ID')}`;
+}
+
+// ==================== PRIVACY SENSOR NOMOR & ID (FULL ASTERISK *) ====================
+
+export function maskUserId16Full(): string {
+  return '**** **** **** ****';
+}
+
+export function maskCardNumberFull(): string {
+  return '**** **** **** ****';
+}
+
+export function maskAccountNumberFull(rawAccountNumber?: string): string {
+  const digits = (rawAccountNumber || '').replace(/\s+/g, '');
+  const len = Math.max(10, digits.length || 10);
+  return '*'.repeat(Math.min(16, len));
+}
+
+export function maskPhoneNumberFull(rawPhone?: string): string {
+  const clean = (rawPhone || '').trim();
+  const len = Math.max(10, clean.replace(/\s+/g, '').length || 12);
+  return '*'.repeat(Math.min(15, len));
+}
+
+export function formatUserId16Display(id16?: string, masked = false): string {
+  if (masked) return maskUserId16Full();
+  return formatUserId16(id16);
+}
+
+export function formatAccountNumberDisplay(accountNumber?: string, masked = false): string {
+  if (!accountNumber) return '-';
+  if (masked) return maskAccountNumberFull(accountNumber);
+  return accountNumber;
+}
+
+export function formatCardNumberDisplay(cardNumber?: string, masked = false): string {
+  if (!cardNumber) return '**** **** **** ****';
+  if (masked) return maskCardNumberFull();
+  return cardNumber;
+}
+
+export function formatPhoneDisplay(phone?: string, masked = false): string {
+  if (!phone) return '-';
+  if (masked) return maskPhoneNumberFull(phone);
+  return phone;
+}
+
 export const CARD_TIER_CONFIGS: Record<string, CardTierConfig> = {
   regular: {
     tier: 'regular',

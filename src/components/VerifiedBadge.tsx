@@ -5,7 +5,7 @@
  */
 import React, { useState } from 'react';
 import { Copy, CheckCircle2, Fingerprint, ShieldCheck } from 'lucide-react';
-import { ensureAccountUserId16, formatUserId16 } from '../utils/bankUtils';
+import { ensureAccountUserId16, formatUserId16, maskUserId16Full } from '../utils/bankUtils';
 
 interface VerifiedBadgeProps {
   size?: 'xs' | 'sm' | 'md' | 'lg';
@@ -108,6 +108,7 @@ interface UserId16AboveNameBannerProps {
   variant?: 'default' | 'card' | 'navbar' | 'light';
   showCopyButton?: boolean;
   showPermanentTag?: boolean;
+  masked?: boolean;
   className?: string;
 }
 
@@ -118,6 +119,7 @@ export const UserId16AboveNameBanner: React.FC<UserId16AboveNameBannerProps> = (
   variant = 'default',
   showCopyButton = true,
   showPermanentTag = false,
+  masked = false,
   className = '',
 }) => {
   const [copied, setCopied] = useState(false);
@@ -128,7 +130,7 @@ export const UserId16AboveNameBanner: React.FC<UserId16AboveNameBannerProps> = (
     ? ensureAccountUserId16(account)
     : '0000000000000000';
 
-  const formatted4x4 = formatUserId16(resolvedId16);
+  const formatted4x4 = masked ? maskUserId16Full() : formatUserId16(resolvedId16);
 
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();

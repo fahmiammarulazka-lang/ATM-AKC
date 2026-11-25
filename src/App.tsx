@@ -17,6 +17,8 @@ import { UpdateHistoryView } from './components/UpdateHistoryView';
 import { JobVacancyView } from './components/JobVacancyView';
 import { SpinTheWheelView } from './components/SpinTheWheelView';
 import { FamilyWorkspaceView } from './components/FamilyWorkspaceView';
+import { MissionsView } from './components/MissionsView';
+import { LeaderboardView } from './components/LeaderboardView';
 import { DiamondStoreModal } from './components/DiamondStoreModal';
 import { BuatQrisPaymentModal } from './components/BuatQrisPaymentModal';
 import { AdminWarningOverlay } from './components/AdminWarningOverlay';
@@ -137,6 +139,8 @@ function BankAppContent() {
     const applyDeepLink = (targetView?: string, targetDashboardTab?: string) => {
       const validViews: AppNavView[] = [
         'dashboard',
+        'missions',
+        'leaderboard',
         'family',
         'debt',
         'transfer',
@@ -494,6 +498,8 @@ function BankAppContent() {
             onOpenSecurityCenter={openSecurityCenter}
           />
         )}
+        {activeView === 'missions' && <MissionsView />}
+        {activeView === 'leaderboard' && <LeaderboardView />}
         {activeView === 'family' && <FamilyWorkspaceView />}
         {activeView === 'debt' && (
           <DebtManagementView onNavigateToView={(v) => setActiveView(v)} />

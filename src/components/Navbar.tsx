@@ -34,6 +34,8 @@ import {
   Ticket,
   Plus,
   Users,
+  Target,
+  Trophy,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
@@ -42,7 +44,10 @@ import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './Verifi
 import {
   formatRupiah,
   formatCompactRupiah,
+  formatMobileCompactRupiah,
   formatAssetCount,
+  formatCompactAssetCount,
+  formatAccountNumberDisplay,
   isAdminCardAccount,
   isUnlimitedNumber,
 } from '../utils/bankUtils';
@@ -59,6 +64,8 @@ import { RefreshCw } from 'lucide-react';
 
 export type AppNavView =
   | 'dashboard'
+  | 'missions'
+  | 'leaderboard'
   | 'family'
   | 'debt'
   | 'transfer'
@@ -117,7 +124,13 @@ export const Navbar: React.FC<NavbarProps> = ({
     diamondConfig,
     uiVisibilityConfig,
     syncTelemetry,
+    missions,
   } = useBank();
+
+  const activeMissionsCount = React.useMemo(
+    () => (missions || []).filter((m) => m.isActive).length,
+    [missions]
+  );
 
   const activeDebtAmount = Math.max(0, Math.round(currentAccount?.debtAmount || 0));
   const formatCompactDebt = (val: number): string => {
@@ -165,7 +178,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v13.35.43';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v14.35.43';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -460,33 +473,64 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </div>
 
-              {/* Compact Mobile & Tablet Diamond Indicator & + Button */}
-              {(uiVisibilityConfig.showDiamondBalance !== false ||
-                uiVisibilityConfig.showDiamondTopUpButton !== false) && (
-                <div className="flex lg:hidden items-center gap-1 h-7 sm:h-8 px-1.5 sm:px-2 rounded-lg bg-slate-900 border border-cyan-500/40 text-cyan-300 font-mono text-[10px] sm:text-[11px] font-bold tabular-nums shrink-0">
-                  {uiVisibilityConfig.showDiamondBalance !== false && (
-                    <>
-                      <DiamondIcon tone="bright" className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                      <span className="max-w-[56px] truncate">
-                        {formatAssetCount(currentAccount.diamonds, {
-                          isAdmin: isAdminCardAccount(currentAccount),
-                        })}
-                      </span>
-                    </>
-                  )}
-                  {uiVisibilityConfig.showDiamondTopUpButton !== false && (
-                    <button
-                      type="button"
-                      onClick={() => setIsDiamondStoreOpen(true)}
-                      className="flex h-4 w-4 items-center justify-center rounded bg-cyan-500 text-slate-950 cursor-pointer shrink-0"
-                      title="Top-Up via QRIS Nusantara"
-                      aria-label="Top-Up"
-                    >
-                      <Plus className="w-3 h-3 stroke-[3]" />
-                    </button>
-                  )}
-                </div>
-              )}
+              {/* Compact Mobile & Tablet Money + Coin + Diamond (+ Top-Up) Bar */}
+              <div className="flex lg:hidden items-center gap-1 h-7 sm:h-8 px-1.5 sm:px-2 rounded-lg bg-slate-900 border border-slate-700/90 font-mono text-[9px] sm:text-[10px] font-bold tabular-nums shrink-0">
+                <span
+                  className="flex items-center gap-0.5 text-emerald-300 pr-1 border-r border-slate-700/80 whitespace-nowrap"
+                  title="Saldo Uang Rekening"
+                >
+                  <Banknote className="w-3 h-3 text-emerald-400 shrink-0 hidden sm:inline" />
+                  <span>
+                    {formatMobileCompactRupiah(currentAccount.balance, {
+                      isAdmin: isAdminCardAccount(currentAccount),
+                    })}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveView('spin_wheel')}
+                  className={`flex items-center gap-0.5 text-amber-300 hover:text-amber-200 cursor-pointer whitespace-nowrap ${
+                    uiVisibilityConfig.showDiamondBalance !== false ||
+                    uiVisibilityConfig.showDiamondTopUpButton !== false
+                      ? 'pr-1 border-r border-slate-700/80'
+                      : ''
+                  }`}
+                  title="Coin Nusantara"
+                >
+                  <Coins className="w-3 h-3 text-amber-400 shrink-0" />
+                  <span>
+                    {formatCompactAssetCount(currentAccount.spinCoins, {
+                      isAdmin: isAdminCardAccount(currentAccount),
+                    })}
+                  </span>
+                </button>
+                {(uiVisibilityConfig.showDiamondBalance !== false ||
+                  uiVisibilityConfig.showDiamondTopUpButton !== false) && (
+                  <div className="flex items-center gap-0.5 text-cyan-300 whitespace-nowrap">
+                    {uiVisibilityConfig.showDiamondBalance !== false && (
+                      <>
+                        <DiamondIcon tone="bright" className="w-3 h-3 shrink-0" />
+                        <span>
+                          {formatCompactAssetCount(currentAccount.diamonds, {
+                            isAdmin: isAdminCardAccount(currentAccount),
+                          })}
+                        </span>
+                      </>
+                    )}
+                    {uiVisibilityConfig.showDiamondTopUpButton !== false && (
+                      <button
+                        type="button"
+                        onClick={() => setIsDiamondStoreOpen(true)}
+                        className="ml-0.5 flex h-4 w-4 items-center justify-center rounded bg-cyan-500 text-slate-950 cursor-pointer shrink-0"
+                        title="Top-Up via QRIS Nusantara"
+                        aria-label="Top-Up"
+                      >
+                        <Plus className="w-2.5 h-2.5 stroke-[3]" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             </>
           )}
 
@@ -844,6 +888,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       account={currentAccount}
                       variant="navbar"
                       showCopyButton={true}
+                      masked={Boolean(currentAccount.hideSensitiveNumbers)}
                     />
                   </div>
                 )}
@@ -857,7 +902,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {currentAccount?.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
                 </div>
                 <span className="hidden md:block text-[10px] font-mono text-amber-300 -mt-0.5">
-                  {currentAccount ? currentAccount.accountNumber : ''}
+                  {currentAccount
+                    ? formatAccountNumberDisplay(
+                        currentAccount.accountNumber,
+                        Boolean(currentAccount.hideSensitiveNumbers)
+                      )
+                    : ''}
                 </span>
               </div>
             </button>
@@ -901,6 +951,42 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 <Building className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>Mobile Banking</span>
+              </button>
+            )}
+
+            {/* 1A. Misi Harian & Leaderboard bersebelahan di dekat Mobile Banking */}
+            {uiVisibilityConfig.navTabs.missions !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('missions', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'missions'
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black shadow-sm'
+                    : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-500/35'
+                }`}
+              >
+                <Target className="w-3.5 h-3.5 shrink-0" />
+                <span>Misi Harian</span>
+                {activeMissionsCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-200 font-mono tabular-nums text-[10px] font-black">
+                    {activeMissionsCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {uiVisibilityConfig.navTabs.leaderboard !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('leaderboard', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'leaderboard'
+                    ? 'bg-gradient-to-r from-yellow-400 via-amber-400 to-amber-500 text-slate-950 font-black shadow-sm'
+                    : 'text-yellow-300 hover:text-white hover:bg-slate-900 border border-yellow-500/35'
+                }`}
+              >
+                <Trophy className="w-3.5 h-3.5 shrink-0" />
+                <span>Leaderboard</span>
               </button>
             )}
 

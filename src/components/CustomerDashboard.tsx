@@ -36,6 +36,8 @@ import {
   Clock,
   Link2,
   Loader2,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CardVisualizer } from './CardVisualizer';
@@ -46,11 +48,14 @@ import { DigitalBankingFeatures } from './DigitalBankingFeatures';
 import { DiamondText } from './DiamondIcon';
 import { JobVacancyView } from './JobVacancyView';
 import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
+import { TopLeaderboardBadges } from './TopLeaderboardBadges';
 import { TabEmasView } from './TabEmasView';
 import { TransferWorkspace } from './TransferWorkspace';
 import {
   formatRupiah,
   formatIndoDate,
+  formatAccountNumberDisplay,
+  formatPhoneDisplay,
   CARD_TIER_CONFIGS,
   LOAN_TIER_CONFIGS,
 } from '../utils/bankUtils';
@@ -106,7 +111,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     featureConfigs,
     devRoles,
     linkCurrentAccountWithGooglePopup,
+    toggleHideSensitiveNumbers,
   } = useBank();
+
+  const isPrivacyMasked = Boolean(currentAccount?.hideSensitiveNumbers);
 
   const [isLinkingGoogleInDashboard, setIsLinkingGoogleInDashboard] = useState<boolean>(false);
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
@@ -375,6 +383,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               size="sm"
               showCopyButton={true}
               showPermanentTag={true}
+              masked={isPrivacyMasked}
             />
           </div>
 
@@ -387,10 +396,16 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             )}
             {currentAccount.isOfficialAdminAccount && <OaAccountBadge size="sm" />}
           </div>
+          <TopLeaderboardBadges
+            account={currentAccount}
+            variant="full"
+            context="profile"
+            className="pt-1"
+          />
           <p className="text-xs text-slate-300">
             No. Rekening:{' '}
             <strong className="font-mono text-amber-300 tracking-wider">
-              {currentAccount.accountNumber}
+              {formatAccountNumberDisplay(currentAccount.accountNumber, isPrivacyMasked)}
             </strong>{' '}
             • Terdaftar sejak {new Date(currentAccount.createdAt).getFullYear()}
           </p>
@@ -759,6 +774,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   size="md"
                   showCopyButton={true}
                   showPermanentTag={true}
+                  masked={isPrivacyMasked}
                 />
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <span className="text-base sm:text-lg font-black text-white">
@@ -769,10 +785,17 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   )}
                   {currentAccount.isOfficialAdminAccount && <OaAccountBadge size="sm" />}
                 </div>
+                <TopLeaderboardBadges
+                  account={currentAccount}
+                  variant="full"
+                  context="profile"
+                />
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-xs">
                   <div>
                     <span className="text-[10px] text-slate-400 block">Nomor Rekening</span>
-                    <span className="font-mono font-bold text-amber-300">{currentAccount.accountNumber}</span>
+                    <span className="font-mono font-bold text-amber-300">
+                      {formatAccountNumberDisplay(currentAccount.accountNumber, isPrivacyMasked)}
+                    </span>
                   </div>
                   <div>
                     <span className="text-[10px] text-slate-400 block">NIK Identitas</span>
@@ -781,14 +804,33 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                   <div>
                     <span className="text-[10px] text-slate-400 block">Email & Telepon</span>
                     <span className="text-slate-200 truncate block">
-                      {currentAccount.phone} • {currentAccount.email || '-'}
+                      {formatPhoneDisplay(currentAccount.phone, isPrivacyMasked)} •{' '}
+                      {currentAccount.email || '-'}
                     </span>
                   </div>
                 </div>
 
-                {/* Baris Pengaturan Akun: Sambungkan ke Google, Ubah No. HP, Ganti PIN */}
+                {/* Baris Pengaturan Akun: Sensor Nomor & ID, Sambungkan ke Google, Ubah No. HP, Ganti PIN */}
                 <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleHideSensitiveNumbers(currentAccount.id)}
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer transition ${
+                        isPrivacyMasked
+                          ? 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-400/60 text-amber-200'
+                          : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'
+                      }`}
+                    >
+                      {isPrivacyMasked ? (
+                        <Eye className="w-3.5 h-3.5 text-amber-300" />
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5 text-cyan-400" />
+                      )}
+                      <span>
+                        {isPrivacyMasked ? 'Tampilkan Nomor & ID' : 'Sensor Nomor & ID (****)'}
+                      </span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => setShowPhoneModal(true)}

@@ -18,10 +18,17 @@ import {
   ShieldCheck,
   UserCheck,
   Wallet,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { TransferBebasAssetMode, TransferBebasReceipt } from '../types/bank';
-import { formatIndoDate, formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
+import {
+  formatAccountNumberDisplay,
+  formatIndoDate,
+  formatRupiah,
+  isUnlimitedNumber,
+} from '../utils/bankUtils';
 
 interface TransferBebasPanelProps {
   onNavigateToMutasi?: () => void;
@@ -64,6 +71,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [latestReceipt, setLatestReceipt] = useState<TransferBebasReceipt | null>(null);
   const [copiedReceipt, setCopiedReceipt] = useState<boolean>(false);
+  const [peekSenderAccount, setPeekSenderAccount] = useState<boolean>(false);
 
   if (!currentAccount) return null;
 
@@ -574,6 +582,29 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             </div>
 
             <div className="rounded-2xl bg-slate-950/90 border border-slate-800 p-4 space-y-2">
+              <div className="flex justify-between items-center gap-2">
+                <span className="text-slate-400">Pengirim</span>
+                <span className="text-slate-200 font-semibold font-mono flex items-center gap-1.5">
+                  <span>
+                    {currentAccount.fullName} (
+                    {formatAccountNumberDisplay(
+                      currentAccount.accountNumber,
+                      Boolean(currentAccount.hideSensitiveNumbers) && !peekSenderAccount
+                    )}
+                    )
+                  </span>
+                  {currentAccount.hideSensitiveNumbers && (
+                    <button
+                      type="button"
+                      onClick={() => setPeekSenderAccount((p) => !p)}
+                      className="p-0.5 rounded bg-slate-800 text-cyan-300 hover:text-white cursor-pointer"
+                      title="Intip nomor pengirim"
+                    >
+                      {peekSenderAccount ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  )}
+                </span>
+              </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Penerima</span>
                 <span className="text-white font-semibold">

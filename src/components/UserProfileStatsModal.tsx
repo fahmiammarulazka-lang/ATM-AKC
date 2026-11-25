@@ -24,6 +24,8 @@ import {
   RefreshCw,
   CloudOff,
   AlertTriangle,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -31,11 +33,14 @@ import {
   formatCompactRupiah,
   formatAssetCount,
   isAdminCardAccount,
-  formatUserId16,
+  formatUserId16Display,
+  formatAccountNumberDisplay,
+  formatPhoneDisplay,
   isUnlimitedNumber,
   CARD_TIER_CONFIGS,
 } from '../utils/bankUtils';
 import { DiamondIcon } from './DiamondIcon';
+import { TopLeaderboardBadges } from './TopLeaderboardBadges';
 import { DevRoleConfig } from '../types/bank';
 
 interface UserProfileStatsModalProps {
@@ -127,6 +132,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     forceSyncCloudNow,
     linkCurrentAccountWithGooglePopup,
     logoutGoogle,
+    toggleHideSensitiveNumbers,
   } = useBank();
 
   const [copiedField, setCopiedField] = useState<'id16' | 'rekening' | null>(null);
@@ -218,6 +224,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
   const isAdminCard = isAdminCardAccount(currentAccount);
   const isUnlimitedBal =
     isAdminCard || isUnlimitedNumber(currentAccount.balance);
+  const isPrivacyMasked = Boolean(currentAccount.hideSensitiveNumbers);
 
   const handleQuickSyncCloud = async () => {
     if (isQuickSyncing) return;
@@ -344,6 +351,12 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                   </span>
                 </span>
               </div>
+              <TopLeaderboardBadges
+                account={currentAccount}
+                variant="full"
+                context="profile"
+                className="mt-2"
+              />
             </div>
           </div>
           <button
@@ -434,6 +447,52 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
             </div>
           </div>
 
+          {/* Pengaturan Sensor Privasi Nomor & ID (Tersimpan Permanen Per Akun + Cloud Sync) */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50/90 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+              <div
+                className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                  isPrivacyMasked
+                    ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                    : 'bg-slate-200/80 text-slate-700'
+                }`}
+              >
+                {isPrivacyMasked ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-900">
+                  Sensor Privasi Nomor &amp; ID (Tutup Penuh ****)
+                </p>
+                <p className="text-[11px] text-slate-600">
+                  {isPrivacyMasked
+                    ? 'Aktif: ID 16 Digit, No. Rekening, No. Kartu ATM & No. HP disembunyikan penuh. Tombol Salin tetap menyalin nomor asli.'
+                    : 'Nonaktif: Semua nomor dan ID tampil terbuka normal. Klik tombol mata untuk menyensor.'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => toggleHideSensitiveNumbers(currentAccount.id)}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold inline-flex items-center justify-center gap-1.5 shrink-0 transition-colors cursor-pointer ${
+                isPrivacyMasked
+                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                  : 'bg-slate-900 hover:bg-slate-800 text-white'
+              }`}
+            >
+              {isPrivacyMasked ? (
+                <>
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Tampilkan Nomor</span>
+                </>
+              ) : (
+                <>
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span>Sembunyikan (****)</span>
+                </>
+              )}
+            </button>
+          </div>
+
           {/* Blok Identitas Permanen & Salin Cepat */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 flex items-center justify-between gap-2.5 min-w-0">
@@ -442,7 +501,9 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                   ID Permanen (16 Digit)
                 </p>
                 <p className="text-sm font-bold text-slate-900 font-mono tabular-nums mt-0.5 break-words leading-snug select-all">
-                  {currentAccount.userId16 ? formatUserId16(currentAccount.userId16) : '-'}
+                  {currentAccount.userId16
+                    ? formatUserId16Display(currentAccount.userId16, isPrivacyMasked)
+                    : '-'}
                 </p>
               </div>
               {currentAccount.userId16 && (
@@ -470,7 +531,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                   Nomor Rekening Aktif
                 </p>
                 <p className="text-sm font-bold text-slate-900 font-mono tabular-nums mt-0.5 break-all leading-snug select-all">
-                  {currentAccount.accountNumber}
+                  {formatAccountNumberDisplay(currentAccount.accountNumber, isPrivacyMasked)}
                 </p>
               </div>
               <button
@@ -505,7 +566,9 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
             <div className="rounded-xl border border-slate-200 bg-white p-3 min-w-0">
               <p className="text-slate-500">Nomor HP Terdaftar</p>
               <p className="font-semibold text-slate-900 mt-0.5 font-mono tabular-nums break-words">
-                {currentAccount.phone || '-'}
+                {currentAccount.phone
+                  ? formatPhoneDisplay(currentAccount.phone, isPrivacyMasked)
+                  : '-'}
               </p>
             </div>
             <div className="rounded-xl border border-slate-200 bg-white p-3 min-w-0">

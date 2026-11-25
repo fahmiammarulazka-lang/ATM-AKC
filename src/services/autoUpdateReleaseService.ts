@@ -16,7 +16,7 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v13.35.43';
+export const STRUCTURED_BASE_VERSION = 'v14.35.43';
 
 export interface StructuredVersion {
   p: number; // AAA: Major (fitur besar / penambahan > 3 fitur sekaligus)
@@ -292,14 +292,38 @@ export function validateVersionJump(
 // MESIN DETEKSI & PENYARINGAN UPDATE KHUSUS ADMIN (AUTO + SAKELAR MANUAL)
 // =====================================================================================
 
+const CUSTOMER_FEE_PROTECT_REGEX = /\bbiaya\s+admin(?:istrasi)?\b/gi;
+
+function maskCustomerFeePhrases(input: string): {
+  masked: string;
+  restore: (text: string) => string;
+} {
+  const captured: string[] = [];
+  const masked = String(input || '').replace(CUSTOMER_FEE_PROTECT_REGEX, (match) => {
+    const idx = captured.length;
+    captured.push(match);
+    return `__BN_CUSTOMER_FEE_${idx}__`;
+  });
+  return {
+    masked,
+    restore: (text: string) =>
+      text.replace(/__BN_CUSTOMER_FEE_(\d+)__/g, (_, i) => captured[Number(i)] || 'biaya admin'),
+  };
+}
+
 const ADMIN_KEYWORD_PATTERNS: RegExp[] = [
   /\bpanel\s+admin\b/i,
   /\bportal\s+admin\b/i,
   /\btab\s+admin\b/i,
   /\badmin\s+portal\b/i,
   /\badmin\s+utama\b/i,
-  /\bsuper\s*tool/i,
+  /\bsuper\s*tool(?:s)?\b/i,
   /\bpin\s+admin\b/i,
+  /\brole\s+dev\b/i,
+  /\bdev\s+role\b/i,
+  /\bakun\s+oa\b/i,
+  /\bkartu\s+admin\b/i,
+  /\btier\s+admin\b/i,
   /\botorisasi\s+admin\b/i,
   /\bpersetujuan\s+admin\b/i,
   /\btinjauan\s+admin\b/i,
@@ -323,9 +347,8 @@ const ADMIN_KEYWORD_PATTERNS: RegExp[] = [
   /\bforce\s+clear\s+stage\b/i,
   /\bdaftar\s+riwayat\s+update\s+website\b.*\badmin\b/i,
   /\bstudio\s+tanda\s+tangan\b.*\badmin\b/i,
-  /\brole\s+dev\b/i,
-  /\bdev\s+role\b/i,
   /\b\(pa\)\b/i,
+  /\badmin\b/i,
 ];
 
 const CUSTOMER_FEATURE_SIGNAL_PATTERNS: RegExp[] = [
@@ -353,11 +376,18 @@ const CUSTOMER_FEATURE_SIGNAL_PATTERNS: RegExp[] = [
   /\bsaldo\b/i,
   /\bkartu\b/i,
   /\bnotifikasi\b/i,
+  /\bmisi\b/i,
+  /\bleaderboard\b/i,
+  /\bprofil\b/i,
+  /\bkeluarga\b/i,
+  /\bsensor\b/i,
+  /\bprivasi\b/i,
 ];
 
 export function isAdminRelatedLine(text?: string): boolean {
   if (!text) return false;
-  return ADMIN_KEYWORD_PATTERNS.some((re) => re.test(text));
+  const { masked } = maskCustomerFeePhrases(text);
+  return ADMIN_KEYWORD_PATTERNS.some((re) => re.test(masked));
 }
 
 function hasCustomerFeatureSignal(text?: string): boolean {
@@ -365,68 +395,83 @@ function hasCustomerFeatureSignal(text?: string): boolean {
   return CUSTOMER_FEATURE_SIGNAL_PATTERNS.some((re) => re.test(text));
 }
 
+function stripResidualAdminPhrases(text: string): string {
+  const { masked, restore } = maskCustomerFeePhrases(text);
+  let clean = masked
+    .replace(/\s*\([^)]*\b(?:admin|panel\s+admin|portal\s+admin|super\s*tool|pin\s+admin|role\s+dev|akun\s+oa|kartu\s+admin|tier\s+admin)\b[^)]*\)/gi, '')
+    .replace(/\b(?:di|ke|dari|oleh)\s+(?:panel\s+admin|portal\s+admin|admin(?:\s+utama)?)\b/gi, '')
+    .replace(/\b(?:kartu\s+admin\s*(?:\(?\s*(?:infinity|∞)\s*\)?)?|tier\s+admin)\b/gi, 'kartu prioritas')
+    .replace(/\b(?:panel\s+admin|portal\s+admin|super\s*tool(?:s)?|pin\s+admin|role\s+dev|akun\s+oa)\b/gi, 'sistem')
+    .replace(/\badmin\b/gi, 'pengelola sistem')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .trim();
+  clean = restore(clean);
+  return clean;
+}
+
 /**
- * Membersihkan frasa atau klausa yang secara eksplisit menyebut Panel Admin dari judul campuran
- * tanpa memotong dengan '...' atau merusak kalimat fitur nasabah.
+ * Membersihkan frasa atau klausa yang secara eksplisit menyebut istilah Admin dari judul campuran
+ * tanpa memotong dengan '...' atau menghilangkan frasa biaya admin transaksi.
  */
 function sanitizeTitleForPublic(title: string): string {
-  let clean = title.trim();
-  // Hapus klausa belakang seperti "& Pusat Kelola ... Panel Admin" atau "+ Kontrol Panel Admin"
-  clean = clean
-    .replace(/\s*(?:&|\+|dan|serta)\s+[^—–-]*\b(?:panel\s+admin|portal\s+admin|khusus\s+admin|super\s*tool\s+admin)[^—–-]*/gi, '')
-    .replace(/\s*,\s*[^,—–-]*\b(?:panel\s+admin|portal\s+admin|khusus\s+admin)\b[^,—–-]*/gi, '')
-    .replace(/\s+di\s+panel\s+admin\b/gi, '')
+  const { masked, restore } = maskCustomerFeePhrases(title.trim());
+  let clean = masked
+    .replace(/\s*(?:&|\+|dan|serta|,)\s+[^—–-]*\b(?:panel\s+admin|portal\s+admin|khusus\s+admin|super\s*tool(?:s)?|pin\s+admin|role\s+dev|akun\s+oa|kartu\s+admin|tier\s+admin)\b[^—–-]*/gi, '')
+    .replace(/\s+di\s+(?:panel\s+admin|portal\s+admin)\b/gi, '')
+    .replace(/\b(?:kartu\s+admin(?:\s+infinity\s*\(?∞\)?)?|tier\s+admin)\b/gi, 'Layanan Prioritas')
+    .replace(/\b(?:panel\s+admin|portal\s+admin|super\s*tool(?:s)?|pin\s+admin|role\s+dev|akun\s+oa)\b/gi, 'Sistem Terpadu')
+    .replace(/\badmin\b/gi, 'Sistem')
     .replace(/\s{2,}/g, ' ')
     .replace(/[\s,&+-]+$/, '')
     .trim();
 
-  return clean || title.trim();
+  const restored = restore(clean);
+  return restored || 'Pembaruan Layanan Bank Nusantara';
 }
 
 /**
- * Menyaring kalimat atau klausa bernomor khusus Panel Admin di dalam deskripsi campuran
- * agar teks publik tetap mengalir utuh dan natural tanpa pemotongan (...).
+ * Menyaring kalimat atau klausa bernomor khusus Admin di dalam deskripsi campuran
+ * agar teks publik tetap mengalir utuh dan natural (tetap menjaga frasa "biaya admin").
  */
 function sanitizeDescriptionForPublic(description: string): string {
   const raw = String(description || '').trim();
   if (!raw) return '';
   if (!isAdminRelatedLine(raw)) return raw;
 
-  // 1. Jika mengandung pemisah klausa titik-koma (seperti poin bernomor "(1) ...; (2) ...; serta (5) Tab Kelola ... di Panel Admin.")
-  if (raw.includes(';')) {
-    const segments = raw.split(';').map((s) => s.trim()).filter(Boolean);
-    const keptSegments = segments.filter((seg) => !isAdminRelatedLine(seg));
+  const { masked, restore } = maskCustomerFeePhrases(raw);
+
+  // 1. Jika mengandung pemisah klausa titik-koma
+  if (masked.includes(';')) {
+    const segments = masked.split(';').map((s) => s.trim()).filter(Boolean);
+    const keptSegments = segments.filter((seg) => !ADMIN_KEYWORD_PATTERNS.some((re) => re.test(seg)));
     if (keptSegments.length > 0 && keptSegments.length < segments.length) {
       let joined = keptSegments.join('; ').replace(/;\s*$/, '');
       if (!/[.!?]$/.test(joined)) joined += '.';
-      return joined;
+      return restore(joined);
     }
   }
 
-  // 2. Saring kalimat-kalimat yang khusus membahas Panel Admin
-  const sentences = raw
+  // 2. Saring kalimat-kalimat yang khusus membahas fitur internal
+  const sentences = masked
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  const keptSentences = sentences.filter((s) => !isAdminRelatedLine(s));
+  const keptSentences = sentences.filter((s) => !ADMIN_KEYWORD_PATTERNS.some((re) => re.test(s)));
   if (keptSentences.length > 0) {
-    return keptSentences.join(' ');
+    return restore(keptSentences.join(' '));
   }
 
-  // 3. Jika hanya satu kalimat panjang namun tetap punya fitur nasabah, hapus anak kalimat "di Panel Admin..."
-  const stripped = raw
-    .replace(/,?\s*(?:serta|dan)\s+[^.]*\b(?:panel\s+admin|portal\s+admin|admin\s+dapat|khusus\s+admin)[^.]*/gi, '')
-    .replace(/\s*\([^)]*\badmin\b[^)]*\)/gi, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-  return stripped || raw;
+  // 3. Jika hanya satu kalimat panjang namun punya konteks fitur nasabah, bersihkan anak klausa internal
+  const stripped = stripResidualAdminPhrases(restore(masked));
+  return stripped || 'Pembaruan dan peningkatan kualitas layanan Bank Nusantara.';
 }
 
 /**
  * Mengevaluasi visibilitas publik satu catatan update:
  * - visibilityMode === 'admin_only' -> sembunyikan penuh
  * - visibilityMode === 'public' -> tampilkan penuh tanpa penyaringan
- * - visibilityMode === 'auto' (atau undefined) -> saring poin Admin otomatis & sembunyikan penuh jika seluruh catatan murni tentang Admin
+ * - visibilityMode === 'auto' (atau undefined) -> saring poin & frasa internal di seluruh rilis lama & baru
  */
 export function resolvePublicAppUpdate(rec: AppUpdateRecord): PublicUpdateResolution {
   const mode: AppUpdateVisibilityMode = rec.visibilityMode || 'auto';
@@ -441,7 +486,8 @@ export function resolvePublicAppUpdate(rec: AppUpdateRecord): PublicUpdateResolu
   const publicPoints = rawPoints.filter((p) => !isAdminRelatedLine(p));
   const titleHasAdmin = isAdminRelatedLine(rec.title);
   const descHasAdmin = isAdminRelatedLine(rec.description);
-  const hasAdminContent = adminPoints.length > 0 || titleHasAdmin || descHasAdmin;
+  const authorHasAdmin = isAdminRelatedLine(rec.author);
+  const hasAdminContent = adminPoints.length > 0 || titleHasAdmin || descHasAdmin || authorHasAdmin;
 
   if (mode === 'admin_only') {
     return {
@@ -463,16 +509,25 @@ export function resolvePublicAppUpdate(rec: AppUpdateRecord): PublicUpdateResolu
     };
   }
 
-  // Mode 'auto': deteksi jika keseluruhan catatan murni tentang Admin
+  // Mode 'auto': deteksi jika keseluruhan catatan murni tentang Admin/Internal
   const allPointsAreAdmin = rawPoints.length > 0 && publicPoints.length === 0;
+  const cleanedTitleProbe = maskCustomerFeePhrases(rec.title || '').masked.replace(
+    /\b(?:panel\s+admin|portal\s+admin|super\s*tool(?:s)?|pin\s+admin|role\s+dev|akun\s+oa|kartu\s+admin|tier\s+admin|admin)\b/gi,
+    ''
+  );
+  const cleanedDescProbe = maskCustomerFeePhrases(rec.description || '').masked.replace(
+    /\b(?:panel\s+admin|portal\s+admin|super\s*tool(?:s)?|pin\s+admin|role\s+dev|akun\s+oa|kartu\s+admin|tier\s+admin|admin)\b/gi,
+    ''
+  );
+
   const purelyAdminWithoutPoints =
     rawPoints.length === 0 &&
     (titleHasAdmin || descHasAdmin) &&
-    !hasCustomerFeatureSignal(`${rec.title} ${rec.description}`.replace(/\bpanel\s+admin\b/gi, ''));
+    !hasCustomerFeatureSignal(`${cleanedTitleProbe} ${cleanedDescProbe}`);
 
   const titleOnlyAdmin =
     titleHasAdmin &&
-    !hasCustomerFeatureSignal(sanitizeTitleForPublic(rec.title)) &&
+    !hasCustomerFeatureSignal(cleanedTitleProbe) &&
     publicPoints.length === 0;
 
   if (allPointsAreAdmin || purelyAdminWithoutPoints || titleOnlyAdmin) {
@@ -489,11 +544,15 @@ export function resolvePublicAppUpdate(rec: AppUpdateRecord): PublicUpdateResolu
   const sanitizedDesc = descHasAdmin
     ? sanitizeDescriptionForPublic(rec.description)
     : rec.description;
+  const sanitizedAuthor = authorHasAdmin
+    ? 'Tim Pengembangan Bank Nusantara'
+    : rec.author;
 
   const filteredRecord: AppUpdateRecord = {
     ...rec,
     title: sanitizedTitle,
     description: sanitizedDesc,
+    ...(sanitizedAuthor ? { author: sanitizedAuthor } : {}),
     highlights: rawPoints.length > 0 ? publicPoints : undefined,
     changes: rawPoints.length > 0 ? publicPoints : undefined,
   };

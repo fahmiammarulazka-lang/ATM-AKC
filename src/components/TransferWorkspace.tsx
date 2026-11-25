@@ -16,10 +16,17 @@ import {
   ShieldCheck,
   Star,
   Wallet,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { TransferBebasAssetMode } from '../types/bank';
-import { formatRupiah, isUnlimitedNumber, SUPPORTED_BANKS } from '../utils/bankUtils';
+import {
+  formatAccountNumberDisplay,
+  formatRupiah,
+  isUnlimitedNumber,
+  SUPPORTED_BANKS,
+} from '../utils/bankUtils';
 import { TransferBebasPanel } from './TransferBebasPanel';
 
 interface TransferWorkspaceProps {
@@ -70,6 +77,7 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
   const [transferError, setTransferError] = useState<string>('');
   const [transferSuccess, setTransferSuccess] = useState<string>('');
   const [saveAsFav, setSaveAsFav] = useState<boolean>(false);
+  const [peekSenderAccount, setPeekSenderAccount] = useState<boolean>(false);
 
   useEffect(() => {
     if (initialMode) {
@@ -170,9 +178,25 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
                 <Send className="w-5 h-5 text-emerald-400" />
                 <span>Pusat Transfer Bank Nusantara</span>
               </h1>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {currentAccount.fullName} · No. Rek{' '}
-                <span className="font-mono text-amber-300">{currentAccount.accountNumber}</span>
+              <p className="text-xs text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+                <span>{currentAccount.fullName} · No. Rek</span>
+                <span className="font-mono text-amber-300">
+                  {formatAccountNumberDisplay(
+                    currentAccount.accountNumber,
+                    Boolean(currentAccount.hideSensitiveNumbers) && !peekSenderAccount
+                  )}
+                </span>
+                {currentAccount.hideSensitiveNumbers && (
+                  <button
+                    type="button"
+                    onClick={() => setPeekSenderAccount((p) => !p)}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-[10px] text-cyan-300 cursor-pointer"
+                    title="Intip cepat nomor rekening pengirim"
+                  >
+                    {peekSenderAccount ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{peekSenderAccount ? 'Tutup' : 'Intip'}</span>
+                  </button>
+                )}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -595,6 +619,29 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
             </div>
 
             <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2 text-xs">
+              <div className="flex justify-between items-center gap-2">
+                <span className="text-slate-400">Pengirim (Anda):</span>
+                <span className="font-mono font-bold text-slate-200 flex items-center gap-1.5">
+                  <span>
+                    {currentAccount.fullName} (
+                    {formatAccountNumberDisplay(
+                      currentAccount.accountNumber,
+                      Boolean(currentAccount.hideSensitiveNumbers) && !peekSenderAccount
+                    )}
+                    )
+                  </span>
+                  {currentAccount.hideSensitiveNumbers && (
+                    <button
+                      type="button"
+                      onClick={() => setPeekSenderAccount((p) => !p)}
+                      className="p-0.5 rounded bg-slate-800 text-cyan-300 hover:text-white cursor-pointer"
+                      title="Intip nomor pengirim"
+                    >
+                      {peekSenderAccount ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  )}
+                </span>
+              </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">Penerima:</span>
                 <span className="font-bold text-emerald-400">{recipientLookup?.name}</span>

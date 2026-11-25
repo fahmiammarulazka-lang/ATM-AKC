@@ -23,9 +23,17 @@ import {
   Clock,
   ArrowUp,
   ArrowDown,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
-import { formatRupiah, playAtmSound, CARD_TIER_CONFIGS, SUPPORTED_BANKS } from '../utils/bankUtils';
+import {
+  formatAccountNumberDisplay,
+  formatRupiah,
+  playAtmSound,
+  CARD_TIER_CONFIGS,
+  SUPPORTED_BANKS,
+} from '../utils/bankUtils';
 import { Transaction } from '../types/bank';
 
 type AtmScreen =
@@ -107,6 +115,9 @@ export const AtmSimulator: React.FC = () => {
   const [screenMessage, setScreenMessage] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [forgotPinNotice, setForgotPinNotice] = useState<string>('');
+  const [peekAtmAccount, setPeekAtmAccount] = useState<boolean>(false);
+
+  const isAtmNumberMasked = Boolean(currentAccount?.hideSensitiveNumbers) && !peekAtmAccount;
 
   // Find latest PIN reset request for currentAccount
   const myPinResetRequest = currentAccount
@@ -699,8 +710,20 @@ export const AtmSimulator: React.FC = () => {
                       </div>
                       <div className="text-right">
                         <span className="text-[10px] text-blue-300">No. Rekening:</span>
-                        <span className="font-mono text-xs font-bold text-amber-300 block">
-                          {currentAccount?.accountNumber}
+                        <span className="font-mono text-xs font-bold text-amber-300 flex items-center justify-end gap-1">
+                          <span>
+                            {formatAccountNumberDisplay(currentAccount?.accountNumber, isAtmNumberMasked)}
+                          </span>
+                          {currentAccount?.hideSensitiveNumbers && (
+                            <button
+                              type="button"
+                              onClick={() => setPeekAtmAccount((p) => !p)}
+                              className="p-0.5 rounded bg-blue-900/70 text-cyan-300 hover:text-white cursor-pointer"
+                              title="Intip No. Rekening"
+                            >
+                              {peekAtmAccount ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                            </button>
+                          )}
                         </span>
                       </div>
                     </div>
@@ -834,9 +857,22 @@ export const AtmSimulator: React.FC = () => {
                       <div className="text-2xl sm:text-3xl font-extrabold text-amber-300 font-mono">
                         {formatRupiah(currentAccount?.balance || 0)}
                       </div>
-                      <div className="mt-3 pt-3 border-t border-blue-800/60 text-[11px] text-blue-200 flex justify-between">
+                      <div className="mt-3 pt-3 border-t border-blue-800/60 text-[11px] text-blue-200 flex justify-between items-center">
                         <span>No. Rekening:</span>
-                        <span className="font-mono font-bold">{currentAccount?.accountNumber}</span>
+                        <span className="font-mono font-bold flex items-center gap-1.5">
+                          <span>
+                            {formatAccountNumberDisplay(currentAccount?.accountNumber, isAtmNumberMasked)}
+                          </span>
+                          {currentAccount?.hideSensitiveNumbers && (
+                            <button
+                              type="button"
+                              onClick={() => setPeekAtmAccount((p) => !p)}
+                              className="p-0.5 rounded bg-blue-900 text-cyan-300 hover:text-white cursor-pointer"
+                            >
+                              {peekAtmAccount ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                            </button>
+                          )}
+                        </span>
                       </div>
                     </div>
 
@@ -1195,8 +1231,20 @@ export const AtmSimulator: React.FC = () => {
                     <h3 className="text-sm font-bold text-white uppercase">NOMOR REKENING ANDA</h3>
                     <div className="p-4 rounded-xl bg-blue-950 border border-blue-500">
                       <span className="text-xs text-blue-300 block mb-1">Nomor Rekening Aktif:</span>
-                      <div className="font-mono text-2xl font-bold text-amber-300 tracking-wider">
-                        {currentAccount?.accountNumber}
+                      <div className="font-mono text-2xl font-bold text-amber-300 tracking-wider flex items-center justify-center gap-2">
+                        <span>
+                          {formatAccountNumberDisplay(currentAccount?.accountNumber, isAtmNumberMasked)}
+                        </span>
+                        {currentAccount?.hideSensitiveNumbers && (
+                          <button
+                            type="button"
+                            onClick={() => setPeekAtmAccount((p) => !p)}
+                            className="p-1 rounded-lg bg-blue-900 text-cyan-300 hover:text-white cursor-pointer"
+                            title="Intip No. Rekening"
+                          >
+                            {peekAtmAccount ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        )}
                       </div>
                       <p className="text-[11px] text-blue-300 mt-2 leading-relaxed">
                         Sistem Bank Nusantara mengacak sendiri nomor rekening 10 digit secara otomatis dan unik.
@@ -1745,9 +1793,24 @@ export const AtmSimulator: React.FC = () => {
                 <span>NO. REFERENSI:</span>
                 <span className="font-bold">{activeReceipt.referenceNo}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span>NO. REKENING:</span>
-                <span className="font-bold">{activeReceipt.recipientAccount || currentAccount?.accountNumber}</span>
+                <span className="font-bold flex items-center gap-1">
+                  <span>
+                    {activeReceipt.recipientAccount ||
+                      formatAccountNumberDisplay(currentAccount?.accountNumber, isAtmNumberMasked)}
+                  </span>
+                  {!activeReceipt.recipientAccount && currentAccount?.hideSensitiveNumbers && (
+                    <button
+                      type="button"
+                      onClick={() => setPeekAtmAccount((p) => !p)}
+                      className="p-0.5 rounded bg-slate-200 text-slate-700 hover:bg-slate-300 cursor-pointer"
+                      title="Intip nomor rekening pada struk"
+                    >
+                      {peekAtmAccount ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    </button>
+                  )}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span>NAMA:</span>

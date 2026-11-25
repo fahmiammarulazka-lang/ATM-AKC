@@ -51,6 +51,22 @@ export interface BankPersistableSnapshot {
   globalChats: unknown[];
   bugReports: unknown[];
   adminUnlocked: boolean;
+  missions?: unknown[];
+  missionConfig?: unknown;
+  missionProgressByAccount?: Record<string, unknown>;
+  missionClaimLogs?: unknown[];
+  leaderboardConfig?: unknown;
+  bugRewardConfig?: unknown;
+  diamondConfig?: unknown;
+  uiVisibilityConfig?: unknown;
+  adminWarnings?: unknown[];
+  supportFaqs?: unknown[];
+  supportContactConfig?: unknown;
+  familyConfig?: unknown;
+  families?: unknown[];
+  jobCoinBonusConfig?: unknown;
+  devRoles?: unknown[];
+  configUpdatedAtMsMap?: Record<string, number>;
 }
 
 /**

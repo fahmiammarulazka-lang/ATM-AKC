@@ -110,12 +110,15 @@ export const AdminBanStudioView: React.FC = () => {
   }));
 
   const isDraftDirtyRef = useRef<boolean>(false);
+  const isContactDirtyRef = useRef<boolean>(false);
   const templateTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Sync draftConfig & global contact inputs when banSupportConfig hydrates from Cloud (only if user hasn't typed locally)
   useEffect(() => {
-    setGlobalWa(banSupportConfig.whatsappNumber || '');
-    setGlobalEmail(banSupportConfig.emailAddress || '');
+    if (!isContactDirtyRef.current) {
+      setGlobalWa(banSupportConfig.whatsappNumber || '');
+      setGlobalEmail(banSupportConfig.emailAddress || '');
+    }
     if (!isDraftDirtyRef.current) {
       const hydratedBase =
         banSupportConfig.defaultTemplate ||
@@ -1435,14 +1438,18 @@ export const AdminBanStudioView: React.FC = () => {
                       <input
                         type="text"
                         value={globalWa}
-                        onChange={(e) => setGlobalWa(e.target.value)}
-                        onBlur={() =>
+                        onChange={(e) => {
+                          isContactDirtyRef.current = true;
+                          setGlobalWa(e.target.value);
+                        }}
+                        onBlur={() => {
+                          isContactDirtyRef.current = false;
                           void adminUpdateBanSupportConfig({
                             ...banSupportConfig,
                             whatsappNumber: globalWa,
                             emailAddress: globalEmail,
-                          })
-                        }
+                          });
+                        }}
                         placeholder="6281298765432"
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono text-xs"
                       />
@@ -1454,14 +1461,18 @@ export const AdminBanStudioView: React.FC = () => {
                       <input
                         type="email"
                         value={globalEmail}
-                        onChange={(e) => setGlobalEmail(e.target.value)}
-                        onBlur={() =>
+                        onChange={(e) => {
+                          isContactDirtyRef.current = true;
+                          setGlobalEmail(e.target.value);
+                        }}
+                        onBlur={() => {
+                          isContactDirtyRef.current = false;
                           void adminUpdateBanSupportConfig({
                             ...banSupportConfig,
                             whatsappNumber: globalWa,
                             emailAddress: globalEmail,
-                          })
-                        }
+                          });
+                        }}
                         placeholder="admin@banknusantara.id"
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white font-mono text-xs"
                       />

@@ -306,6 +306,8 @@ export interface BankAccount {
   isDebtAutoBanned?: boolean; // true jika sedang dibanned otomatis karena gagal bayar hutang
   debtBanCount?: number; // Total kali akun pernah terkena ban jatuh tempo hutang
   lastDebtPenaltyAt?: string; // Timestamp terakhir bunga denda diterapkan (jika diaktifkan Admin)
+  // Sensor privasi Nomor & ID (Default false / nonaktif, tersinkron permanen per akun ke Cloud)
+  hideSensitiveNumbers?: boolean;
 }
 
 export interface DebtHistoryEntry {
@@ -1740,6 +1742,8 @@ export interface DiamondPackageItem {
 export type UiVisibilityNavKey =
   | 'debt'
   | 'dashboard'
+  | 'missions'
+  | 'leaderboard'
   | 'family'
   | 'transfer'
   | 'emas'
@@ -1897,6 +1901,159 @@ export interface FamilySystemConfig {
   allowMemberChangeNameTag: boolean;
   updatedAt?: string;
 }
+
+// ==================== SISTEM MISI HARIAN, 7-HARI & BIASA + 25 KONTROL ADMIN ====================
+export type MissionCategory = 'daily' | 'streak_7' | 'normal';
+export type MissionTrackingMode = 'auto' | 'manual';
+export type MissionStreakMissPolicy = 'reset_day_1' | 'continue';
+
+export type MissionMetricKey =
+  | 'any_tx'
+  | 'transfer_count'
+  | 'transfer_amount'
+  | 'deposit_count'
+  | 'withdraw_count'
+  | 'spin_count'
+  | 'job_clicks'
+  | 'job_complete'
+  | 'gold_tx'
+  | 'redeem_claim'
+  | 'family_action'
+  | 'daily_checkin'
+  | 'manual_claim';
+
+export interface MissionRewardBundle {
+  money?: number;
+  spinCoins?: number;
+  diamonds?: number;
+  goldGrams?: number;
+  rewardPoints?: number;
+  levelVouchers?: number;
+  jobLevelBoost?: number;
+  devRoleId?: string;
+  cardTierReward?: CardTier;
+  dashboardEffectId?: string;
+  customGiftLabel?: string;
+}
+
+export interface MissionDayRewardConfig {
+  day: number; // 1..7
+  title?: string;
+  rewards: MissionRewardBundle;
+}
+
+export interface AppMissionDefinition {
+  id: string;
+  category: MissionCategory;
+  title: string;
+  description: string;
+  iconEmoji?: string;
+  trackingMode: MissionTrackingMode;
+  metricKey: MissionMetricKey;
+  targetValue: number;
+  unitLabel?: string;
+  isActive: boolean;
+  sortOrder: number;
+  rewards: MissionRewardBundle;
+  streakDays?: MissionDayRewardConfig[];
+  streakMissPolicy?: MissionStreakMissPolicy;
+  startAt?: string;
+  endAt?: string;
+  maxClaimsPerAccount?: number;
+  globalClaimQuota?: number;
+  totalGlobalClaims?: number;
+  targetTiers?: CardTier[];
+  requireVerifiedAccount?: boolean;
+  badgeText?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface MissionAccountProgressRecord {
+  missionId: string;
+  progress: number;
+  lastProgressDateKey?: string;
+  claimedDates?: string[];
+  totalClaims?: number;
+  lastClaimedAt?: string;
+  streakDay?: number;
+  lastStreakClaimDateKey?: string;
+}
+
+export interface MissionSystemConfig {
+  enabled: boolean;
+  dailyResetHourWib: number;
+  showEmptyBannerInfo: boolean;
+  emptyStateTitle: string;
+  emptyStateDescription: string;
+  allowManualClaimFallback: boolean;
+  notifyOnMissionComplete: boolean;
+  updatedAt?: string;
+}
+
+export interface MissionClaimAuditLog {
+  id: string;
+  missionId: string;
+  missionTitle: string;
+  category: MissionCategory;
+  accountId: string;
+  accountName: string;
+  dayClaimed?: number;
+  rewardsSummary: string;
+  grantedByAdmin?: boolean;
+  claimedAt: string;
+}
+
+// ==================== SISTEM LEADERBOARD MULTI-ASET ====================
+export type LeaderboardCategoryKey =
+  | 'balance'
+  | 'spinCoins'
+  | 'diamonds'
+  | 'goldGrams'
+  | 'rewardPoints'
+  | 'jobLevel'
+  | 'txCount'
+  | string;
+
+export interface LeaderboardCategoryConfig {
+  id: string;
+  key: LeaderboardCategoryKey;
+  label: string;
+  unitLabel: string;
+  enabled: boolean;
+  sortOrder: number;
+  accentColor?: 'emerald' | 'amber' | 'cyan' | 'yellow' | 'indigo' | 'fuchsia' | 'rose';
+}
+
+export type LeaderboardBadgeTierStyle = 'gold_1' | 'gray_2' | 'brown_3' | 'charcoal_4_100';
+
+export interface AccountTopLeaderboardEntry {
+  categoryId: string;
+  categoryKey: LeaderboardCategoryKey;
+  categoryLabel: string;
+  unitLabel: string;
+  rank: number;
+  score: number;
+  tierStyle: LeaderboardBadgeTierStyle;
+  isUnlimited?: boolean;
+}
+
+export interface LeaderboardSystemConfig {
+  enabled: boolean;
+  showAdminTier: boolean;
+  maxEntries: number;
+  showMyRankCard: boolean;
+  hideBannedAccounts: boolean;
+  hidePendingAccounts: boolean;
+  showTopBadges?: boolean;
+  maxBadgeRank?: number;
+  topBadgeCustomPrefix?: string;
+  showTopBadgesOnCard?: boolean;
+  showTopBadgesInProfile?: boolean;
+  categories: LeaderboardCategoryConfig[];
+  updatedAt?: string;
+}
+
 
 
 

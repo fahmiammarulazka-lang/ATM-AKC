@@ -39,19 +39,35 @@ export const AdminDebtManagementTab: React.FC = () => {
   const [customMinutesInput, setCustomMinutesInput] = useState<string>('5');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Global policy form state synced with sultanEmpireConfig
-  const [lossRisk, setLossRisk] = useState<number>(sultanEmpireConfig.lossRiskPercent ?? 25);
-  const [lossSeverity, setLossSeverity] = useState<number>(sultanEmpireConfig.lossSeverityPercent ?? 35);
-  const [defaultTermHours, setDefaultTermHours] = useState<number>(
-    sultanEmpireConfig.debtDefaultTermHours ?? 24
+  // Global policy form state synced with sultanEmpireConfig (anti-reset dirty guard)
+  const isPolicyDirtyRef = React.useRef<boolean>(false);
+  const [lossRisk, setLossRisk] = useState<string>(String(sultanEmpireConfig.lossRiskPercent ?? 25));
+  const [lossSeverity, setLossSeverity] = useState<string>(
+    String(sultanEmpireConfig.lossSeverityPercent ?? 35)
   );
-  const [banHours, setBanHours] = useState<number>(sultanEmpireConfig.debtBanDurationHours ?? 24);
+  const [defaultTermHours, setDefaultTermHours] = useState<string>(
+    String(sultanEmpireConfig.debtDefaultTermHours ?? 24)
+  );
+  const [banHours, setBanHours] = useState<string>(
+    String(sultanEmpireConfig.debtBanDurationHours ?? 24)
+  );
   const [lateFeeEnabled, setLateFeeEnabled] = useState<boolean>(
     Boolean(sultanEmpireConfig.debtLateFeeEnabled)
   );
-  const [lateFeePercent, setLateFeePercent] = useState<number>(
-    sultanEmpireConfig.debtLateFeePercent ?? 5
+  const [lateFeePercent, setLateFeePercent] = useState<string>(
+    String(sultanEmpireConfig.debtLateFeePercent ?? 5)
   );
+
+  React.useEffect(() => {
+    if (!isPolicyDirtyRef.current) {
+      setLossRisk(String(sultanEmpireConfig.lossRiskPercent ?? 25));
+      setLossSeverity(String(sultanEmpireConfig.lossSeverityPercent ?? 35));
+      setDefaultTermHours(String(sultanEmpireConfig.debtDefaultTermHours ?? 24));
+      setBanHours(String(sultanEmpireConfig.debtBanDurationHours ?? 24));
+      setLateFeeEnabled(Boolean(sultanEmpireConfig.debtLateFeeEnabled));
+      setLateFeePercent(String(sultanEmpireConfig.debtLateFeePercent ?? 5));
+    }
+  }, [sultanEmpireConfig]);
 
   const customerAccounts = accounts
     .filter((a) => a.id !== 'acc-admin')
@@ -76,15 +92,23 @@ export const AdminDebtManagementTab: React.FC = () => {
   const indebtedCount = accounts.filter((a) => (a.debtAmount || 0) > 0).length;
   const debtBannedCount = accounts.filter((a) => a.isDebtAutoBanned && a.cardStatus === 'banned').length;
 
+  const parseNum = (raw: string, fallback: number, min: number, max: number) => {
+    const trimmed = raw.trim();
+    if (trimmed === '') return min;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+  };
+
   const handleSaveGlobalPolicy = () => {
     const res = adminUpdateSultanEmpireConfig({
-      lossRiskPercent: Math.min(80, Math.max(0, Number(lossRisk) || 0)),
-      lossSeverityPercent: Math.min(100, Math.max(5, Number(lossSeverity) || 35)),
-      debtDefaultTermHours: Math.max(1, Number(defaultTermHours) || 24),
-      debtBanDurationHours: Math.max(1, Number(banHours) || 24),
+      lossRiskPercent: parseNum(lossRisk, 0, 0, 80),
+      lossSeverityPercent: parseNum(lossSeverity, 35, 0, 100),
+      debtDefaultTermHours: parseNum(defaultTermHours, 24, 1, 720),
+      debtBanDurationHours: parseNum(banHours, 24, 1, 720),
       debtLateFeeEnabled: lateFeeEnabled,
-      debtLateFeePercent: Math.min(50, Math.max(0, Number(lateFeePercent) || 5)),
+      debtLateFeePercent: parseNum(lateFeePercent, 0, 0, 50),
     });
+    isPolicyDirtyRef.current = false;
     setFeedback({ type: res.success ? 'success' : 'error', text: res.message });
   };
 
@@ -195,7 +219,10 @@ export const AdminDebtManagementTab: React.FC = () => {
               min={0}
               max={80}
               value={lossRisk}
-              onChange={(e) => setLossRisk(Number(e.target.value))}
+              onChange={(e) => {
+                isPolicyDirtyRef.current = true;
+                setLossRisk(e.target.value);
+              }}
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
             />
             <span className="text-[10px] text-slate-400">0% = bebas rugi, bawaan 25% (seimbang)</span>
@@ -207,10 +234,13 @@ export const AdminDebtManagementTab: React.FC = () => {
             </label>
             <input
               type="number"
-              min={5}
+              min={0}
               max={100}
               value={lossSeverity}
-              onChange={(e) => setLossSeverity(Number(e.target.value))}
+              onChange={(e) => {
+                isPolicyDirtyRef.current = true;
+                setLossSeverity(e.target.value);
+              }}
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
             />
             <span className="text-[10px] text-slate-400">Default 35% dari nilai aktivitas</span>
@@ -225,7 +255,10 @@ export const AdminDebtManagementTab: React.FC = () => {
               min={1}
               max={720}
               value={defaultTermHours}
-              onChange={(e) => setDefaultTermHours(Number(e.target.value))}
+              onChange={(e) => {
+                isPolicyDirtyRef.current = true;
+                setDefaultTermHours(e.target.value);
+              }}
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
             />
             <span className="text-[10px] text-slate-400">Bawaan 24 jam sejak hutang tercatat</span>
@@ -240,7 +273,10 @@ export const AdminDebtManagementTab: React.FC = () => {
               min={1}
               max={720}
               value={banHours}
-              onChange={(e) => setBanHours(Number(e.target.value))}
+              onChange={(e) => {
+                isPolicyDirtyRef.current = true;
+                setBanHours(e.target.value);
+              }}
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono"
             />
             <span className="text-[10px] text-slate-400">Bawaan 24 jam (1 Hari)</span>
@@ -261,7 +297,10 @@ export const AdminDebtManagementTab: React.FC = () => {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setLateFeeEnabled((v) => !v)}
+              onClick={() => {
+                isPolicyDirtyRef.current = true;
+                setLateFeeEnabled((v) => !v);
+              }}
               className={`px-3 py-1.5 rounded-lg font-bold text-xs cursor-pointer transition-colors ${
                 lateFeeEnabled
                   ? 'bg-rose-600 text-white'
@@ -274,10 +313,13 @@ export const AdminDebtManagementTab: React.FC = () => {
               <div className="flex items-center gap-1.5">
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={50}
                   value={lateFeePercent}
-                  onChange={(e) => setLateFeePercent(Number(e.target.value))}
+                  onChange={(e) => {
+                    isPolicyDirtyRef.current = true;
+                    setLateFeePercent(e.target.value);
+                  }}
                   className="w-20 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white font-mono text-xs"
                 />
                 <span className="text-slate-300 font-bold">%</span>
@@ -427,7 +469,7 @@ export const AdminDebtManagementTab: React.FC = () => {
                   onClick={() =>
                     runDebtAction(activeAccount.id, 'add', {
                       amount: numericAmount,
-                      hours: Number(customHoursInput) || defaultTermHours,
+                      hours: Number(customHoursInput) || parseNum(defaultTermHours, 24, 1, 720),
                     })
                   }
                   className="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold flex items-center justify-center gap-1.5 cursor-pointer"
@@ -514,7 +556,7 @@ export const AdminDebtManagementTab: React.FC = () => {
                     type="button"
                     onClick={() =>
                       runDebtAction(activeAccount.id, 'lift_debt_ban', {
-                        hours: defaultTermHours,
+                        hours: parseNum(defaultTermHours, 24, 1, 720),
                       })
                     }
                     className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 cursor-pointer"

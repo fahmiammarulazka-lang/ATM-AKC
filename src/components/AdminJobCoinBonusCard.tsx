@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { Briefcase, CheckCircle2, Coins, Sparkles } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Briefcase, CheckCircle2, Coins, Save, Sparkles } from 'lucide-react';
 import { useBank } from '../context/BankContext';
-import { JobCoinBonusConfig } from '../types/bank';
 
 interface AdminJobCoinBonusCardProps {
   compact?: boolean;
@@ -12,22 +11,46 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
 }) => {
   const { jobCoinBonusConfig, adminUpdateJobCoinBonusConfig } = useBank();
 
-  const [draft, setDraft] = useState<JobCoinBonusConfig>(() => jobCoinBonusConfig);
+  const isDirtyRef = useRef<boolean>(false);
+  const [enabledDraft, setEnabledDraft] = useState<boolean>(jobCoinBonusConfig.enabled);
+  const [coinMultText, setCoinMultText] = useState<string>(
+    String(jobCoinBonusConfig.coinMultiplier ?? 1)
+  );
+  const [extraCoinsText, setExtraCoinsText] = useState<string>(
+    String(jobCoinBonusConfig.extraBonusCoins ?? 0)
+  );
   const [feedback, setFeedback] = useState<string>('');
 
   useEffect(() => {
-    setDraft(jobCoinBonusConfig);
+    if (!isDirtyRef.current) {
+      setEnabledDraft(jobCoinBonusConfig.enabled);
+      setCoinMultText(String(jobCoinBonusConfig.coinMultiplier ?? 1));
+      setExtraCoinsText(String(jobCoinBonusConfig.extraBonusCoins ?? 0));
+    }
   }, [jobCoinBonusConfig]);
 
+  const parsedMultiplier = (() => {
+    const n = Number(coinMultText.trim());
+    return Number.isFinite(n) && n >= 0 ? Math.max(0, n) : 0;
+  })();
+
+  const parsedExtraCoins = (() => {
+    const n = Number(extraCoinsText.trim());
+    return Number.isFinite(n) && n >= 0 ? Math.round(n) : 0;
+  })();
+
   const previewCoin = (base: number) => {
-    if (!draft.enabled) return base;
-    const mult = Math.max(0.1, Number(draft.coinMultiplier) || 1);
-    const extra = Math.max(0, Math.round(Number(draft.extraBonusCoins) || 0));
-    return Math.max(1, Math.round(base * mult)) + extra;
+    if (!enabledDraft) return base;
+    return Math.max(0, Math.round(base * parsedMultiplier)) + parsedExtraCoins;
   };
 
   const handleSave = () => {
-    const res = adminUpdateJobCoinBonusConfig(draft);
+    const res = adminUpdateJobCoinBonusConfig({
+      enabled: enabledDraft,
+      coinMultiplier: Math.max(0, parsedMultiplier),
+      extraBonusCoins: Math.max(0, parsedExtraCoins),
+    });
+    isDirtyRef.current = false;
     setFeedback(res.message);
   };
 
@@ -48,20 +71,21 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
             <span>Atur Pengali Coin &amp; Bonus Coin Ekstra Saat Nasabah Bekerja</span>
           </h3>
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            Berlaku otomatis untuk seluruh 25 Lowongan Kerja setiap kali target klik selesai. (Bonus Gacha Pekerjaan sudah dihapus.)
+            Berlaku otomatis untuk seluruh 25 Lowongan Kerja setiap kali target klik selesai. Perubahan aman dari reset saat mengetik.
           </p>
         </div>
 
         <label className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-950 border border-amber-400/50 cursor-pointer shrink-0">
           <input
             type="checkbox"
-            checked={draft.enabled}
-            onChange={(e) =>
-              setDraft((prev) => ({ ...prev, enabled: e.target.checked }))
-            }
+            checked={enabledDraft}
+            onChange={(e) => {
+              isDirtyRef.current = true;
+              setEnabledDraft(e.target.checked);
+            }}
           />
           <span className="font-black text-amber-300 text-xs whitespace-nowrap">
-            {draft.enabled ? 'Bonus Coin Aktif' : 'Nonaktif (1x Normal)'}
+            {enabledDraft ? 'Bonus Coin Aktif' : 'Nonaktif (1x Normal)'}
           </span>
         </label>
       </div>
@@ -74,7 +98,7 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
               1. Pengali Coin Kerja (Multiplier)
             </label>
             <span className="font-mono font-black text-white text-xs tabular-nums">
-              {draft.coinMultiplier}x Coin
+              {parsedMultiplier}x Coin
             </span>
           </div>
           <div className="grid grid-cols-5 gap-1.5">
@@ -82,9 +106,12 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
               <button
                 key={m}
                 type="button"
-                onClick={() => setDraft((prev) => ({ ...prev, coinMultiplier: m }))}
+                onClick={() => {
+                  isDirtyRef.current = true;
+                  setCoinMultText(String(m));
+                }}
                 className={`py-1.5 rounded-lg font-mono font-bold text-[11px] cursor-pointer border whitespace-nowrap ${
-                  draft.coinMultiplier === m
+                  parsedMultiplier === m
                     ? 'bg-amber-400 text-slate-950 border-amber-300 font-black'
                     : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-amber-400/50'
                 }`}
@@ -95,16 +122,14 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
           </div>
           <input
             type="number"
-            min={0.1}
+            min={0}
             step={0.5}
-            value={draft.coinMultiplier}
-            onChange={(e) =>
-              setDraft((prev) => ({
-                ...prev,
-                coinMultiplier: Math.max(0.1, Number(e.target.value) || 1),
-              }))
-            }
-            placeholder="Pengali custom..."
+            value={coinMultText}
+            onChange={(e) => {
+              isDirtyRef.current = true;
+              setCoinMultText(e.target.value);
+            }}
+            placeholder="Pengali custom (0 diperbolehkan)..."
             className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 font-mono font-bold tabular-nums text-xs"
           />
         </div>
@@ -116,7 +141,7 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
               2. Bonus Coin Ekstra (Per Selesai Kerja)
             </label>
             <span className="font-mono font-black text-emerald-300 text-xs tabular-nums">
-              +{draft.extraBonusCoins.toLocaleString('id-ID')} Coin
+              +{parsedExtraCoins.toLocaleString('id-ID')} Coin
             </span>
           </div>
           <div className="grid grid-cols-5 gap-1.5">
@@ -124,9 +149,12 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
               <button
                 key={bonus}
                 type="button"
-                onClick={() => setDraft((prev) => ({ ...prev, extraBonusCoins: bonus }))}
+                onClick={() => {
+                  isDirtyRef.current = true;
+                  setExtraCoinsText(String(bonus));
+                }}
                 className={`py-1.5 rounded-lg font-mono font-bold text-[11px] cursor-pointer border whitespace-nowrap ${
-                  draft.extraBonusCoins === bonus
+                  parsedExtraCoins === bonus
                     ? 'bg-emerald-400 text-slate-950 border-emerald-300 font-black'
                     : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-emerald-400/50'
                 }`}
@@ -139,14 +167,12 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
             type="number"
             min={0}
             step={5}
-            value={draft.extraBonusCoins}
-            onChange={(e) =>
-              setDraft((prev) => ({
-                ...prev,
-                extraBonusCoins: Math.max(0, Math.round(Number(e.target.value) || 0)),
-              }))
-            }
-            placeholder="Bonus coin ekstra..."
+            value={extraCoinsText}
+            onChange={(e) => {
+              isDirtyRef.current = true;
+              setExtraCoinsText(e.target.value);
+            }}
+            placeholder="Bonus coin ekstra (0 diperbolehkan)..."
             className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-emerald-300 font-mono font-bold tabular-nums text-xs"
           />
         </div>
@@ -173,7 +199,7 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
             onClick={handleSave}
             className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-black text-xs cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap shadow-lg shadow-amber-500/20"
           >
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <Save className="w-4 h-4 shrink-0" />
             <span>Simpan Bonus Coin</span>
           </button>
         </div>
@@ -181,7 +207,10 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
 
       {feedback && (
         <div className="p-3 rounded-2xl bg-emerald-950/75 border border-emerald-400/50 text-emerald-200 font-bold text-xs flex items-center justify-between gap-2">
-          <span>{feedback}</span>
+          <span className="flex items-center gap-1.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{feedback}</span>
+          </span>
           <button
             type="button"
             onClick={() => setFeedback('')}

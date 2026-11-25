@@ -39,6 +39,8 @@ export const DEFAULT_UI_VISIBILITY_CONFIG: UiVisibilityConfig = {
   navTabs: {
     debt: true,
     dashboard: true,
+    missions: true,
+    leaderboard: true,
     family: true,
     transfer: true,
     emas: true,
@@ -66,6 +68,8 @@ export const UI_VISIBILITY_NAV_METADATA: Array<{
 }> = [
   { key: 'debt', label: 'Tab Hutang (Kiri Logo)', description: 'Tombol kotak hutang di kiri atas Navbar.' },
   { key: 'dashboard', label: 'Mobile Banking', description: 'Halaman beranda rekening utama nasabah.' },
+  { key: 'missions', label: 'Misi Harian', description: 'Misi Harian, Misi 7-Hari & Misi Biasa dengan multi-hadiah.' },
+  { key: 'leaderboard', label: 'Leaderboard', description: 'Peringkat Uang, Coin, Diamond & kategori kustom nasabah.' },
   { key: 'family', label: 'Keluarga', description: 'Workspace grup keluarga, anggota, dan slot keluarga.' },
   { key: 'transfer', label: 'Transfer', description: 'Transfer reguler antar rekening dan Transfer Bebas.' },
   { key: 'emas', label: 'Emas 24K', description: 'Tabungan dan jual-beli logam mulia emas 24K.' },

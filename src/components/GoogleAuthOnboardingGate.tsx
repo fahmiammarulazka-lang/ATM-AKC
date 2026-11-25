@@ -43,6 +43,8 @@ import {
   isUnlimitedNumber,
   generateRandomPin6,
   formatUserId16,
+  formatUserId16Display,
+  formatAccountNumberDisplay,
   ensureAccountUserId16,
 } from '../utils/bankUtils';
 import { StructuredIndonesiaAddress, BankAccount } from '../types/bank';
@@ -152,6 +154,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [isRetryingCloudCheck, setIsRetryingCloudCheck] = useState(false);
   const [allowManualCreateOnTimeout, setAllowManualCreateOnTimeout] = useState(false);
+  const [maskLobbyNumbers, setMaskLobbyNumbers] = useState(false);
   const [authError, setAuthError] = useState<{ code?: string; message: string } | null>(null);
 
   // Stage 2A: Existing Card(s) Detected under Google Email -> Choose Account + Verify 6-Digit PIN
@@ -733,7 +736,21 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                     </div>
 
                     <div>
-                      <UserId16AboveNameBanner account={summaryTargetAccount} size="sm" />
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <UserId16AboveNameBanner
+                          account={summaryTargetAccount}
+                          size="sm"
+                          masked={maskLobbyNumbers}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setMaskLobbyNumbers((p) => !p)}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-bold text-cyan-300 hover:text-white cursor-pointer shrink-0"
+                        >
+                          {maskLobbyNumbers ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                          <span>{maskLobbyNumbers ? 'Tampilkan' : 'Sensor'}</span>
+                        </button>
+                      </div>
                       <p className="text-base font-black text-white mt-1">
                         {summaryTargetAccount.fullName}
                       </p>
@@ -753,7 +770,10 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                             Nomor Rekening (10 Digit)
                           </p>
                           <p className="text-sm font-mono tabular-nums font-black text-amber-300 tracking-wider mt-0.5">
-                            {summaryTargetAccount.accountNumber}
+                            {formatAccountNumberDisplay(
+                              summaryTargetAccount.accountNumber,
+                              maskLobbyNumbers
+                            )}
                           </p>
                         </div>
                         <button
@@ -777,7 +797,10 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                             User ID 16 Digit
                           </p>
                           <p className="text-xs font-mono tabular-nums font-black text-cyan-300 tracking-wider mt-0.5">
-                            {formatUserId16(ensureAccountUserId16(summaryTargetAccount))}
+                            {formatUserId16Display(
+                              ensureAccountUserId16(summaryTargetAccount),
+                              maskLobbyNumbers
+                            )}
                           </p>
                         </div>
                         <button
@@ -1367,6 +1390,19 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               {(guestSubMode === 'choose_existing' || !canCreateLobbyGuestOnThisDevice) &&
               guestLocalAccounts.length > 0 ? (
                 <form onSubmit={handleGuestPinLoginSubmit} className="space-y-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-emerald-300">
+                      Pilih Akun Guest Tersimpan:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMaskLobbyNumbers((p) => !p)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-bold text-cyan-300 hover:text-white cursor-pointer"
+                    >
+                      {maskLobbyNumbers ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                      <span>{maskLobbyNumbers ? 'Tampilkan Nomor' : 'Sensor Nomor'}</span>
+                    </button>
+                  </div>
                   <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                     {guestLocalAccounts.map((gAcc) => {
                       const isSelected = gAcc.id === (selectedGuestAccount?.id || '');
@@ -1385,7 +1421,11 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                           }`}
                         >
                           <div className="mb-1">
-                            <UserId16AboveNameBanner account={gAcc} size="xs" />
+                            <UserId16AboveNameBanner
+                              account={gAcc}
+                              size="xs"
+                              masked={maskLobbyNumbers}
+                            />
                           </div>
                           <div className="flex items-center justify-between gap-2">
                             <div>
@@ -1396,7 +1436,11 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                                 </span>
                               </p>
                               <p className="text-[11px] font-mono tabular-nums text-slate-400 mt-0.5">
-                                No. Rek: <strong className="text-amber-300">{gAcc.accountNumber}</strong> · Saldo:{' '}
+                                No. Rek:{' '}
+                                <strong className="text-amber-300">
+                                  {formatAccountNumberDisplay(gAcc.accountNumber, maskLobbyNumbers)}
+                                </strong>{' '}
+                                · Saldo:{' '}
                                 <strong className="text-emerald-300">{formatRupiah(gAcc.balance)}</strong>
                               </p>
                             </div>
@@ -1870,7 +1914,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
 
           {/* PEMILIH AKUN (MULTI-ACCOUNT CHOOSER): TAMPILKAN SEMUA AKUN DI EMAIL TERSEBUT */}
           <div className="mb-4 space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-extrabold text-cyan-300 flex items-center gap-1.5">
                 <CreditCard className="w-4 h-4" />
                 <span>
@@ -1879,6 +1923,15 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                     : 'Akun Rekening Terhubung ke Email Google Ini:'}
                 </span>
               </span>
+              <button
+                type="button"
+                onClick={() => setMaskLobbyNumbers((p) => !p)}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-bold text-cyan-300 hover:text-white cursor-pointer shrink-0"
+                title="Sensor atau tampilkan Nomor Rekening & ID 16 Digit saat memilih akun"
+              >
+                {maskLobbyNumbers ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                <span>{maskLobbyNumbers ? 'Tampilkan' : 'Sensor'}</span>
+              </button>
             </div>
 
             <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
@@ -1913,7 +1966,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                     </div>
 
                     <div className="mb-1">
-                      <UserId16AboveNameBanner account={acc} size="xs" />
+                      <UserId16AboveNameBanner account={acc} size="xs" masked={maskLobbyNumbers} />
                     </div>
 
                     <div className="flex items-center justify-between gap-2">
@@ -1926,7 +1979,11 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                           {acc.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
                         </p>
                         <p className="text-[11px] font-mono text-slate-400 mt-0.5">
-                          No. Rek: <span className="text-cyan-300 font-bold">{acc.accountNumber}</span> • Saldo:{' '}
+                          No. Rek:{' '}
+                          <span className="text-cyan-300 font-bold">
+                            {formatAccountNumberDisplay(acc.accountNumber, maskLobbyNumbers)}
+                          </span>{' '}
+                          • Saldo:{' '}
                           <span className="text-emerald-300 font-bold">
                             {acc.cardTier === 'admin' || isUnlimitedNumber(acc.balance)
                               ? '∞'
@@ -1957,7 +2014,10 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
             </h2>
             <p className="text-xs text-slate-400 mt-1">
               Wajib masukkan 6 digit PIN Kartu untuk membuka rekening{' '}
-              <strong className="text-cyan-300">{activeTargetAccount.accountNumber}</strong> ({tierCfg.name}).
+              <strong className="text-cyan-300">
+                {formatAccountNumberDisplay(activeTargetAccount.accountNumber, maskLobbyNumbers)}
+              </strong>{' '}
+              ({tierCfg.name}).
             </p>
             {!activeTargetAccount.isOfficialAdminAccount && (
               <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-[11px] font-bold text-amber-300">

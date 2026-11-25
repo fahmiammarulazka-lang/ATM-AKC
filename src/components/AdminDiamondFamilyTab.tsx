@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Users,
   QrCode,
@@ -8,6 +8,8 @@ import {
   Eye,
   EyeOff,
   SlidersHorizontal,
+  Save,
+  AlertTriangle,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -54,6 +56,53 @@ export const AdminDiamondFamilyTab: React.FC = () => {
   const [feedback, setFeedback] = useState<string>('');
   const [qrisConfigStatus, setQrisConfigStatus] = useState<QrisGatewayStatusInfo | null>(null);
   const [loadingStatus, setLoadingStatus] = useState<boolean>(false);
+  const [confirmResetDiamond, setConfirmResetDiamond] = useState<boolean>(false);
+
+  // Anti-reset local string drafts for Diamond & Family configs
+  const isDiamondDirtyRef = useRef<boolean>(false);
+  const [diamondDraft, setDiamondDraft] = useState(() => ({
+    baseDiamondPriceRupiah: String(diamondConfig.baseDiamondPriceRupiah ?? 90),
+    diamondDiscountPercent: String(diamondConfig.diamondDiscountPercent ?? 0),
+    maxCustomDiamond: String(diamondConfig.maxCustomDiamond ?? MAX_DIAMOND_PACKAGE_AMOUNT),
+    maxPurchaseRupiah: String(diamondConfig.maxPurchaseRupiah ?? MAX_DIAMOND_PURCHASE_RUPIAH),
+  }));
+
+  useEffect(() => {
+    if (!isDiamondDirtyRef.current) {
+      setDiamondDraft({
+        baseDiamondPriceRupiah: String(diamondConfig.baseDiamondPriceRupiah ?? 90),
+        diamondDiscountPercent: String(diamondConfig.diamondDiscountPercent ?? 0),
+        maxCustomDiamond: String(diamondConfig.maxCustomDiamond ?? MAX_DIAMOND_PACKAGE_AMOUNT),
+        maxPurchaseRupiah: String(diamondConfig.maxPurchaseRupiah ?? MAX_DIAMOND_PURCHASE_RUPIAH),
+      });
+    }
+  }, [diamondConfig]);
+
+  const isFamilyDirtyRef = useRef<boolean>(false);
+  const [familyDraft, setFamilyDraft] = useState(() => ({
+    defaultMaxFamilies: String(familyConfig.defaultMaxFamilies ?? 1),
+    baseSlotMoneyCost: String(familyConfig.baseSlotMoneyCost ?? 2_500_000),
+    baseSlotDiamondCost: String(familyConfig.baseSlotDiamondCost ?? 100),
+    maxMembersPerFamily: String(familyConfig.maxMembersPerFamily ?? 25),
+  }));
+
+  useEffect(() => {
+    if (!isFamilyDirtyRef.current) {
+      setFamilyDraft({
+        defaultMaxFamilies: String(familyConfig.defaultMaxFamilies ?? 1),
+        baseSlotMoneyCost: String(familyConfig.baseSlotMoneyCost ?? 2_500_000),
+        baseSlotDiamondCost: String(familyConfig.baseSlotDiamondCost ?? 100),
+        maxMembersPerFamily: String(familyConfig.maxMembersPerFamily ?? 25),
+      });
+    }
+  }, [familyConfig]);
+
+  const parseDraftNum = (raw: string, min: number, max: number) => {
+    const t = raw.trim();
+    if (t === '') return min;
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : min;
+  };
 
   const fetchQrisStatus = async () => {
     setLoadingStatus(true);
@@ -113,16 +162,43 @@ export const AdminDiamondFamilyTab: React.FC = () => {
           </div>
           <button
             type="button"
-            onClick={() => {
-              const res = adminResetDiamondConfig();
-              showMsg(res.message);
-            }}
+            onClick={() => setConfirmResetDiamond(true)}
             className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 px-3.5 py-2 font-bold text-cyan-300 hover:bg-slate-700 cursor-pointer"
           >
             <span>Reset Default</span>
             <DiamondIcon tone="bright" className="h-3.5 w-3.5" />
           </button>
         </div>
+
+        {confirmResetDiamond && (
+          <div className="rounded-2xl border-2 border-rose-400 bg-rose-950/90 p-3.5 flex flex-wrap items-center justify-between gap-2 text-rose-100">
+            <span className="flex items-center gap-2 font-bold">
+              <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+              Konfirmasi Reset Pengaturan Permata ke Standar Bawaan?
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmResetDiamond(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 text-white font-bold cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const res = adminResetDiamondConfig();
+                  isDiamondDirtyRef.current = false;
+                  setConfirmResetDiamond(false);
+                  showMsg(res.message);
+                }}
+                className="px-3.5 py-1.5 rounded-lg bg-rose-500 text-white font-black cursor-pointer"
+              >
+                Ya, Reset
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Kontrol Harga, Diskon & Batas Maksimal Dual-Cap (11.099 & Rp 998.910) */}
         <div className="rounded-2xl border border-cyan-500/40 bg-slate-950/80 p-4 space-y-3">
@@ -131,10 +207,41 @@ export const AdminDiamondFamilyTab: React.FC = () => {
               <SlidersHorizontal className="h-4 w-4 text-cyan-400" />
               <span>Harga Satuan, Diskon &amp; Batas Maksimal Pembelian</span>
             </h3>
-            <span className="text-[11px] font-mono text-cyan-300">
-              Batas Sistem: Maks {MAX_DIAMOND_PACKAGE_AMOUNT.toLocaleString('id-ID')} &amp; Rp{' '}
-              {MAX_DIAMOND_PURCHASE_RUPIAH.toLocaleString('id-ID')}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-cyan-300">
+                Batas Sistem: Maks {MAX_DIAMOND_PACKAGE_AMOUNT.toLocaleString('id-ID')} &amp; Rp{' '}
+                {MAX_DIAMOND_PURCHASE_RUPIAH.toLocaleString('id-ID')}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const res = adminUpdateDiamondConfig({
+                    baseDiamondPriceRupiah: parseDraftNum(
+                      diamondDraft.baseDiamondPriceRupiah,
+                      0,
+                      1_000_000_000
+                    ),
+                    diamondDiscountPercent: parseDraftNum(diamondDraft.diamondDiscountPercent, 0, 99),
+                    maxCustomDiamond: parseDraftNum(
+                      diamondDraft.maxCustomDiamond,
+                      1,
+                      MAX_DIAMOND_PACKAGE_AMOUNT
+                    ),
+                    maxPurchaseRupiah: parseDraftNum(
+                      diamondDraft.maxPurchaseRupiah,
+                      0,
+                      MAX_DIAMOND_PURCHASE_RUPIAH
+                    ),
+                  });
+                  isDiamondDirtyRef.current = false;
+                  showMsg(res.message);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 px-3.5 py-1.5 font-black text-slate-950 cursor-pointer"
+              >
+                <Save className="h-3.5 w-3.5" />
+                <span>Simpan Pengaturan</span>
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-xl border border-slate-800 bg-slate-900 p-3 space-y-1">
@@ -143,13 +250,14 @@ export const AdminDiamondFamilyTab: React.FC = () => {
               </label>
               <input
                 type="number"
-                min={1}
-                value={diamondConfig.baseDiamondPriceRupiah}
+                min={0}
+                value={diamondDraft.baseDiamondPriceRupiah}
                 onChange={(e) => {
-                  const res = adminUpdateDiamondConfig({
-                    baseDiamondPriceRupiah: Math.max(1, Number(e.target.value) || 90),
-                  });
-                  showMsg(res.message);
+                  isDiamondDirtyRef.current = true;
+                  setDiamondDraft((prev) => ({
+                    ...prev,
+                    baseDiamondPriceRupiah: e.target.value,
+                  }));
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 font-mono font-bold text-white"
               />
@@ -163,12 +271,13 @@ export const AdminDiamondFamilyTab: React.FC = () => {
                 type="number"
                 min={0}
                 max={99}
-                value={diamondConfig.diamondDiscountPercent}
+                value={diamondDraft.diamondDiscountPercent}
                 onChange={(e) => {
-                  const res = adminUpdateDiamondConfig({
-                    diamondDiscountPercent: Math.max(0, Math.min(99, Number(e.target.value) || 0)),
-                  });
-                  showMsg(res.message);
+                  isDiamondDirtyRef.current = true;
+                  setDiamondDraft((prev) => ({
+                    ...prev,
+                    diamondDiscountPercent: e.target.value,
+                  }));
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 font-mono font-bold text-amber-300"
               />
@@ -182,15 +291,13 @@ export const AdminDiamondFamilyTab: React.FC = () => {
                 type="number"
                 min={1}
                 max={MAX_DIAMOND_PACKAGE_AMOUNT}
-                value={diamondConfig.maxCustomDiamond}
+                value={diamondDraft.maxCustomDiamond}
                 onChange={(e) => {
-                  const res = adminUpdateDiamondConfig({
-                    maxCustomDiamond: Math.max(
-                      1,
-                      Math.min(MAX_DIAMOND_PACKAGE_AMOUNT, Number(e.target.value) || MAX_DIAMOND_PACKAGE_AMOUNT)
-                    ),
-                  });
-                  showMsg(res.message);
+                  isDiamondDirtyRef.current = true;
+                  setDiamondDraft((prev) => ({
+                    ...prev,
+                    maxCustomDiamond: e.target.value,
+                  }));
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 font-mono font-bold text-cyan-300"
               />
@@ -202,17 +309,15 @@ export const AdminDiamondFamilyTab: React.FC = () => {
               </label>
               <input
                 type="number"
-                min={1}
+                min={0}
                 max={MAX_DIAMOND_PURCHASE_RUPIAH}
-                value={diamondConfig.maxPurchaseRupiah}
+                value={diamondDraft.maxPurchaseRupiah}
                 onChange={(e) => {
-                  const res = adminUpdateDiamondConfig({
-                    maxPurchaseRupiah: Math.max(
-                      1,
-                      Math.min(MAX_DIAMOND_PURCHASE_RUPIAH, Number(e.target.value) || MAX_DIAMOND_PURCHASE_RUPIAH)
-                    ),
-                  });
-                  showMsg(res.message);
+                  isDiamondDirtyRef.current = true;
+                  setDiamondDraft((prev) => ({
+                    ...prev,
+                    maxPurchaseRupiah: e.target.value,
+                  }));
                 }}
                 className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 font-mono font-bold text-emerald-300"
               />
@@ -585,18 +690,37 @@ export const AdminDiamondFamilyTab: React.FC = () => {
             </div>
           </div>
 
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-indigo-400/40 bg-indigo-950/60 px-3.5 py-2 font-black text-indigo-200">
-            <input
-              type="checkbox"
-              checked={familyConfig.enabled}
-              onChange={(e) => {
-                const res = adminUpdateFamilyConfig({ enabled: e.target.checked });
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-indigo-400/40 bg-indigo-950/60 px-3.5 py-2 font-black text-indigo-200">
+              <input
+                type="checkbox"
+                checked={familyConfig.enabled}
+                onChange={(e) => {
+                  const res = adminUpdateFamilyConfig({ enabled: e.target.checked });
+                  showMsg(res.message);
+                }}
+                className="h-4 w-4 accent-indigo-500"
+              />
+              Aktifkan Fitur Keluarga
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                const res = adminUpdateFamilyConfig({
+                  defaultMaxFamilies: parseDraftNum(familyDraft.defaultMaxFamilies, 1, 100),
+                  baseSlotMoneyCost: parseDraftNum(familyDraft.baseSlotMoneyCost, 0, 1_000_000_000_000),
+                  baseSlotDiamondCost: parseDraftNum(familyDraft.baseSlotDiamondCost, 0, 1_000_000),
+                  maxMembersPerFamily: parseDraftNum(familyDraft.maxMembersPerFamily, 2, 500),
+                });
+                isFamilyDirtyRef.current = false;
                 showMsg(res.message);
               }}
-              className="h-4 w-4 accent-indigo-500"
-            />
-            Aktifkan Fitur Keluarga
-          </label>
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-400 hover:bg-indigo-300 px-3.5 py-2 font-black text-slate-950 cursor-pointer"
+            >
+              <Save className="h-3.5 w-3.5" />
+              <span>Simpan Pengaturan Keluarga</span>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -607,12 +731,11 @@ export const AdminDiamondFamilyTab: React.FC = () => {
             <input
               type="number"
               min={1}
-              value={familyConfig.defaultMaxFamilies}
-              onChange={(e) =>
-                adminUpdateFamilyConfig({
-                  defaultMaxFamilies: Math.max(1, Number(e.target.value) || 1),
-                })
-              }
+              value={familyDraft.defaultMaxFamilies}
+              onChange={(e) => {
+                isFamilyDirtyRef.current = true;
+                setFamilyDraft((prev) => ({ ...prev, defaultMaxFamilies: e.target.value }));
+              }}
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
             />
             <span className="text-[10px] text-slate-500">Bawaan: 1 Keluarga per akun</span>
@@ -626,12 +749,11 @@ export const AdminDiamondFamilyTab: React.FC = () => {
               type="number"
               min={0}
               step={500000}
-              value={familyConfig.baseSlotMoneyCost}
-              onChange={(e) =>
-                adminUpdateFamilyConfig({
-                  baseSlotMoneyCost: Math.max(0, Number(e.target.value) || 0),
-                })
-              }
+              value={familyDraft.baseSlotMoneyCost}
+              onChange={(e) => {
+                isFamilyDirtyRef.current = true;
+                setFamilyDraft((prev) => ({ ...prev, baseSlotMoneyCost: e.target.value }));
+              }}
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
             />
             <span className="text-[10px] text-slate-500">
@@ -651,12 +773,11 @@ export const AdminDiamondFamilyTab: React.FC = () => {
               type="number"
               min={0}
               step={10}
-              value={familyConfig.baseSlotDiamondCost}
-              onChange={(e) =>
-                adminUpdateFamilyConfig({
-                  baseSlotDiamondCost: Math.max(0, Number(e.target.value) || 0),
-                })
-              }
+              value={familyDraft.baseSlotDiamondCost}
+              onChange={(e) => {
+                isFamilyDirtyRef.current = true;
+                setFamilyDraft((prev) => ({ ...prev, baseSlotDiamondCost: e.target.value }));
+              }}
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-cyan-300"
             />
             <span className="inline-flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
@@ -676,12 +797,11 @@ export const AdminDiamondFamilyTab: React.FC = () => {
             <input
               type="number"
               min={2}
-              value={familyConfig.maxMembersPerFamily}
-              onChange={(e) =>
-                adminUpdateFamilyConfig({
-                  maxMembersPerFamily: Math.max(2, Number(e.target.value) || 50),
-                })
-              }
+              value={familyDraft.maxMembersPerFamily}
+              onChange={(e) => {
+                isFamilyDirtyRef.current = true;
+                setFamilyDraft((prev) => ({ ...prev, maxMembersPerFamily: e.target.value }));
+              }}
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
             />
             <span className="text-[10px] text-slate-500">Batas kapasitas anggota</span>

@@ -3081,6 +3081,39 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v14-35-43',
+    version: 'v14.35.43',
+    releaseType: 'major',
+    visibilityMode: 'auto',
+    title:
+      'Rilis Besar v14.35.43: Misi Harian & Misi 7-Hari, Leaderboard Multi-Aset, Bilah Aset HP Lengkap, Sensor Nomor/ID Privasi & Penyaringan Update',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 18:00 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 18:00 WIB',
+    description:
+      'Pembaruan Major v14.35.43 menghadirkan halaman Misi Harian (mendukung Misi Harian, Misi Harian 7-Hari beruntun, dan Misi Biasa dengan pelacakan aktivitas otomatis & hadiah lengkap), halaman Leaderboard multi-aset yang adil, tampilan lengkap Uang + Koin + Diamond + Top-Up pada Navbar versi HP, tombol Sensor Nomor & ID privasi penuh tanda bintang tanpa menyensor menu Keluarga, serta penyaringan otomatis catatan rilis publik.',
+    highlights: [
+      'Misi Harian, Misi Harian 7-Hari & Misi Biasa: Tab Misi Harian resmi hadir di samping Mobile Banking. Daftar awal bersih sampai misi pertama diterbitkan, progres tercatat real-time dari transaksi, putaran Spin, kerja, dan emas, serta mendukung hadiah gabungan Saldo Uang, Koin, Permata, Emas 24K, Poin, Voucher Level, Level Karir, Role, hingga Tier Kartu.',
+      'Leaderboard Peringkat Nasabah Real-Time: Halaman Leaderboard resmi hadir di sebelah Misi Harian dengan 3 kategori utama (Uang, Coin, Diamond) beserta kartu Posisi Peringkat Saya, lencana Centang Biru, dan kepatuhan penuh terhadap mode Sensor Nomor.',
+      'Navbar HP Lengkap (Uang, Koin, Diamond & Top-Up): Layar HP kini menampilkan saldo Uang, Koin Spin, Permata, dan tombol + Top-Up secara serentak dalam format ringkas K/JT/M/T sambil menjaga tulisan BANK NUSANTARA tetap terbaca utuh.',
+      'Sensor Privasi Nomor & ID Penuh (****): Pengguna dapat menyalakan atau mematikan sensor untuk ID 16 Digit, Nomor Rekening, Nomor Kartu ATM, dan Nomor HP dari popup Profil maupun Pengaturan Akun, tetap menyalin nomor asli saat menekan Salin, serta membiarkan menu Keluarga tetap terlihat utuh.',
+      'Penyaringan Otomatis Catatan Rilis Publik: Seluruh catatan arsip lama hingga rilis terbaru otomatis disaring agar hanya menampilkan informasi layanan nasabah yang bersih (tetap mempertahankan keterangan biaya admin transaksi).',
+      'Panel Admin — 25 Kendali Misi, Kontrol Leaderboard & Tampilan Tanpa Sensor: Admin memiliki tab khusus kelola Misi dengan 25 kontrol penuh, pengaturan tampil/sembunyi tier ADMIN & tambah kategori Leaderboard, kelola catatan Update mentah, serta semua Nomor & ID tetap terbuka utuh di Panel Admin.',
+    ],
+    changes: [
+      'Misi Harian, Misi Harian 7-Hari & Misi Biasa: Tab Misi Harian resmi hadir di samping Mobile Banking. Daftar awal bersih sampai misi pertama diterbitkan, progres tercatat real-time dari transaksi, putaran Spin, kerja, dan emas, serta mendukung hadiah gabungan Saldo Uang, Koin, Permata, Emas 24K, Poin, Voucher Level, Level Karir, Role, hingga Tier Kartu.',
+      'Leaderboard Peringkat Nasabah Real-Time: Halaman Leaderboard resmi hadir di sebelah Misi Harian dengan 3 kategori utama (Uang, Coin, Diamond) beserta kartu Posisi Peringkat Saya, lencana Centang Biru, dan kepatuhan penuh terhadap mode Sensor Nomor.',
+      'Navbar HP Lengkap (Uang, Koin, Diamond & Top-Up): Layar HP kini menampilkan saldo Uang, Koin Spin, Permata, dan tombol + Top-Up secara serentak dalam format ringkas K/JT/M/T sambil menjaga tulisan BANK NUSANTARA tetap terbaca utuh.',
+      'Sensor Privasi Nomor & ID Penuh (****): Pengguna dapat menyalakan atau mematikan sensor untuk ID 16 Digit, Nomor Rekening, Nomor Kartu ATM, dan Nomor HP dari popup Profil maupun Pengaturan Akun, tetap menyalin nomor asli saat menekan Salin, serta membiarkan menu Keluarga tetap terlihat utuh.',
+      'Penyaringan Otomatis Catatan Rilis Publik: Seluruh catatan arsip lama hingga rilis terbaru otomatis disaring agar hanya menampilkan informasi layanan nasabah yang bersih (tetap mempertahankan keterangan biaya admin transaksi).',
+      'Panel Admin — 25 Kendali Misi, Kontrol Leaderboard & Tampilan Tanpa Sensor: Admin memiliki tab khusus kelola Misi dengan 25 kontrol penuh, pengaturan tampil/sembunyi tier ADMIN & tambah kategori Leaderboard, kelola catatan Update mentah, serta semua Nomor & ID tetap terbuka utuh di Panel Admin.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-25T11:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v13-35-43',
     version: 'v13.35.43',
     releaseType: 'minor',
@@ -3105,8 +3138,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Sistem Update Real-Time Berjalan Selamanya & Anti-Logout: Pembaruan katalog resmi maupun sinkronisasi Cloud terus aktif otomatis mempromosikan rilis terbaru tanpa pernah mengeluarkan sesi login akun Anda.',
       'Panel Admin — Pengelolaan Infinity & Turun Tier Aman: Daftar akun, tool suntik saldo/koin spin/diamond/poin, dan pembuatan akun di Panel Admin otomatis mengenali Kartu ADMIN sebagai ∞ serta mengembalikan batas aman saat diturunkan ke tier normal.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-25T05:00:00.000Z',
     isAutoDetected: true,
