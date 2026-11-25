@@ -25,6 +25,7 @@ import { JOB_VACANCIES_CATALOG } from '../data/featuresCatalog';
 import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
 import { JobVacancyItem } from '../types/bank';
 import { StopwatchDuelArena } from './StopwatchDuelArena';
+import { DiamondIcon, DiamondText } from './DiamondIcon';
 
 type JobFilterMode = 'all' | 'unlocked' | 'locked' | 'pemula' | 'menengah' | 'eksekutif';
 
@@ -209,6 +210,9 @@ export const JobVacancyView: React.FC = () => {
     workJobClick,
     upgradeJobLevelWithCash,
     useJobLevelVoucher,
+    upgradeJobLevelWithDiamonds,
+    diamondConfig,
+    setIsDiamondStoreOpen,
     playSuitForLevelVoucher,
     jobCoinBonusConfig,
   } = useBank();
@@ -217,6 +221,7 @@ export const JobVacancyView: React.FC = () => {
     type: 'success' | 'error' | 'info' | 'salary';
     title?: string;
     message: string;
+    showTopUpShortcut?: boolean;
   } | null>(null);
 
   const [suitResult, setSuitResult] = useState<{
@@ -724,9 +729,24 @@ export const JobVacancyView: React.FC = () => {
             )}
             <div>
               {feedback.title && (
-                <h4 className="font-black text-white text-sm sm:text-base">{feedback.title}</h4>
+                <h4 className="font-black text-white text-sm sm:text-base">
+                  <DiamondText text={feedback.title} tone="bright" />
+                </h4>
               )}
-              <p className="text-xs sm:text-sm leading-relaxed mt-0.5">{feedback.message}</p>
+              <p className="text-xs sm:text-sm leading-relaxed mt-0.5">
+                <DiamondText text={feedback.message} tone="bright" />
+              </p>
+              {feedback.showTopUpShortcut && (
+                <button
+                  type="button"
+                  onClick={() => setIsDiamondStoreOpen(true)}
+                  className="mt-2.5 inline-flex items-center gap-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 px-3.5 py-1.5 text-xs font-black text-slate-950 shadow-sm transition cursor-pointer"
+                >
+                  <span>Top-Up</span>
+                  <DiamondIcon tone="cyan" className="w-3.5 h-3.5" />
+                  <span>Cepat</span>
+                </button>
+              )}
             </div>
           </div>
           <button
@@ -824,6 +844,55 @@ export const JobVacancyView: React.FC = () => {
                 <span>Bayar Rp 1.000.000 ➔ Naik ke Level {userLevel + 1}</span>
               </button>
             </div>
+
+            {/* Option C: Upgrade Level with Diamond (Admin-Controlled Feature) */}
+            {diamondConfig.enabledFeatures?.job_voucher_upgrade && (
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-sky-950/70 to-slate-950 border border-cyan-500/50 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-cyan-300">
+                    <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
+                    <span>Cara 3: Upgrade Instan pakai</span>
+                    <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
+                  </span>
+                  <span className="inline-flex items-center gap-1 font-mono font-bold text-cyan-200 text-xs tabular-nums">
+                    <span>25</span>
+                    <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
+                    <span>/ +1 Lv (Saldo: {(currentAccount.diamonds || 0).toLocaleString('id-ID')}</span>
+                    <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
+                    <span>)</span>
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = upgradeJobLevelWithDiamonds(1);
+                      setFeedback({
+                        type: res.success ? 'success' : 'error',
+                        title: res.success ? `Naik Permanen ke Level ${res.newLevel}!` : 'Saldo 💎 Kurang',
+                        message: res.message,
+                        showTopUpShortcut: Boolean(res.insufficientDiamonds),
+                      });
+                    }}
+                    className="flex-1 inline-flex items-center justify-center gap-1 py-2.5 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs cursor-pointer transition"
+                  >
+                    <span>Pakai 25</span>
+                    <DiamondIcon tone="cyan" className="w-3.5 h-3.5" />
+                    <span>➔ Lv.{userLevel + 1}</span>
+                  </button>
+                  {(currentAccount.diamonds || 0) < 25 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsDiamondStoreOpen(true)}
+                      className="inline-flex items-center gap-1 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-cyan-400/50 text-cyan-300 font-bold text-xs cursor-pointer"
+                    >
+                      <span>+ Top-Up</span>
+                      <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Summary Progress Bar for 25 Levels */}

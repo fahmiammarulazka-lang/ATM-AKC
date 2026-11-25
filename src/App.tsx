@@ -16,6 +16,11 @@ import { InformationGuide } from './components/InformationGuide';
 import { UpdateHistoryView } from './components/UpdateHistoryView';
 import { JobVacancyView } from './components/JobVacancyView';
 import { SpinTheWheelView } from './components/SpinTheWheelView';
+import { FamilyWorkspaceView } from './components/FamilyWorkspaceView';
+import { DiamondStoreModal } from './components/DiamondStoreModal';
+import { BuatQrisPaymentModal } from './components/BuatQrisPaymentModal';
+import { AdminWarningOverlay } from './components/AdminWarningOverlay';
+import { UiVisibilityNavKey } from './types/bank';
 import {
   DebtManagementView,
   DebtWarningBanner,
@@ -60,8 +65,10 @@ function BankAppContent() {
     isCloudBootReady,
     activeBanLockState,
     markLatestAppUpdateSeen,
+    uiVisibilityConfig,
   } = useBank();
   const [activeView, setActiveView] = useState<AppNavView>('dashboard');
+  const [hiddenTabNotice, setHiddenTabNotice] = useState<string>('');
   const prevAuthUidRef = useRef<string | null>(null);
   const [requestedDashboardTab, setRequestedDashboardTab] = useState<{
     tab: DashboardTab;
@@ -111,11 +118,26 @@ function BankAppContent() {
     }
   }, [activeView, markLatestAppUpdateSeen]);
 
+  // Jika nasabah sedang membuka tab yang baru saja disembunyikan Admin, pindahkan otomatis ke Mobile Banking + tampilkan pesan info
+  useEffect(() => {
+    if (activeView === 'admin' || activeView === 'dashboard') return;
+    const navMap = uiVisibilityConfig?.navTabs;
+    if (!navMap) return;
+    const key = activeView as UiVisibilityNavKey;
+    if (navMap[key] === false) {
+      setActiveView('dashboard');
+      setHiddenTabNotice('Halaman yang Anda buka sedang disembunyikan sementara oleh Administrator. Anda dialihkan ke Mobile Banking.');
+      const timer = window.setTimeout(() => setHiddenTabNotice(''), 5000);
+      return () => window.clearTimeout(timer);
+    }
+  }, [activeView, uiVisibilityConfig]);
+
   // Handle tap-to-navigate deep links from Push Banners, Notification Bell, URL query, & Service Worker
   useEffect(() => {
     const applyDeepLink = (targetView?: string, targetDashboardTab?: string) => {
       const validViews: AppNavView[] = [
         'dashboard',
+        'family',
         'debt',
         'transfer',
         'emas',
@@ -416,11 +438,13 @@ function BankAppContent() {
           </button>
         </div>
       )}
-      {/* Global Closable Website System Notification Modal, Debt Popup & Lapor Bug Modal */}
+      {/* Global Closable Website System Notification Modal, Debt Popup, Diamond Store & BuatQRIS Modal */}
       <WebsiteSystemNotificationModal />
       <GlobalChatAndNotificationLayer />
       <GiftLetterOverlayAndCornerPopup />
       <DebtIncurredPopupModal onOpenDebtTab={() => setActiveView('debt')} />
+      <DiamondStoreModal />
+      <BuatQrisPaymentModal />
 
       {/* Top Navbar (Includes Tab Kotak Hutang di kiri logo, Transfer & Emas 24K, serta indikator Update BARU) */}
       <Navbar
@@ -437,6 +461,24 @@ function BankAppContent() {
         onOpenSecurityCenter={openSecurityCenter}
       />
 
+      {/* Banner & Pop-up Peringatan Sistem Real-Time dari Panel Admin */}
+      <AdminWarningOverlay />
+
+      {hiddenTabNotice && (
+        <div className="max-w-7xl w-full mx-auto px-4 pt-3">
+          <div className="rounded-xl border border-amber-400/40 bg-amber-950/80 px-4 py-2.5 text-xs font-semibold text-amber-200 flex items-center justify-between gap-3">
+            <span>{hiddenTabNotice}</span>
+            <button
+              type="button"
+              onClick={() => setHiddenTabNotice('')}
+              className="text-amber-300 hover:text-white font-bold cursor-pointer"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Banner Peringatan Hutang Aktif + Hitung Mundur Tenggat Real-Time */}
       <DebtWarningBanner
         onOpenDebtTab={() => setActiveView('debt')}
@@ -452,6 +494,7 @@ function BankAppContent() {
             onOpenSecurityCenter={openSecurityCenter}
           />
         )}
+        {activeView === 'family' && <FamilyWorkspaceView />}
         {activeView === 'debt' && (
           <DebtManagementView onNavigateToView={(v) => setActiveView(v)} />
         )}
@@ -566,9 +609,6 @@ function BankAppContent() {
               <div className="font-bold text-white tracking-wider font-mono">
                 PT BANK NUSANTARA (PERSERO) TBK
               </div>
-              <p className="text-[11px] text-slate-400">
-                Terdaftar dan diawasi oleh Otoritas Jasa Keuangan (OJK) serta peserta penjaminan Lembaga Penjamin Simpanan (LPS).
-              </p>
             </div>
           </div>
 

@@ -169,7 +169,36 @@ import {
   SupportFaqCategory,
   SupportFaqItem,
   SupportContactConfig,
+  BugReportReward,
+  BugReportStatus,
+  BugRewardProgramConfig,
+  DiamondFeatureKey,
+  DiamondSystemConfig,
+  UiVisibilityConfig,
+  AdminSystemWarning,
+  QrisOrderStatus,
+  QrisPaymentOrder,
+  FamilyMemberRole,
+  FamilyMemberRecord,
+  FamilyPermissionRequest,
+  FamilyGroup,
+  FamilySystemConfig,
 } from '../types/bank';
+import {
+  DEFAULT_DIAMOND_SYSTEM_CONFIG,
+  DEFAULT_FAMILY_SYSTEM_CONFIG,
+  DEFAULT_UI_VISIBILITY_CONFIG,
+  MAX_DIAMOND_PACKAGE_AMOUNT,
+  MAX_DIAMOND_PURCHASE_RUPIAH,
+  DIAMOND_CONFIG_REVISION,
+  calculateNextFamilySlotCost,
+  formatFamilyCode4x3,
+  generateRandomFamilyCode4x3,
+} from '../data/diamondCatalog';
+import {
+  DEFAULT_BUG_REWARD_CONFIG,
+  getBugStatusMeta,
+} from '../data/bugRewardCatalog';
 import {
   DEFAULT_SUPPORT_FAQS_50,
   DEFAULT_SUPPORT_FAQS_350,
@@ -462,11 +491,42 @@ interface BankContextType {
   }) => Promise<{ success: boolean; message: string; bugReport?: BugReportRecord }>;
   adminUpdateBugReport: (
     id: string,
-    status: 'baru' | 'diproses' | 'selesai',
-    adminReply?: string
+    status: BugReportStatus,
+    adminReply?: string,
+    reward?: BugReportReward,
+    options?: {
+      verifyAndDisburse?: boolean;
+      rejectionReason?: string;
+    }
   ) => Promise<{ success: boolean; message: string }>;
   adminDeleteBugReport: (id: string) => Promise<void>;
   adminClearBugReports: () => Promise<void>;
+  bugRewardConfig: BugRewardProgramConfig;
+  adminUpdateBugRewardConfig: (
+    partial: Partial<BugRewardProgramConfig>
+  ) => { success: boolean; message: string };
+
+  // Kontrol Tampil/Sembunyi Tab & Fitur Navbar/Toko (Real-Time dari Panel Admin)
+  uiVisibilityConfig: UiVisibilityConfig;
+  adminUpdateUiVisibility: (
+    partial: Partial<Omit<UiVisibilityConfig, 'navTabs'>> & {
+      navTabs?: Partial<UiVisibilityConfig['navTabs']>;
+    }
+  ) => { success: boolean; message: string };
+  adminShowAllUiVisibility: () => { success: boolean; message: string };
+
+  // Studio Peringatan Sistem Admin (Manual + 25 Preset Sistem Real-Time)
+  adminWarnings: AdminSystemWarning[];
+  dismissedWarningMap: Record<string, number>;
+  dismissAdminWarning: (warningId: string, resendVersion?: number) => void;
+  adminSaveWarning: (
+    input: Omit<AdminSystemWarning, 'id' | 'createdAt' | 'updatedAt' | 'resendVersion'> & {
+      id?: string;
+    }
+  ) => { success: boolean; message: string; warning?: AdminSystemWarning };
+  adminToggleWarningActive: (id: string) => { success: boolean; message: string };
+  adminResendWarning: (id: string) => { success: boolean; message: string };
+  adminDeleteWarning: (id: string) => { success: boolean; message: string };
 
   // Background & Multi-Channel Notification System (Service Worker + Browser + Banner + Bell)
   notificationsEnabled: boolean;
@@ -1237,6 +1297,114 @@ interface BankContextType {
     mode: 'add' | 'set'
   ) => { success: boolean; message: string };
   adminMassSpinCoinRain: (coins: number) => { success: boolean; message: string };
+
+  // Sistem Diamond, Toko 250 Paket + Custom, Integrasi Pembayaran BuatQRIS & Fitur Keluarga (v13.34.00)
+  diamondConfig: DiamondSystemConfig;
+  qrisOrders: QrisPaymentOrder[];
+  isDiamondStoreOpen: boolean;
+  setIsDiamondStoreOpen: (open: boolean) => void;
+  activeQrisModalOrder: QrisPaymentOrder | null;
+  setActiveQrisModalOrder: (order: QrisPaymentOrder | null) => void;
+  registerQrisOrder: (order: QrisPaymentOrder) => void;
+  updateQrisOrderStatus: (
+    orderId: string,
+    status: QrisOrderStatus,
+    extra?: Partial<QrisPaymentOrder>
+  ) => void;
+  fulfillPaidQrisOrder: (
+    orderId: string,
+    providerReference?: string
+  ) => { success: boolean; alreadyFulfilled?: boolean; message: string; order?: QrisPaymentOrder };
+  adminUpdateDiamondConfig: (
+    partial: Partial<DiamondSystemConfig>
+  ) => { success: boolean; message: string };
+  adminResetDiamondConfig: () => { success: boolean; message: string };
+  adminAdjustAccountDiamonds: (
+    accountId: string,
+    diamonds: number,
+    mode: 'add' | 'set'
+  ) => { success: boolean; message: string };
+  spendAccountDiamonds: (
+    amount: number,
+    featureKey: DiamondFeatureKey,
+    title: string,
+    note?: string
+  ) => {
+    success: boolean;
+    message: string;
+    newDiamondBalance?: number;
+    insufficientDiamonds?: boolean;
+  };
+  upgradeJobLevelWithDiamonds: (
+    levels?: number
+  ) => {
+    success: boolean;
+    newLevel?: number;
+    diamondsSpent?: number;
+    message: string;
+    insufficientDiamonds?: boolean;
+  };
+  exchangeDiamondsToCashOrCoins: (
+    diamonds: number,
+    target: 'cash' | 'coin'
+  ) => {
+    success: boolean;
+    message: string;
+    receivedAmount?: number;
+    insufficientDiamonds?: boolean;
+  };
+
+  // Fitur Keluarga (Buat Keluarga, Tambah Slot Berjenjang, Join Kode XXXX XXXX XXXX, Wakil Co-Leader, Izin & Inspeksi Pribadi Pemilik)
+  familyConfig: FamilySystemConfig;
+  families: FamilyGroup[];
+  adminUpdateFamilyConfig: (
+    partial: Partial<FamilySystemConfig>
+  ) => { success: boolean; message: string };
+  adminDeleteFamily: (familyId: string) => { success: boolean; message: string };
+  createFamilyGroup: (name: string) => { success: boolean; message: string; family?: FamilyGroup };
+  purchaseExtraFamilySlot: () => {
+    success: boolean;
+    message: string;
+    newMaxSlots?: number;
+    moneyPaid?: number;
+    diamondPaid?: number;
+    insufficientDiamonds?: boolean;
+  };
+  joinFamilyByCode: (rawCode: string) => { success: boolean; message: string; family?: FamilyGroup };
+  leaveFamilyGroup: (familyId: string) => { success: boolean; message: string };
+  renameFamilyGroup: (
+    familyId: string,
+    newName: string
+  ) => { success: boolean; message: string };
+  updateMemberNameTag: (
+    familyId: string,
+    targetAccountId: string,
+    newNameTag: string
+  ) => { success: boolean; message: string };
+  setFamilyMemberRole: (
+    familyId: string,
+    targetAccountId: string,
+    role: 'co_leader' | 'member'
+  ) => { success: boolean; message: string };
+  setFamilyMemberPermissions: (
+    familyId: string,
+    targetAccountId: string,
+    perms: { canEditNameTag?: boolean; canEditFamilyName?: boolean }
+  ) => { success: boolean; message: string };
+  submitFamilyPermissionRequest: (
+    familyId: string,
+    type: 'name_tag' | 'family_name',
+    proposedValue: string
+  ) => { success: boolean; message: string };
+  resolveFamilyPermissionRequest: (
+    familyId: string,
+    requestId: string,
+    decision: 'approved' | 'rejected'
+  ) => { success: boolean; message: string };
+  kickFamilyMember: (
+    familyId: string,
+    targetAccountId: string
+  ) => { success: boolean; message: string };
 
   // Mining Kripto, Lelang Supercar & Cyber Vault (Sebelah Spin the Wheel - Pengganti Kerajaan) + Risiko Kerugian & Hutang + Kontrol Admin
   sultanEmpireConfig: SultanEmpireAdminConfig;
@@ -2352,6 +2520,51 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
   const [spinWheelConfig, setSpinWheelConfig] = useState<SpinWheelAdminConfig>(INITIAL_SPIN_WHEEL_CONFIG);
   const [spinHistory, setSpinHistory] = useState<SpinHistoryRecord[]>([]);
+  const [diamondConfig, setDiamondConfig] = useState<DiamondSystemConfig>(
+    DEFAULT_DIAMOND_SYSTEM_CONFIG
+  );
+  const diamondConfigRef = useRef<DiamondSystemConfig>(diamondConfig);
+  diamondConfigRef.current = diamondConfig;
+
+  const [uiVisibilityConfig, setUiVisibilityConfig] = useState<UiVisibilityConfig>(
+    DEFAULT_UI_VISIBILITY_CONFIG
+  );
+  const uiVisibilityConfigRef = useRef<UiVisibilityConfig>(uiVisibilityConfig);
+  uiVisibilityConfigRef.current = uiVisibilityConfig;
+
+  const [adminWarnings, setAdminWarnings] = useState<AdminSystemWarning[]>([]);
+  const adminWarningsRef = useRef<AdminSystemWarning[]>(adminWarnings);
+  adminWarningsRef.current = adminWarnings;
+  const [dismissedWarningMap, setDismissedWarningMap] = useState<Record<string, number>>({});
+
+  const [bugRewardConfig, setBugRewardConfig] = useState<BugRewardProgramConfig>(
+    DEFAULT_BUG_REWARD_CONFIG
+  );
+  const bugRewardConfigRef = useRef<BugRewardProgramConfig>(bugRewardConfig);
+  bugRewardConfigRef.current = bugRewardConfig;
+  const [qrisOrders, setQrisOrders] = useState<QrisPaymentOrder[]>([]);
+  const qrisOrdersRef = useRef<QrisPaymentOrder[]>(qrisOrders);
+  qrisOrdersRef.current = qrisOrders;
+  const [isDiamondStoreOpen, setIsDiamondStoreOpen] = useState<boolean>(false);
+  const [activeQrisModalOrder, setActiveQrisModalOrder] = useState<QrisPaymentOrder | null>(null);
+  const fulfillPaidQrisOrderRef = useRef<
+    ((orderId: string, providerReference?: string) => {
+      success: boolean;
+      alreadyFulfilled?: boolean;
+      message: string;
+      order?: QrisPaymentOrder;
+    }) | null
+  >(null);
+
+  const [familyConfig, setFamilyConfig] = useState<FamilySystemConfig>(
+    DEFAULT_FAMILY_SYSTEM_CONFIG
+  );
+  const familyConfigRef = useRef<FamilySystemConfig>(familyConfig);
+  familyConfigRef.current = familyConfig;
+  const [families, setFamilies] = useState<FamilyGroup[]>([]);
+  const familiesRef = useRef<FamilyGroup[]>(families);
+  familiesRef.current = families;
+
   const [sultanEmpireConfig, setSultanEmpireConfig] = useState<SultanEmpireAdminConfig>(
     INITIAL_SULTAN_EMPIRE_CONFIG
   );
@@ -2622,6 +2835,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isGuestAccount: hasGoogle ? false : Boolean(a.isGuestAccount),
       isOfficialAdminAccount: Boolean(a.isOfficialAdminAccount || a.id === 'acc-admin'),
       oaAdminPin: a.oaAdminPin || '159357',
+      jobLevel: Math.max(1, Math.floor(Number(a.jobLevel) || 1)),
+      levelVouchers: Math.max(0, Math.floor(Number(a.levelVouchers) || 0)),
+      diamonds: Math.max(0, Math.floor(Number(a.diamonds) || 0)),
+      extraFamilySlots: Math.max(0, Math.floor(Number(a.extraFamilySlots) || 0)),
+      accountUpdatedAtMs: Number(a.accountUpdatedAtMs) || 0,
       status:
         a.status === 'banned' || a.cardStatus === 'banned' || a.banInfo?.isBanned
           ? ('banned' as const)
@@ -2643,6 +2861,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     ]);
     const map = new Map<string, BankAccount>();
 
+    const pickFresherAccount = (existing: BankAccount | undefined, incoming: BankAccount): BankAccount => {
+      if (!existing) return incoming;
+      const existingTs = Number(existing.accountUpdatedAtMs) || 0;
+      const incomingTs = Number(incoming.accountUpdatedAtMs) || 0;
+      if (existingTs > incomingTs) {
+        return existing;
+      }
+      if (incomingTs > existingTs) {
+        return incoming;
+      }
+      // Jika timestamp sama-sama 0 (data lama), pertahankan progres level pekerjaan / diamond / slot keluarga tertinggi agar tidak rollback
+      return {
+        ...incoming,
+        jobLevel: Math.max(existing.jobLevel || 1, incoming.jobLevel || 1),
+        diamonds: Math.max(existing.diamonds || 0, incoming.diamonds || 0),
+        extraFamilySlots: Math.max(existing.extraFamilySlots || 0, incoming.extraFamilySlots || 0),
+      };
+    };
+
     for (const list of fallbackLists) {
       if (!Array.isArray(list)) continue;
       for (const item of list) {
@@ -2654,7 +2891,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ) {
           continue;
         }
-        map.set(item.id, normalizeAndSanitizeAccount(item));
+        const normalized = normalizeAndSanitizeAccount(item);
+        map.set(item.id, pickFresherAccount(map.get(item.id), normalized));
       }
     }
 
@@ -2667,7 +2905,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ) {
         continue;
       }
-      map.set(item.id, normalizeAndSanitizeAccount(item));
+      const normalized = normalizeAndSanitizeAccount(item);
+      map.set(item.id, pickFresherAccount(map.get(item.id), normalized));
     }
 
     // Pastikan Kartu Admin Utama ('acc-admin') selalu tersedia kecuali sengaja dihapus
@@ -3061,6 +3300,77 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }));
     }
     if (Array.isArray(data.spinHistory)) setSpinHistory(data.spinHistory as SpinHistoryRecord[]);
+    if (data.diamondConfig && typeof data.diamondConfig === 'object') {
+      const inc = data.diamondConfig as Partial<DiamondSystemConfig>;
+      const needs55PercentPriceCut =
+        (inc.priceRevision ?? 1) < 2 &&
+        (inc.baseDiamondPriceRupiah === undefined || inc.baseDiamondPriceRupiah === 200);
+      const needsCapV3Migration = (inc.priceRevision ?? 1) < DIAMOND_CONFIG_REVISION;
+      const nextDiamondCfg: DiamondSystemConfig = {
+        ...diamondConfigRef.current,
+        ...inc,
+        baseDiamondPriceRupiah: needs55PercentPriceCut
+          ? DEFAULT_DIAMOND_SYSTEM_CONFIG.baseDiamondPriceRupiah
+          : Math.max(1, Math.round(inc.baseDiamondPriceRupiah ?? diamondConfigRef.current.baseDiamondPriceRupiah)),
+        maxCustomDiamond: needsCapV3Migration
+          ? Math.min(MAX_DIAMOND_PACKAGE_AMOUNT, inc.maxCustomDiamond ?? MAX_DIAMOND_PACKAGE_AMOUNT)
+          : Math.max(1, Math.min(MAX_DIAMOND_PACKAGE_AMOUNT, Math.round(inc.maxCustomDiamond ?? MAX_DIAMOND_PACKAGE_AMOUNT))),
+        maxPurchaseRupiah: Math.max(
+          1,
+          Math.min(MAX_DIAMOND_PURCHASE_RUPIAH, Math.round(inc.maxPurchaseRupiah ?? MAX_DIAMOND_PURCHASE_RUPIAH))
+        ),
+        priceRevision: Math.max(DIAMOND_CONFIG_REVISION, inc.priceRevision ?? DIAMOND_CONFIG_REVISION),
+        enabledFeatures: {
+          ...diamondConfigRef.current.enabledFeatures,
+          ...(inc.enabledFeatures || {}),
+        },
+      };
+      diamondConfigRef.current = nextDiamondCfg;
+      setDiamondConfig(nextDiamondCfg);
+    }
+    if (data.uiVisibilityConfig && typeof data.uiVisibilityConfig === 'object') {
+      const incVis = data.uiVisibilityConfig as Partial<UiVisibilityConfig>;
+      const mergedVis: UiVisibilityConfig = {
+        ...DEFAULT_UI_VISIBILITY_CONFIG,
+        ...incVis,
+        navTabs: {
+          ...DEFAULT_UI_VISIBILITY_CONFIG.navTabs,
+          ...(incVis.navTabs || {}),
+        },
+      };
+      uiVisibilityConfigRef.current = mergedVis;
+      setUiVisibilityConfig(mergedVis);
+    }
+    if (Array.isArray(data.adminWarnings)) {
+      const incomingWarnings = data.adminWarnings as AdminSystemWarning[];
+      adminWarningsRef.current = incomingWarnings;
+      setAdminWarnings(incomingWarnings);
+    }
+    if (data.bugRewardConfig && typeof data.bugRewardConfig === 'object') {
+      const incBugCfg = data.bugRewardConfig as Partial<BugRewardProgramConfig>;
+      const mergedBugCfg: BugRewardProgramConfig = {
+        ...DEFAULT_BUG_REWARD_CONFIG,
+        ...incBugCfg,
+      };
+      bugRewardConfigRef.current = mergedBugCfg;
+      setBugRewardConfig(mergedBugCfg);
+    }
+    if (Array.isArray(data.qrisOrders)) {
+      const incomingOrders = data.qrisOrders as QrisPaymentOrder[];
+      qrisOrdersRef.current = incomingOrders;
+      setQrisOrders(incomingOrders);
+    }
+    if (data.familyConfig && typeof data.familyConfig === 'object') {
+      setFamilyConfig((prev) => ({
+        ...prev,
+        ...(data.familyConfig as Partial<FamilySystemConfig>),
+      }));
+    }
+    if (Array.isArray(data.families)) {
+      const incomingFamilies = data.families as FamilyGroup[];
+      familiesRef.current = incomingFamilies;
+      setFamilies(incomingFamilies);
+    }
     if (data.sultanEmpireConfig && typeof data.sultanEmpireConfig === 'object') {
       setSultanEmpireConfig((prev) => ({
         ...prev,
@@ -3159,6 +3469,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     cardlessTokens?: CardlessToken[];
     spinWheelConfig?: SpinWheelAdminConfig;
     spinHistory?: SpinHistoryRecord[];
+    diamondConfig?: DiamondSystemConfig;
+    uiVisibilityConfig?: UiVisibilityConfig;
+    adminWarnings?: AdminSystemWarning[];
+    bugRewardConfig?: BugRewardProgramConfig;
+    qrisOrders?: QrisPaymentOrder[];
+    familyConfig?: FamilySystemConfig;
+    families?: FamilyGroup[];
     sultanEmpireConfig?: SultanEmpireAdminConfig;
     featureConfigs?: FeatureSecurityConfig[];
     deletedFeatureIds?: string[];
@@ -3293,6 +3610,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ),
       spinWheelConfig: overrides?.spinWheelConfig ?? spinWheelConfig,
       spinHistory: (overrides?.spinHistory ?? spinHistory).slice(0, 80),
+      diamondConfig: overrides?.diamondConfig ?? diamondConfigRef.current,
+      uiVisibilityConfig: overrides?.uiVisibilityConfig ?? uiVisibilityConfigRef.current,
+      adminWarnings: overrides?.adminWarnings ?? adminWarningsRef.current,
+      bugRewardConfig: overrides?.bugRewardConfig ?? bugRewardConfigRef.current,
+      qrisOrders: (overrides?.qrisOrders ?? qrisOrdersRef.current).slice(0, 120),
+      familyConfig: overrides?.familyConfig ?? familyConfigRef.current,
+      families: (overrides?.families ?? familiesRef.current).slice(0, 150),
       sultanEmpireConfig: overrides?.sultanEmpireConfig ?? sultanEmpireConfig,
       featureConfigs: overrides?.featureConfigs ?? rawFeatureConfigs,
       deletedFeatureIds: overrides?.deletedFeatureIds ?? deletedFeatureIds,
@@ -7716,6 +8040,57 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setBugReports(data.bugReports);
         }
 
+        if (data.diamondConfig && typeof data.diamondConfig === 'object') {
+          const incD = data.diamondConfig as Partial<DiamondSystemConfig>;
+          const mergedD: DiamondSystemConfig = {
+            ...diamondConfigRef.current,
+            ...incD,
+            maxCustomDiamond: Math.max(1, Math.min(MAX_DIAMOND_PACKAGE_AMOUNT, Math.round(incD.maxCustomDiamond ?? diamondConfigRef.current.maxCustomDiamond))),
+            maxPurchaseRupiah: Math.max(
+              1,
+              Math.min(
+                MAX_DIAMOND_PURCHASE_RUPIAH,
+                Math.round(incD.maxPurchaseRupiah ?? diamondConfigRef.current.maxPurchaseRupiah ?? MAX_DIAMOND_PURCHASE_RUPIAH)
+              )
+            ),
+            enabledFeatures: {
+              ...diamondConfigRef.current.enabledFeatures,
+              ...(incD.enabledFeatures || {}),
+            },
+          };
+          diamondConfigRef.current = mergedD;
+          setDiamondConfig(mergedD);
+        }
+
+        if (data.uiVisibilityConfig && typeof data.uiVisibilityConfig === 'object') {
+          const incVis = data.uiVisibilityConfig as Partial<UiVisibilityConfig>;
+          const mergedVis: UiVisibilityConfig = {
+            ...DEFAULT_UI_VISIBILITY_CONFIG,
+            ...incVis,
+            navTabs: {
+              ...DEFAULT_UI_VISIBILITY_CONFIG.navTabs,
+              ...(incVis.navTabs || {}),
+            },
+          };
+          uiVisibilityConfigRef.current = mergedVis;
+          setUiVisibilityConfig(mergedVis);
+        }
+
+        if (Array.isArray(data.adminWarnings)) {
+          const incomingWarnings = data.adminWarnings as AdminSystemWarning[];
+          adminWarningsRef.current = incomingWarnings;
+          setAdminWarnings(incomingWarnings);
+        }
+
+        if (data.bugRewardConfig && typeof data.bugRewardConfig === 'object') {
+          const mergedBugCfg: BugRewardProgramConfig = {
+            ...DEFAULT_BUG_REWARD_CONFIG,
+            ...(data.bugRewardConfig as Partial<BugRewardProgramConfig>),
+          };
+          bugRewardConfigRef.current = mergedBugCfg;
+          setBugRewardConfig(mergedBugCfg);
+        }
+
         if (Array.isArray(data.deletedGiftEventIds)) {
           const mergedDeleted = Array.from(
             new Set([...deletedGiftEventIdsRef.current, ...data.deletedGiftEventIds])
@@ -7848,6 +8223,53 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               if (Array.isArray(msg.payload.bugReports)) {
                 setBugReports(msg.payload.bugReports);
               }
+              if (msg.payload.diamondConfig && typeof msg.payload.diamondConfig === 'object') {
+                const incD = msg.payload.diamondConfig as Partial<DiamondSystemConfig>;
+                const mergedD: DiamondSystemConfig = {
+                  ...diamondConfigRef.current,
+                  ...incD,
+                  maxCustomDiamond: Math.max(1, Math.min(MAX_DIAMOND_PACKAGE_AMOUNT, Math.round(incD.maxCustomDiamond ?? diamondConfigRef.current.maxCustomDiamond))),
+                  maxPurchaseRupiah: Math.max(
+                    1,
+                    Math.min(
+                      MAX_DIAMOND_PURCHASE_RUPIAH,
+                      Math.round(incD.maxPurchaseRupiah ?? diamondConfigRef.current.maxPurchaseRupiah ?? MAX_DIAMOND_PURCHASE_RUPIAH)
+                    )
+                  ),
+                  enabledFeatures: {
+                    ...diamondConfigRef.current.enabledFeatures,
+                    ...(incD.enabledFeatures || {}),
+                  },
+                };
+                diamondConfigRef.current = mergedD;
+                setDiamondConfig(mergedD);
+              }
+              if (msg.payload.uiVisibilityConfig && typeof msg.payload.uiVisibilityConfig === 'object') {
+                const incVis = msg.payload.uiVisibilityConfig as Partial<UiVisibilityConfig>;
+                const mergedVis: UiVisibilityConfig = {
+                  ...DEFAULT_UI_VISIBILITY_CONFIG,
+                  ...incVis,
+                  navTabs: {
+                    ...DEFAULT_UI_VISIBILITY_CONFIG.navTabs,
+                    ...(incVis.navTabs || {}),
+                  },
+                };
+                uiVisibilityConfigRef.current = mergedVis;
+                setUiVisibilityConfig(mergedVis);
+              }
+              if (Array.isArray(msg.payload.adminWarnings)) {
+                const incomingWarnings = msg.payload.adminWarnings as AdminSystemWarning[];
+                adminWarningsRef.current = incomingWarnings;
+                setAdminWarnings(incomingWarnings);
+              }
+              if (msg.payload.bugRewardConfig && typeof msg.payload.bugRewardConfig === 'object') {
+                const mergedBugCfg: BugRewardProgramConfig = {
+                  ...DEFAULT_BUG_REWARD_CONFIG,
+                  ...(msg.payload.bugRewardConfig as Partial<BugRewardProgramConfig>),
+                };
+                bugRewardConfigRef.current = mergedBugCfg;
+                setBugRewardConfig(mergedBugCfg);
+              }
               if (Array.isArray(msg.payload.deletedGiftEventIds)) {
                 setDeletedGiftEventIds((prev) =>
                   Array.from(new Set([...prev, ...msg.payload.deletedGiftEventIds]))
@@ -7892,6 +8314,49 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               if (typeof msg.payload.connectedDevices === 'number') {
                 setConnectedDevicesCount(Math.max(1, msg.payload.connectedDevices));
               }
+            } else if (msg.type === 'diamond_config:updated' && msg.payload?.diamondConfig) {
+              const incD = msg.payload.diamondConfig as Partial<DiamondSystemConfig>;
+              const mergedD: DiamondSystemConfig = {
+                ...diamondConfigRef.current,
+                ...incD,
+                maxCustomDiamond: Math.max(1, Math.min(MAX_DIAMOND_PACKAGE_AMOUNT, Math.round(incD.maxCustomDiamond ?? diamondConfigRef.current.maxCustomDiamond))),
+                maxPurchaseRupiah: Math.max(
+                  1,
+                  Math.min(
+                    MAX_DIAMOND_PURCHASE_RUPIAH,
+                    Math.round(incD.maxPurchaseRupiah ?? diamondConfigRef.current.maxPurchaseRupiah ?? MAX_DIAMOND_PURCHASE_RUPIAH)
+                  )
+                ),
+                enabledFeatures: {
+                  ...diamondConfigRef.current.enabledFeatures,
+                  ...(incD.enabledFeatures || {}),
+                },
+              };
+              diamondConfigRef.current = mergedD;
+              setDiamondConfig(mergedD);
+            } else if (msg.type === 'ui_visibility:updated' && msg.payload?.uiVisibilityConfig) {
+              const incVis = msg.payload.uiVisibilityConfig as Partial<UiVisibilityConfig>;
+              const mergedVis: UiVisibilityConfig = {
+                ...DEFAULT_UI_VISIBILITY_CONFIG,
+                ...incVis,
+                navTabs: {
+                  ...DEFAULT_UI_VISIBILITY_CONFIG.navTabs,
+                  ...(incVis.navTabs || {}),
+                },
+              };
+              uiVisibilityConfigRef.current = mergedVis;
+              setUiVisibilityConfig(mergedVis);
+            } else if (msg.type === 'admin_warnings:updated' && Array.isArray(msg.payload?.adminWarnings)) {
+              const incomingWarnings = msg.payload.adminWarnings as AdminSystemWarning[];
+              adminWarningsRef.current = incomingWarnings;
+              setAdminWarnings(incomingWarnings);
+            } else if (msg.type === 'bug_reward_config:updated' && msg.payload?.bugRewardConfig) {
+              const mergedBugCfg: BugRewardProgramConfig = {
+                ...DEFAULT_BUG_REWARD_CONFIG,
+                ...(msg.payload.bugRewardConfig as Partial<BugRewardProgramConfig>),
+              };
+              bugRewardConfigRef.current = mergedBugCfg;
+              setBugRewardConfig(mergedBugCfg);
             } else if (
               msg.type === 'gift_events:updated' &&
               Array.isArray(msg.payload?.giftEvents)
@@ -7975,6 +8440,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               setBugReports((prev) => prev.filter((b) => b.id !== msg.payload.id));
             } else if (msg.type === 'bug_report:clear') {
               setBugReports([]);
+            } else if (msg.type === 'qris_payment:paid' && msg.payload?.order?.orderId) {
+              const paidOrderId = String(msg.payload.order.orderId);
+              const providerRef = msg.payload.order.providerReference
+                ? String(msg.payload.order.providerReference)
+                : undefined;
+              window.setTimeout(() => {
+                fulfillPaidQrisOrderRef.current?.(paidOrderId, providerRef);
+              }, 0);
             }
           } catch {
             // ignore
@@ -8134,6 +8607,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const bugId = `bug-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const newBug: BugReportRecord = {
       id: bugId,
+      reporterAccountId: currentAccount?.id,
       reporterName: currentAccount?.fullName || googleUser?.name || 'Pengguna Bank Nusantara',
       reporterAccountNumber: currentAccount?.accountNumber,
       reporterEmail: googleUser?.email || currentAccount?.email,
@@ -8146,7 +8620,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     seenBugIdsRef.current.add(bugId);
-    setBugReports((prev) => [newBug, ...prev]);
+    const nextBugs = [newBug, ...bugReports];
+    setBugReports(nextBugs);
+    flushMasterStateToCloud({ bugReports: nextBugs });
     playAtmSound('success');
 
     try {
@@ -8175,35 +8651,489 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const adminUpdateBugReport = async (
     id: string,
-    status: 'baru' | 'diproses' | 'selesai',
-    adminReply?: string
+    status: BugReportStatus,
+    adminReply?: string,
+    reward?: BugReportReward,
+    options?: {
+      verifyAndDisburse?: boolean;
+      rejectionReason?: string;
+    }
   ): Promise<{ success: boolean; message: string }> => {
-    setBugReports((prev) =>
-      prev.map((b) =>
+    const existingBug = bugReports.find((b) => b.id === id);
+    const effectiveStatus: BugReportStatus = options?.verifyAndDisburse ? 'terverifikasi' : status;
+    const isRejectedStatus =
+      effectiveStatus === 'ditolak' ||
+      effectiveStatus === 'duplikat' ||
+      effectiveStatus === 'tidak_repro';
+    const isAdminVerifiedNow =
+      effectiveStatus === 'terverifikasi' || Boolean(options?.verifyAndDisburse);
+
+    let finalReward: BugReportReward | undefined = existingBug?.reward;
+    let rewardFeedback = '';
+    const nextIsVerifiedByAdmin = isRejectedStatus
+      ? false
+      : isAdminVerifiedNow
+      ? true
+      : existingBug?.isVerifiedByAdmin;
+    const nextVerifiedAt =
+      isAdminVerifiedNow && !existingBug?.verifiedAt
+        ? new Date().toISOString()
+        : existingBug?.verifiedAt;
+    const nextRejectionReason =
+      options?.rejectionReason !== undefined
+        ? options.rejectionReason.trim()
+        : isRejectedStatus && adminReply
+        ? adminReply.trim()
+        : existingBug?.rejectionReason;
+
+    // Hadiah HANYA boleh dicairkan saat Admin memverifikasi bug (status 'terverifikasi' / verifyAndDisburse) dan belum pernah dicairkan (anti-duplikat)
+    const shouldAttemptDisburse =
+      isAdminVerifiedNow &&
+      !isRejectedStatus &&
+      !existingBug?.reward?.given &&
+      Boolean(reward?.given || options?.verifyAndDisburse);
+
+    if (shouldAttemptDisburse) {
+      const cfg = bugRewardConfigRef.current;
+      const sourceReward = reward || (cfg.enabled
+        ? {
+            given: true,
+            cashAmount: cfg.cashAmount,
+            coinAmount: cfg.coinAmount,
+            diamondAmount: cfg.diamondAmount,
+            goldGrams: cfg.goldGrams,
+            voucherAmount: cfg.voucherAmount,
+            pointsAmount: cfg.pointsAmount,
+            familySlotAmount: cfg.familySlotAmount,
+            adminRewardMessage: cfg.defaultRewardMessage,
+          }
+        : undefined);
+
+      const cashAmt = Math.max(0, Math.floor(Number(sourceReward?.cashAmount) || 0));
+      const coinAmt = Math.max(0, Math.floor(Number(sourceReward?.coinAmount) || 0));
+      const diamondAmt = Math.max(0, Math.floor(Number(sourceReward?.diamondAmount) || 0));
+      const goldAmt = Math.max(0, Math.round((Number(sourceReward?.goldGrams) || 0) * 100) / 100);
+      const voucherAmt = Math.max(0, Math.floor(Number(sourceReward?.voucherAmount) || 0));
+      const pointsAmt = Math.max(0, Math.floor(Number(sourceReward?.pointsAmount) || 0));
+      const familySlotAmt = Math.max(0, Math.floor(Number(sourceReward?.familySlotAmount) || 0));
+      const hasAnyReward =
+        cashAmt > 0 ||
+        coinAmt > 0 ||
+        diamondAmt > 0 ||
+        goldAmt > 0 ||
+        voucherAmt > 0 ||
+        pointsAmt > 0 ||
+        familySlotAmt > 0;
+      const cleanRewardMsg = (sourceReward?.adminRewardMessage || cfg.defaultRewardMessage || '').trim();
+
+      if (hasAnyReward) {
+        const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+        const targetAcc = pool.find(
+          (a) =>
+            (existingBug?.reporterAccountId && a.id === existingBug.reporterAccountId) ||
+            (existingBug?.reporterAccountNumber && a.accountNumber === existingBug.reporterAccountNumber) ||
+            (existingBug?.reporterEmail &&
+              normalizeEmailKey(a.googleEmail || a.email || '') === normalizeEmailKey(existingBug.reporterEmail))
+        );
+
+        finalReward = {
+          given: true,
+          cashAmount: cashAmt,
+          coinAmount: coinAmt,
+          diamondAmount: diamondAmt,
+          goldGrams: goldAmt,
+          voucherAmount: voucherAmt,
+          pointsAmount: pointsAmt,
+          familySlotAmount: familySlotAmt,
+          adminRewardMessage:
+            cleanRewardMsg ||
+            'Laporan bug Anda telah diverifikasi Admin. Hadiah apresiasi resmi telah masuk ke akun Anda!',
+          awardedAt: new Date().toISOString(),
+          awardedBy: 'Admin Bank Nusantara',
+        };
+
+        if (targetAcc) {
+          const stampMs = Date.now();
+          const isUnlim = targetAcc.cardTier === 'admin' || isUnlimitedNumber(targetAcc.balance);
+          const nextBal = isUnlim ? UNLIMITED_BALANCE : targetAcc.balance + cashAmt;
+          const updatedAccounts = pool.map((a) =>
+            a.id === targetAcc.id
+              ? {
+                  ...a,
+                  balance: nextBal,
+                  spinCoins: (a.spinCoins || 0) + coinAmt,
+                  diamonds: (a.diamonds || 0) + diamondAmt,
+                  goldGrams: Math.round(((a.goldGrams || 0) + goldAmt) * 100) / 100,
+                  levelVouchers: (a.levelVouchers || 0) + voucherAmt,
+                  rewardPoints: (a.rewardPoints || 0) + pointsAmt,
+                  extraFamilySlots: (a.extraFamilySlots || 0) + familySlotAmt,
+                  accountUpdatedAtMs: stampMs,
+                }
+              : a
+          );
+          accountsRef.current = updatedAccounts;
+          latestServerAccountsRef.current = updatedAccounts;
+          setAccounts(updatedAccounts);
+
+          const rewardParts: string[] = [];
+          if (cashAmt > 0) rewardParts.push(formatRupiah(cashAmt));
+          if (coinAmt > 0) rewardParts.push(`${coinAmt.toLocaleString('id-ID')} Coin`);
+          if (diamondAmt > 0) rewardParts.push(`${diamondAmt.toLocaleString('id-ID')} Permata`);
+          if (goldAmt > 0) rewardParts.push(`${goldAmt.toLocaleString('id-ID')} gr Emas 24K`);
+          if (voucherAmt > 0) rewardParts.push(`${voucherAmt.toLocaleString('id-ID')} Voucher Level`);
+          if (pointsAmt > 0) rewardParts.push(`${pointsAmt.toLocaleString('id-ID')} Poin`);
+          if (familySlotAmt > 0) rewardParts.push(`${familySlotAmt.toLocaleString('id-ID')} Slot Keluarga`);
+
+          const rewardSummary = rewardParts.join(' + ');
+          const tx: Transaction = {
+            id: `tx-bug-reward-${stampMs}`,
+            accountId: targetAcc.id,
+            type: 'setor',
+            title: `Hadiah Verifikasi Laporan Bug: ${rewardSummary}`,
+            amount: cashAmt,
+            coinAmount: coinAmt > 0 ? coinAmt : undefined,
+            balanceAfter: nextBal,
+            date: new Date().toISOString(),
+            timestamp: new Date().toISOString(),
+            referenceNo: `BUGRWD-${String(stampMs).slice(-6)}`,
+            status: 'berhasil',
+            note: finalReward.adminRewardMessage,
+          };
+          const nextTxs = [tx, ...transactions];
+          setTransactions(nextTxs);
+
+          const notif: AppNotification = {
+            id: `notif-bugrwd-${stampMs}`,
+            title: 'Hadiah Laporan Bug Terverifikasi Diterima!',
+            message: `Laporan bug Anda telah diverifikasi Admin! Hadiah (${rewardSummary}) langsung masuk ke akun Anda.`,
+            type: 'success',
+            category: 'sistem',
+            timestamp: new Date().toISOString(),
+            read: false,
+            accountId: targetAcc.id,
+          };
+          const nextNotifs = [notif, ...notifications];
+          setNotifications(nextNotifs);
+
+          const nextBugsWithReward = bugReports.map((b) =>
+            b.id === id
+              ? {
+                  ...b,
+                  status: effectiveStatus,
+                  isVerifiedByAdmin: true,
+                  verifiedAt: nextVerifiedAt,
+                  adminReply: adminReply !== undefined ? adminReply : b.adminReply,
+                  reward: finalReward,
+                  updatedAt: new Date().toISOString(),
+                }
+              : b
+          );
+          setBugReports(nextBugsWithReward);
+          flushMasterStateToCloud({
+            accounts: updatedAccounts,
+            transactions: nextTxs,
+            notifications: nextNotifs,
+            bugReports: nextBugsWithReward,
+          });
+
+          if (targetAcc.firebaseUid || targetAcc.googleEmail || targetAcc.email) {
+            void syncCloudUserProfile(
+              {
+                uid: targetAcc.firebaseUid,
+                email: targetAcc.googleEmail || targetAcc.email,
+                fallbackEmail: targetAcc.email,
+              },
+              { lastBugRewardAtMs: stampMs },
+              updatedAccounts
+            );
+          }
+
+          rewardFeedback = ` Hadiah (${rewardSummary}) langsung cair ke akun ${targetAcc.fullName}!`;
+        } else {
+          const nextBugsWithReward = bugReports.map((b) =>
+            b.id === id
+              ? {
+                  ...b,
+                  status: effectiveStatus,
+                  isVerifiedByAdmin: true,
+                  verifiedAt: nextVerifiedAt,
+                  adminReply: adminReply !== undefined ? adminReply : b.adminReply,
+                  reward: finalReward,
+                  updatedAt: new Date().toISOString(),
+                }
+              : b
+          );
+          setBugReports(nextBugsWithReward);
+          flushMasterStateToCloud({ bugReports: nextBugsWithReward });
+          rewardFeedback = ' Catatan: Akun pelapor tidak ditemukan untuk kredit otomatis, namun status terverifikasi tersimpan.';
+        }
+      } else {
+        const nextBugs = bugReports.map((b) =>
+          b.id === id
+            ? {
+                ...b,
+                status: effectiveStatus,
+                isVerifiedByAdmin: nextIsVerifiedByAdmin,
+                verifiedAt: nextVerifiedAt,
+                rejectionReason: nextRejectionReason,
+                adminReply: adminReply !== undefined ? adminReply : b.adminReply,
+                updatedAt: new Date().toISOString(),
+              }
+            : b
+        );
+        setBugReports(nextBugs);
+        flushMasterStateToCloud({ bugReports: nextBugs });
+      }
+    } else {
+      const nextBugs = bugReports.map((b) =>
         b.id === id
           ? {
               ...b,
-              status,
+              status: effectiveStatus,
+              isVerifiedByAdmin: nextIsVerifiedByAdmin,
+              verifiedAt: nextVerifiedAt,
+              rejectionReason: nextRejectionReason,
               adminReply: adminReply !== undefined ? adminReply : b.adminReply,
               updatedAt: new Date().toISOString(),
             }
           : b
-      )
-    );
+      );
+      setBugReports(nextBugs);
+      flushMasterStateToCloud({ bugReports: nextBugs });
+    }
+
     playAtmSound('success');
 
     try {
       await fetch(`/api/bug-reports/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, adminReply }),
+        body: JSON.stringify({
+          status: effectiveStatus,
+          adminReply,
+          reward: finalReward,
+          isVerifiedByAdmin: nextIsVerifiedByAdmin,
+          verifiedAt: nextVerifiedAt,
+          rejectionReason: nextRejectionReason,
+        }),
       });
     } catch { /* empty */ }
 
+    const statusLabel = getBugStatusMeta(effectiveStatus).label;
     return {
       success: true,
-      message: `Status laporan bug berhasil diperbarui menjadi "${status.toUpperCase()}"!`,
+      message: `Status laporan bug diperbarui ke "${statusLabel}".${rewardFeedback}`,
     };
+  };
+
+  const adminUpdateBugRewardConfig = (
+    partial: Partial<BugRewardProgramConfig>
+  ): { success: boolean; message: string } => {
+    const nextCfg: BugRewardProgramConfig = {
+      ...bugRewardConfigRef.current,
+      ...partial,
+      enabled: partial.enabled !== undefined ? Boolean(partial.enabled) : bugRewardConfigRef.current.enabled,
+      cashAmount: Math.max(0, Math.floor(Number(partial.cashAmount ?? bugRewardConfigRef.current.cashAmount) || 0)),
+      coinAmount: Math.max(0, Math.floor(Number(partial.coinAmount ?? bugRewardConfigRef.current.coinAmount) || 0)),
+      diamondAmount: Math.max(0, Math.floor(Number(partial.diamondAmount ?? bugRewardConfigRef.current.diamondAmount) || 0)),
+      goldGrams: Math.max(0, Math.round((Number(partial.goldGrams ?? bugRewardConfigRef.current.goldGrams) || 0) * 100) / 100),
+      voucherAmount: Math.max(0, Math.floor(Number(partial.voucherAmount ?? bugRewardConfigRef.current.voucherAmount) || 0)),
+      pointsAmount: Math.max(0, Math.floor(Number(partial.pointsAmount ?? bugRewardConfigRef.current.pointsAmount) || 0)),
+      familySlotAmount: Math.max(0, Math.floor(Number(partial.familySlotAmount ?? bugRewardConfigRef.current.familySlotAmount) || 0)),
+      defaultRewardMessage: String(
+        partial.defaultRewardMessage ?? bugRewardConfigRef.current.defaultRewardMessage ?? ''
+      ).slice(0, 300),
+      updatedAt: new Date().toISOString(),
+    };
+    bugRewardConfigRef.current = nextCfg;
+    setBugRewardConfig(nextCfg);
+    flushMasterStateToCloud({ bugRewardConfig: nextCfg });
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'bug_reward_config:sync', payload: nextCfg }));
+      }
+      void fetch('/api/bug-reward-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bugRewardConfig: nextCfg }),
+      });
+    } catch { /* empty */ }
+    playAtmSound('success');
+    return {
+      success: true,
+      message: nextCfg.enabled
+        ? 'Program Hadiah Laporan Bug aktif & tersinkron ke semua nasabah!'
+        : 'Program Hadiah Laporan Bug dinonaktifkan & disembunyikan dari form nasabah.',
+    };
+  };
+
+  const adminUpdateUiVisibility = (
+    partial: Partial<Omit<UiVisibilityConfig, 'navTabs'>> & {
+      navTabs?: Partial<UiVisibilityConfig['navTabs']>;
+    }
+  ): { success: boolean; message: string } => {
+    const nextVis: UiVisibilityConfig = {
+      ...uiVisibilityConfigRef.current,
+      ...partial,
+      navTabs: {
+        ...uiVisibilityConfigRef.current.navTabs,
+        ...(partial.navTabs || {}),
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    uiVisibilityConfigRef.current = nextVis;
+    setUiVisibilityConfig(nextVis);
+    flushMasterStateToCloud({ uiVisibilityConfig: nextVis });
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'ui_visibility:sync', payload: nextVis }));
+      }
+      void fetch('/api/ui-visibility', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uiVisibilityConfig: nextVis }),
+      });
+    } catch { /* empty */ }
+    return { success: true, message: 'Tampilan tab & fitur berhasil diperbarui ke semua nasabah!' };
+  };
+
+  const adminShowAllUiVisibility = (): { success: boolean; message: string } => {
+    const resetVis: UiVisibilityConfig = {
+      ...DEFAULT_UI_VISIBILITY_CONFIG,
+      navTabs: { ...DEFAULT_UI_VISIBILITY_CONFIG.navTabs },
+      updatedAt: new Date().toISOString(),
+    };
+    uiVisibilityConfigRef.current = resetVis;
+    setUiVisibilityConfig(resetVis);
+    flushMasterStateToCloud({ uiVisibilityConfig: resetVis });
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'ui_visibility:sync', payload: resetVis }));
+      }
+      void fetch('/api/ui-visibility', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uiVisibilityConfig: resetVis }),
+      });
+    } catch { /* empty */ }
+    playAtmSound('success');
+    return { success: true, message: 'Semua tab & fitur telah ditampilkan kembali.' };
+  };
+
+  const syncAdminWarningsToServer = (nextList: AdminSystemWarning[]) => {
+    adminWarningsRef.current = nextList;
+    setAdminWarnings(nextList);
+    flushMasterStateToCloud({ adminWarnings: nextList });
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({ type: 'admin_warnings:sync', payload: { adminWarnings: nextList } })
+        );
+      }
+      void fetch('/api/admin-warnings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adminWarnings: nextList }),
+      });
+    } catch { /* empty */ }
+  };
+
+  const dismissAdminWarning = (warningId: string, resendVersion?: number) => {
+    const matched = adminWarningsRef.current.find((w) => w.id === warningId);
+    const ver = resendVersion ?? matched?.resendVersion ?? 1;
+    setDismissedWarningMap((prev) => ({ ...prev, [warningId]: ver }));
+  };
+
+  const adminSaveWarning = (
+    input: Omit<AdminSystemWarning, 'id' | 'createdAt' | 'updatedAt' | 'resendVersion'> & {
+      id?: string;
+    }
+  ): { success: boolean; message: string; warning?: AdminSystemWarning } => {
+    const cleanTitle = String(input.title || '').trim();
+    const cleanMsg = String(input.message || '').trim();
+    if (!cleanTitle || !cleanMsg) {
+      return { success: false, message: 'Judul dan isi peringatan wajib diisi.' };
+    }
+    const nowIso = new Date().toISOString();
+    const existing = input.id ? adminWarningsRef.current.find((w) => w.id === input.id) : undefined;
+    const savedWarning: AdminSystemWarning = {
+      id: existing?.id || `warn-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      title: cleanTitle,
+      message: cleanMsg,
+      iconKey: input.iconKey || 'alert-triangle',
+      colorTheme: input.colorTheme || 'amber',
+      displayMode: input.displayMode || 'popup',
+      isPermanent: Boolean(input.isPermanent),
+      showPermanentLabel: Boolean(input.showPermanentLabel),
+      dismissible: input.dismissible !== false,
+      targetMode: input.targetMode || 'all',
+      targetTiers: Array.isArray(input.targetTiers) ? input.targetTiers : [],
+      targetAccountIds: Array.isArray(input.targetAccountIds) ? input.targetAccountIds : [],
+      isActive: input.isActive !== false,
+      resendVersion: existing ? (existing.resendVersion || 1) + 1 : 1,
+      createdAt: existing?.createdAt || nowIso,
+      updatedAt: nowIso,
+    };
+    const nextList = existing
+      ? adminWarningsRef.current.map((w) => (w.id === existing.id ? savedWarning : w))
+      : [savedWarning, ...adminWarningsRef.current].slice(0, 100);
+    syncAdminWarningsToServer(nextList);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: existing
+        ? `Peringatan "${cleanTitle}" diperbarui & disiarkan ulang.`
+        : `Peringatan "${cleanTitle}" berhasil dikirim real-time!`,
+      warning: savedWarning,
+    };
+  };
+
+  const adminToggleWarningActive = (id: string): { success: boolean; message: string } => {
+    let toggledActive = false;
+    const nextList = adminWarningsRef.current.map((w) => {
+      if (w.id === id) {
+        toggledActive = !w.isActive;
+        return {
+          ...w,
+          isActive: toggledActive,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return w;
+    });
+    syncAdminWarningsToServer(nextList);
+    return {
+      success: true,
+      message: toggledActive ? 'Peringatan diaktifkan kembali.' : 'Peringatan dicabut dari layar nasabah.',
+    };
+  };
+
+  const adminResendWarning = (id: string): { success: boolean; message: string } => {
+    const nextList = adminWarningsRef.current.map((w) =>
+      w.id === id
+        ? {
+            ...w,
+            isActive: true,
+            resendVersion: (w.resendVersion || 1) + 1,
+            updatedAt: new Date().toISOString(),
+          }
+        : w
+    );
+    syncAdminWarningsToServer(nextList);
+    try {
+      void fetch(`/api/admin-warnings/${id}/resend`, { method: 'PATCH' });
+    } catch { /* empty */ }
+    playAtmSound('success');
+    return { success: true, message: 'Peringatan dikirim ulang ke semua target nasabah!' };
+  };
+
+  const adminDeleteWarning = (id: string): { success: boolean; message: string } => {
+    const nextList = adminWarningsRef.current.filter((w) => w.id !== id);
+    syncAdminWarningsToServer(nextList);
+    try {
+      void fetch(`/api/admin-warnings/${id}`, { method: 'DELETE' });
+    } catch { /* empty */ }
+    return { success: true, message: 'Peringatan berhasil dihapus permanen.' };
   };
 
   const adminDeleteBugReport = async (id: string) => {
@@ -16096,21 +17026,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
       const newBalance = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance + finalSalary;
 
-      setAccounts((prev) =>
-        prev.map((a) => {
-          if (a.id !== currentAccount.id) return a;
-          const nextMap = { ...(a.jobClickProgress || {}), [jobId]: 0 };
-          return {
-            ...a,
-            balance: newBalance,
-            spinCoins: (a.spinCoins || 0) + totalCoinsCredited,
-            jobClickProgress: nextMap,
-            totalJobsCompleted: (a.totalJobsCompleted || 0) + 1,
-            totalJobEarnings: (a.totalJobEarnings || 0) + finalSalary,
-            rewardPoints: (a.rewardPoints || 0) + Math.max(10, Math.round(finalSalary / 10_000)),
-          };
-        })
-      );
+      const stampMs = Date.now();
+      const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+      const updatedAccounts = latestPool.map((a) => {
+        if (a.id !== currentAccount.id) return a;
+        const nextMap = { ...(a.jobClickProgress || {}), [jobId]: 0 };
+        return {
+          ...a,
+          balance: newBalance,
+          spinCoins: (a.spinCoins || 0) + totalCoinsCredited,
+          jobClickProgress: nextMap,
+          totalJobsCompleted: (a.totalJobsCompleted || 0) + 1,
+          totalJobEarnings: (a.totalJobEarnings || 0) + finalSalary,
+          rewardPoints: (a.rewardPoints || 0) + Math.max(10, Math.round(finalSalary / 10_000)),
+          accountUpdatedAtMs: stampMs,
+        };
+      });
+      accountsRef.current = updatedAccounts;
+      latestServerAccountsRef.current = updatedAccounts;
+      setAccounts(updatedAccounts);
 
       const coinBonusDesc =
         bonusCoinsEarned > 0
@@ -16118,7 +17052,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           : '';
 
       const salaryTx: Transaction = {
-        id: `tx-job-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+        id: `tx-job-${stampMs}-${Math.floor(Math.random() * 999)}`,
         accountId: currentAccount.id,
         type: 'setor',
         title: `💼 Gaji & Coin Cair: ${jobTitle} (${targetClicks}/${targetClicks} Klik)`,
@@ -16127,12 +17061,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         recipientAccount: currentAccount.accountNumber,
         recipientName: currentAccount.fullName,
         description: `Gaji ${formatRupiah(finalSalary)} + ${totalCoinsCredited.toLocaleString('id-ID')} Coin${coinBonusDesc}`,
-        referenceNo: `JOB-${Date.now().toString().slice(-6)}`,
+        referenceNo: `JOB-${String(stampMs).slice(-6)}`,
         timestamp: new Date().toISOString(),
         status: 'success',
         category: 'setor_tunai',
       };
-      setTransactions((prev) => [salaryTx, ...prev]);
+      const nextTxs = [salaryTx, ...transactions];
+      setTransactions(nextTxs);
+      flushMasterStateToCloud({ accounts: updatedAccounts, transactions: nextTxs });
+      if (currentAccount.firebaseUid || currentAccount.googleEmail || currentAccount.email) {
+        void syncCloudUserProfile(
+          {
+            uid: currentAccount.firebaseUid,
+            email: currentAccount.googleEmail || currentAccount.email,
+            fallbackEmail: currentAccount.email,
+          },
+          { lastJobSalaryAtMs: stampMs },
+          updatedAccounts
+        );
+      }
 
       playAtmSound('cash');
       return {
@@ -16149,16 +17096,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         )} + ${totalCoinsCredited.toLocaleString('id-ID')} Coin${coinBonusDesc}!`,
       };
     } else {
-      setAccounts((prev) =>
-        prev.map((a) => {
-          if (a.id !== currentAccount.id) return a;
-          const nextMap = { ...(a.jobClickProgress || {}), [jobId]: nextClicks };
-          return {
-            ...a,
-            jobClickProgress: nextMap,
-          };
-        })
-      );
+      const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+      const updatedAccounts = latestPool.map((a) => {
+        if (a.id !== currentAccount.id) return a;
+        const nextMap = { ...(a.jobClickProgress || {}), [jobId]: nextClicks };
+        return {
+          ...a,
+          jobClickProgress: nextMap,
+          accountUpdatedAtMs: Date.now(),
+        };
+      });
+      accountsRef.current = updatedAccounts;
+      setAccounts(updatedAccounts);
       return {
         success: true,
         completed: false,
@@ -16169,47 +17118,83 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // Helper sinkronisasi permanen untuk pembaruan akun (Level Pekerjaan, Voucher, Diamond, Slot Keluarga)
+  const commitAccountMutationPermanent = (
+    targetAccountId: string,
+    mutator: (acc: BankAccount) => BankAccount,
+    extraCloudOverrides?: {
+      transactions?: Transaction[];
+      notifications?: AppNotification[];
+      qrisOrders?: QrisPaymentOrder[];
+      families?: FamilyGroup[];
+    }
+  ): { updatedAccounts: BankAccount[]; updatedTarget?: BankAccount } => {
+    const stampMs = Date.now();
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    let updatedTarget: BankAccount | undefined;
+    const updatedAccounts = latestPool.map((a) => {
+      if (a.id !== targetAccountId) return a;
+      const mutated = {
+        ...mutator(a),
+        accountUpdatedAtMs: stampMs,
+      };
+      updatedTarget = mutated;
+      return mutated;
+    });
+    accountsRef.current = updatedAccounts;
+    latestServerAccountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+
+    flushMasterStateToCloud({
+      accounts: updatedAccounts,
+      ...(extraCloudOverrides || {}),
+    });
+
+    if (updatedTarget && (updatedTarget.firebaseUid || updatedTarget.googleEmail || updatedTarget.email)) {
+      void syncCloudUserProfile(
+        {
+          uid: updatedTarget.firebaseUid,
+          email: updatedTarget.googleEmail || updatedTarget.email,
+          fallbackEmail: updatedTarget.email,
+        },
+        { lastAccountMutationAtMs: stampMs },
+        updatedAccounts
+      );
+    }
+    return { updatedAccounts, updatedTarget };
+  };
+
   const upgradeJobLevelWithCash = (): {
     success: boolean;
     newLevel?: number;
     message: string;
   } => {
-    if (!currentAccount) {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) {
       return { success: false, message: 'Silakan login terlebih dahulu.' };
     }
     const UPGRADE_COST = 1_000_000;
     const isUnlim =
-      currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+      liveAcc.cardTier === 'admin' || isUnlimitedNumber(liveAcc.balance);
 
-    if (!isUnlim && currentAccount.balance < UPGRADE_COST) {
+    if (!isUnlim && liveAcc.balance < UPGRADE_COST) {
       playAtmSound('alert');
       return {
         success: false,
         message: `Saldo tidak cukup! Biaya meningkatkan level secara langsung adalah Rp 1.000.000 (Saldo Anda: ${formatRupiah(
-          currentAccount.balance
+          liveAcc.balance
         )}). Anda juga bisa main Suit lawan Komputer (Rp 500.000) untuk mendapat Voucher Level + Rp 300.000!`,
       };
     }
 
-    const oldLevel = currentAccount.jobLevel || 1;
+    const oldLevel = liveAcc.jobLevel || 1;
     const newLevel = oldLevel + 1;
-    const newBalance = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance - UPGRADE_COST;
-
-    setAccounts((prev) =>
-      prev.map((a) =>
-        a.id === currentAccount.id
-          ? {
-              ...a,
-              balance: newBalance,
-              jobLevel: newLevel,
-            }
-          : a
-      )
-    );
+    const newBalance = isUnlim ? UNLIMITED_BALANCE : liveAcc.balance - UPGRADE_COST;
 
     const tx: Transaction = {
       id: `tx-lvlup-${Date.now()}`,
-      accountId: currentAccount.id,
+      accountId: liveAcc.id,
       type: 'tagihan',
       title: `⬆️ Upgrade Level Pekerjaan (Level ${oldLevel} ➔ Level ${newLevel})`,
       amount: UPGRADE_COST,
@@ -16220,13 +17205,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       status: 'berhasil',
       note: `Pembayaran Rp 1.000.000 untuk meningkatkan Level Pekerjaan ke Level ${newLevel}.`,
     };
-    setTransactions((prev) => [tx, ...prev]);
+    const nextTxs = [tx, ...transactions];
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      liveAcc.id,
+      (a) => ({
+        ...a,
+        balance: newBalance,
+        jobLevel: newLevel,
+      }),
+      { transactions: nextTxs }
+    );
+
     playAtmSound('success');
 
     return {
       success: true,
       newLevel,
-      message: `✅ Berhasil! Level Pekerjaan Anda naik dari Level ${oldLevel} menjadi Level ${newLevel} dengan pembayaran Rp 1.000.000!`,
+      message: `✅ Berhasil! Level Pekerjaan Anda naik dari Level ${oldLevel} menjadi Level ${newLevel} dan tersimpan permanen di Cloud!`,
     };
   };
 
@@ -16237,10 +17234,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     newLevel?: number;
     message: string;
   } => {
-    if (!currentAccount) {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) {
       return { success: false, message: 'Silakan login terlebih dahulu.' };
     }
-    const available = currentAccount.levelVouchers || 0;
+    const available = liveAcc.levelVouchers || 0;
     const useCount = Math.max(1, Math.min(count, available));
     if (available < 1) {
       playAtmSound('alert');
@@ -16251,26 +17250,1129 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    const oldLevel = currentAccount.jobLevel || 1;
+    const oldLevel = liveAcc.jobLevel || 1;
     const newLevel = oldLevel + useCount;
 
-    setAccounts((prev) =>
-      prev.map((a) =>
-        a.id === currentAccount.id
-          ? {
-              ...a,
-              jobLevel: newLevel,
-              levelVouchers: Math.max(0, (a.levelVouchers || 0) - useCount),
-            }
-          : a
-      )
-    );
+    commitAccountMutationPermanent(liveAcc.id, (a) => ({
+      ...a,
+      jobLevel: newLevel,
+      levelVouchers: Math.max(0, (a.levelVouchers || 0) - useCount),
+    }));
 
     playAtmSound('success');
     return {
       success: true,
       newLevel,
-      message: `🎫 ${useCount} Voucher Level berhasil digunakan! Level Anda meningkat dari Level ${oldLevel} ke Level ${newLevel} tanpa potongan saldo!`,
+      message: `🎫 ${useCount} Voucher Level berhasil digunakan! Level Anda meningkat dari Level ${oldLevel} ke Level ${newLevel} dan tersimpan permanen!`,
+    };
+  };
+
+  // ================= SISTEM DIAMOND, BUATQRIS & FITUR KELUARGA (v13.34.00) =================
+  const registerQrisOrder = (order: QrisPaymentOrder) => {
+    const nextOrders = [order, ...qrisOrdersRef.current.filter((o) => o.orderId !== order.orderId)].slice(
+      0,
+      120
+    );
+    qrisOrdersRef.current = nextOrders;
+    setQrisOrders(nextOrders);
+    flushMasterStateToCloud({ qrisOrders: nextOrders });
+  };
+
+  const updateQrisOrderStatus = (
+    orderId: string,
+    status: QrisOrderStatus,
+    extra?: Partial<QrisPaymentOrder>
+  ) => {
+    const nextOrders = qrisOrdersRef.current.map((o) =>
+      o.orderId === orderId
+        ? {
+            ...o,
+            ...extra,
+            status,
+          }
+        : o
+    );
+    qrisOrdersRef.current = nextOrders;
+    setQrisOrders(nextOrders);
+    setActiveQrisModalOrder((prev) =>
+      prev && prev.orderId === orderId ? { ...prev, ...(extra || {}), status } : prev
+    );
+    flushMasterStateToCloud({ qrisOrders: nextOrders });
+  };
+
+  const fulfillPaidQrisOrder = (
+    orderId: string,
+    providerReference?: string
+  ): { success: boolean; alreadyFulfilled?: boolean; message: string; order?: QrisPaymentOrder } => {
+    const existing = qrisOrdersRef.current.find((o) => o.orderId === orderId);
+    if (!existing) {
+      return { success: false, message: 'Order QRIS tidak ditemukan di sistem.' };
+    }
+    if (existing.status === 'LUNAS' || existing.fulfilled) {
+      return {
+        success: true,
+        alreadyFulfilled: true,
+        message: 'Pembayaran QRIS ini sudah diproses dan berstatus LUNAS.',
+        order: existing,
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedOrder: QrisPaymentOrder = {
+      ...existing,
+      status: 'LUNAS',
+      paidAt: nowIso,
+      fulfilled: true,
+      providerReference: providerReference || existing.providerReference,
+    };
+
+    const nextOrders = qrisOrdersRef.current.map((o) =>
+      o.orderId === orderId ? updatedOrder : o
+    );
+    qrisOrdersRef.current = nextOrders;
+    setQrisOrders(nextOrders);
+    setActiveQrisModalOrder((prev) => (prev && prev.orderId === orderId ? updatedOrder : prev));
+
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const targetAcc = latestPool.find((a) => a.id === existing.accountId);
+    const creditDiamonds = Math.max(0, Math.floor(existing.diamondAmount || 0));
+    if (targetAcc && creditDiamonds > 0) {
+      const tx: Transaction = {
+        id: `tx-qris-dia-${Date.now()}`,
+        accountId: targetAcc.id,
+        type: 'setor',
+        title: `💎 Top-Up ${creditDiamonds.toLocaleString('id-ID')} Diamond via BuatQRIS`,
+        amount: existing.totalAmount,
+        balanceAfter: targetAcc.balance,
+        date: nowIso,
+        timestamp: nowIso,
+        referenceNo: existing.orderId,
+        status: 'berhasil',
+        note: `Pembayaran QRIS LUNAS (${formatRupiah(existing.totalAmount)}). +${creditDiamonds.toLocaleString('id-ID')} Diamond langsung masuk ke akun Anda.`,
+      };
+      const nextTxs = [tx, ...transactions];
+      setTransactions(nextTxs);
+
+      const notif: AppNotification = {
+        id: `notif-qris-${Date.now()}`,
+        title: '💎 Pembayaran BuatQRIS LUNAS!',
+        message: `Top-Up ${creditDiamonds.toLocaleString('id-ID')} Diamond (Order ${existing.orderId}) sebesar ${formatRupiah(
+          existing.totalAmount
+        )} telah LUNAS dan langsung ditambahkan ke akun Anda!`,
+        type: 'success',
+        category: 'sistem',
+        timestamp: nowIso,
+        read: false,
+        accountId: targetAcc.id,
+      };
+      const nextNotifs = [notif, ...notifications];
+      setNotifications(nextNotifs);
+
+      commitAccountMutationPermanent(
+        targetAcc.id,
+        (a) => ({
+          ...a,
+          diamonds: (a.diamonds || 0) + creditDiamonds,
+        }),
+        {
+          transactions: nextTxs,
+          notifications: nextNotifs,
+          qrisOrders: nextOrders,
+        }
+      );
+    } else {
+      flushMasterStateToCloud({ qrisOrders: nextOrders });
+    }
+
+    playAtmSound('cash');
+    return {
+      success: true,
+      message: `Pembayaran QRIS LUNAS! +${creditDiamonds.toLocaleString('id-ID')} Diamond telah masuk ke saldo Diamond Anda.`,
+      order: updatedOrder,
+    };
+  };
+
+  fulfillPaidQrisOrderRef.current = fulfillPaidQrisOrder;
+
+  const adminUpdateDiamondConfig = (
+    partial: Partial<DiamondSystemConfig>
+  ): { success: boolean; message: string } => {
+    const nextCfg: DiamondSystemConfig = {
+      ...diamondConfigRef.current,
+      ...partial,
+      baseDiamondPriceRupiah: Math.max(
+        1,
+        Math.round(
+          partial.baseDiamondPriceRupiah !== undefined
+            ? partial.baseDiamondPriceRupiah
+            : diamondConfigRef.current.baseDiamondPriceRupiah
+        )
+      ),
+      diamondDiscountPercent: Math.max(
+        0,
+        Math.min(
+          99,
+          Math.round(
+            partial.diamondDiscountPercent !== undefined
+              ? partial.diamondDiscountPercent
+              : diamondConfigRef.current.diamondDiscountPercent
+          )
+        )
+      ),
+      maxCustomDiamond: Math.max(
+        1,
+        Math.min(
+          MAX_DIAMOND_PACKAGE_AMOUNT,
+          Math.round(
+            partial.maxCustomDiamond !== undefined
+              ? partial.maxCustomDiamond
+              : diamondConfigRef.current.maxCustomDiamond
+          )
+        )
+      ),
+      maxPurchaseRupiah: Math.max(
+        1,
+        Math.min(
+          MAX_DIAMOND_PURCHASE_RUPIAH,
+          Math.round(
+            partial.maxPurchaseRupiah !== undefined
+              ? partial.maxPurchaseRupiah
+              : (diamondConfigRef.current.maxPurchaseRupiah ?? MAX_DIAMOND_PURCHASE_RUPIAH)
+          )
+        )
+      ),
+      enabledFeatures: {
+        ...diamondConfigRef.current.enabledFeatures,
+        ...(partial.enabledFeatures || {}),
+      },
+      priceRevision: DIAMOND_CONFIG_REVISION,
+      updatedAt: new Date().toISOString(),
+    };
+    diamondConfigRef.current = nextCfg;
+    setDiamondConfig(nextCfg);
+    flushMasterStateToCloud({ diamondConfig: nextCfg });
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'diamond_config:sync', payload: nextCfg }));
+      }
+      void fetch('/api/diamond-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ diamondConfig: nextCfg }),
+      });
+    } catch { /* empty */ }
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Pengaturan disimpan! Harga Rp ${nextCfg.baseDiamondPriceRupiah.toLocaleString(
+        'id-ID'
+      )} • Diskon ${nextCfg.diamondDiscountPercent}% • Maks ${nextCfg.maxCustomDiamond.toLocaleString(
+        'id-ID'
+      )} / Rp ${(nextCfg.maxPurchaseRupiah ?? MAX_DIAMOND_PURCHASE_RUPIAH).toLocaleString('id-ID')}.`,
+    };
+  };
+
+  const adminResetDiamondConfig = (): { success: boolean; message: string } => {
+    const resetCfg: DiamondSystemConfig = {
+      ...DEFAULT_DIAMOND_SYSTEM_CONFIG,
+      priceRevision: DIAMOND_CONFIG_REVISION,
+      updatedAt: new Date().toISOString(),
+    };
+    diamondConfigRef.current = resetCfg;
+    setDiamondConfig(resetCfg);
+    flushMasterStateToCloud({ diamondConfig: resetCfg });
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'diamond_config:sync', payload: resetCfg }));
+      }
+      void fetch('/api/diamond-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ diamondConfig: resetCfg }),
+      });
+    } catch { /* empty */ }
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Pengaturan berhasil direset ke default (Rp 90, Diskon 0%, Maks ${MAX_DIAMOND_PACKAGE_AMOUNT.toLocaleString(
+        'id-ID'
+      )} / Rp ${MAX_DIAMOND_PURCHASE_RUPIAH.toLocaleString('id-ID')}).`,
+    };
+  };
+
+  const adminAdjustAccountDiamonds = (
+    accountId: string,
+    diamonds: number,
+    mode: 'add' | 'set'
+  ): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const target = latestPool.find((a) => a.id === accountId);
+    if (!target) return { success: false, message: 'Rekening tidak ditemukan.' };
+    const safeVal = Math.max(0, Math.floor(Number(diamonds) || 0));
+    const currentDia = target.diamonds || 0;
+    const nextDia = mode === 'add' ? currentDia + safeVal : safeVal;
+    commitAccountMutationPermanent(accountId, (a) => ({
+      ...a,
+      diamonds: nextDia,
+    }));
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Saldo Diamond ${target.fullName} berhasil diperbarui menjadi ${nextDia.toLocaleString('id-ID')} Diamond!`,
+    };
+  };
+
+  const spendAccountDiamonds = (
+    amount: number,
+    featureKey: DiamondFeatureKey,
+    title: string,
+    note?: string
+  ): {
+    success: boolean;
+    message: string;
+    newDiamondBalance?: number;
+    insufficientDiamonds?: boolean;
+  } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    if (!diamondConfigRef.current.enabledFeatures?.[featureKey]) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'Penggunaan Diamond untuk fitur ini sedang dinonaktifkan oleh Admin.',
+      };
+    }
+    const cost = Math.max(1, Math.floor(Number(amount) || 0));
+    const currentDia = liveAcc.diamonds || 0;
+    if (currentDia < cost) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        insufficientDiamonds: true,
+        message: `Saldo 💎 tidak mencukupi! Butuh ${cost.toLocaleString('id-ID')} 💎 (Saldo Anda: ${currentDia.toLocaleString('id-ID')} 💎).`,
+      };
+    }
+    const nextDia = Math.max(0, currentDia - cost);
+    const tx: Transaction = {
+      id: `tx-dia-spend-${Date.now()}`,
+      accountId: liveAcc.id,
+      type: 'tagihan',
+      title: `💎 ${title} (-${cost.toLocaleString('id-ID')} Diamond)`,
+      amount: 0,
+      balanceAfter: liveAcc.balance,
+      date: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+      referenceNo: `DIA-${Date.now().toString().slice(-6)}`,
+      status: 'berhasil',
+      note: note || `Penggunaan ${cost.toLocaleString('id-ID')} Diamond pada fitur ${featureKey}.`,
+    };
+    const nextTxs = [tx, ...transactions];
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      liveAcc.id,
+      (a) => ({
+        ...a,
+        diamonds: nextDia,
+      }),
+      { transactions: nextTxs }
+    );
+    playAtmSound('success');
+    return {
+      success: true,
+      newDiamondBalance: nextDia,
+      message: `Berhasil menggunakan ${cost.toLocaleString('id-ID')} Diamond untuk ${title}!`,
+    };
+  };
+
+  const upgradeJobLevelWithDiamonds = (
+    levels = 1
+  ): {
+    success: boolean;
+    newLevel?: number;
+    diamondsSpent?: number;
+    message: string;
+    insufficientDiamonds?: boolean;
+  } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    if (!diamondConfigRef.current.enabledFeatures?.job_voucher_upgrade) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'Upgrade Level Pekerjaan dengan Diamond sedang dinonaktifkan oleh Admin.',
+      };
+    }
+    const lvlCount = Math.max(1, Math.min(50, Math.floor(Number(levels) || 1)));
+    const DIAMOND_PER_LEVEL = 25;
+    const totalCost = lvlCount * DIAMOND_PER_LEVEL;
+    const currentDia = liveAcc.diamonds || 0;
+    if (currentDia < totalCost) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        insufficientDiamonds: true,
+        message: `Saldo 💎 tidak cukup! Butuh ${totalCost.toLocaleString('id-ID')} 💎 (${DIAMOND_PER_LEVEL} 💎 / level). Saldo Anda: ${currentDia.toLocaleString('id-ID')} 💎.`,
+      };
+    }
+    const oldLevel = liveAcc.jobLevel || 1;
+    const newLevel = oldLevel + lvlCount;
+    const nextDia = Math.max(0, currentDia - totalCost);
+    const tx: Transaction = {
+      id: `tx-lvl-dia-${Date.now()}`,
+      accountId: liveAcc.id,
+      type: 'tagihan',
+      title: `💎 Upgrade Level Pekerjaan (Lv.${oldLevel} ➔ Lv.${newLevel})`,
+      amount: 0,
+      balanceAfter: liveAcc.balance,
+      date: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+      referenceNo: `DIAlvl-${Date.now().toString().slice(-5)}`,
+      status: 'berhasil',
+      note: `Menggunakan ${totalCost.toLocaleString('id-ID')} Diamond untuk naik +${lvlCount} Level Pekerjaan.`,
+    };
+    const nextTxs = [tx, ...transactions];
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      liveAcc.id,
+      (a) => ({
+        ...a,
+        jobLevel: newLevel,
+        diamonds: nextDia,
+      }),
+      { transactions: nextTxs }
+    );
+    playAtmSound('success');
+    return {
+      success: true,
+      newLevel,
+      diamondsSpent: totalCost,
+      message: `💎 Level Pekerjaan naik permanen dari Lv.${oldLevel} menjadi Lv.${newLevel} (-${totalCost.toLocaleString('id-ID')} Diamond)!`,
+    };
+  };
+
+  const exchangeDiamondsToCashOrCoins = (
+    diamonds: number,
+    target: 'cash' | 'coin'
+  ): {
+    success: boolean;
+    message: string;
+    receivedAmount?: number;
+    insufficientDiamonds?: boolean;
+  } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    if (!diamondConfigRef.current.enabledFeatures?.diamond_transfer_exchange) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'Fitur Tukar Diamond ke Saldo/Coin sedang dinonaktifkan oleh Admin.',
+      };
+    }
+    const safeDia = Math.max(1, Math.floor(Number(diamonds) || 0));
+    const currentDia = liveAcc.diamonds || 0;
+    if (currentDia < safeDia) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        insufficientDiamonds: true,
+        message: `Saldo 💎 Anda (${currentDia.toLocaleString('id-ID')} 💎) tidak mencukupi untuk menukar ${safeDia.toLocaleString('id-ID')} 💎.`,
+      };
+    }
+    const nextDia = Math.max(0, currentDia - safeDia);
+    const unitCashRate = Math.max(100, (diamondConfigRef.current.baseDiamondPriceRupiah || 90) * 50);
+    const unitCoinRate = 2; // 1 💎 = 2 Coin
+    const received = target === 'cash' ? safeDia * unitCashRate : safeDia * unitCoinRate;
+    const isUnlim = liveAcc.cardTier === 'admin' || isUnlimitedNumber(liveAcc.balance);
+    const nextBal = target === 'cash' && !isUnlim ? liveAcc.balance + received : liveAcc.balance;
+
+    const tx: Transaction = {
+      id: `tx-dia-exch-${Date.now()}`,
+      accountId: liveAcc.id,
+      type: 'setor',
+      title:
+        target === 'cash'
+          ? `💎 Tukar ${safeDia.toLocaleString('id-ID')} Diamond ➔ ${formatRupiah(received)}`
+          : `💎 Tukar ${safeDia.toLocaleString('id-ID')} Diamond ➔ ${received.toLocaleString('id-ID')} Coin`,
+      amount: target === 'cash' ? received : 0,
+      coinAmount: target === 'coin' ? received : undefined,
+      balanceAfter: nextBal,
+      date: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+      referenceNo: `EXDIA-${Date.now().toString().slice(-6)}`,
+      status: 'berhasil',
+      note: `Penukaran ${safeDia.toLocaleString('id-ID')} Diamond ke ${target === 'cash' ? 'Saldo Uang' : 'Coin'}.`,
+    };
+    const nextTxs = [tx, ...transactions];
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      liveAcc.id,
+      (a) => ({
+        ...a,
+        diamonds: nextDia,
+        balance: nextBal,
+        spinCoins: target === 'coin' ? (a.spinCoins || 0) + received : a.spinCoins || 0,
+      }),
+      { transactions: nextTxs }
+    );
+    playAtmSound('cash');
+    return {
+      success: true,
+      receivedAmount: received,
+      message:
+        target === 'cash'
+          ? `✅ Berhasil menukar ${safeDia.toLocaleString('id-ID')} Diamond menjadi ${formatRupiah(received)}!`
+          : `✅ Berhasil menukar ${safeDia.toLocaleString('id-ID')} Diamond menjadi ${received.toLocaleString('id-ID')} Coin!`,
+    };
+  };
+
+  // ================= FITUR KELUARGA (FULL ADMIN & PERMISSION ENGINE) =================
+  const adminUpdateFamilyConfig = (
+    partial: Partial<FamilySystemConfig>
+  ): { success: boolean; message: string } => {
+    const nextCfg: FamilySystemConfig = {
+      ...familyConfigRef.current,
+      ...partial,
+      defaultMaxFamilies: Math.max(
+        1,
+        Math.floor(
+          partial.defaultMaxFamilies !== undefined
+            ? partial.defaultMaxFamilies
+            : familyConfigRef.current.defaultMaxFamilies
+        )
+      ),
+      baseSlotMoneyCost: Math.max(
+        0,
+        Math.floor(
+          partial.baseSlotMoneyCost !== undefined
+            ? partial.baseSlotMoneyCost
+            : familyConfigRef.current.baseSlotMoneyCost
+        )
+      ),
+      baseSlotDiamondCost: Math.max(
+        0,
+        Math.floor(
+          partial.baseSlotDiamondCost !== undefined
+            ? partial.baseSlotDiamondCost
+            : familyConfigRef.current.baseSlotDiamondCost
+        )
+      ),
+      maxMembersPerFamily: Math.max(
+        2,
+        Math.floor(
+          partial.maxMembersPerFamily !== undefined
+            ? partial.maxMembersPerFamily
+            : familyConfigRef.current.maxMembersPerFamily
+        )
+      ),
+      updatedAt: new Date().toISOString(),
+    };
+    familyConfigRef.current = nextCfg;
+    setFamilyConfig(nextCfg);
+    flushMasterStateToCloud({ familyConfig: nextCfg });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Konfigurasi Fitur Keluarga berhasil disimpan ke Cloud!',
+    };
+  };
+
+  const adminDeleteFamily = (familyId: string): { success: boolean; message: string } => {
+    const target = familiesRef.current.find((f) => f.id === familyId);
+    if (!target) return { success: false, message: 'Keluarga tidak ditemukan.' };
+    const nextFamilies = familiesRef.current.filter((f) => f.id !== familyId);
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('beep');
+    return {
+      success: true,
+      message: `Keluarga "${target.name}" (${target.familyCode}) berhasil dibubarkan oleh Admin.`,
+    };
+  };
+
+  const createFamilyGroup = (
+    name: string
+  ): { success: boolean; message: string; family?: FamilyGroup } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    if (!familyConfigRef.current.enabled) {
+      playAtmSound('alert');
+      return { success: false, message: 'Fitur Keluarga sedang dinonaktifkan oleh Admin.' };
+    }
+    const cleanName = name.trim();
+    if (cleanName.length < 3) {
+      playAtmSound('alert');
+      return { success: false, message: 'Nama Keluarga minimal 3 karakter.' };
+    }
+    const ownedCount = familiesRef.current.filter((f) => f.ownerAccountId === liveAcc.id).length;
+    const maxSlots =
+      (familyConfigRef.current.defaultMaxFamilies || 1) + (liveAcc.extraFamilySlots || 0);
+    if (ownedCount >= maxSlots) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Slot buat keluarga Anda sudah penuh (${ownedCount}/${maxSlots}). Klik "Tambah Slot" untuk menambah kapasitas keluarga!`,
+      };
+    }
+
+    const existingCodes = new Set(familiesRef.current.map((f) => f.familyCode));
+    let familyCode = generateRandomFamilyCode4x3();
+    while (existingCodes.has(familyCode)) {
+      familyCode = generateRandomFamilyCode4x3();
+    }
+
+    const nowIso = new Date().toISOString();
+    const newFamily: FamilyGroup = {
+      id: `fam-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      familyCode,
+      name: cleanName,
+      ownerAccountId: liveAcc.id,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      members: [
+        {
+          accountId: liveAcc.id,
+          role: 'owner',
+          nameTag: 'Kepala Keluarga',
+          canEditNameTag: true,
+          canEditFamilyName: true,
+          joinedAt: nowIso,
+        },
+      ],
+      pendingRequests: [],
+    };
+    const nextFamilies = [newFamily, ...familiesRef.current];
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('success');
+    return {
+      success: true,
+      family: newFamily,
+      message: `🏠 Keluarga "${cleanName}" berhasil dibuat! Kode Keluarga Anda: ${familyCode}`,
+    };
+  };
+
+  const purchaseExtraFamilySlot = (): {
+    success: boolean;
+    message: string;
+    newMaxSlots?: number;
+    moneyPaid?: number;
+    diamondPaid?: number;
+    insufficientDiamonds?: boolean;
+  } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    if (!familyConfigRef.current.enabled) {
+      playAtmSound('alert');
+      return { success: false, message: 'Fitur Keluarga sedang dinonaktifkan oleh Admin.' };
+    }
+    const currentExtra = liveAcc.extraFamilySlots || 0;
+    const cost = calculateNextFamilySlotCost(currentExtra, familyConfigRef.current);
+    const useDiamond =
+      diamondConfigRef.current.enabledFeatures?.family_slots !== false &&
+      cost.diamondCost > 0;
+    const finalDiamondCost = useDiamond ? cost.diamondCost : 0;
+
+    const isUnlim = liveAcc.cardTier === 'admin' || isUnlimitedNumber(liveAcc.balance);
+    if (!isUnlim && liveAcc.balance < cost.moneyCost) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Saldo Uang tidak cukup! Biaya Tambah Slot ke-${cost.nextSlotNumber} adalah ${formatRupiah(
+          cost.moneyCost
+        )} + ${finalDiamondCost.toLocaleString('id-ID')} 💎.`,
+      };
+    }
+    const currentDia = liveAcc.diamonds || 0;
+    if (finalDiamondCost > 0 && currentDia < finalDiamondCost) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        insufficientDiamonds: true,
+        message: `Saldo 💎 tidak cukup! Butuh ${finalDiamondCost.toLocaleString(
+          'id-ID'
+        )} 💎 untuk Tambah Slot Keluarga ke-${cost.nextSlotNumber} (Saldo Anda: ${currentDia.toLocaleString('id-ID')} 💎).`,
+      };
+    }
+
+    const nextBal = isUnlim ? UNLIMITED_BALANCE : liveAcc.balance - cost.moneyCost;
+    const nextDia = Math.max(0, currentDia - finalDiamondCost);
+    const nextExtraSlots = currentExtra + 1;
+    const newMaxSlots = (familyConfigRef.current.defaultMaxFamilies || 1) + nextExtraSlots;
+
+    const tx: Transaction = {
+      id: `tx-famslot-${Date.now()}`,
+      accountId: liveAcc.id,
+      type: 'tagihan',
+      title: `🏠 Tambah Slot Keluarga #${cost.nextSlotNumber} (Total ${newMaxSlots} Slot)`,
+      amount: cost.moneyCost,
+      balanceAfter: nextBal,
+      date: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+      referenceNo: `FSLOT-${Date.now().toString().slice(-6)}`,
+      status: 'berhasil',
+      note: `Biaya slot keluarga bertingkat: ${formatRupiah(cost.moneyCost)} + ${finalDiamondCost.toLocaleString('id-ID')} Diamond.`,
+    };
+    const nextTxs = [tx, ...transactions];
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      liveAcc.id,
+      (a) => ({
+        ...a,
+        balance: nextBal,
+        diamonds: nextDia,
+        extraFamilySlots: nextExtraSlots,
+      }),
+      { transactions: nextTxs }
+    );
+    playAtmSound('cash');
+    return {
+      success: true,
+      newMaxSlots,
+      moneyPaid: cost.moneyCost,
+      diamondPaid: finalDiamondCost,
+      message: `✅ Berhasil! Slot Keluarga bertambah menjadi ${newMaxSlots} keluarga (${formatRupiah(
+        cost.moneyCost
+      )} + ${finalDiamondCost.toLocaleString('id-ID')} Diamond).`,
+    };
+  };
+
+  const joinFamilyByCode = (
+    rawCode: string
+  ): { success: boolean; message: string; family?: FamilyGroup } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    if (!familyConfigRef.current.enabled) {
+      playAtmSound('alert');
+      return { success: false, message: 'Fitur Keluarga sedang dinonaktifkan oleh Admin.' };
+    }
+    const formatted = formatFamilyCode4x3(rawCode);
+    const cleanedLen = formatted.replace(/\s+/g, '').length;
+    if (cleanedLen !== 12) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'Kode Keluarga harus 12 karakter dengan format XXXX XXXX XXXX.',
+      };
+    }
+    const target = familiesRef.current.find((f) => formatFamilyCode4x3(f.familyCode) === formatted);
+    if (!target) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Kode Keluarga "${formatted}" tidak ditemukan. Periksa kembali kode dari Kepala Keluarga.`,
+      };
+    }
+    if (target.members.some((m) => m.accountId === liveAcc.id)) {
+      return {
+        success: true,
+        family: target,
+        message: `Anda sudah tergabung di keluarga "${target.name}".`,
+      };
+    }
+    if (target.members.length >= (familyConfigRef.current.maxMembersPerFamily || 50)) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Keluarga "${target.name}" sudah mencapai batas maksimal anggota (${familyConfigRef.current.maxMembersPerFamily} orang).`,
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedFamily: FamilyGroup = {
+      ...target,
+      updatedAt: nowIso,
+      members: [
+        ...target.members,
+        {
+          accountId: liveAcc.id,
+          role: 'member',
+          nameTag: 'Anggota',
+          canEditNameTag: false,
+          canEditFamilyName: false,
+          joinedAt: nowIso,
+        },
+      ],
+    };
+    const nextFamilies = familiesRef.current.map((f) =>
+      f.id === target.id ? updatedFamily : f
+    );
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('success');
+    return {
+      success: true,
+      family: updatedFamily,
+      message: `🎉 Berhasil bergabung ke keluarga "${target.name}" (${target.familyCode})!`,
+    };
+  };
+
+  const leaveFamilyGroup = (familyId: string): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    const target = familiesRef.current.find((f) => f.id === familyId);
+    if (!target) return { success: false, message: 'Keluarga tidak ditemukan.' };
+
+    if (target.ownerAccountId === liveAcc.id) {
+      const nextFamilies = familiesRef.current.filter((f) => f.id !== familyId);
+      familiesRef.current = nextFamilies;
+      setFamilies(nextFamilies);
+      flushMasterStateToCloud({ families: nextFamilies });
+      playAtmSound('beep');
+      return {
+        success: true,
+        message: `Keluarga "${target.name}" telah dibubarkan oleh Kepala Keluarga.`,
+      };
+    }
+
+    const updatedFamily: FamilyGroup = {
+      ...target,
+      updatedAt: new Date().toISOString(),
+      members: target.members.filter((m) => m.accountId !== liveAcc.id),
+    };
+    const nextFamilies = familiesRef.current.map((f) =>
+      f.id === familyId ? updatedFamily : f
+    );
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('beep');
+    return {
+      success: true,
+      message: `Anda telah keluar dari keluarga "${target.name}".`,
+    };
+  };
+
+  const renameFamilyGroup = (
+    familyId: string,
+    newName: string
+  ): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    const target = familiesRef.current.find((f) => f.id === familyId);
+    if (!target) return { success: false, message: 'Keluarga tidak ditemukan.' };
+    const member = target.members.find((m) => m.accountId === liveAcc.id);
+    if (!member) return { success: false, message: 'Anda bukan anggota keluarga ini.' };
+
+    const cleanName = newName.trim();
+    if (cleanName.length < 3) {
+      return { success: false, message: 'Nama Keluarga minimal 3 karakter.' };
+    }
+    const canDirect = target.ownerAccountId === liveAcc.id || Boolean(member.canEditFamilyName);
+    if (!canDirect) {
+      return {
+        success: false,
+        message: 'Anda belum memiliki izin langsung mengganti Nama Keluarga. Kirim permintaan persetujuan ke Kepala Keluarga!',
+      };
+    }
+
+    const nextFamilies = familiesRef.current.map((f) =>
+      f.id === familyId ? { ...f, name: cleanName, updatedAt: new Date().toISOString() } : f
+    );
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Nama keluarga berhasil diubah menjadi "${cleanName}"!`,
+    };
+  };
+
+  const updateMemberNameTag = (
+    familyId: string,
+    targetAccountId: string,
+    newNameTag: string
+  ): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    const target = familiesRef.current.find((f) => f.id === familyId);
+    if (!target) return { success: false, message: 'Keluarga tidak ditemukan.' };
+    const actor = target.members.find((m) => m.accountId === liveAcc.id);
+    if (!actor) return { success: false, message: 'Anda bukan anggota keluarga ini.' };
+
+    const cleanTag = newNameTag.trim().slice(0, 32);
+    if (!cleanTag) return { success: false, message: 'Name Tag tidak boleh kosong.' };
+
+    const isOwner = target.ownerAccountId === liveAcc.id;
+    const isCoLeader = actor.role === 'co_leader';
+    const isSelf = liveAcc.id === targetAccountId;
+
+    const allowed =
+      isOwner ||
+      (isCoLeader && actor.canEditNameTag && targetAccountId !== target.ownerAccountId) ||
+      (isSelf && actor.canEditNameTag);
+
+    if (!allowed) {
+      return {
+        success: false,
+        message: 'Anda belum memiliki izin langsung mengganti Name Tag. Gunakan tombol Ajukan Permintaan ke Kepala Keluarga!',
+      };
+    }
+
+    const nextFamilies = familiesRef.current.map((f) =>
+      f.id === familyId
+        ? {
+            ...f,
+            updatedAt: new Date().toISOString(),
+            members: f.members.map((m) =>
+              m.accountId === targetAccountId ? { ...m, nameTag: cleanTag } : m
+            ),
+          }
+        : f
+    );
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Name Tag berhasil diperbarui menjadi "${cleanTag}"!`,
+    };
+  };
+
+  const setFamilyMemberRole = (
+    familyId: string,
+    targetAccountId: string,
+    role: 'co_leader' | 'member'
+  ): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    const target = familiesRef.current.find((f) => f.id === familyId);
+    if (!target) return { success: false, message: 'Keluarga tidak ditemukan.' };
+    if (target.ownerAccountId !== liveAcc.id) {
+      return { success: false, message: 'Hanya Kepala Keluarga yang dapat mengangkat atau menurunkan Wakil Kepala Keluarga.' };
+    }
+    if (targetAccountId === target.ownerAccountId) {
+      return { success: false, message: 'Jabatan Kepala Keluarga tidak dapat diubah.' };
+    }
+    const nextFamilies = familiesRef.current.map((f) =>
+      f.id === familyId
+        ? {
+            ...f,
+            updatedAt: new Date().toISOString(),
+            members: f.members.map((m) =>
+              m.accountId === targetAccountId
+                ? {
+                    ...m,
+                    role,
+                    nameTag:
+                      role === 'co_leader' && m.nameTag === 'Anggota'
+                        ? 'Wakil Kepala Keluarga'
+                        : m.nameTag,
+                  }
+                : m
+            ),
+          }
+        : f
+    );
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('success');
+    return {
+      success: true,
+      message:
+        role === 'co_leader'
+          ? 'Anggota berhasil diangkat menjadi Wakil Kepala Keluarga (Co-Leader)!'
+          : 'Jabatan diubah kembali menjadi Anggota biasa.',
+    };
+  };
+
+  const setFamilyMemberPermissions = (
+    familyId: string,
+    targetAccountId: string,
+    perms: { canEditNameTag?: boolean; canEditFamilyName?: boolean }
+  ): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    const target = familiesRef.current.find((f) => f.id === familyId);
+    if (!target) return { success: false, message: 'Keluarga tidak ditemukan.' };
+    if (target.ownerAccountId !== liveAcc.id) {
+      return { success: false, message: 'Hanya Kepala Keluarga yang dapat mengatur izin anggota.' };
+    }
+    const nextFamilies = familiesRef.current.map((f) =>
+      f.id === familyId
+        ? {
+            ...f,
+            updatedAt: new Date().toISOString(),
+            members: f.members.map((m) =>
+              m.accountId === targetAccountId
+                ? {
+                    ...m,
+                    canEditNameTag:
+                      perms.canEditNameTag !== undefined ? perms.canEditNameTag : m.canEditNameTag,
+                    canEditFamilyName:
+                      perms.canEditFamilyName !== undefined
+                        ? perms.canEditFamilyName
+                        : m.canEditFamilyName,
+                  }
+                : m
+            ),
+          }
+        : f
+    );
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('beep');
+    return {
+      success: true,
+      message: 'Izin langsung anggota keluarga berhasil diperbarui!',
+    };
+  };
+
+  const submitFamilyPermissionRequest = (
+    familyId: string,
+    type: 'name_tag' | 'family_name',
+    proposedValue: string
+  ): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    const target = familiesRef.current.find((f) => f.id === familyId);
+    if (!target) return { success: false, message: 'Keluarga tidak ditemukan.' };
+    if (!target.members.some((m) => m.accountId === liveAcc.id)) {
+      return { success: false, message: 'Anda bukan anggota keluarga ini.' };
+    }
+    const cleanVal = proposedValue.trim().slice(0, 40);
+    if (cleanVal.length < 2) {
+      return { success: false, message: 'Isian usulan minimal 2 karakter.' };
+    }
+
+    const req: FamilyPermissionRequest = {
+      id: `famreq-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      requesterAccountId: liveAcc.id,
+      requesterName: liveAcc.fullName,
+      type,
+      proposedValue: cleanVal,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    const nextFamilies = familiesRef.current.map((f) =>
+      f.id === familyId
+        ? {
+            ...f,
+            updatedAt: new Date().toISOString(),
+            pendingRequests: [req, ...(f.pendingRequests || [])].slice(0, 50),
+          }
+        : f
+    );
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Permintaan perubahan telah dikirim ke Kepala Keluarga untuk disetujui!',
+    };
+  };
+
+  const resolveFamilyPermissionRequest = (
+    familyId: string,
+    requestId: string,
+    decision: 'approved' | 'rejected'
+  ): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    const target = familiesRef.current.find((f) => f.id === familyId);
+    if (!target) return { success: false, message: 'Keluarga tidak ditemukan.' };
+    if (target.ownerAccountId !== liveAcc.id) {
+      return { success: false, message: 'Hanya Kepala Keluarga yang dapat memproses permintaan.' };
+    }
+    const req = (target.pendingRequests || []).find((r) => r.id === requestId);
+    if (!req || req.status !== 'pending') {
+      return { success: false, message: 'Permintaan tidak ditemukan atau sudah diproses.' };
+    }
+
+    const nowIso = new Date().toISOString();
+    const nextFamilies = familiesRef.current.map((f) => {
+      if (f.id !== familyId) return f;
+      let nextName = f.name;
+      let nextMembers = f.members;
+      if (decision === 'approved') {
+        if (req.type === 'family_name') {
+          nextName = req.proposedValue;
+        } else if (req.type === 'name_tag') {
+          nextMembers = f.members.map((m) =>
+            m.accountId === req.requesterAccountId ? { ...m, nameTag: req.proposedValue } : m
+          );
+        }
+      }
+      return {
+        ...f,
+        name: nextName,
+        members: nextMembers,
+        updatedAt: nowIso,
+        pendingRequests: (f.pendingRequests || []).map((r) =>
+          r.id === requestId ? { ...r, status: decision, resolvedAt: nowIso } : r
+        ),
+      };
+    });
+
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound(decision === 'approved' ? 'success' : 'beep');
+    return {
+      success: true,
+      message:
+        decision === 'approved'
+          ? `Permintaan dari ${req.requesterName} telah DISETUJUI dan langsung diterapkan!`
+          : `Permintaan dari ${req.requesterName} telah ditolak.`,
+    };
+  };
+
+  const kickFamilyMember = (
+    familyId: string,
+    targetAccountId: string
+  ): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
+    if (!liveAcc) return { success: false, message: 'Silakan login terlebih dahulu.' };
+    const target = familiesRef.current.find((f) => f.id === familyId);
+    if (!target) return { success: false, message: 'Keluarga tidak ditemukan.' };
+    const actor = target.members.find((m) => m.accountId === liveAcc.id);
+    if (!actor || (target.ownerAccountId !== liveAcc.id && actor.role !== 'co_leader')) {
+      return { success: false, message: 'Hanya Kepala Keluarga atau Wakil Kepala Keluarga yang dapat mengeluarkan anggota.' };
+    }
+    if (targetAccountId === target.ownerAccountId) {
+      return { success: false, message: 'Kepala Keluarga tidak dapat dikeluarkan.' };
+    }
+    const nextFamilies = familiesRef.current.map((f) =>
+      f.id === familyId
+        ? {
+            ...f,
+            updatedAt: new Date().toISOString(),
+            members: f.members.filter((m) => m.accountId !== targetAccountId),
+          }
+        : f
+    );
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+    flushMasterStateToCloud({ families: nextFamilies });
+    playAtmSound('beep');
+    return {
+      success: true,
+      message: 'Anggota berhasil dikeluarkan dari keluarga.',
     };
   };
 
@@ -16937,7 +19039,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     level: number,
     mode: 'add' | 'set' | 'max' = 'set'
   ): { success: boolean; message: string } => {
-    const target = accounts.find((a) => a.id === accountId);
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const target = latestPool.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan.' };
     const currentLvl = target.jobLevel || 1;
     const nextLvl =
@@ -16947,13 +19050,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? Math.max(1, currentLvl + level)
         : Math.max(1, level);
 
-    setAccounts((prev) =>
-      prev.map((a) => (a.id === accountId ? { ...a, jobLevel: nextLvl } : a))
-    );
+    commitAccountMutationPermanent(accountId, (a) => ({
+      ...a,
+      jobLevel: nextLvl,
+    }));
     playAtmSound('success');
     return {
       success: true,
-      message: `Level Pekerjaan ${target.fullName} berhasil diubah menjadi Level ${nextLvl}! Semua lowongan hingga Level ${nextLvl} langsung terbuka.`,
+      message: `Level Pekerjaan ${target.fullName} berhasil diubah & disimpan permanen menjadi Level ${nextLvl}! Semua lowongan hingga Level ${nextLvl} langsung terbuka.`,
     };
   };
 
@@ -16962,17 +19066,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     count: number,
     mode: 'add' | 'set'
   ): { success: boolean; message: string } => {
-    const target = accounts.find((a) => a.id === accountId);
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const target = latestPool.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan.' };
     const cur = target.levelVouchers || 0;
     const next = mode === 'add' ? Math.max(0, cur + count) : Math.max(0, count);
-    setAccounts((prev) =>
-      prev.map((a) => (a.id === accountId ? { ...a, levelVouchers: next } : a))
-    );
+    commitAccountMutationPermanent(accountId, (a) => ({
+      ...a,
+      levelVouchers: next,
+    }));
     playAtmSound('success');
     return {
       success: true,
-      message: `Voucher Level ${target.fullName} berhasil diatur menjadi ${next} Voucher Level!`,
+      message: `Voucher Level ${target.fullName} berhasil diatur & disimpan permanen menjadi ${next} Voucher Level!`,
     };
   };
 
@@ -24447,6 +26553,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminUpdateBugReport,
         adminDeleteBugReport,
         adminClearBugReports,
+        bugRewardConfig,
+        adminUpdateBugRewardConfig,
+        uiVisibilityConfig,
+        adminUpdateUiVisibility,
+        adminShowAllUiVisibility,
+        adminWarnings,
+        dismissedWarningMap,
+        dismissAdminWarning,
+        adminSaveWarning,
+        adminToggleWarningActive,
+        adminResendWarning,
+        adminDeleteWarning,
         notificationsEnabled,
         setNotificationsEnabled,
         backgroundAutoNotifEnabled,
@@ -24680,6 +26798,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminResetSpinWheelConfig,
         adminAdjustAccountSpinCoins,
         adminMassSpinCoinRain,
+        diamondConfig,
+        qrisOrders,
+        isDiamondStoreOpen,
+        setIsDiamondStoreOpen,
+        activeQrisModalOrder,
+        setActiveQrisModalOrder,
+        registerQrisOrder,
+        updateQrisOrderStatus,
+        fulfillPaidQrisOrder,
+        adminUpdateDiamondConfig,
+        adminResetDiamondConfig,
+        adminAdjustAccountDiamonds,
+        spendAccountDiamonds,
+        upgradeJobLevelWithDiamonds,
+        exchangeDiamondsToCashOrCoins,
+        familyConfig,
+        families,
+        adminUpdateFamilyConfig,
+        adminDeleteFamily,
+        createFamilyGroup,
+        purchaseExtraFamilySlot,
+        joinFamilyByCode,
+        leaveFamilyGroup,
+        renameFamilyGroup,
+        updateMemberNameTag,
+        setFamilyMemberRole,
+        setFamilyMemberPermissions,
+        submitFamilyPermissionRequest,
+        resolveFamilyPermissionRequest,
+        kickFamilyMember,
         sultanEmpireConfig,
         debtAlertModal,
         dismissDebtAlertModal,

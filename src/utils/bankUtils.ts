@@ -541,8 +541,8 @@ export function getFeatureUltraDetailedExplanation(feat: {
       },
       {
         number: '09',
-        title: 'Kepatuhan Regulasi Perbankan, BI-FAST, GPN & Proteksi Data',
-        content: `Seluruh pertukaran data pada "${feat.title}" dilindungi enkripsi TLS 1.3 dan standar keamanan Otoritas Jasa Keuangan (OJK). Identitas nasabah yang telah mendapatkan "Centang Biru (Verified Badge)" dari Panel Admin juga memperoleh prioritas pemrosesan pada antrean transaksi finansial.`,
+        title: 'Keamanan Transaksi & Proteksi Data',
+        content: `Seluruh pertukaran data pada "${feat.title}" dilindungi enkripsi TLS 1.3 dan standar keamanan sistem aplikasi. Identitas nasabah yang telah mendapatkan "Centang Biru (Verified Badge)" dari Panel Admin juga memperoleh prioritas pemrosesan pada antrean transaksi finansial.`,
       },
       {
         number: '10',

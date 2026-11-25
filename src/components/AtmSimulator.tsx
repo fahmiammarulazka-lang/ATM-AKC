@@ -1553,7 +1553,7 @@ export const AtmSimulator: React.FC = () => {
               {/* Bottom Screen System Footer */}
               <div className="relative z-10 flex items-center justify-between pt-2 border-t border-blue-800/80 text-[10px] text-blue-400">
                 <span>Layanan Nasabah 24 Jam: 1500-888</span>
-                <span>Proteksi PIN Terenkripsi OJK</span>
+                <span>Proteksi PIN Terenkripsi</span>
               </div>
             </div>
           </div>

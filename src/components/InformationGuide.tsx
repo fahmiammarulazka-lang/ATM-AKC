@@ -283,7 +283,7 @@ const EXTRA_CHAPTERS_DATA: ExtraChapterContent[] = [
     id: 43,
     badge: 'BAB 43 — REKSADANA, SBN & SAHAM IDX',
     title: '4️⃣3️⃣ Panduan Investasi Reksadana, Obligasi Negara (SBN/Sukuk) & Saham Bluechip',
-    subtitle: 'Pengembangan aset pasar modal Indonesia yang diawasi OJK dan dijamin negara.',
+    subtitle: 'Pengembangan aset pasar modal digital yang terpadu.',
     color: 'text-emerald-400',
     icon: BadgeDollarSign,
     sections: [
@@ -1725,7 +1725,7 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                   1️⃣4️⃣ Sistem Tabungan Deposito Online & Bunga Majemuk
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Investasikan dana mengendap Anda ke dalam produk Deposito Online Bank Nusantara dengan imbal hasil terjamin dan penjaminan LPS.
+                  Investasikan dana mengendap Anda ke dalam produk Deposito Online Bank Nusantara dengan imbal hasil terencana.
                 </p>
               </div>
 
@@ -1920,7 +1920,7 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                   2️⃣1️⃣ Pembayaran Praktis Menggunakan QRIS Dinamis & Statis
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Panduan transaksi nirkontak menggunakan Quick Response Code Indonesian Standard (QRIS) terstandar Bank Indonesia.
+                  Panduan transaksi nirkontak menggunakan Quick Response Code Indonesian Standard (QRIS).
                 </p>
               </div>
 

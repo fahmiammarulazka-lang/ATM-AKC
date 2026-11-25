@@ -4,8 +4,14 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI } from '@google/genai';
+import {
+  createBuatQrisInvoiceServer,
+  checkBuatQrisStatusServer,
+  getBuatQrisConfig,
+} from './buatQrisService';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,6 +50,7 @@ export interface ServerPopupNotification {
 
 export interface ServerBugReport {
   id: string;
+  reporterAccountId?: string;
   reporterName: string;
   reporterAccountNumber?: string;
   reporterEmail?: string;
@@ -51,10 +58,37 @@ export interface ServerBugReport {
   explanation: string;
   photoDataUrl?: string;
   photoFileName?: string;
-  status: 'baru' | 'diproses' | 'selesai';
+  status: string;
+  isVerifiedByAdmin?: boolean;
+  verifiedAt?: string;
+  rejectionReason?: string;
   adminReply?: string;
+  reward?: Record<string, unknown>;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface ServerQrisOrder {
+  orderId: string;
+  externalInvoiceId?: string;
+  accountId: string;
+  purpose: string;
+  diamondAmount?: number;
+  baseAmount: number;
+  uniqueCode: number;
+  totalAmount: number;
+  modeUsed: 'api' | 'emvco';
+  configReady: boolean;
+  configNotice?: string;
+  qrisString: string;
+  qrisImageUrl?: string;
+  status: 'PENDING' | 'PAID' | 'SUCCESS' | 'LUNAS' | 'EXPIRED';
+  customerName?: string;
+  description?: string;
+  providerReference?: string;
+  createdAt: string;
+  expiresAt: string;
+  paidAt?: string;
 }
 
 export interface ServerPushAlert {
@@ -79,8 +113,13 @@ interface PersistedGlobalState {
   deletedGiftEventIds: string[];
   giftEventsInitialized: boolean;
   giftEventsUpdatedAtMs: number;
+  diamondConfig?: Record<string, unknown> | null;
+  uiVisibilityConfig?: Record<string, unknown> | null;
+  adminWarnings: Array<Record<string, unknown>>;
+  bugRewardConfig?: Record<string, unknown> | null;
   sharedBankData: Record<string, unknown>;
   userSnapshotsByScope: Record<string, Record<string, unknown>>;
+  qrisOrders: Record<string, ServerQrisOrder>;
   lastUpdated: number;
 }
 
@@ -113,11 +152,16 @@ const DEFAULT_STATE: PersistedGlobalState = {
   ],
   sharedBankData: {},
   userSnapshotsByScope: {},
+  qrisOrders: {},
   pushAlerts: [],
   giftEvents: [],
   deletedGiftEventIds: [],
   giftEventsInitialized: false,
   giftEventsUpdatedAtMs: 0,
+  diamondConfig: null,
+  uiVisibilityConfig: null,
+  adminWarnings: [],
+  bugRewardConfig: null,
   lastUpdated: Date.now(),
 };
 
@@ -145,10 +189,27 @@ function loadPersistedState(): PersistedGlobalState {
           : [],
         giftEventsInitialized: Boolean(parsed.giftEventsInitialized),
         giftEventsUpdatedAtMs: Number(parsed.giftEventsUpdatedAtMs) || 0,
+        diamondConfig:
+          parsed.diamondConfig && typeof parsed.diamondConfig === 'object'
+            ? parsed.diamondConfig
+            : null,
+        uiVisibilityConfig:
+          parsed.uiVisibilityConfig && typeof parsed.uiVisibilityConfig === 'object'
+            ? parsed.uiVisibilityConfig
+            : null,
+        adminWarnings: Array.isArray(parsed.adminWarnings) ? parsed.adminWarnings : [],
+        bugRewardConfig:
+          parsed.bugRewardConfig && typeof parsed.bugRewardConfig === 'object'
+            ? parsed.bugRewardConfig
+            : null,
         sharedBankData: parsed.sharedBankData || {},
         userSnapshotsByScope:
           parsed.userSnapshotsByScope && typeof parsed.userSnapshotsByScope === 'object'
             ? parsed.userSnapshotsByScope
+            : {},
+        qrisOrders:
+          parsed.qrisOrders && typeof parsed.qrisOrders === 'object'
+            ? parsed.qrisOrders
             : {},
         lastUpdated: parsed.lastUpdated || Date.now(),
       };
@@ -213,6 +274,10 @@ async function startServer() {
             deletedGiftEventIds: serverState.deletedGiftEventIds,
             giftEventsInitialized: serverState.giftEventsInitialized,
             giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs || 0,
+            diamondConfig: serverState.diamondConfig || null,
+            uiVisibilityConfig: serverState.uiVisibilityConfig || null,
+            adminWarnings: serverState.adminWarnings || [],
+            bugRewardConfig: serverState.bugRewardConfig || null,
             sharedBankData: serverState.sharedBankData,
             connectedDevices: clients.size,
             lastUpdated: serverState.lastUpdated,
@@ -269,6 +334,49 @@ async function startServer() {
               giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs,
               lastUpdated: serverState.lastUpdated,
             },
+          });
+        } else if (msg.type === 'diamond_config:sync' && msg.payload && typeof msg.payload === 'object') {
+          const rawCfg = msg.payload as Record<string, unknown>;
+          serverState.diamondConfig = {
+            ...rawCfg,
+            baseDiamondPriceRupiah: Math.max(1, Math.round(Number(rawCfg.baseDiamondPriceRupiah) || 90)),
+            diamondDiscountPercent: Math.max(0, Math.min(99, Math.round(Number(rawCfg.diamondDiscountPercent) || 0))),
+            maxCustomDiamond: Math.max(1, Math.min(11_099, Math.round(Number(rawCfg.maxCustomDiamond) || 11_099))),
+            maxPurchaseRupiah: Math.max(1, Math.min(998_910, Math.round(Number(rawCfg.maxPurchaseRupiah) || 998_910))),
+            priceRevision: 3,
+            updatedAt: new Date().toISOString(),
+          };
+          savePersistedState();
+          broadcastToAll({
+            type: 'diamond_config:updated',
+            payload: { diamondConfig: serverState.diamondConfig, lastUpdated: serverState.lastUpdated },
+          });
+        } else if (msg.type === 'ui_visibility:sync' && msg.payload && typeof msg.payload === 'object') {
+          serverState.uiVisibilityConfig = {
+            ...(msg.payload as Record<string, unknown>),
+            updatedAt: new Date().toISOString(),
+          };
+          savePersistedState();
+          broadcastToAll({
+            type: 'ui_visibility:updated',
+            payload: { uiVisibilityConfig: serverState.uiVisibilityConfig, lastUpdated: serverState.lastUpdated },
+          });
+        } else if (msg.type === 'admin_warnings:sync' && Array.isArray(msg.payload?.adminWarnings)) {
+          serverState.adminWarnings = (msg.payload.adminWarnings as Array<Record<string, unknown>>).slice(0, 100);
+          savePersistedState();
+          broadcastToAll({
+            type: 'admin_warnings:updated',
+            payload: { adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated },
+          });
+        } else if (msg.type === 'bug_reward_config:sync' && msg.payload && typeof msg.payload === 'object') {
+          serverState.bugRewardConfig = {
+            ...(msg.payload as Record<string, unknown>),
+            updatedAt: new Date().toISOString(),
+          };
+          savePersistedState();
+          broadcastToAll({
+            type: 'bug_reward_config:updated',
+            payload: { bugRewardConfig: serverState.bugRewardConfig, lastUpdated: serverState.lastUpdated },
           });
         } else if (msg.type === 'bank_data:sync' && msg.payload) {
           serverState.sharedBankData = {
@@ -398,6 +506,7 @@ async function startServer() {
 
     const newBug: ServerBugReport = {
       id: bugId,
+      reporterAccountId: input.reporterAccountId ? String(input.reporterAccountId) : undefined,
       reporterName: String(input.reporterName || 'Pengguna Bank Nusantara').trim(),
       reporterAccountNumber: input.reporterAccountNumber ? String(input.reporterAccountNumber) : undefined,
       reporterEmail: input.reporterEmail ? String(input.reporterEmail) : undefined,
@@ -470,10 +579,172 @@ async function startServer() {
       deletedGiftEventIds: serverState.deletedGiftEventIds,
       giftEventsInitialized: serverState.giftEventsInitialized,
       giftEventsUpdatedAtMs: serverState.giftEventsUpdatedAtMs || 0,
+      diamondConfig: serverState.diamondConfig || null,
+      uiVisibilityConfig: serverState.uiVisibilityConfig || null,
+      adminWarnings: serverState.adminWarnings || [],
+      bugRewardConfig: serverState.bugRewardConfig || null,
       sharedBankData: serverState.sharedBankData,
       connectedDevices: Math.max(1, clients.size),
       lastUpdated: serverState.lastUpdated,
     });
+  });
+
+  app.get('/api/diamond-config', (_req, res) => {
+    res.json({
+      success: true,
+      diamondConfig: serverState.diamondConfig || null,
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/diamond-config', (req, res) => {
+    const rawCfg = (req.body?.diamondConfig || req.body || {}) as Record<string, unknown>;
+    if (!rawCfg || typeof rawCfg !== 'object') {
+      res.status(400).json({ success: false, message: 'Konfigurasi tidak valid.' });
+      return;
+    }
+    serverState.diamondConfig = {
+      ...rawCfg,
+      baseDiamondPriceRupiah: Math.max(1, Math.round(Number(rawCfg.baseDiamondPriceRupiah) || 90)),
+      diamondDiscountPercent: Math.max(0, Math.min(99, Math.round(Number(rawCfg.diamondDiscountPercent) || 0))),
+      maxCustomDiamond: Math.max(1, Math.min(11_099, Math.round(Number(rawCfg.maxCustomDiamond) || 11_099))),
+      maxPurchaseRupiah: Math.max(1, Math.min(998_910, Math.round(Number(rawCfg.maxPurchaseRupiah) || 998_910))),
+      priceRevision: 3,
+      updatedAt: new Date().toISOString(),
+    };
+    savePersistedState();
+    broadcastToAll({
+      type: 'diamond_config:updated',
+      payload: { diamondConfig: serverState.diamondConfig, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, diamondConfig: serverState.diamondConfig, lastUpdated: serverState.lastUpdated });
+  });
+
+  app.get('/api/ui-visibility', (_req, res) => {
+    res.json({
+      success: true,
+      uiVisibilityConfig: serverState.uiVisibilityConfig || null,
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/ui-visibility', (req, res) => {
+    const incoming = (req.body?.uiVisibilityConfig || req.body || {}) as Record<string, unknown>;
+    if (!incoming || typeof incoming !== 'object') {
+      res.status(400).json({ success: false, message: 'Konfigurasi visibilitas tidak valid.' });
+      return;
+    }
+    serverState.uiVisibilityConfig = {
+      ...incoming,
+      updatedAt: new Date().toISOString(),
+    };
+    savePersistedState();
+    broadcastToAll({
+      type: 'ui_visibility:updated',
+      payload: { uiVisibilityConfig: serverState.uiVisibilityConfig, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, uiVisibilityConfig: serverState.uiVisibilityConfig, lastUpdated: serverState.lastUpdated });
+  });
+
+  app.get('/api/admin-warnings', (_req, res) => {
+    res.json({
+      success: true,
+      adminWarnings: serverState.adminWarnings || [],
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/admin-warnings', (req, res) => {
+    if (Array.isArray(req.body?.adminWarnings)) {
+      serverState.adminWarnings = (req.body.adminWarnings as Array<Record<string, unknown>>).slice(0, 100);
+    } else if (req.body && typeof req.body === 'object' && req.body.id) {
+      const incoming = req.body as Record<string, unknown>;
+      const exists = serverState.adminWarnings.some((w) => String(w.id) === String(incoming.id));
+      serverState.adminWarnings = exists
+        ? serverState.adminWarnings.map((w) => (String(w.id) === String(incoming.id) ? incoming : w))
+        : [incoming, ...serverState.adminWarnings].slice(0, 100);
+    } else {
+      res.status(400).json({ success: false, message: 'Data peringatan admin tidak valid.' });
+      return;
+    }
+    savePersistedState();
+    broadcastToAll({
+      type: 'admin_warnings:updated',
+      payload: { adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated });
+  });
+
+  app.patch('/api/admin-warnings/:id/resend', (req, res) => {
+    const targetId = String(req.params.id || '');
+    let found = false;
+    serverState.adminWarnings = serverState.adminWarnings.map((w) => {
+      if (String(w.id) === targetId) {
+        found = true;
+        return {
+          ...w,
+          isActive: true,
+          resendVersion: (Number(w.resendVersion) || 1) + 1,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return w;
+    });
+    if (!found) {
+      res.status(404).json({ success: false, message: 'Peringatan tidak ditemukan.' });
+      return;
+    }
+    savePersistedState();
+    broadcastToAll({
+      type: 'admin_warnings:updated',
+      payload: { adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated });
+  });
+
+  app.delete('/api/admin-warnings/:id', (req, res) => {
+    const targetId = String(req.params.id || '');
+    serverState.adminWarnings = serverState.adminWarnings.filter((w) => String(w.id) !== targetId);
+    savePersistedState();
+    broadcastToAll({
+      type: 'admin_warnings:updated',
+      payload: { adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, adminWarnings: serverState.adminWarnings, lastUpdated: serverState.lastUpdated });
+  });
+
+  app.get('/api/bug-reward-config', (_req, res) => {
+    res.json({
+      success: true,
+      bugRewardConfig: serverState.bugRewardConfig || null,
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/bug-reward-config', (req, res) => {
+    const incoming = (req.body?.bugRewardConfig || req.body || {}) as Record<string, unknown>;
+    if (!incoming || typeof incoming !== 'object') {
+      res.status(400).json({ success: false, message: 'Konfigurasi hadiah bug tidak valid.' });
+      return;
+    }
+    serverState.bugRewardConfig = {
+      enabled: Boolean(incoming.enabled),
+      cashAmount: Math.max(0, Math.floor(Number(incoming.cashAmount) || 0)),
+      coinAmount: Math.max(0, Math.floor(Number(incoming.coinAmount) || 0)),
+      diamondAmount: Math.max(0, Math.floor(Number(incoming.diamondAmount) || 0)),
+      goldGrams: Math.max(0, Math.round((Number(incoming.goldGrams) || 0) * 100) / 100),
+      voucherAmount: Math.max(0, Math.floor(Number(incoming.voucherAmount) || 0)),
+      pointsAmount: Math.max(0, Math.floor(Number(incoming.pointsAmount) || 0)),
+      familySlotAmount: Math.max(0, Math.floor(Number(incoming.familySlotAmount) || 0)),
+      defaultRewardMessage: String(incoming.defaultRewardMessage ?? incoming.defaultMessage ?? '').slice(0, 300),
+      updatedAt: new Date().toISOString(),
+    };
+    savePersistedState();
+    broadcastToAll({
+      type: 'bug_reward_config:updated',
+      payload: { bugRewardConfig: serverState.bugRewardConfig, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, bugRewardConfig: serverState.bugRewardConfig, lastUpdated: serverState.lastUpdated });
   });
 
   app.get('/api/gift-events', (_req, res) => {
@@ -622,15 +893,26 @@ async function startServer() {
 
   app.patch('/api/bug-reports/:id', (req, res) => {
     const targetId = req.params.id;
-    const { status, adminReply } = req.body || {};
+    const { status, adminReply, reward, isVerifiedByAdmin, verifiedAt, rejectionReason } = req.body || {};
     let updatedBug: ServerBugReport | null = null;
 
     serverState.bugReports = serverState.bugReports.map((b) => {
       if (b.id === targetId) {
+        const alreadyRewarded = Boolean(b.reward && (b.reward as Record<string, unknown>).given);
+        const nextReward = alreadyRewarded
+          ? b.reward
+          : reward && typeof reward === 'object'
+          ? (reward as Record<string, unknown>)
+          : b.reward;
         updatedBug = {
           ...b,
-          status: status || b.status,
+          status: status ? String(status) : b.status,
           adminReply: adminReply !== undefined ? String(adminReply) : b.adminReply,
+          isVerifiedByAdmin:
+            typeof isVerifiedByAdmin === 'boolean' ? isVerifiedByAdmin : b.isVerifiedByAdmin,
+          verifiedAt: verifiedAt !== undefined ? String(verifiedAt) : b.verifiedAt,
+          rejectionReason: rejectionReason !== undefined ? String(rejectionReason) : b.rejectionReason,
+          ...(nextReward ? { reward: nextReward } : {}),
           updatedAt: new Date().toISOString(),
         };
         return updatedBug;
@@ -1198,6 +1480,382 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
 
     res.json({ success: false, postalCode: '' });
   });
+
+  // ==================== BUATQRIS.SITE PAYMENT GATEWAY & WEBHOOK API ====================
+  app.get('/api/buatqris/config-status', (_req, res) => {
+    const cfg = getBuatQrisConfig();
+    const hasLoginId = Boolean(cfg.BUATQRIS_LOGIN_ID);
+    const hasAccountId = Boolean(cfg.ACCOUNT_ID);
+    const hasSecretKey = Boolean(cfg.SECRET_KEY);
+    const hasWebhookUrl = Boolean(cfg.WEBHOOK_URL);
+    const hasWebhookSecret = Boolean(cfg.WEBHOOK_SECRET);
+    const hasStaticQris = Boolean(cfg.STATIC_QRIS_STRING);
+    const activeMode: 'api' | 'emvco' = hasSecretKey && hasAccountId ? 'api' : 'emvco';
+    res.json({
+      success: true,
+      siteUrl: cfg.BUATQRIS_URL_SITE,
+      urlSite: cfg.BUATQRIS_URL_SITE,
+      defaultMode: cfg.DEFAULT_MODE,
+      expiryMinutes: cfg.DEFAULT_EXPIRY_MINUTES,
+      useUniqueCode: cfg.USE_UNIQUE_CODE_3_DIGIT,
+      hasLoginId,
+      hasAccountId,
+      hasSecretKey,
+      hasWebhookUrl,
+      hasApiKey: hasSecretKey,
+      hasMerchantId: hasAccountId,
+      hasWebhookSecret,
+      hasStaticQris,
+      activeMode,
+      activeEngine: activeMode,
+      webhookEndpoints: ['POST /', 'POST /api/buatqris/webhook'],
+    });
+  });
+
+  app.get('/api/buatqris/orders', (_req, res) => {
+    const list = Object.values(serverState.qrisOrders || {})
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+      .slice(0, 100);
+    res.json({ success: true, orders: list });
+  });
+
+  app.post('/api/buatqris/create', async (req, res) => {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const rawOrderId = String(body.orderId || `QRIS-${Date.now()}`).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+    const amount = Math.round(Number(body.amount) || 0);
+    const accountId = String(body.accountId || '').trim().slice(0, 80);
+    const purpose = String(body.purpose || 'diamond_topup').trim().slice(0, 40);
+    const diamondAmount = body.diamondAmount ? Math.max(0, Math.round(Number(body.diamondAmount) || 0)) : undefined;
+
+    if (!rawOrderId || amount < 1) {
+      res.status(400).json({ success: false, message: 'Nominal dan Order ID pembayaran QRIS wajib valid.' });
+      return;
+    }
+
+    if (purpose === 'diamond_topup') {
+      const HARD_MAX_DIAMONDS = 11_099;
+      const HARD_MAX_RUPIAH = 998_910;
+      const activeDiamondCfg = (serverState.diamondConfig ||
+        (serverState.sharedBankData?.diamondConfig as Record<string, unknown> | undefined) ||
+        {}) as Record<string, unknown>;
+      const unitBase = Math.max(1, Math.round(Number(activeDiamondCfg.baseDiamondPriceRupiah) || 90));
+      const discPct = Math.max(0, Math.min(99, Math.round(Number(activeDiamondCfg.diamondDiscountPercent) || 0)));
+      const maxDiamondsAllowed = Math.max(
+        1,
+        Math.min(HARD_MAX_DIAMONDS, Math.round(Number(activeDiamondCfg.maxCustomDiamond) || HARD_MAX_DIAMONDS))
+      );
+      const maxRupiahAllowed = Math.max(
+        1,
+        Math.min(HARD_MAX_RUPIAH, Math.round(Number(activeDiamondCfg.maxPurchaseRupiah) || HARD_MAX_RUPIAH))
+      );
+
+      if (!diamondAmount || diamondAmount < 1 || diamondAmount > maxDiamondsAllowed) {
+        res.status(400).json({
+          success: false,
+          message: `Jumlah pembelian dibatasi 1 hingga maksimal ${maxDiamondsAllowed.toLocaleString('id-ID')} per transaksi.`,
+        });
+        return;
+      }
+
+      if (amount > maxRupiahAllowed) {
+        res.status(400).json({
+          success: false,
+          message: `Harga dasar transaksi tidak boleh melebihi Rp ${maxRupiahAllowed.toLocaleString('id-ID')} (sebelum angka unik QRIS).`,
+        });
+        return;
+      }
+
+      const rawUnitDiscounted = unitBase * (1 - discPct / 100);
+      const minExpectedPrice = Math.max(1, Math.round(diamondAmount * rawUnitDiscounted));
+      if (amount < minExpectedPrice) {
+        res.status(400).json({
+          success: false,
+          message: `Nominal pembayaran Rp ${amount.toLocaleString('id-ID')} di bawah tarif aktif minimum Rp ${minExpectedPrice.toLocaleString('id-ID')}.`,
+        });
+        return;
+      }
+    }
+
+    try {
+      const created = await createBuatQrisInvoiceServer({
+        orderId: rawOrderId,
+        amount,
+        customerName: typeof body.customerName === 'string' ? body.customerName.slice(0, 80) : undefined,
+        description: typeof body.description === 'string' ? body.description.slice(0, 140) : undefined,
+        useUniqueCode: typeof body.useUniqueCode === 'boolean' ? body.useUniqueCode : true,
+        expiryMinutes: typeof body.expiryMinutes === 'number' ? body.expiryMinutes : 10,
+      });
+
+      const orderRecord: ServerQrisOrder = {
+        orderId: created.orderId,
+        externalInvoiceId: created.externalInvoiceId,
+        accountId,
+        purpose,
+        diamondAmount,
+        baseAmount: created.baseAmount,
+        uniqueCode: created.uniqueCode,
+        totalAmount: created.totalAmount,
+        modeUsed: created.modeUsed,
+        configReady: created.configReady,
+        configNotice: created.configNotice,
+        qrisString: created.qrisString,
+        qrisImageUrl: created.qrisImageUrl,
+        status: 'PENDING',
+        customerName: typeof body.customerName === 'string' ? body.customerName.slice(0, 80) : undefined,
+        description: typeof body.description === 'string' ? body.description.slice(0, 140) : undefined,
+        createdAt: created.createdAt,
+        expiresAt: created.expiresAt,
+      };
+
+      serverState.qrisOrders[orderRecord.orderId] = orderRecord;
+      // Cap persisted qris orders to most recent 250 entries
+      const orderKeys = Object.keys(serverState.qrisOrders);
+      if (orderKeys.length > 250) {
+        const sorted = Object.values(serverState.qrisOrders).sort(
+          (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
+        );
+        serverState.qrisOrders = Object.fromEntries(sorted.slice(0, 250).map((o) => [o.orderId, o]));
+      }
+      savePersistedState();
+
+      res.json(created);
+    } catch (err) {
+      res.status(500).json({
+        success: false,
+        message: 'Terjadi kesalahan saat membuat tagihan BuatQRIS.',
+        error: String(err),
+      });
+    }
+  });
+
+  app.get('/api/buatqris/status/:orderId', async (req, res) => {
+    const orderId = String(req.params.orderId || '').replace(/[^A-Za-z0-9_-]/g, '');
+    const order = serverState.qrisOrders[orderId];
+    if (!order) {
+      res.status(404).json({ success: false, status: 'EXPIRED', message: 'Pesanan QRIS tidak ditemukan.' });
+      return;
+    }
+
+    if (order.status === 'PAID' || order.status === 'SUCCESS' || order.status === 'LUNAS') {
+      res.json({
+        success: true,
+        status: 'PAID',
+        paidAt: order.paidAt,
+        providerReference: order.providerReference,
+        configReady: order.configReady,
+        order,
+      });
+      return;
+    }
+
+    // Check expiry
+    if (Date.now() > Date.parse(order.expiresAt)) {
+      order.status = 'EXPIRED';
+      savePersistedState();
+      res.json({
+        success: true,
+        status: 'EXPIRED',
+        configReady: order.configReady,
+        order,
+      });
+      return;
+    }
+
+    // Query live BuatQRIS API if credentials configured
+    if (order.modeUsed === 'api') {
+      const liveCheck = await checkBuatQrisStatusServer(order.orderId, order.externalInvoiceId);
+      if (liveCheck) {
+        if (liveCheck.status === 'PAID' || liveCheck.status === 'SUCCESS') {
+          order.status = 'PAID';
+          order.paidAt = liveCheck.paidAt || new Date().toISOString();
+          order.providerReference = liveCheck.providerReference;
+          savePersistedState();
+          broadcastToAll({
+            type: 'qris_payment:paid',
+            payload: { orderId: order.orderId, status: 'PAID', paidAt: order.paidAt, order },
+          });
+          res.json({
+            success: true,
+            status: liveCheck.status,
+            paidAt: order.paidAt,
+            providerReference: order.providerReference,
+            configReady: order.configReady,
+            order,
+          });
+          return;
+        }
+        if (liveCheck.status === 'EXPIRED') {
+          order.status = 'EXPIRED';
+          savePersistedState();
+          res.json({ success: true, status: 'EXPIRED', configReady: order.configReady, order });
+          return;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      status: order.status,
+      configReady: order.configReady,
+      order,
+    });
+  });
+
+  const handleBuatQrisWebhook = (req: express.Request, res: express.Response) => {
+    const cfg = getBuatQrisConfig();
+    const body = (req.body || {}) as Record<string, unknown>;
+    const nestedData =
+      body.data && typeof body.data === 'object'
+        ? (body.data as Record<string, unknown>)
+        : {};
+    const payload = { ...body, ...nestedData };
+
+    // Verify webhook signature / secret whenever WEBHOOK_SECRET or SECRET_KEY is configured
+    const verificationSecret = cfg.WEBHOOK_SECRET || cfg.SECRET_KEY;
+    if (verificationSecret) {
+      const authHeader = String(req.headers.authorization || '').trim();
+      const bearerToken = authHeader.toLowerCase().startsWith('bearer ')
+        ? authHeader.slice(7).trim()
+        : '';
+      const incomingSig = String(
+        req.headers['x-buatqris-signature'] ||
+          req.headers['x-signature'] ||
+          req.headers['x-webhook-secret'] ||
+          req.headers['x-secret-key'] ||
+          req.headers['x-callback-token'] ||
+          bearerToken ||
+          payload.signature ||
+          ''
+      ).trim();
+
+      const expectedHmac = crypto
+        .createHmac('sha256', verificationSecret)
+        .update(JSON.stringify(body))
+        .digest('hex');
+
+      const sigBuf = Buffer.from(incomingSig);
+      const secretBuf = Buffer.from(verificationSecret);
+      const hmacBuf = Buffer.from(expectedHmac);
+
+      const matchesDirect =
+        sigBuf.length === secretBuf.length && crypto.timingSafeEqual(sigBuf, secretBuf);
+      const matchesHmac =
+        sigBuf.length === hmacBuf.length && crypto.timingSafeEqual(sigBuf, hmacBuf);
+
+      if (!matchesDirect && !matchesHmac) {
+        res.status(401).json({ success: false, message: 'Invalid BuatQRIS webhook signature.' });
+        return;
+      }
+    }
+
+    // Optional account_id verification if provided in payload and configured in server Secrets
+    const incomingAccountId = String(payload.account_id || payload.merchant_id || '').trim();
+    if (cfg.ACCOUNT_ID && incomingAccountId && incomingAccountId !== cfg.ACCOUNT_ID) {
+      res.status(403).json({ success: false, message: 'Account ID webhook tidak cocok.' });
+      return;
+    }
+
+    const candidateRef = String(
+      payload.order_id ||
+        payload.orderId ||
+        payload.reference_id ||
+        payload.invoice_id ||
+        payload.invoice ||
+        payload.reference ||
+        payload.qris_invoiceid ||
+        ''
+    ).trim();
+    const rawStatus = String(
+      payload.status || payload.payment_status || payload.event || ''
+    ).toUpperCase();
+    const paidAmount = Math.round(Number(payload.amount || payload.total_amount || 0));
+
+    // Locate matching pending order by orderId, externalInvoiceId, or exact unique totalAmount
+    let matchedOrder: ServerQrisOrder | undefined = serverState.qrisOrders[candidateRef];
+    if (!matchedOrder && candidateRef) {
+      matchedOrder = Object.values(serverState.qrisOrders).find(
+        (o) => o.externalInvoiceId === candidateRef
+      );
+    }
+    if (!matchedOrder && paidAmount > 0) {
+      matchedOrder = Object.values(serverState.qrisOrders).find(
+        (o) =>
+          o.status === 'PENDING' &&
+          o.totalAmount === paidAmount &&
+          Date.now() <= Date.parse(o.expiresAt)
+      );
+    }
+
+    if (!matchedOrder) {
+      res.status(200).json({
+        success: true,
+        matched: false,
+        message: 'Order tidak ditemukan atau sudah diproses.',
+      });
+      return;
+    }
+
+    // Idempotent check
+    if (
+      matchedOrder.status === 'PAID' ||
+      matchedOrder.status === 'SUCCESS' ||
+      matchedOrder.status === 'LUNAS'
+    ) {
+      res.status(200).json({
+        success: true,
+        matched: true,
+        alreadyPaid: true,
+        orderId: matchedOrder.orderId,
+      });
+      return;
+    }
+
+    if (
+      rawStatus === 'PAID' ||
+      rawStatus === 'SUCCESS' ||
+      rawStatus === 'SETTLED' ||
+      rawStatus === 'LUNAS' ||
+      rawStatus === 'PAYMENT.PAID' ||
+      rawStatus === 'PAYMENT.SUCCESS'
+    ) {
+      matchedOrder.status = 'PAID';
+      matchedOrder.paidAt = new Date().toISOString();
+      matchedOrder.providerReference = String(
+        payload.rrn || payload.transaction_id || payload.reference || candidateRef
+      );
+      savePersistedState();
+
+      broadcastToAll({
+        type: 'qris_payment:paid',
+        payload: {
+          orderId: matchedOrder.orderId,
+          status: 'PAID',
+          paidAt: matchedOrder.paidAt,
+          providerReference: matchedOrder.providerReference,
+          order: matchedOrder,
+        },
+      });
+    } else if (
+      rawStatus === 'EXPIRED' ||
+      rawStatus === 'CANCELLED' ||
+      rawStatus === 'FAILED' ||
+      rawStatus === 'PAYMENT.EXPIRED'
+    ) {
+      matchedOrder.status = 'EXPIRED';
+      savePersistedState();
+    }
+
+    res.status(200).json({
+      success: true,
+      matched: true,
+      orderId: matchedOrder.orderId,
+      status: matchedOrder.status,
+    });
+  };
+
+  // Dual webhook endpoints: dedicated route AND root POST / (for https://atm-akc.vercel.app/)
+  app.post('/api/buatqris/webhook', handleBuatQrisWebhook);
+  app.post('/', handleBuatQrisWebhook);
 
   // ==================== VITE MIDDLEWARE / STATIC ASSETS ====================
   if (process.env.NODE_ENV !== 'production') {

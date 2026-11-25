@@ -263,6 +263,10 @@ export interface BankAccount {
   spinCoins?: number; // Default 0 koin
   totalSpinsPlayed?: number;
   totalSpinWinnings?: number;
+  // Mata Uang Diamond Premium & Slot Keluarga Tambahan
+  diamonds?: number; // Default 0 diamond (1 Diamond = Rp 200 via BuatQRIS)
+  extraFamilySlots?: number; // Default 0 (total slot keluarga = defaultMaxFamilies + extraFamilySlots)
+  accountUpdatedAtMs?: number; // Timestamp mutasi otoritatif agar jobLevel/diamonds/saldo tidak tertimpa sync lama
   // Kerajaan Bisnis & Bursa Sultan (Fitur Baru di sebelah Spin the Wheel)
   empireBusinesses?: Record<string, number>; // businessId -> jumlah unit dimiliki
   empireTradingHoldings?: Record<string, number>; // assetId -> jumlah unit dimiliki
@@ -469,9 +473,50 @@ export interface MobilePushBannerToast {
   timestamp: string;
 }
 
+export type BugReportStatus =
+  | 'baru'
+  | 'ditinjau'
+  | 'terverifikasi'
+  | 'dalam_perbaikan'
+  | 'diperbaiki'
+  | 'uji_ulang'
+  | 'selesai'
+  | 'ditolak'
+  | 'duplikat'
+  | 'tidak_repro'
+  | 'diproses'; // Legacy compatibility alias
+
+export interface BugReportReward {
+  given: boolean;
+  cashAmount: number;
+  coinAmount: number;
+  diamondAmount: number;
+  goldGrams?: number;
+  voucherAmount: number;
+  pointsAmount: number;
+  familySlotAmount?: number;
+  adminRewardMessage?: string;
+  awardedAt?: string;
+  awardedBy?: string;
+}
+
+export interface BugRewardProgramConfig {
+  enabled: boolean; // Sakelar global Aktifkan Program Hadiah Bug
+  cashAmount: number; // Saldo Uang (Rp)
+  coinAmount: number; // Coin Spin
+  diamondAmount: number; // Permata
+  goldGrams: number; // Emas 24K (gram)
+  voucherAmount: number; // Voucher Level
+  pointsAmount: number; // Poin Rewards
+  familySlotAmount: number; // Slot Keluarga tambahan
+  defaultRewardMessage: string;
+  updatedAt?: string;
+}
+
 export interface BugReportRecord {
   id: string;
   accountId?: string;
+  reporterAccountId?: string;
   reporterName: string;
   reporterAccountNumber?: string;
   reporterEmail?: string;
@@ -479,8 +524,12 @@ export interface BugReportRecord {
   explanation: string; // Wajib diisi
   photoDataUrl?: string; // Opsional (foto bebas)
   photoFileName?: string;
-  status: 'baru' | 'diproses' | 'selesai';
+  status: BugReportStatus;
+  isVerifiedByAdmin?: boolean;
+  verifiedAt?: string;
+  rejectionReason?: string;
   adminReply?: string;
+  reward?: BugReportReward;
   createdAt: string;
   updatedAt?: string;
 }
@@ -1657,5 +1706,197 @@ export interface SupportContactConfig {
   presetCategories?: SupportContactCategoryPreset[];
   updatedAt?: string;
 }
+
+// ==================== MATA UANG DIAMOND & BUATQRIS ====================
+export type DiamondFeatureKey =
+  | 'family_slots'
+  | 'job_voucher_upgrade'
+  | 'spin_gacha_auction'
+  | 'dashboard_vip_effects'
+  | 'diamond_transfer_exchange';
+
+export interface DiamondSystemConfig {
+  baseDiamondPriceRupiah: number; // Default Rp 90 (55% lebih murah dari Rp 200)
+  diamondDiscountPercent: number; // 0..99% (dikelola di Panel Admin)
+  priceRevision?: number; // Revisi migrasi harga & batas maksimal (v3: maks 11.099 & Rp 998.910)
+  allowCustomAmount: boolean;
+  minCustomDiamond: number;
+  maxCustomDiamond: number; // Default 11.099 (batas keras 11.099)
+  maxPurchaseRupiah?: number; // Default 998.910 (harga dasar sebelum angka unik 3 digit)
+  useUniqueCode3Digit: boolean; // Default true
+  qrisExpiryMinutes: number; // Default 10 menit
+  enabledFeatures: Record<DiamondFeatureKey, boolean>;
+  updatedAt?: string;
+}
+
+export interface DiamondPackageItem {
+  id: number; // 1..250
+  diamonds: number; // 1..11099
+  tierLabel: 'Hemat' | 'Populer' | 'Sultan' | 'Max Sultan';
+  isPopular?: boolean;
+}
+
+// ==================== KONTROL VISIBILITAS TAB & FITUR ADMIN ====================
+export type UiVisibilityNavKey =
+  | 'debt'
+  | 'dashboard'
+  | 'family'
+  | 'transfer'
+  | 'emas'
+  | 'anggaran'
+  | 'redeem'
+  | 'jobs'
+  | 'spin_wheel'
+  | 'chat'
+  | 'atm'
+  | 'guide'
+  | 'updates';
+
+export interface UiVisibilityConfig {
+  navTabs: Record<UiVisibilityNavKey, boolean>;
+  showDiamondBalance: boolean;
+  showDiamondTopUpButton: boolean;
+  storeTabTopUp: boolean;
+  storeTabUse: boolean;
+  storeTabHistory: boolean;
+  updatedAt?: string;
+}
+
+// ==================== SISTEM PERINGATAN ADMIN (MANUAL + 25 PRESET) ====================
+export type AdminWarningIconKey =
+  | 'wrench'
+  | 'alert-triangle'
+  | 'shield-alert'
+  | 'info'
+  | 'megaphone'
+  | 'sparkles'
+  | 'wifi-off'
+  | 'server-crash'
+  | 'lock'
+  | 'bell-ring'
+  | 'clock'
+  | 'gift'
+  | 'ban'
+  | 'check-circle'
+  | 'bug'
+  | 'zap';
+
+export type AdminWarningColorTheme = 'amber' | 'rose' | 'sky' | 'emerald' | 'indigo' | 'slate';
+
+export type AdminWarningCategory =
+  | 'perbaikan'
+  | 'update'
+  | 'keamanan'
+  | 'jaringan'
+  | 'promo'
+  | 'pengumuman';
+
+export type AdminWarningDisplayMode = 'popup' | 'banner';
+export type AdminWarningTargetMode = 'all' | 'tiers' | 'accounts';
+
+export interface AdminSystemWarning {
+  id: string;
+  title: string;
+  message: string;
+  iconKey: AdminWarningIconKey;
+  colorTheme: AdminWarningColorTheme;
+  displayMode: AdminWarningDisplayMode;
+  isPermanent: boolean;
+  showPermanentLabel: boolean;
+  dismissible: boolean;
+  targetMode: AdminWarningTargetMode;
+  targetTiers: CardTier[];
+  targetAccountIds: string[];
+  isActive: boolean;
+  resendVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminSystemWarningPreset {
+  id: string;
+  category: AdminWarningCategory;
+  name: string;
+  title: string;
+  message: string;
+  iconKey: AdminWarningIconKey;
+  colorTheme: AdminWarningColorTheme;
+  suggestedDisplayMode: AdminWarningDisplayMode;
+  suggestedPermanent: boolean;
+  suggestedShowPermanentLabel: boolean;
+  suggestedDismissible: boolean;
+}
+
+export type QrisOrderStatus = 'PENDING' | 'LUNAS' | 'EXPIRED';
+
+export interface QrisPaymentOrder {
+  orderId: string;
+  externalInvoiceId?: string;
+  accountId: string;
+  accountName: string;
+  purpose: 'diamond_topup' | 'coin_topup' | 'feature_checkout';
+  diamondAmount?: number;
+  baseAmount: number;
+  uniqueCode: number;
+  totalAmount: number;
+  discountPercentApplied?: number;
+  modeUsed: 'api' | 'emvco';
+  configReady: boolean;
+  configNotice?: string;
+  qrisString: string;
+  qrisImageUrl?: string;
+  status: QrisOrderStatus;
+  fulfilled?: boolean;
+  providerReference?: string;
+  createdAt: string;
+  expiresAt: string;
+  paidAt?: string;
+}
+
+// ==================== FITUR KELUARGA BANK NUSANTARA ====================
+export type FamilyMemberRole = 'owner' | 'co_leader' | 'member';
+
+export interface FamilyMemberRecord {
+  accountId: string;
+  role: FamilyMemberRole;
+  nameTag: string;
+  canEditNameTag: boolean; // Sakelar izin langsung dari pemilik
+  canEditFamilyName: boolean; // Sakelar izin langsung khusus Wakil Kepala Keluarga
+  joinedAt: string;
+}
+
+export interface FamilyPermissionRequest {
+  id: string;
+  requesterAccountId: string;
+  requesterName: string;
+  type: 'name_tag' | 'family_name';
+  proposedValue: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  resolvedAt?: string;
+}
+
+export interface FamilyGroup {
+  id: string;
+  familyCode: string; // Format 4x3: "XXXX XXXX XXXX"
+  name: string;
+  ownerAccountId: string;
+  members: FamilyMemberRecord[];
+  pendingRequests: FamilyPermissionRequest[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface FamilySystemConfig {
+  enabled: boolean;
+  defaultMaxFamilies: number; // Default 1
+  baseSlotMoneyCost: number; // Default 2.500.000
+  baseSlotDiamondCost: number; // Default 100
+  maxMembersPerFamily: number; // Default 25
+  allowCoLeaderRenameFamily: boolean;
+  allowMemberChangeNameTag: boolean;
+  updatedAt?: string;
+}
+
 
 

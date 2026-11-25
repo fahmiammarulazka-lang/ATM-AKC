@@ -1155,9 +1155,9 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
   },
   {
     id: 'kripto_berjangka',
-    title: 'Top-Up Bursa Aset Kripto Resmi Bappebti / OJK',
+    title: 'Top-Up Bursa Aset Kripto Digital',
     category: 'Investasi & Proteksi',
-    description: 'Setoran Rupiah instan ke dompet pedagang fisik aset kripto teregulasi resmi.',
+    description: 'Setoran Rupiah instan ke dompet pedagang fisik aset kripto digital.',
     defaultAmount: 500000,
     isPaidWithMoney: true,
     requireAdminPin: false,
@@ -3081,6 +3081,37 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v13-34-00',
+    version: 'v13.34.00',
+    releaseType: 'major',
+    visibilityMode: 'auto',
+    title:
+      'Rilis Besar v13.34.00: Perbaikan Permanen Level Pekerjaan, Sistem Versi vAAA.SSS.DDD, Diamond + BuatQRIS Hybrid, Fitur Keluarga, Donasi & Hadiah Laporan Bug',
+    fullDate: 'Selasa, 24 November 2026 • Pukul 19:30 WIB',
+    dateText: 'Selasa, 24 November 2026 • Pukul 19:30 WIB',
+    description:
+      'Pembaruan Major v13.34.00 (kenaikan segmen A sesuai aturan resmi vAAA.SSS.DDD karena menghadirkan lebih dari 3 fitur besar sekaligus) memperbaiki penyimpanan permanen Level Pekerjaan agar tidak tergulung balik oleh sinkronisasi latar belakang, menghadirkan mata uang Diamond dengan 250 paket (1 s/d 297.286) + Custom melalui pembayaran BuatQRIS (API & EMVCo CRC16-CCITT), meluncurkan Fitur Keluarga dengan ID 4x3 (XXXX XXXX XXXX), tombol Donasi BuatQRIS di pojok kanan bawah, serta sistem Hadiah Laporan Bug.',
+    highlights: [
+      'Perbaikan Permanen Simpan Level Pekerjaan: Upgrade level via uang maupun voucher kini langsung mengunci referensi akun terbaru dan menyinkronkannya seketika ke penyimpanan lokal & Cloud sehingga tidak lagi kembali ke level lama.',
+      'Format Versi Resmi Baru vAAA.SSS.DDD: Segmen Minor (S) dan Patch (D) kini tumbuh alami melewati 99 menjadi 100 hingga 999 (v13.34.00 -> v13.100.00), dan segmen Major (A) naik saat ada fitur besar atau penambahan lebih dari 3 fitur sekaligus.',
+      'Mata Uang Diamond (250 Paket 1–297.286 + Custom) & Pembayaran BuatQRIS Hybrid: Hadir di sebelah ikon Uang & Coin lengkap dengan tombol +, harga dasar Rp 200/Diamond, diskon terpadu, modal QR Code tajam, tombol Salin Nominal, timer 10 menit, kode unik 3 digit, auto-polling 3 detik, dan webhook pelunasan otomatis.',
+      'Fitur Keluarga di Navbar (Sebelah Mobile Banking): Buat & Join Keluarga dengan ID 4x3 (XXXX XXXX XXXX) otomatis spasi, Tambah Slot bertingkat (Rp 2,5jt+100D -> Rp 5jt+200D -> Rp 7,5jt+300D), jabatan Wakil Kepala Keluarga (Co-Leader), izin ganda ganti Name Tag/Nama Keluarga, dan akses Kepala Keluarga melihat info pribadi anggota sepenuhnya.',
+      'Tombol Donasi BuatQRIS & Hadiah Laporan Bug: Tombol Donasi cepat hadir di sebelah ikon WhatsApp pojok kanan bawah menuju link resmi BuatQRIS, serta pelapor bug kini dapat menerima apresiasi hadiah lengkap beserta pesan resmi.',
+    ],
+    changes: [
+      'Perbaikan Permanen Simpan Level Pekerjaan: Upgrade level via uang maupun voucher kini langsung mengunci referensi akun terbaru dan menyinkronkannya seketika ke penyimpanan lokal & Cloud sehingga tidak lagi kembali ke level lama.',
+      'Format Versi Resmi Baru vAAA.SSS.DDD: Segmen Minor (S) dan Patch (D) kini tumbuh alami melewati 99 menjadi 100 hingga 999 (v13.34.00 -> v13.100.00), dan segmen Major (A) naik saat ada fitur besar atau penambahan lebih dari 3 fitur sekaligus.',
+      'Mata Uang Diamond (250 Paket 1–297.286 + Custom) & Pembayaran BuatQRIS Hybrid: Hadir di sebelah ikon Uang & Coin lengkap dengan tombol +, harga dasar Rp 200/Diamond, diskon terpadu, modal QR Code tajam, tombol Salin Nominal, timer 10 menit, kode unik 3 digit, auto-polling 3 detik, dan webhook pelunasan otomatis.',
+      'Fitur Keluarga di Navbar (Sebelah Mobile Banking): Buat & Join Keluarga dengan ID 4x3 (XXXX XXXX XXXX) otomatis spasi, Tambah Slot bertingkat (Rp 2,5jt+100D -> Rp 5jt+200D -> Rp 7,5jt+300D), jabatan Wakil Kepala Keluarga (Co-Leader), izin ganda ganti Name Tag/Nama Keluarga, dan akses Kepala Keluarga melihat info pribadi anggota sepenuhnya.',
+      'Tombol Donasi BuatQRIS & Hadiah Laporan Bug: Tombol Donasi cepat hadir di sebelah ikon WhatsApp pojok kanan bawah menuju link resmi BuatQRIS, serta pelapor bug kini dapat menerima apresiasi hadiah lengkap beserta pesan resmi.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-24T12:30:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v12-34-00',
     version: 'v12.34.00',
     releaseType: 'patch',
@@ -3103,8 +3134,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Isolasi Total Digit Kronograf: Layar angka Pemain & Bot kini terbungkus komponen terisolasi penuh sehingga pembaruan timer dashboard maupun sinkronisasi Cloud di latar belakang tidak pernah menimpa angka saat laga berlangsung.',
       'Bekukan Instan Dulu, Proses Saldo & Cloud Pasca-Paint: Tampilan stopwatch dan tombol langsung membeku seketika (< 0,2ms), sedangkan perhitungan hadiah, riwayat, dan penyimpanan Cloud berjalan mulus satu frame setelahnya tanpa macet.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-23T10:27:00.000Z',
     isAutoDetected: true,

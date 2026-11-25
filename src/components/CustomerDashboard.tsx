@@ -43,6 +43,7 @@ import { NusantaraChat } from './NusantaraChat';
 import { PinPromptModal } from './PinPromptModal';
 import { AdminPinModal } from './AdminPinModal';
 import { DigitalBankingFeatures } from './DigitalBankingFeatures';
+import { DiamondText } from './DiamondIcon';
 import { JobVacancyView } from './JobVacancyView';
 import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
 import { TabEmasView } from './TabEmasView';
@@ -356,9 +357,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
             <span className="text-xs uppercase font-mono tracking-widest text-amber-400">
               Nasabah Bank Nusantara
             </span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
-              Terverifikasi OJK
-            </span>
             {currentAccount.isVerified && (
               <VerifiedBadge size="sm" showText text={currentAccount.verifiedLabel || 'Terverifikasi Centang Biru'} label={currentAccount.verifiedLabel} />
             )}
@@ -563,7 +561,12 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               >
                 <div>
                   <span className="font-bold text-white block">
-                    {(tx.title || tx.description || 'Transaksi').replace('(Menunggu Persetujuan Pembeli)', '').trim()}
+                    <DiamondText
+                      text={(tx.title || tx.description || 'Transaksi')
+                        .replace('(Menunggu Persetujuan Pembeli)', '')
+                        .trim()}
+                      tone="bright"
+                    />
                   </span>
                   <span className="text-[11px] font-mono text-amber-300 block mt-0.5">
                     Nominal: {formatRupiah(tx.amount)} • Tujuan/ID: {tx.recipientAccount || '-'}
@@ -1430,7 +1433,10 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                       </div>
                       <div className="space-y-1">
                         <span className="font-bold text-white block text-sm">
-                          {tx.title || tx.description || 'Transaksi Bank Nusantara'}
+                          <DiamondText
+                            text={tx.title || tx.description || 'Transaksi Bank Nusantara'}
+                            tone="bright"
+                          />
                         </span>
                         <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
                           <span>{formatIndoDate(tx.timestamp || (tx as any).date || new Date().toISOString())}</span>

@@ -1,18 +1,14 @@
 /**
- * Bank Nusantara — Mesin Penomoran Versi Terstruktur (vAAA.SS.DD),
+ * Bank Nusantara — Mesin Penomoran Versi Terstruktur (vAAA.SSS.DDD),
  * Sinkronisasi Katalog Rilis, Pembersihan Spam Auto-DD & Filter Visibilitas Khusus Admin
  * ------------------------------------------------------------------------------------
- * Aturan Resmi Penomoran Versi (vAAA.SS.DD):
- * - v  : Singkatan dari version (versi).
- * - AAA (Major): Berubah saat ada pembaruan besar atau perombakan total pada sistem/tampilan.
- * - SS  (Minor): Berubah saat ada penambahan fitur baru tanpa mengubah sistem utama.
- * - DD  (Patch): Berubah saat perbaikan bug, optimalisasi kecil, atau tambalan keamanan.
- * - Tanpa reset segmen belakang saat AAA atau SS naik (+1 melanjutkan angka SS.DD)
- * - Rollover otomatis 99 -> 00:
- *     * DD > 99 -> DD = 00, SS + 1
- *     * SS > 99 -> SS = 00, AAA + 1
- * - Tidak ada lagi auto-increment DD buta setiap kali build/halaman dimuat ulang;
- *   versi hanya naik saat benar-benar ada rilis fitur/perbaikan resmi atau publikasi Admin.
+ * Aturan Resmi Penomoran Versi (vAAA.SSS.DDD):
+ * - v   : Singkatan dari version (versi).
+ * - AAA (Major): Naik saat ada penambahan fitur baru yang besar atau penambahan lebih dari 3 fitur sekaligus.
+ * - SSS (Minor): Naik saat ada penambahan fitur baru (00–99 lalu berlanjut alami ke 100–999, contoh v13.34.00 -> v13.100.00).
+ * - DDD (Patch): Naik saat perbaikan bug, optimalisasi kecil, atau tambalan keamanan (00–99 lalu 100–999).
+ * - Tanpa reset segmen belakang saat AAA atau SSS naik (+1 melanjutkan angka SSS.DDD)
+ * - Rollover otomatis hanya saat melebihi 999 (999 -> 00 ke segmen depannya).
  */
 import {
   AppUpdateRecord,
@@ -20,12 +16,12 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v12.34.00';
+export const STRUCTURED_BASE_VERSION = 'v13.34.00';
 
 export interface StructuredVersion {
-  p: number; // AAA: Major (pembaruan besar / perombakan sistem)
-  w: number; // SS:  Minor (penambahan fitur baru)
-  g: number; // DD:  Patch (perbaikan bug, optimalisasi kecil, keamanan)
+  p: number; // AAA: Major (fitur besar / penambahan > 3 fitur sekaligus)
+  w: number; // SSS: Minor (penambahan fitur baru, 0..999)
+  g: number; // DDD: Patch (perbaikan bug, optimalisasi kecil, keamanan, 0..999)
 }
 
 export interface ActiveAppBuildInfo {
@@ -73,42 +69,44 @@ export function getActiveAppBuildInfo(): ActiveAppBuildInfo {
 }
 
 /**
- * Mengecek apakah string versi mengikuti format 3-segmen baru (vppp.ww.gg atau ppp.ww.gg)
+ * Mengecek apakah string versi mengikuti format 3-segmen vAAA.SSS.DDD
  */
 export function isStructuredThreePartVersion(versionStr?: string): boolean {
   if (!versionStr) return false;
-  return /^\s*v?(\d{1,3})\.(\d{1,2})\.(\d{1,2})\s*$/i.test(versionStr);
+  return /^\s*v?(\d{1,3})\.(\d{1,3})\.(\d{1,3})\s*$/i.test(versionStr);
 }
 
 /**
- * Mem-parsing versi 3-segmen vppp.ww.gg menjadi angka { p, w, g }
+ * Mem-parsing versi 3-segmen vAAA.SSS.DDD menjadi angka { p, w, g }
  */
 export function parseStructuredVersion(versionStr?: string): StructuredVersion | null {
   if (!versionStr) return null;
   const match = String(versionStr)
     .trim()
-    .match(/^v?(\d{1,3})\.(\d{1,2})\.(\d{1,2})$/i);
+    .match(/^v?(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/i);
   if (!match) return null;
   const p = Number.parseInt(match[1], 10);
   const w = Number.parseInt(match[2], 10);
   const g = Number.parseInt(match[3], 10);
   if (!Number.isFinite(p) || !Number.isFinite(w) || !Number.isFinite(g)) return null;
-  if (p < 0 || p > 999 || w < 0 || w > 99 || g < 0 || g > 99) return null;
+  if (p < 0 || p > 999 || w < 0 || w > 999 || g < 0 || g > 999) return null;
   return { p, w, g };
 }
 
 /**
- * Memformat { p, w, g } ke bentuk resmi vppp.ww.gg (p alami, w & g 2 digit dengan leading zero)
+ * Memformat { p, w, g } ke bentuk resmi vAAA.SSS.DDD:
+ * - Di bawah 100 tampil minimal 2 digit (misal v13.34.00)
+ * - Mulai 100 tampil alami 3 digit (misal v13.100.00, v13.101.00)
  */
 export function formatStructuredVersion(v: StructuredVersion): string {
   const safeP = Math.max(0, Math.min(999, Math.floor(v.p)));
-  const safeW = Math.max(0, Math.min(99, Math.floor(v.w)));
-  const safeG = Math.max(0, Math.min(99, Math.floor(v.g)));
+  const safeW = Math.max(0, Math.min(999, Math.floor(v.w)));
+  const safeG = Math.max(0, Math.min(999, Math.floor(v.g)));
   return `v${safeP}.${String(safeW).padStart(2, '0')}.${String(safeG).padStart(2, '0')}`;
 }
 
 /**
- * Menormalkan input versi Admin: jika 3 segmen angka, selalu dibakukan menjadi v{p}.{ww}.{gg}
+ * Menormalkan input versi Admin: jika 3 segmen angka, selalu dibakukan menjadi v{p}.{w}.{g}
  */
 export function normalizeVersionInput(raw: string): string {
   const trimmed = String(raw || '').trim();
@@ -128,7 +126,7 @@ export function compareStructuredVersions(a: StructuredVersion, b: StructuredVer
 }
 
 /**
- * Menormalkan tipe rilis historis ('bug' -> 'minor', 'small_bug' -> 'patch') ke standar vAAA.SS.DD
+ * Menormalkan tipe rilis historis ('bug' -> 'minor', 'small_bug' -> 'patch') ke standar vAAA.SSS.DDD
  */
 export function normalizeReleaseType(
   releaseType?: AppUpdateReleaseType
@@ -139,16 +137,16 @@ export function normalizeReleaseType(
 }
 
 /**
- * Menaikkan versi 3-segmen sesuai tipe rilis vAAA.SS.DD:
- * - major (+AAA): Pembaruan besar / perombakan total (melanjutkan SS.DD tanpa reset)
- * - minor (+SS):  Penambahan fitur baru (melanjutkan DD tanpa reset, rollover 99 -> 00 ke AAA)
- * - patch (+DD):  Perbaikan bug / optimalisasi kecil / keamanan (rollover 99 -> 00 ke SS)
+ * Menaikkan versi 3-segmen sesuai tipe rilis vAAA.SSS.DDD:
+ * - major (+AAA): Pembaruan fitur baru yang besar atau penambahan > 3 fitur sekaligus (melanjutkan SSS.DDD tanpa reset)
+ * - minor (+SSS): Penambahan fitur baru (99 -> 100 -> ... -> 999, rollover ke AAA hanya jika > 999)
+ * - patch (+DDD): Perbaikan bug / optimalisasi kecil / keamanan (99 -> 100 -> ... -> 999, rollover ke SSS hanya jika > 999)
  */
 export function bumpStructuredVersion(
   baseVersionStr: string | undefined,
   releaseType: AppUpdateReleaseType
 ): string {
-  const base = parseStructuredVersion(baseVersionStr) || { p: 12, w: 32, g: 97 };
+  const base = parseStructuredVersion(baseVersionStr) || { p: 13, w: 34, g: 0 };
   let { p, w, g } = base;
   const kind = normalizeReleaseType(releaseType);
 
@@ -156,17 +154,17 @@ export function bumpStructuredVersion(
     p = Math.min(999, p + 1);
   } else if (kind === 'minor') {
     w += 1;
-    if (w > 99) {
+    if (w > 999) {
       w = 0;
       p = Math.min(999, p + 1);
     }
   } else {
-    // patch (+DD)
+    // patch (+DDD)
     g += 1;
-    if (g > 99) {
+    if (g > 999) {
       g = 0;
       w += 1;
-      if (w > 99) {
+      if (w > 999) {
         w = 0;
         p = Math.min(999, p + 1);
       }
@@ -212,7 +210,7 @@ export function validateVersionJump(
       normalizedVersion: normalized,
       matchedReleaseType: null,
       warningMessage:
-        'Format versi disarankan mengikuti pola vAAA.SS.DD dengan angka 00–99 untuk SS & DD (contoh: v12.33.97). Anda tetap bisa menyimpan jika memang disengaja.',
+        'Format versi disarankan mengikuti pola vAAA.SSS.DDD dengan angka 00–999 untuk SSS & DDD (contoh: v13.34.00 atau v13.100.00). Anda tetap bisa menyimpan jika memang disengaja.',
     };
   }
 
@@ -255,7 +253,7 @@ export function validateVersionJump(
       hasWarning: true,
       normalizedVersion: normalized,
       matchedReleaseType: null,
-      warningMessage: `Nomor versi ${normalized} sama dengan versi aktif ${currentFormatted}. Pilih salah satu tombol Major (+AAA), Minor (+SS), atau Patch (+DD) untuk kenaikan bertahap (+1).`,
+      warningMessage: `Nomor versi ${normalized} sama dengan versi aktif ${currentFormatted}. Pilih salah satu tombol Major (+AAA), Minor (+SSS), atau Patch (+DDD) untuk kenaikan bertahap (+1).`,
     };
   }
   if (cmp < 0) {
@@ -273,8 +271,8 @@ export function validateVersionJump(
   const dg = candidateParsed.g - currentParsed.g;
   const jumpParts: string[] = [];
   if (dp > 1) jumpParts.push(`Major AAA melompat +${dp}`);
-  if (dw > 1) jumpParts.push(`Minor SS melompat +${dw}`);
-  if (dg > 1) jumpParts.push(`Patch DD melompat +${dg}`);
+  if (dw > 1) jumpParts.push(`Minor SSS melompat +${dw}`);
+  if (dg > 1) jumpParts.push(`Patch DDD melompat +${dg}`);
 
   const detail =
     jumpParts.length > 0
@@ -286,7 +284,7 @@ export function validateVersionJump(
     hasWarning: true,
     normalizedVersion: normalized,
     matchedReleaseType: null,
-    warningMessage: `Peringatan Anti-Lompat Jauh: ${detail}. Saran bertahap: ${nextPatch} (Patch +DD), ${nextMinor} (Minor +SS), atau ${nextMajor} (Major +AAA). Admin tetap dapat menyimpan jika diperlukan.`,
+    warningMessage: `Peringatan Anti-Lompat Jauh: ${detail}. Saran bertahap: ${nextPatch} (Patch +DDD), ${nextMinor} (Minor +SSS), atau ${nextMajor} (Major +AAA). Admin tetap dapat menyimpan jika diperlukan.`,
   };
 }
 

@@ -32,11 +32,14 @@ import {
   ArrowLeft,
   ReceiptText,
   Ticket,
+  Plus,
+  Users,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
-import { PinPromptModal } from './PinPromptModal';
+import { DiamondIcon, DiamondText } from './DiamondIcon';
+import { UserProfileStatsModal } from './UserProfileStatsModal';
 import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
-import { formatRupiah, isUnlimitedNumber, ensureAccountUserId16, formatUserId16 } from '../utils/bankUtils';
+import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
 import { computeMonthlyBudgetReport, getCurrentMonthKey } from '../utils/budgetUtils';
 import { useSecretAdminSequence } from '../utils/useSecretAdminSequence';
 import { DevRoleConfig, NotificationCategory10Key } from '../types/bank';
@@ -51,6 +54,7 @@ import { ShieldCheck } from 'lucide-react';
 
 export type AppNavView =
   | 'dashboard'
+  | 'family'
   | 'debt'
   | 'transfer'
   | 'emas'
@@ -82,9 +86,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSecurityCenter,
 }) => {
   const {
-    accounts,
     currentAccount,
-    loginToCardWithPin,
     notifications,
     unreadNotificationCount,
     markNotificationAsRead,
@@ -97,7 +99,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     notificationPermissionStatus,
     requestAndEnableNotifications,
     sendTestNotificationNow,
-    logoutGoogle,
     publicCurrentUpdate,
     activeBuildInfo,
     hasUnreadAppUpdate,
@@ -105,10 +106,11 @@ export const Navbar: React.FC<NavbarProps> = ({
     transactions,
     manualExpenses,
     budgetTxCategoryMap,
-    devRoles,
-    cloudSyncStatus,
     googleUser,
     linkCurrentAccountWithGooglePopup,
+    setIsDiamondStoreOpen,
+    diamondConfig,
+    uiVisibilityConfig,
   } = useBank();
 
   const activeDebtAmount = Math.max(0, Math.round(currentAccount?.debtAmount || 0));
@@ -156,13 +158,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     }
   };
 
-  const activeDevRole = currentAccount?.devRoleId
-    ? devRoles.find((r) => r.id === currentAccount.devRoleId) || null
-    : null;
-  const activeDevStyle = activeDevRole ? getDevBadgeColorStyle(activeDevRole.badgeColor) : null;
-
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v12.34.00';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v13.34.00';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -178,14 +175,11 @@ export const Navbar: React.FC<NavbarProps> = ({
     ? budgetAlertReport.warningCount + budgetAlertReport.exceededCount
     : 0;
 
-  const [showUserDropdown, setShowUserDropdown] = useState<boolean>(false);
+  const [showProfileStatsModal, setShowProfileStatsModal] = useState<boolean>(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState<boolean>(false);
   const [selectedNotifCategory, setSelectedNotifCategory] = useState<NotificationCategory10Key | null>(null);
-  const [pendingSwitchAccountId, setPendingSwitchAccountId] = useState<string | null>(null);
 
   const { handleBankClick, handleNusantaraClick } = useSecretAdminSequence(onSecretAdminTrigger);
-
-  const pendingTargetAccount = accounts.find((a) => a.id === pendingSwitchAccountId) || null;
 
   const notificationsByCategory = React.useMemo(() => {
     const map: Record<NotificationCategory10Key, typeof notifications> = {
@@ -287,39 +281,41 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-4">
         <div className="flex items-center gap-2.5 shrink-0">
           {/* TAB KOTAK HUTANG — Tepat di sebelah kiri logo Bank Nusantara */}
-          <button
-            type="button"
-            onClick={() => setActiveView('debt')}
-            title={
-              activeDebtAmount > 0
-                ? `Tab Hutang Aktif: ${formatRupiah(activeDebtAmount)} — Klik untuk bayar & lihat tenggat`
-                : 'Tab Kotak Hutang — Tidak ada hutang aktif'
-            }
-            aria-label="Tab Hutang"
-            className={`relative w-10 h-10 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer shrink-0 ${
-              activeDebtAmount > 0
-                ? activeView === 'debt'
-                  ? 'bg-rose-600 border-rose-300 text-white shadow-lg shadow-rose-600/40 ring-2 ring-rose-400/60'
-                  : 'bg-rose-950/90 hover:bg-rose-900 border-rose-500/80 text-rose-200 shadow-md shadow-rose-950/60'
-                : activeView === 'debt'
-                ? 'bg-blue-600 border-blue-400 text-white shadow-md shadow-blue-600/30'
-                : 'bg-slate-900 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
-            }`}
-          >
-            <ReceiptText className={`w-4 h-4 ${activeDebtAmount > 0 ? 'text-rose-200' : ''}`} />
-            <span className="text-[8px] font-black uppercase leading-none mt-0.5 tracking-tight">
-              HUTANG
-            </span>
-            {activeDebtAmount > 0 && (
-              <>
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 border border-slate-950 animate-ping" />
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 border border-slate-950" />
-                <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded bg-rose-600 border border-rose-300/70 text-white font-mono text-[8px] font-black whitespace-nowrap shadow-md animate-pulse leading-tight">
-                  -{formatCompactDebt(activeDebtAmount)}
-                </span>
-              </>
-            )}
-          </button>
+          {uiVisibilityConfig.navTabs.debt !== false && (
+            <button
+              type="button"
+              onClick={() => setActiveView('debt')}
+              title={
+                activeDebtAmount > 0
+                  ? `Tab Hutang Aktif: ${formatRupiah(activeDebtAmount)} — Klik untuk bayar & lihat tenggat`
+                  : 'Tab Kotak Hutang — Tidak ada hutang aktif'
+              }
+              aria-label="Tab Hutang"
+              className={`relative w-10 h-10 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer shrink-0 ${
+                activeDebtAmount > 0
+                  ? activeView === 'debt'
+                    ? 'bg-rose-600 border-rose-300 text-white shadow-lg shadow-rose-600/40 ring-2 ring-rose-400/60'
+                    : 'bg-rose-950/90 hover:bg-rose-900 border-rose-500/80 text-rose-200 shadow-md shadow-rose-950/60'
+                  : activeView === 'debt'
+                  ? 'bg-blue-600 border-blue-400 text-white shadow-md shadow-blue-600/30'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-700/80 text-slate-300 hover:text-white'
+              }`}
+            >
+              <ReceiptText className={`w-4 h-4 ${activeDebtAmount > 0 ? 'text-rose-200' : ''}`} />
+              <span className="text-[8px] font-black uppercase leading-none mt-0.5 tracking-tight">
+                HUTANG
+              </span>
+              {activeDebtAmount > 0 && (
+                <>
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 border border-slate-950 animate-ping" />
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 border border-slate-950" />
+                  <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded bg-rose-600 border border-rose-300/70 text-white font-mono text-[8px] font-black whitespace-nowrap shadow-md animate-pulse leading-tight">
+                    -{formatCompactDebt(activeDebtAmount)}
+                  </span>
+                </>
+              )}
+            </button>
+          )}
 
           {/* Brand Logo (Stealth 4-stage trigger attached cleanly with zero visual cues) */}
           <div
@@ -386,30 +382,93 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Money & Coin Icon Indicator Bar — Rapi sejajar di Baris 1 */}
+          {/* Money, Coin & Diamond (+ Top-Up BuatQRIS) Indicator Bar — Rapi sejajar di Baris 1 */}
           {currentAccount && (
-            <div className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-slate-900 border border-slate-700/80 whitespace-nowrap shrink-0 font-mono text-[11px] tabular-nums">
-              <span
-                className="flex items-center gap-1 text-emerald-300 font-bold pr-1.5 border-r border-slate-700"
-                title="Saldo Uang Rekening"
-              >
-                <Banknote className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>
-                  {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
-                    ? '∞'
-                    : formatRupiah(currentAccount.balance)}
+            <>
+              <div className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-slate-900 border border-slate-700/80 whitespace-nowrap shrink-0 font-mono text-[11px] tabular-nums">
+                <span
+                  className="flex items-center gap-1 text-emerald-300 font-bold pr-1.5 border-r border-slate-700"
+                  title="Saldo Uang Rekening"
+                >
+                  <Banknote className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>
+                    {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
+                      ? '∞'
+                      : formatRupiah(currentAccount.balance)}
+                  </span>
                 </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setActiveView('spin_wheel')}
-                className="flex items-center gap-1 text-amber-300 font-bold hover:text-amber-200 cursor-pointer"
-                title="Total Coin Nusantara (Klik ke Spin the Wheel)"
-              >
-                <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>{(currentAccount.spinCoins ?? 0).toLocaleString('id-ID')}</span>
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveView('spin_wheel')}
+                  className={`flex items-center gap-1 text-amber-300 font-bold hover:text-amber-200 cursor-pointer ${
+                    uiVisibilityConfig.showDiamondBalance !== false ||
+                    uiVisibilityConfig.showDiamondTopUpButton !== false
+                      ? 'pr-1.5 border-r border-slate-700'
+                      : ''
+                  }`}
+                  title="Total Coin Nusantara (Klik ke Spin the Wheel)"
+                >
+                  <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>{(currentAccount.spinCoins ?? 0).toLocaleString('id-ID')}</span>
+                </button>
+                {(uiVisibilityConfig.showDiamondBalance !== false ||
+                  uiVisibilityConfig.showDiamondTopUpButton !== false) && (
+                  <div
+                    className="flex items-center gap-1 text-cyan-300 font-bold"
+                    title="Saldo Permata & Top-Up BuatQRIS"
+                  >
+                    {uiVisibilityConfig.showDiamondBalance !== false && (
+                      <>
+                        <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
+                        <span>{(currentAccount.diamonds ?? 0).toLocaleString('id-ID')}</span>
+                      </>
+                    )}
+                    {uiVisibilityConfig.showDiamondTopUpButton !== false && (
+                      <button
+                        type="button"
+                        onClick={() => setIsDiamondStoreOpen(true)}
+                        className="relative ml-0.5 flex h-5 w-5 items-center justify-center rounded-md bg-cyan-500 text-slate-950 hover:bg-cyan-400 transition active:scale-90 cursor-pointer"
+                        title={
+                          diamondConfig.diamondDiscountPercent > 0
+                            ? `Top-Up (Diskon ${diamondConfig.diamondDiscountPercent}% via BuatQRIS)`
+                            : 'Top-Up (250 Paket + Custom via BuatQRIS)'
+                        }
+                        aria-label="Top-Up"
+                      >
+                        <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                        {diamondConfig.diamondDiscountPercent > 0 && (
+                          <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-rose-500 ring-1 ring-slate-900" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Compact Mobile Diamond Indicator & + Button (Sakelar Terpisah) */}
+              {(uiVisibilityConfig.showDiamondBalance !== false ||
+                uiVisibilityConfig.showDiamondTopUpButton !== false) && (
+                <div className="flex md:hidden items-center gap-1 h-8 px-2 rounded-lg bg-slate-900 border border-cyan-500/40 text-cyan-300 font-mono text-[11px] font-bold tabular-nums shrink-0">
+                  {uiVisibilityConfig.showDiamondBalance !== false && (
+                    <>
+                      <DiamondIcon tone="bright" className="w-3.5 h-3.5" />
+                      <span>{(currentAccount.diamonds ?? 0).toLocaleString('id-ID')}</span>
+                    </>
+                  )}
+                  {uiVisibilityConfig.showDiamondTopUpButton !== false && (
+                    <button
+                      type="button"
+                      onClick={() => setIsDiamondStoreOpen(true)}
+                      className="flex h-4 w-4 items-center justify-center rounded bg-cyan-500 text-slate-950 cursor-pointer"
+                      title="Top-Up via BuatQRIS"
+                      aria-label="Top-Up"
+                    >
+                      <Plus className="w-3 h-3 stroke-[3]" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
           )}
 
           {/* 🔔 Tombol Notifikasi (10 Jenis dengan Centang Izin & Drill-Down) */}
@@ -422,7 +481,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 if (nextOpen) {
                   setSelectedNotifCategory(null);
                 }
-                setShowUserDropdown(false);
+                setShowProfileStatsModal(false);
               }}
               className="relative p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-amber-300 transition cursor-pointer"
               title="Pusat Notifikasi (10 Jenis)"
@@ -685,7 +744,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           >
                             <div className="flex items-center justify-between gap-2">
                               <div className="font-bold text-white text-[11px] truncate">
-                                {n.title}
+                                <DiamondText text={n.title} tone="bright" />
                               </div>
                               <span className="text-[9px] text-slate-500 font-mono tabular-nums shrink-0">
                                 {new Date(n.timestamp).toLocaleTimeString('id-ID', {
@@ -695,7 +754,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                               </span>
                             </div>
                             <div className="text-[11px] text-slate-300 mt-1 leading-relaxed">
-                              {n.message}
+                              <DiamondText text={n.message} tone="bright" />
                             </div>
                           </div>
                         ))
@@ -716,11 +775,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>Daftar Kartu Baru</span>
           </button>
 
-          {/* Active Card / Account Switcher */}
+          {/* Profil & Statistik Akun Lengkap (Tanpa Fitur Ganti Akun PIN) */}
           <div className="relative">
             <button
-              onClick={() => setShowUserDropdown(!showUserDropdown)}
-              className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs cursor-pointer"
+              type="button"
+              onClick={() => {
+                setShowNotifDropdown(false);
+                setShowProfileStatsModal(true);
+              }}
+              title="Buka Profil & Statistik Akun Lengkap"
+              className="flex items-center gap-2 p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs cursor-pointer transition-colors"
             >
               <div
                 className={`w-7 h-7 rounded-lg text-white flex items-center justify-center font-bold text-xs ${
@@ -741,7 +805,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
                 <div className="flex items-center gap-1">
                   <span className="font-bold text-white block truncate max-w-[105px]">
-                    {currentAccount ? currentAccount.fullName.split(' ')[0] : 'Pilih Akun'}
+                    {currentAccount ? currentAccount.fullName.split(' ')[0] : 'Profil Akun'}
                   </span>
                   {currentAccount?.isVerified && (
                     <VerifiedBadge size="xs" label={currentAccount.verifiedLabel} />
@@ -752,230 +816,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   {currentAccount ? currentAccount.accountNumber : ''}
                 </span>
               </div>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
             </button>
-
-            {/* Switch Account / Card Dropdown */}
-            {showUserDropdown && (
-              <div className="absolute right-0 mt-2 w-84 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-2.5 z-50 text-xs space-y-2">
-                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5">
-                  {currentAccount && (
-                    <UserId16AboveNameBanner
-                      account={currentAccount}
-                      size="xs"
-                      showCopyButton={true}
-                      showPermanentTag={true}
-                    />
-                  )}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <span className="text-[11px] font-bold text-white flex items-center gap-1 flex-wrap">
-                        <span className="truncate">
-                          {currentAccount ? currentAccount.fullName : googleUser?.name || 'Nasabah Bank Nusantara'}
-                        </span>
-                        {currentAccount?.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
-                      </span>
-                      <span className="text-[9px] font-mono text-emerald-400 block truncate">
-                        {isCurrentAccountUnlinkedToGoogle
-                          ? currentAccount?.isGuestAccount || googleUser?.authMode === 'guest'
-                            ? 'Akun Guest Cloud (Firebase) · Belum Tersambung Google'
-                            : 'Akun OA Resmi · Belum Tersambung Email Google'
-                          : `${currentAccount?.email || googleUser?.email || ''} · ${
-                              currentAccount?.isOfficialAdminAccount
-                                ? 'Akun OA + Google Cloud'
-                                : 'Google Cloud'
-                            }`}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setShowUserDropdown(false);
-                        logoutGoogle();
-                      }}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 text-slate-300 text-[10px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
-                      title="Keluar Sesi Akun"
-                    >
-                      <LogOut className="w-3 h-3" />
-                      <span>Keluar Akun</span>
-                    </button>
-                  </div>
-
-                  {/* Badge Role & Tombol Pintas Panel Admin di Dalam Menu Profil */}
-                  {activeDevRole && activeDevStyle && (
-                    <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                      <span
-                        className={`px-2 py-1 rounded-lg border text-[10px] font-black tracking-wide truncate ${activeDevStyle.pillClass}`}
-                        title={activeDevRole.description || activeDevRole.name}
-                      >
-                        👑 {activeDevRole.name}
-                      </span>
-                      {activeDevRole.canQuickOpenAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowUserDropdown(false);
-                            if (onQuickAdminAccess) {
-                              onQuickAdminAccess(activeDevRole);
-                            } else {
-                              onSecretAdminTrigger();
-                            }
-                          }}
-                          className={`px-2.5 py-1.5 rounded-xl font-black text-[10px] flex items-center gap-1 cursor-pointer shadow-md transition-transform active:scale-95 whitespace-nowrap shrink-0 ${activeDevStyle.quickBtnClass}`}
-                        >
-                          {activeDevRole.bypassAdminPin ? (
-                            <Zap className="w-3.5 h-3.5 shrink-0" />
-                          ) : (
-                            <Lock className="w-3.5 h-3.5 shrink-0" />
-                          )}
-                          <span>
-                            {activeDevRole.bypassAdminPin ? '⚡ Panel Admin' : '🔐 Admin (PIN)'}
-                          </span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {isCurrentAccountUnlinkedToGoogle && (
-                    <button
-                      type="button"
-                      onClick={handleLinkCurrentAccountToGoogle}
-                      disabled={isLinkingGoogle}
-                      className="w-full mt-1.5 py-2 px-3 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-black text-[11px] flex items-center justify-center gap-2 shadow cursor-pointer transition disabled:opacity-60"
-                    >
-                      <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
-                        <path
-                          fill="#4285F4"
-                          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                        />
-                        <path
-                          fill="#EA4335"
-                          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                        />
-                      </svg>
-                      <span>
-                        {isLinkingGoogle
-                          ? 'Menyambungkan ke Google...'
-                          : 'Sign in with Google (Sambungkan Akun Ini)'}
-                      </span>
-                    </button>
-                  )}
-
-                  {onOpenSecurityCenter && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowUserDropdown(false);
-                        onOpenSecurityCenter('identity');
-                      }}
-                      className="w-full mt-1.5 py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-emerald-500/35 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-2 cursor-pointer transition"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                      <span>Security &amp; Sync Command Center</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="px-2 py-1 text-[11px] font-semibold text-slate-300 border-b border-slate-800 flex items-center justify-between">
-                  <span>Login / Ganti ke Kartu Lain:</span>
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono">
-                    PIN Kartu / Admin
-                  </span>
-                </div>
-
-                <div className="px-2.5 py-1.5 text-[10px] text-slate-300 bg-blue-950/30 rounded-lg border border-blue-500/30 flex items-center gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>
-                    Untuk masuk ke kartu lain, masukkan <strong>6 digit PIN Kartu</strong> tersebut.
-                  </span>
-                </div>
-
-                <div className="max-h-64 overflow-y-auto space-y-1 pt-1">
-                  {accounts.map((acc, idx) => {
-                    const isSelected = acc.id === currentAccount?.id;
-                    const isAdminCard = acc.cardTier === 'admin';
-                    return (
-                      <button
-                        key={acc.id}
-                        onClick={() => {
-                          setShowUserDropdown(false);
-                          if (!isSelected) {
-                            setPendingSwitchAccountId(acc.id);
-                          }
-                        }}
-                        className={`w-full p-2.5 rounded-xl text-left transition-all flex items-center justify-between cursor-pointer ${
-                          isSelected
-                            ? 'bg-blue-600 text-white font-bold'
-                            : isAdminCard
-                            ? 'bg-purple-950/60 hover:bg-purple-900/60 border border-fuchsia-500/40 text-fuchsia-200'
-                            : 'hover:bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        <div className="min-w-0 pr-2">
-                          <span className="text-[9px] font-mono text-cyan-300 block mb-0.5">
-                            ID: {formatUserId16(ensureAccountUserId16(acc))}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-black/30 text-amber-300 shrink-0">
-                              Kartu #{idx + 1}
-                            </span>
-                            <span className="font-bold truncate max-w-[130px]">{acc.fullName}</span>
-                            {acc.isVerified && (
-                              <VerifiedBadge size="xs" label={acc.verifiedLabel} />
-                            )}
-                            {acc.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
-                          </div>
-                          <span className="text-[10px] font-mono opacity-80 block mt-0.5">
-                            {acc.accountNumber} • {isAdminCard ? 'KARTU ADMIN (∞)' : acc.cardTier.toUpperCase()}
-                          </span>
-                        </div>
-                        <span
-                          className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold uppercase shrink-0 ${
-                            isAdminCard
-                              ? 'bg-fuchsia-500 text-slate-950'
-                              : acc.cardStatus === 'active'
-                              ? 'bg-emerald-500/20 text-emerald-300'
-                              : acc.cardStatus === 'banned'
-                              ? 'bg-rose-600 text-white'
-                              : acc.cardStatus === 'pending'
-                              ? 'bg-amber-500/20 text-amber-300'
-                              : 'bg-rose-500/20 text-rose-300'
-                          }`}
-                        >
-                          {acc.cardStatus === 'banned'
-                            ? '🚫 BANNED'
-                            : isAdminCard
-                            ? '∞ UNLIMITED'
-                            : acc.cardStatus === 'pending'
-                            ? 'DIPROSES'
-                            : acc.cardStatus}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="pt-2 border-t border-slate-800">
-                  <button
-                    onClick={() => {
-                      onOpenRegisterModal();
-                      setShowUserDropdown(false);
-                    }}
-                    className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <PlusCircle className="w-3.5 h-3.5" />
-                    <span>Daftarkan Kartu Baru</span>
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -1004,191 +845,229 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="flex flex-1 min-w-0 items-center gap-1.5 overflow-x-auto py-2 text-xs font-semibold [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {/* 1. Mobile Banking */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('dashboard', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'dashboard'
-                  ? 'bg-blue-600 text-white font-bold shadow-sm'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <Building className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Mobile Banking</span>
-            </button>
-
-            {/* 2. Transfer */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('transfer', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'transfer'
-                  ? 'bg-emerald-600 text-white font-bold shadow-sm'
-                  : 'text-emerald-300 hover:text-white hover:bg-slate-900 border border-emerald-500/30'
-              }`}
-            >
-              <Send className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-              <span>Transfer</span>
-            </button>
-
-            {/* 3. Emas 24K */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('emas', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'emas'
-                  ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-sm'
-                  : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/35'
-              }`}
-            >
-              <Crown className="w-3.5 h-3.5 shrink-0" />
-              <span>Emas 24K</span>
-            </button>
-
-            {/* 4. Anggaran */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('anggaran', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'anggaran'
-                  ? 'bg-indigo-600 text-white font-bold shadow-sm'
-                  : 'text-indigo-300 hover:text-white hover:bg-slate-900 border border-indigo-500/30'
-              }`}
-            >
-              <PieChart className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
-              <span>Anggaran</span>
-              {budgetAlertCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 font-mono tabular-nums text-[10px] font-black">
-                  {budgetAlertCount}
-                </span>
-              )}
-            </button>
-
-            {/* 5. Kode Redeem (Tab Khusus di Sebelah Anggaran) */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('redeem', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'redeem'
-                  ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
-                  : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/35'
-              }`}
-            >
-              <Ticket className="w-3.5 h-3.5 shrink-0" />
-              <span>Kode Redeem</span>
-            </button>
-
-            {/* 5. Lowongan Kerja */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('jobs', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'jobs'
-                  ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-sm'
-                  : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/35'
-              }`}
-            >
-              <Briefcase className="w-3.5 h-3.5 shrink-0" />
-              <span>Lowongan Kerja</span>
-              <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono tabular-nums text-[10px] font-bold">
-                Lv.{currentAccount?.jobLevel || 1}
-              </span>
-            </button>
-
-            {/* 6. Spin the Wheel */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('spin_wheel', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'spin_wheel'
-                  ? 'bg-gradient-to-r from-fuchsia-500 via-amber-400 to-yellow-500 text-slate-950 font-black shadow-sm'
-                  : 'text-fuchsia-300 hover:text-white hover:bg-slate-900 border border-fuchsia-500/35'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span>Spin the Wheel</span>
-              <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 font-mono tabular-nums text-[10px] font-bold">
-                {(currentAccount?.spinCoins ?? 0).toLocaleString('id-ID')}
-              </span>
-            </button>
-
-            {/* 7. PayChat */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('chat', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'chat'
-                  ? 'bg-blue-600 text-white font-bold shadow-sm'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <MessageSquare className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <span>PayChat</span>
-            </button>
-
-            {/* 9. Mesin ATM */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('atm', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'atm'
-                  ? 'bg-blue-600 text-white font-bold shadow-sm'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <Monitor className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>Mesin ATM</span>
-            </button>
-
-            {/* 10. Panduan */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('guide', e)}
-              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                activeView === 'guide'
-                  ? 'bg-blue-600 text-white font-bold shadow-sm'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <BookOpen className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-              <span>Panduan</span>
-            </button>
-
-            {/* 11. Update */}
-            <button
-              type="button"
-              onClick={(e) => handleSelectNavView('updates', e)}
-              className={`group relative overflow-hidden px-3 py-1.5 rounded-lg transition-all duration-200 cursor-pointer flex items-center gap-2 whitespace-nowrap shrink-0 ${
-                activeView === 'updates'
-                  ? 'bg-gradient-to-b from-emerald-500 to-emerald-600 text-slate-950 font-bold border border-emerald-300/60 shadow-[0_0_20px_rgba(16,185,129,0.28),inset_0_1px_0_rgba(255,255,255,0.45)]'
-                  : 'bg-gradient-to-b from-emerald-500/12 via-slate-900/80 to-slate-950/90 text-slate-200 hover:text-white border border-emerald-400/35 hover:border-emerald-400/70 shadow-[inset_0_1px_0_rgba(167,243,208,0.18)]'
-              }`}
-            >
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/60 to-transparent"
-              />
-              <History
-                className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 group-hover:scale-105 ${
-                  activeView === 'updates' ? 'text-slate-950' : 'text-emerald-400'
-                }`}
-              />
-              <span className="tracking-tight">Update</span>
-              <span
-                className={`font-mono tabular-nums text-[10px] font-bold tracking-tight ${
-                  activeView === 'updates'
-                    ? 'text-slate-950/90'
-                    : 'text-emerald-300'
+            {uiVisibilityConfig.navTabs.dashboard !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('dashboard', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'dashboard'
+                    ? 'bg-blue-600 text-white font-bold shadow-sm'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-900'
                 }`}
               >
-                {currentUpdateVersion}
-              </span>
-              {hasUnreadAppUpdate && activeView !== 'updates' && (
-                <span className="px-1.5 py-0.5 rounded bg-emerald-400 text-slate-950 font-mono text-[9px] font-black tracking-wider leading-none">
-                  BARU
+                <Building className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Mobile Banking</span>
+              </button>
+            )}
+
+            {/* 1B. Keluarga */}
+            {uiVisibilityConfig.navTabs.family !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('family', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'family'
+                    ? 'bg-indigo-600 text-white font-bold shadow-sm'
+                    : 'text-indigo-300 hover:text-white hover:bg-slate-900 border border-indigo-500/35'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                <span>Keluarga</span>
+              </button>
+            )}
+
+            {/* 2. Transfer */}
+            {uiVisibilityConfig.navTabs.transfer !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('transfer', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'transfer'
+                    ? 'bg-emerald-600 text-white font-bold shadow-sm'
+                    : 'text-emerald-300 hover:text-white hover:bg-slate-900 border border-emerald-500/30'
+                }`}
+              >
+                <Send className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                <span>Transfer</span>
+              </button>
+            )}
+
+            {/* 3. Emas 24K */}
+            {uiVisibilityConfig.navTabs.emas !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('emas', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'emas'
+                    ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-sm'
+                    : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/35'
+                }`}
+              >
+                <Crown className="w-3.5 h-3.5 shrink-0" />
+                <span>Emas 24K</span>
+              </button>
+            )}
+
+            {/* 4. Anggaran */}
+            {uiVisibilityConfig.navTabs.anggaran !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('anggaran', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'anggaran'
+                    ? 'bg-indigo-600 text-white font-bold shadow-sm'
+                    : 'text-indigo-300 hover:text-white hover:bg-slate-900 border border-indigo-500/30'
+                }`}
+              >
+                <PieChart className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                <span>Anggaran</span>
+                {budgetAlertCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 font-mono tabular-nums text-[10px] font-black">
+                    {budgetAlertCount}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* 5. Kode Redeem */}
+            {uiVisibilityConfig.navTabs.redeem !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('redeem', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'redeem'
+                    ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
+                    : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/35'
+                }`}
+              >
+                <Ticket className="w-3.5 h-3.5 shrink-0" />
+                <span>Kode Redeem</span>
+              </button>
+            )}
+
+            {/* 6. Lowongan Kerja */}
+            {uiVisibilityConfig.navTabs.jobs !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('jobs', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'jobs'
+                    ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 font-black shadow-sm'
+                    : 'text-amber-300 hover:text-white hover:bg-slate-900 border border-amber-400/35'
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                <span>Lowongan Kerja</span>
+                <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-mono tabular-nums text-[10px] font-bold">
+                  Lv.{currentAccount?.jobLevel || 1}
                 </span>
-              )}
-            </button>
+              </button>
+            )}
+
+            {/* 7. Spin the Wheel */}
+            {uiVisibilityConfig.navTabs.spin_wheel !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('spin_wheel', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'spin_wheel'
+                    ? 'bg-gradient-to-r from-fuchsia-500 via-amber-400 to-yellow-500 text-slate-950 font-black shadow-sm'
+                    : 'text-fuchsia-300 hover:text-white hover:bg-slate-900 border border-fuchsia-500/35'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Spin the Wheel</span>
+                <span className="px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 font-mono tabular-nums text-[10px] font-bold">
+                  {(currentAccount?.spinCoins ?? 0).toLocaleString('id-ID')}
+                </span>
+              </button>
+            )}
+
+            {/* 8. PayChat */}
+            {uiVisibilityConfig.navTabs.chat !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('chat', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'chat'
+                    ? 'bg-blue-600 text-white font-bold shadow-sm'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-900'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>PayChat</span>
+              </button>
+            )}
+
+            {/* 9. Mesin ATM */}
+            {uiVisibilityConfig.navTabs.atm !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('atm', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'atm'
+                    ? 'bg-blue-600 text-white font-bold shadow-sm'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-900'
+                }`}
+              >
+                <Monitor className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>Mesin ATM</span>
+              </button>
+            )}
+
+            {/* 10. Panduan */}
+            {uiVisibilityConfig.navTabs.guide !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('guide', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'guide'
+                    ? 'bg-blue-600 text-white font-bold shadow-sm'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-900'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                <span>Panduan</span>
+              </button>
+            )}
+
+            {/* 11. Update */}
+            {uiVisibilityConfig.navTabs.updates !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('updates', e)}
+                className={`group relative overflow-hidden px-3 py-1.5 rounded-lg transition-all duration-200 cursor-pointer flex items-center gap-2 whitespace-nowrap shrink-0 ${
+                  activeView === 'updates'
+                    ? 'bg-gradient-to-b from-emerald-500 to-emerald-600 text-slate-950 font-bold border border-emerald-300/60 shadow-[0_0_20px_rgba(16,185,129,0.28),inset_0_1px_0_rgba(255,255,255,0.45)]'
+                    : 'bg-gradient-to-b from-emerald-500/12 via-slate-900/80 to-slate-950/90 text-slate-200 hover:text-white border border-emerald-400/35 hover:border-emerald-400/70 shadow-[inset_0_1px_0_rgba(167,243,208,0.18)]'
+                }`}
+              >
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/60 to-transparent"
+                />
+                <History
+                  className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 group-hover:scale-105 ${
+                    activeView === 'updates' ? 'text-slate-950' : 'text-emerald-400'
+                  }`}
+                />
+                <span className="tracking-tight">Update</span>
+                <span
+                  className={`font-mono tabular-nums text-[10px] font-bold tracking-tight ${
+                    activeView === 'updates'
+                      ? 'text-slate-950/90'
+                      : 'text-emerald-300'
+                  }`}
+                >
+                  {currentUpdateVersion}
+                </span>
+                {hasUnreadAppUpdate && activeView !== 'updates' && (
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-400 text-slate-950 font-mono text-[9px] font-black tracking-wider leading-none">
+                    BARU
+                  </span>
+                )}
+              </button>
+            )}
           </nav>
 
           {/* Panah Gulir Kanan Otomatis */}
@@ -1220,27 +1099,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       )}
 
-      {/* Card PIN Prompt when switching/logging into an Old Card or Another Card */}
-      {pendingTargetAccount && (
-        <PinPromptModal
-          isOpen={Boolean(pendingTargetAccount)}
-          title="Login ke Kartu Lain / Ganti Kartu"
-          description={`Masukkan 6 digit PIN Kartu ${pendingTargetAccount.fullName} untuk masuk ke kartu ini. Jika lupa PIN kartu, klik tombol "Lupa PIN?" di bawah.`}
-          targetAccountId={pendingTargetAccount.id}
-          targetAccountName={pendingTargetAccount.fullName}
-          cardNumberSnippet={pendingTargetAccount.cardNumber}
-          expectedPin={pendingTargetAccount.pin}
-          acceptAdminPin={true}
-          onSuccess={(enteredPin) => {
-            loginToCardWithPin(
-              pendingTargetAccount.id,
-              enteredPin || pendingTargetAccount.pin
-            );
-            setPendingSwitchAccountId(null);
-          }}
-          onCancel={() => setPendingSwitchAccountId(null)}
-        />
-      )}
+      {/* Modal Profil & Statistik Akun Lengkap (Tanpa Ganti Akun PIN) */}
+      <UserProfileStatsModal
+        isOpen={showProfileStatsModal}
+        onClose={() => setShowProfileStatsModal(false)}
+        onQuickAdminAccess={onQuickAdminAccess}
+      />
     </header>
   );
 };

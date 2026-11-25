@@ -32,6 +32,7 @@ import {
   CheckSquare,
   Square,
   Edit3,
+  Coffee,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -1343,32 +1344,55 @@ export const HelpCenterAndWhatsappDock: React.FC<HelpCenterAndWhatsappDockProps>
           </div>
         )}
 
-        {/* Tombol Bulat Hijau Khas WhatsApp + Tooltip "Bantuan" */}
-        <div className="relative group">
-          <span
-            role="tooltip"
-            className="pointer-events-none absolute -top-9 right-0 px-2.5 py-1 rounded-md bg-slate-900 border border-slate-700 text-white text-[11px] font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
-          >
-            Bantuan
-          </span>
-          <button
-            type="button"
-            onClick={toggleQuickPopup}
-            title="Bantuan"
-            aria-label="Bantuan & Contact Us"
-            aria-expanded={quickPopupOpen}
-            className={`w-12 h-12 rounded-full flex items-center justify-center text-white shadow-xl border-2 transition-transform active:scale-95 cursor-pointer ${
-              quickPopupOpen
-                ? 'bg-emerald-600 border-emerald-300 scale-105'
-                : 'bg-[#25D366] hover:bg-[#1fb858] border-emerald-300/70 hover:scale-105'
-            }`}
-          >
-            {quickPopupOpen ? (
-              <X className="w-5 h-5" />
-            ) : (
-              <WhatsAppGlyph className="w-6 h-6" />
-            )}
-          </button>
+        {/* Baris Tombol Bulat Donasi (Sebelah WA) + WhatsApp Bantuan */}
+        <div className="flex items-center gap-2.5">
+          {/* Tombol Dukung Aplikasi BuatQRIS */}
+          <div className="relative group">
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute -top-10 right-0 px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-600 to-orange-500 text-white text-[11px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+            >
+              Dukung Aplikasi via BuatQRIS
+            </span>
+            <a
+              href="https://app.buatqris.site/donation/azkaakc"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Dukung Aplikasi via BuatQRIS"
+              aria-label="Dukung Aplikasi via BuatQRIS"
+              className="w-12 h-12 rounded-full flex items-center justify-center bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-white shadow-xl border-2 border-amber-200/80 transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+            >
+              <Coffee className="w-5 h-5" />
+            </a>
+          </div>
+
+          {/* Tombol Bulat Hijau Khas WhatsApp + Tooltip "Bantuan" */}
+          <div className="relative group">
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute -top-9 right-0 px-2.5 py-1 rounded-md bg-slate-900 border border-slate-700 text-white text-[11px] font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
+            >
+              Bantuan
+            </span>
+            <button
+              type="button"
+              onClick={toggleQuickPopup}
+              title="Bantuan"
+              aria-label="Bantuan & Contact Us"
+              aria-expanded={quickPopupOpen}
+              className={`w-12 h-12 rounded-full flex items-center justify-center text-white shadow-xl border-2 transition-transform active:scale-95 cursor-pointer ${
+                quickPopupOpen
+                  ? 'bg-emerald-600 border-emerald-300 scale-105'
+                  : 'bg-[#25D366] hover:bg-[#1fb858] border-emerald-300/70 hover:scale-105'
+              }`}
+            >
+              {quickPopupOpen ? (
+                <X className="w-5 h-5" />
+              ) : (
+                <WhatsAppGlyph className="w-6 h-6" />
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
