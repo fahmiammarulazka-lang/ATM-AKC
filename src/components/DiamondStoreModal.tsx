@@ -20,6 +20,8 @@ import { useBank } from '../context/BankContext';
 import {
   DIAMOND_FEATURE_METADATA,
   DIAMOND_PACKAGES_250,
+  MIN_DIAMOND_PACKAGE_AMOUNT,
+  MIN_DIAMOND_PURCHASE_RUPIAH,
   MAX_DIAMOND_PACKAGE_AMOUNT,
   MAX_DIAMOND_PURCHASE_RUPIAH,
   calculateDiamondPurchasePrice,
@@ -36,6 +38,7 @@ const ITEMS_PER_PAGE = 25;
 type TierFilter = 'all' | 'tier1' | 'tier2' | 'tier3' | 'tier4';
 
 const QUICK_RUPIAH_PRESETS: Array<{ label: string; amount: number | 'max' }> = [
+  { label: 'Rp 1rb (11 💎)', amount: 1_000 },
   { label: 'Rp 5rb', amount: 5_000 },
   { label: 'Rp 10rb', amount: 10_000 },
   { label: 'Rp 25rb', amount: 25_000 },
@@ -106,14 +109,23 @@ export const DiamondStoreModal: React.FC = () => {
       setCustomDiamondsInput(String(calc.diamonds));
     } else {
       const qty = Math.max(
-        1,
-        Math.min(limits.maxDiamonds, Math.floor(Number(customDiamondsInput.replace(/[^0-9]/g, '')) || 1))
+        limits.minDiamonds,
+        Math.min(
+          limits.maxDiamonds,
+          Math.floor(Number(customDiamondsInput.replace(/[^0-9]/g, '')) || limits.minDiamonds)
+        )
       );
       const pr = calculateDiamondPurchasePrice(qty, diamondConfig);
       setCustomRupiahInput(String(pr.finalPrice));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diamondConfig.baseDiamondPriceRupiah, diamondConfig.diamondDiscountPercent, limits.maxDiamonds, limits.maxBaseRupiah]);
+  }, [
+    diamondConfig.baseDiamondPriceRupiah,
+    diamondConfig.diamondDiscountPercent,
+    limits.minDiamonds,
+    limits.maxDiamonds,
+    limits.maxBaseRupiah,
+  ]);
 
   const handleDiamondsInputChange = (raw: string) => {
     const digits = raw.replace(/[^0-9]/g, '');
@@ -130,13 +142,19 @@ export const DiamondStoreModal: React.FC = () => {
       setClampNotice(
         `Jumlah disesuaikan otomatis ke batas maksimal ${limits.maxDiamonds.toLocaleString('id-ID')} (harga dasar maks ${formatRupiah(limits.maxBaseRupiah)}).`
       );
+    } else if (val > 0 && val < limits.minDiamonds) {
+      setClampNotice(
+        `Minimal pembelian adalah ${limits.minDiamonds} 💎 (mulai dari ${formatRupiah(limits.minRupiah)}).`
+      );
     } else {
       setClampNotice('');
     }
     setCustomDiamondsInput(String(val));
-    if (val >= 1) {
+    if (val >= limits.minDiamonds) {
       const pr = calculateDiamondPurchasePrice(val, diamondConfig);
       setCustomRupiahInput(String(pr.finalPrice));
+    } else if (val >= 1) {
+      setCustomRupiahInput(String(limits.minRupiah));
     } else {
       setCustomRupiahInput('0');
     }
@@ -162,7 +180,7 @@ export const DiamondStoreModal: React.FC = () => {
       notice = `Batas maksimal ${limits.maxDiamonds.toLocaleString('id-ID')} per transaksi diterapkan (${formatRupiah(calc.finalPrice)}).`;
       rupiahVal = calc.finalPrice;
     } else if (calc.isBelowMin && rupiahVal > 0) {
-      notice = `Minimal pembelian 1 permata adalah ${formatRupiah(calc.minRupiah)}.`;
+      notice = `Minimal pembelian adalah ${limits.minDiamonds} 💎 mulai dari ${formatRupiah(calc.minRupiah)}.`;
     }
     setClampNotice(notice);
     setCustomRupiahInput(String(rupiahVal));
@@ -240,14 +258,21 @@ export const DiamondStoreModal: React.FC = () => {
       setFeedback({ type: 'error', text: 'Silakan login ke rekening terlebih dahulu.' });
       return;
     }
-    if (diamonds < 1 || diamonds > limits.maxDiamonds) {
+    if (diamonds < limits.minDiamonds || diamonds > limits.maxDiamonds) {
       setFeedback({
         type: 'error',
-        text: `Jumlah 💎 harus antara 1 sampai ${limits.maxDiamonds.toLocaleString('id-ID')} 💎.`,
+        text: `Jumlah 💎 minimal ${limits.minDiamonds} 💎 (mulai ${formatRupiah(limits.minRupiah)}) sampai ${limits.maxDiamonds.toLocaleString('id-ID')} 💎.`,
       });
       return;
     }
     const pricing = calculateDiamondPurchasePrice(diamonds, diamondConfig);
+    if (pricing.finalPrice < MIN_DIAMOND_PURCHASE_RUPIAH) {
+      setFeedback({
+        type: 'error',
+        text: `Harga minimal Top-Up 💎 adalah ${formatRupiah(MIN_DIAMOND_PURCHASE_RUPIAH)} (minimal ${MIN_DIAMOND_PACKAGE_AMOUNT} 💎).`,
+      });
+      return;
+    }
     if (pricing.finalPrice > limits.maxBaseRupiah) {
       setFeedback({
         type: 'error',
@@ -333,15 +358,13 @@ export const DiamondStoreModal: React.FC = () => {
               </div>
               <p className="flex flex-wrap items-center gap-1 text-xs text-cyan-100/80">
                 <span>
-                  250 Paket (1 – {limits.maxDiamonds.toLocaleString('id-ID')}
+                  250 Paket ({MIN_DIAMOND_PACKAGE_AMOUNT} – {limits.maxDiamonds.toLocaleString('id-ID')}
                 </span>
                 <DiamondIcon tone="bright" className="h-3.5 w-3.5" />
                 <span>
-                  ) • Maks {formatRupiah(limits.maxBaseRupiah)} • Rp{' '}
-                  {diamondConfig.baseDiamondPriceRupiah.toLocaleString('id-ID')}/
+                  ) • Mulai {formatRupiah(MIN_DIAMOND_PURCHASE_RUPIAH)} • Maks{' '}
+                  {formatRupiah(limits.maxBaseRupiah)} via QRIS Nusantara
                 </span>
-                <DiamondIcon tone="bright" className="h-3.5 w-3.5" />
-                <span>via QRIS Nusantara</span>
               </p>
             </div>
           </div>
@@ -500,7 +523,7 @@ export const DiamondStoreModal: React.FC = () => {
                       <span>Jumlah</span>
                       <DiamondIcon className="h-3.5 w-3.5" />
                       <span className="text-slate-400">
-                        (1 – {limits.maxDiamonds.toLocaleString('id-ID')})
+                        ({limits.minDiamonds} – {limits.maxDiamonds.toLocaleString('id-ID')})
                       </span>
                     </label>
                     <input
@@ -508,7 +531,7 @@ export const DiamondStoreModal: React.FC = () => {
                       inputMode="numeric"
                       value={customDiamondsInput}
                       onChange={(e) => handleDiamondsInputChange(e.target.value)}
-                      placeholder="Contoh: 500"
+                      placeholder="Minimal 11"
                       className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm font-black text-slate-900 tabular-nums focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
                     />
                   </div>
@@ -517,7 +540,7 @@ export const DiamondStoreModal: React.FC = () => {
                     <label className="mb-1 flex items-center justify-between text-[11px] font-bold text-slate-600">
                       <span>Nominal Harga (Rp)</span>
                       <span className="text-slate-400 tabular-nums">
-                        Maks {formatRupiah(limits.maxBaseRupiah)}
+                        Mulai {formatRupiah(limits.minRupiah)}
                       </span>
                     </label>
                     <div className="relative">
@@ -529,7 +552,7 @@ export const DiamondStoreModal: React.FC = () => {
                         inputMode="numeric"
                         value={customRupiahInput}
                         onChange={(e) => handleRupiahInputChange(e.target.value)}
-                        placeholder="Contoh: 50000"
+                        placeholder="Minimal 1000"
                         className="w-full rounded-xl border border-slate-300 bg-white pl-9 pr-3 py-2.5 text-sm font-black text-sky-800 tabular-nums focus:border-cyan-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20"
                       />
                     </div>
@@ -538,7 +561,7 @@ export const DiamondStoreModal: React.FC = () => {
                   <div className="sm:col-span-4">
                     <button
                       type="button"
-                      disabled={isCreatingQris || parsedCustomDiamonds < 1}
+                      disabled={isCreatingQris || parsedCustomDiamonds < limits.minDiamonds}
                       onClick={() =>
                         void startQrisCheckout(
                           parsedCustomDiamonds,
@@ -553,7 +576,10 @@ export const DiamondStoreModal: React.FC = () => {
                         <QrCode className="h-4 w-4" />
                       )}
                       <span>
-                        Bayar {parsedCustomDiamonds >= 1 ? formatRupiah(customPrice.finalPrice) : 'QRIS'}
+                        Bayar{' '}
+                        {parsedCustomDiamonds >= limits.minDiamonds
+                          ? formatRupiah(customPrice.finalPrice)
+                          : `Min ${limits.minDiamonds} 💎`}
                       </span>
                     </button>
                   </div>
@@ -628,7 +654,7 @@ export const DiamondStoreModal: React.FC = () => {
                   {(
                     [
                       { key: 'all', label: 'Semua (250)' },
-                      { key: 'tier1', label: '1 - 100' },
+                      { key: 'tier1', label: '11 - 100' },
                       { key: 'tier2', label: '101 - 1.000' },
                       { key: 'tier3', label: '1.001 - 5.000' },
                       { key: 'tier4', label: `5.001 - ${MAX_DIAMOND_PACKAGE_AMOUNT.toLocaleString('id-ID')}` },

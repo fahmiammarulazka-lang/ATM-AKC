@@ -153,10 +153,14 @@ function BankAppContent() {
         'guide',
         'chat',
         'updates',
+        'admin',
       ];
       const safeView: AppNavView = validViews.includes(targetView as AppNavView)
         ? (targetView as AppNavView)
         : 'dashboard';
+      if (safeView === 'admin') {
+        setAdminUnlocked(true);
+      }
       setActiveView(safeView);
       if (safeView === 'dashboard' && targetDashboardTab) {
         setRequestedDashboardTab({

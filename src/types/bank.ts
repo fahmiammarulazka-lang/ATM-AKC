@@ -177,6 +177,8 @@ export interface CloudUserRecord {
   banCustomConfig?: BanScreenCustomizationConfig;
   failedPinAttempts?: number;
   lastFailedPinAt?: string;
+  loginLockedUntil?: string;
+  loginLockReason?: string;
   banAppealStatus?: 'none' | 'pending' | 'rejected' | 'approved';
   banAppealMessage?: string;
   banAppealSubmittedAt?: string;
@@ -225,6 +227,8 @@ export interface BankAccount {
   scheduledBanConfig?: BanScreenCustomizationConfig;
   failedPinAttempts?: number;
   lastFailedPinAt?: string;
+  loginLockedUntil?: string;
+  loginLockReason?: string;
   dailyWithdrawnToday: number;
   lastWithdrawalDate: string;
   initialDeposit: number;
@@ -477,12 +481,27 @@ export interface MobilePushBannerToast {
 
 export type BugReportStatus =
   | 'baru'
+  | 'antrean_tinjauan'
   | 'ditinjau'
+  | 'cek_bukti_log'
   | 'terverifikasi'
+  | 'analisis_akar'
+  | 'reproduksi_teknis'
+  | 'prioritas_perbaikan'
+  | 'diteruskan_tim_inti'
+  | 'dijadwalkan_perbaikan'
   | 'dalam_perbaikan'
+  | 'penyusunan_patch'
+  | 'integrasi_modul'
+  | 'optimasi_keamanan'
   | 'diperbaiki'
   | 'uji_ulang'
+  | 'sedang_diuji_ulang'
+  | 'lulus_uji_qa'
+  | 'siap_rilis_publik'
+  | 'telah_dirilis'
   | 'selesai'
+  | 'arsip_pemeliharaan'
   | 'ditolak'
   | 'duplikat'
   | 'tidak_repro'
@@ -512,6 +531,7 @@ export interface BugRewardProgramConfig {
   pointsAmount: number; // Poin Rewards
   familySlotAmount: number; // Slot Keluarga tambahan
   defaultRewardMessage: string;
+  autoRewardTriggerStatuses?: BugReportStatus[]; // Daftar status dari 25 tahap yang otomatis mencairkan hadiah (anti-ganda 1x)
   updatedAt?: string;
 }
 
@@ -843,6 +863,11 @@ export interface AppNotification {
   timestamp: string;
   read: boolean;
   actionUrl?: string;
+  // Notifikasi Khusus Kartu Tier ADMIN & Akun OA Admin
+  isAdminTierOnly?: boolean;
+  adminEventType?: AdminTierNotificationEventType;
+  adminQuickAction?: AdminTierNotificationQuickAction;
+  adminTargetTab?: string;
 }
 
 export interface ChatMessage {
@@ -2054,6 +2079,46 @@ export interface LeaderboardSystemConfig {
   updatedAt?: string;
 }
 
+// ==================== SISTEM NOTIFIKASI KHUSUS KARTU TIER ADMIN ====================
+export type AdminTierNotificationEventType =
+  | 'card_approval'
+  | 'bug_report'
+  | 'qris_topup'
+  | 'pin_lock_1day'
+  | 'pin_reset'
+  | 'account_deletion'
+  | 'card_upgrade'
+  | 'high_value_tx'
+  | 'admin_broadcast';
 
+export type AdminTierQuickActionType =
+  | 'approve_card'
+  | 'verify_bug_reward'
+  | 'reset_pin_lock'
+  | 'approve_pin_reset'
+  | 'approve_card_upgrade'
+  | 'open_admin_tab';
+
+export interface AdminTierNotificationQuickAction {
+  actionType?: AdminTierQuickActionType;
+  type?: AdminTierQuickActionType;
+  targetId?: string;
+  targetEntityId?: string;
+  label: string;
+  adminTab?: string;
+  completed?: boolean;
+}
+
+export interface AdminTierNotificationConfig {
+  enabled: boolean;
+  soundEnabled: boolean;
+  showTopToast: boolean;
+  showTopToastBanner?: boolean;
+  showDashboardCommandBox: boolean;
+  showNavbarQueueBadge: boolean;
+  highValueTxThreshold: number;
+  triggers: Record<AdminTierNotificationEventType, boolean>;
+  updatedAt?: string;
+}
 
 

@@ -112,6 +112,18 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     devRoles,
     linkCurrentAccountWithGooglePopup,
     toggleHideSensitiveNumbers,
+    accounts,
+    bugReports,
+    pinResetRequests,
+    cardUpgrades,
+    accountDeletionRequests,
+    isCurrentAccountAdminTierRecipient,
+    adminTierNotificationConfig,
+    adminTierNotifications,
+    unreadAdminTierNotificationCount,
+    adminTierPendingTasksCount,
+    executeAdminTierNotificationQuickAction,
+    markNotificationAsRead,
   } = useBank();
 
   const isPrivacyMasked = Boolean(currentAccount?.hideSensitiveNumbers);
@@ -346,6 +358,212 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
       {/* EFEK DASHBOARD 100.000X (AUTO-BLAST REAL-TIME + SPANDUK SAMBUTAN + AURA + PARTIKEL • 100% DIKENDALIKAN ADMIN) */}
       <DashboardActiveEffectBannerAndAura />
+
+      {/* KOTAK PUSAT KOMANDO NOTIFIKASI KHUSUS KARTU TIER ADMIN & AKUN OA ADMIN (OTOMATIS DISEMBUNYIKAN PADA KARTU BIASA) */}
+      {isCurrentAccountAdminTierRecipient &&
+        adminTierNotificationConfig.enabled &&
+        adminTierNotificationConfig.showDashboardCommandBox && (
+          <div className="rounded-3xl bg-gradient-to-br from-amber-950/90 via-slate-950 to-yellow-950/80 border-2 border-amber-400/70 shadow-2xl shadow-amber-500/15 p-4 sm:p-5 space-y-3.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-500/30 pb-3">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 text-slate-950 flex items-center justify-center shadow-lg shadow-amber-500/30 shrink-0">
+                  <Crown className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+                      👑 ADMIN ALERT • COMMAND CENTER
+                    </span>
+                    <span className="text-[11px] font-bold text-amber-200">
+                      Khusus Kartu Tier ADMIN &amp; Akun OA Admin
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    Pantau antrean sistem real-time &amp; eksekusi tindakan cepat 1-klik langsung dari Dashboard tanpa pindah halaman.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <span className="px-2.5 py-1 rounded-xl bg-amber-500/20 border border-amber-400/50 text-amber-200 text-[11px] font-black tabular-nums">
+                  {adminTierPendingTasksCount} Antrean Aktif • {unreadAdminTierNotificationCount} Alert Baru
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent('bn:navigate', { detail: { targetView: 'admin' } })
+                    );
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-xs cursor-pointer shadow-md flex items-center gap-1.5"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>Buka Panel Admin</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Baris Ringkasan Antrean Cepat 6 Kategori */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
+              {[
+                {
+                  label: 'Kartu Baru Pending',
+                  count: accounts.filter((a) => a.cardStatus === 'pending').length,
+                  tab: 'cards',
+                  badgeClass: 'border-amber-400/40 bg-amber-500/10 text-amber-200',
+                },
+                {
+                  label: 'Laporan Bug Aktif',
+                  count: bugReports.filter(
+                    (b) =>
+                      !b.reward?.given &&
+                      b.status !== 'ditolak' &&
+                      b.status !== 'arsip_pemeliharaan'
+                  ).length,
+                  tab: 'bug_reports',
+                  badgeClass: 'border-cyan-400/40 bg-cyan-500/10 text-cyan-200',
+                },
+                {
+                  label: 'Kunci Login 1 Hari (PIN 5x)',
+                  count: accounts.filter(
+                    (a) => a.loginLockedUntil && new Date(a.loginLockedUntil).getTime() > Date.now()
+                  ).length,
+                  tab: 'accounts',
+                  badgeClass: 'border-rose-400/40 bg-rose-500/10 text-rose-200',
+                },
+                {
+                  label: 'Permohonan Lupa PIN',
+                  count: pinResetRequests.filter((r) => r.status === 'pending').length,
+                  tab: 'pinresets',
+                  badgeClass: 'border-purple-400/40 bg-purple-500/10 text-purple-200',
+                },
+                {
+                  label: 'Upgrade Tier Kartu',
+                  count: cardUpgrades.filter((u) => u.status === 'pending').length,
+                  tab: 'upgrades',
+                  badgeClass: 'border-emerald-400/40 bg-emerald-500/10 text-emerald-200',
+                },
+                {
+                  label: 'Permohonan Hapus Akun',
+                  count: accountDeletionRequests.filter((d) => d.status === 'pending').length,
+                  tab: 'accounts',
+                  badgeClass: 'border-orange-400/40 bg-orange-500/10 text-orange-200',
+                },
+              ].map((stat) => (
+                <button
+                  key={stat.label}
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent('bn:navigate', { detail: { targetView: 'admin' } })
+                    );
+                    setTimeout(() => {
+                      window.dispatchEvent(
+                        new CustomEvent('bn:navigate-admin', { detail: { adminTab: stat.tab } })
+                      );
+                    }, 60);
+                  }}
+                  className={`p-2.5 rounded-2xl border text-left transition hover:scale-[1.01] cursor-pointer flex flex-col justify-between ${stat.badgeClass}`}
+                >
+                  <span className="text-[10px] font-bold opacity-85 leading-tight">{stat.label}</span>
+                  <div className="flex items-center justify-between mt-1.5">
+                    <span className="text-base font-black font-mono tabular-nums">{stat.count}</span>
+                    <span className="text-[10px] font-extrabold underline">Buka ➔</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Daftar Notifikasi Admin Tier Terbaru + Tombol Aksi Cepat 1-Klik */}
+            {adminTierNotifications.length > 0 && (
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between text-[11px] font-bold text-amber-300 px-1">
+                  <span>Notifikasi Real-Time Kartu Tier ADMIN Terbaru:</span>
+                  <span>Menampilkan {Math.min(3, adminTierNotifications.length)} dari {adminTierNotifications.length}</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                  {adminTierNotifications.slice(0, 3).map((n) => (
+                    <div
+                      key={n.id}
+                      className={`p-3 rounded-2xl border flex flex-col justify-between gap-2 ${
+                        !n.read
+                          ? 'bg-amber-950/60 border-amber-400/60'
+                          : 'bg-slate-900/80 border-slate-800'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[9px] font-black uppercase">
+                            👑 ADMIN ALERT
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400">
+                            {new Date(n.timestamp).toLocaleTimeString('id-ID', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        </div>
+                        <p className="text-xs font-extrabold text-amber-200 line-clamp-1">
+                          {n.title}
+                        </p>
+                        <p className="text-[11px] text-slate-300 line-clamp-2 leading-relaxed">
+                          {n.message}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-800/80">
+                        {n.adminQuickAction && !n.adminQuickAction.completed && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const res = await executeAdminTierNotificationQuickAction(n.id);
+                              setDashboardNotice(res.message);
+                              setTimeout(() => setDashboardNotice(null), 5000);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-[10px] cursor-pointer shadow"
+                          >
+                            ⚡ {n.adminQuickAction.label}
+                          </button>
+                        )}
+                        {n.adminQuickAction?.completed && (
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[10px] font-bold">
+                            ✓ Dieksekusi
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            markNotificationAsRead(n.id);
+                            window.dispatchEvent(
+                              new CustomEvent('bn:navigate', { detail: { targetView: 'admin' } })
+                            );
+                            if (n.adminTargetTab) {
+                              setTimeout(() => {
+                                window.dispatchEvent(
+                                  new CustomEvent('bn:navigate-admin', {
+                                    detail: {
+                                      adminTab: n.adminTargetTab,
+                                      entityId:
+                                        n.adminQuickAction?.targetId ||
+                                        n.adminQuickAction?.targetEntityId,
+                                    },
+                                  })
+                                );
+                              }, 60);
+                            }
+                          }}
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-200 text-[10px] font-bold cursor-pointer ml-auto"
+                        >
+                          Tab Admin ➔
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
       {/* TOP USER WELCOME & QUICK STATS */}
       <div

@@ -1000,6 +1000,9 @@ async function startServer() {
       pointsAmount: Math.max(0, Math.floor(Number(incoming.pointsAmount ?? 0) || 0)),
       familySlotAmount: Math.max(0, Math.floor(Number(incoming.familySlotAmount ?? 0) || 0)),
       defaultRewardMessage: String(incoming.defaultRewardMessage ?? incoming.defaultMessage ?? '').slice(0, 300),
+      autoRewardTriggerStatuses: Array.isArray(incoming.autoRewardTriggerStatuses)
+        ? incoming.autoRewardTriggerStatuses.map((s) => String(s))
+        : ['terverifikasi'],
       updatedAtMs: nextTs,
       updatedAt: new Date(nextTs).toISOString(),
     };
@@ -1808,6 +1811,7 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
     }
 
     if (purpose === 'diamond_topup') {
+      const HARD_MIN_DIAMONDS = 11;
       const HARD_MAX_DIAMONDS = 11_099;
       const HARD_MAX_RUPIAH = 998_910;
       const activeDiamondCfg = (serverState.diamondConfig ||
@@ -1816,18 +1820,18 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       const unitBase = Math.max(1, Math.round(Number(activeDiamondCfg.baseDiamondPriceRupiah) || 90));
       const discPct = Math.max(0, Math.min(99, Math.round(Number(activeDiamondCfg.diamondDiscountPercent) || 0)));
       const maxDiamondsAllowed = Math.max(
-        1,
+        HARD_MIN_DIAMONDS,
         Math.min(HARD_MAX_DIAMONDS, Math.round(Number(activeDiamondCfg.maxCustomDiamond) || HARD_MAX_DIAMONDS))
       );
       const maxRupiahAllowed = Math.max(
-        1,
+        1_000,
         Math.min(HARD_MAX_RUPIAH, Math.round(Number(activeDiamondCfg.maxPurchaseRupiah) || HARD_MAX_RUPIAH))
       );
 
-      if (!diamondAmount || diamondAmount < 1 || diamondAmount > maxDiamondsAllowed) {
+      if (!diamondAmount || diamondAmount < HARD_MIN_DIAMONDS || diamondAmount > maxDiamondsAllowed) {
         res.status(400).json({
           success: false,
-          message: `Jumlah pembelian dibatasi 1 hingga maksimal ${maxDiamondsAllowed.toLocaleString('id-ID')} per transaksi.`,
+          message: `Jumlah pembelian Diamond minimal ${HARD_MIN_DIAMONDS} hingga maksimal ${maxDiamondsAllowed.toLocaleString('id-ID')} per transaksi.`,
         });
         return;
       }
@@ -1840,9 +1844,14 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         return;
       }
 
-      const rawUnitDiscounted = unitBase * (1 - discPct / 100);
-      const minExpectedPrice = Math.max(1, Math.round(diamondAmount * rawUnitDiscounted));
-      if (amount < minExpectedPrice) {
+      const rawOriginal =
+        diamondAmount === HARD_MIN_DIAMONDS && diamondAmount * unitBase < 1_000
+          ? 1_000
+          : Math.max(1_000, diamondAmount * unitBase);
+      const discountedExpected = Math.max(1, Math.round(rawOriginal * (1 - discPct / 100)));
+      const minExpectedPrice = Math.min(maxRupiahAllowed, discountedExpected);
+      // Toleransi pembulatan 5 rupiah agar sinkronisasi tarif tidak pernah menolak paket valid
+      if (amount + 5 < minExpectedPrice) {
         res.status(400).json({
           success: false,
           message: `Nominal pembayaran Rp ${amount.toLocaleString('id-ID')} di bawah tarif aktif minimum Rp ${minExpectedPrice.toLocaleString('id-ID')}.`,

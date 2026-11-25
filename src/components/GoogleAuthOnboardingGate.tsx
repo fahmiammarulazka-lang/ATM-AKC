@@ -34,6 +34,7 @@ import {
   UserPlus,
   Copy,
   Link2,
+  Clock,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -83,6 +84,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     verifyInitialCardPin,
     requestPinReset,
     pinResetRequests,
+    accounts,
   } = useBank();
 
   // Mode Tab Utama yang SELALU tampil di semua layar masuk (5 Jalur Resmi):
@@ -233,6 +235,102 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
       setRemainingPinTries(Math.max(0, 5 - used));
     }
   }, [activeTargetAccount]);
+
+  // Live reference untuk akun baru yang dibuat di perangkat ini (selalu ambil status terbaru dari array accounts Cloud/Local)
+  const liveSummaryTargetAccount =
+    (newlyCreatedAccountSummary &&
+      accounts.find((a) => a.id === newlyCreatedAccountSummary.id)) ||
+    deviceLobbyCreatedAccount ||
+    newlyCreatedAccountSummary ||
+    null;
+
+  // Otomatis masuk ke Dashboard secara real-time di HP nasabah begitu Admin klik "Setujui Kartu"
+  useEffect(() => {
+    if (
+      liveSummaryTargetAccount &&
+      liveSummaryTargetAccount.cardStatus === 'active' &&
+      (lobbyMode === 'create_account' || Boolean(newlyCreatedAccountSummary))
+    ) {
+      enterLobbyCreatedAccountSession(liveSummaryTargetAccount.id);
+    }
+  }, [
+    liveSummaryTargetAccount,
+    liveSummaryTargetAccount?.id,
+    liveSummaryTargetAccount?.cardStatus,
+    lobbyMode,
+    newlyCreatedAccountSummary,
+    enterLobbyCreatedAccountSession,
+  ]);
+
+  // Ticker 1 detik untuk hitung mundur Kunci Login 1 Hari (24 Jam) akibat salah PIN 5x
+  const [loginLockNowMs, setLoginLockNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLoginLockNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const getAccountLoginLockInfo = (acc: BankAccount | null | undefined) => {
+    if (!acc || acc.isOfficialAdminAccount || !acc.loginLockedUntil) {
+      return { isLocked: false, remainingMs: 0, formattedCountdown: '' };
+    }
+    const lockUntilMs = new Date(acc.loginLockedUntil).getTime();
+    if (!Number.isFinite(lockUntilMs) || lockUntilMs <= loginLockNowMs) {
+      return { isLocked: false, remainingMs: 0, formattedCountdown: '' };
+    }
+    const diffSec = Math.max(0, Math.ceil((lockUntilMs - loginLockNowMs) / 1000));
+    const hours = Math.floor(diffSec / 3600);
+    const minutes = Math.floor((diffSec % 3600) / 60);
+    const seconds = diffSec % 60;
+    const formattedCountdown = `${String(hours).padStart(2, '0')} Jam : ${String(minutes).padStart(
+      2,
+      '0'
+    )} Menit : ${String(seconds).padStart(2, '0')} Detik`;
+    return {
+      isLocked: true,
+      remainingMs: lockUntilMs - loginLockNowMs,
+      formattedCountdown,
+    };
+  };
+
+  const renderLoginLock1DayBox = (targetAcc: BankAccount | null | undefined) => {
+    const lockInfo = getAccountLoginLockInfo(targetAcc);
+    if (!lockInfo.isLocked || !targetAcc) return null;
+    return (
+      <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-950/95 via-slate-950 to-amber-950/80 border-2 border-rose-500/70 shadow-xl space-y-2.5 text-left">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/20 border border-rose-400/50 text-rose-200 text-[11px] font-black uppercase tracking-wider">
+            <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            Tidak Bisa Login 1 Hari (24 Jam)
+          </span>
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-400/40 text-emerald-300 text-[10px] font-black">
+            Kartu Tetap Aktif (Tidak Dibanned)
+          </span>
+        </div>
+
+        <p className="text-xs font-extrabold text-white">
+          Akun &ldquo;{targetAcc.fullName}&rdquo; Terkunci Login Sementara karena Salah PIN 5x
+        </p>
+
+        <p className="text-[11px] text-rose-100/90 leading-relaxed">
+          Anda telah salah memasukkan PIN Kartu sebanyak <strong>5 kali</strong>. Sesuai kebijakan keamanan, akun ini{' '}
+          <strong>tidak bisa login selama 1 hari (24 jam)</strong> dan{' '}
+          <strong>tidak dapat diajukan tinjauan/banding</strong>. Kartu Anda tidak dibanned dan akses login akan terbuka otomatis setelah hitung mundur selesai.
+        </p>
+
+        <div className="p-3 rounded-xl bg-slate-950/90 border border-amber-400/40 flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-[11px] font-bold text-amber-200 flex items-center gap-1.5">
+            <Clock className="w-4 h-4 text-amber-400 animate-spin" />
+            <span>Sisa Waktu Kunci Login:</span>
+          </span>
+          <span className="font-mono tabular-nums text-xs sm:text-sm font-black text-amber-300 tracking-wide">
+            {lockInfo.formattedCountdown}
+          </span>
+        </div>
+      </div>
+    );
+  };
 
   const handleGooglePopupSignIn = async () => {
     setAuthError(null);
@@ -664,7 +762,18 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   ) {
     const selectedGuestAccount =
       guestLocalAccounts.find((g) => g.id === selectedGuestId) || guestLocalAccounts[0] || null;
-    const summaryTargetAccount = newlyCreatedAccountSummary || deviceLobbyCreatedAccount;
+    const summaryTargetAccount = liveSummaryTargetAccount;
+    const cleanStdAccNum = stdAccountNumber.replace(/\D/g, '');
+    const cleanStdUid16 = stdUserId16.replace(/\D/g, '');
+    const matchedStdAccount =
+      accounts.find(
+        (a) =>
+          !a.isOfficialAdminAccount &&
+          ((cleanStdAccNum.length >= 6 &&
+            a.accountNumber.replace(/\D/g, '') === cleanStdAccNum) ||
+            (cleanStdUid16.length === 16 &&
+              ensureAccountUserId16(a) === cleanStdUid16))
+      ) || null;
     const summaryAccountHasRealGoogle =
       summaryTargetAccount &&
       Boolean(
@@ -1129,6 +1238,29 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                 </p>
               </div>
 
+              {liveSummaryTargetAccount && liveSummaryTargetAccount.cardStatus === 'active' && (
+                <div className="p-3.5 rounded-2xl bg-emerald-950/90 border border-emerald-400/60 flex items-center justify-between gap-3 flex-wrap shadow-lg">
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Kartu Baru &ldquo;{liveSummaryTargetAccount.fullName}&rdquo; Sudah Disetujui Admin!</span>
+                    </p>
+                    <p className="text-[11px] text-emerald-100/90 mt-0.5">
+                      No. Rek: <strong className="font-mono">{liveSummaryTargetAccount.accountNumber}</strong> • Langsung masuk tanpa perlu menunggu lagi.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => enterLobbyCreatedAccountSession(liveSummaryTargetAccount.id)}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs cursor-pointer transition shrink-0"
+                  >
+                    Langsung Masuk Dashboard
+                  </button>
+                </div>
+              )}
+
+              {renderLoginLock1DayBox(matchedStdAccount)}
+
               <div>
                 <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
                   <Building2 className="w-3.5 h-3.5 text-cyan-400" />
@@ -1197,7 +1329,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
 
               <button
                 type="submit"
-                disabled={isStdSubmitting}
+                disabled={isStdSubmitting || getAccountLoginLockInfo(matchedStdAccount).isLocked}
                 className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-400 hover:from-indigo-400 hover:to-cyan-300 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-xl shadow-sky-500/20 transition cursor-pointer disabled:opacity-60"
               >
                 {isStdSubmitting ? (
@@ -1459,6 +1591,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                     })}
                   </div>
 
+                  {renderLoginLock1DayBox(selectedGuestAccount)}
+
                   <div>
                     <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1.5">
                       <KeyRound className="w-3.5 h-3.5 text-amber-400" />
@@ -1477,7 +1611,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                         }
                         placeholder="••••••"
                         required
-                        className="w-full pl-4 pr-10 py-3 rounded-xl bg-slate-950 border border-slate-700 text-center text-base font-mono tabular-nums font-bold tracking-[0.4em] text-white focus:border-emerald-400 focus:outline-none"
+                        disabled={getAccountLoginLockInfo(selectedGuestAccount).isLocked}
+                        className="w-full pl-4 pr-10 py-3 rounded-xl bg-slate-950 border border-slate-700 text-center text-base font-mono tabular-nums font-bold tracking-[0.4em] text-white focus:border-emerald-400 focus:outline-none disabled:opacity-50"
                       />
                       <button
                         type="button"
@@ -1491,7 +1626,10 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
 
                   <button
                     type="submit"
-                    disabled={guestPinInput.length !== 6}
+                    disabled={
+                      guestPinInput.length !== 6 ||
+                      getAccountLoginLockInfo(selectedGuestAccount).isLocked
+                    }
                     className="w-full py-3.5 px-5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20 transition cursor-pointer disabled:opacity-50"
                   >
                     <CheckCircle2 className="w-5 h-5" />
@@ -1698,6 +1836,27 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
           </div>
 
           {renderPersistentThreeLoginTabs()}
+
+          {liveSummaryTargetAccount && liveSummaryTargetAccount.cardStatus === 'active' && (
+            <div className="mb-4 p-3.5 rounded-2xl bg-emerald-950/90 border border-emerald-400/60 flex items-center justify-between gap-3 flex-wrap shadow-lg">
+              <div className="min-w-0">
+                <p className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Kartu Baru &ldquo;{liveSummaryTargetAccount.fullName}&rdquo; Telah Disetujui Admin!</span>
+                </p>
+                <p className="text-[11px] text-emerald-100/90 mt-0.5">
+                  No. Rek: <strong className="font-mono">{liveSummaryTargetAccount.accountNumber}</strong> • Klik untuk langsung masuk ke Dashboard.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => enterLobbyCreatedAccountSession(liveSummaryTargetAccount.id)}
+                className="px-3.5 py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs cursor-pointer transition shrink-0"
+              >
+                Langsung Masuk Dashboard
+              </button>
+            </div>
+          )}
 
           <div className="space-y-3">
             {/* Tombol Utama 1: Sign in with Google */}
@@ -2022,12 +2181,14 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
             {!activeTargetAccount.isOfficialAdminAccount && (
               <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-[11px] font-bold text-amber-300">
                 <span>Sisa Kesempatan PIN: {remainingPinTries} / 5</span>
-                <span className="text-rose-400">• (Salah 5x = Banned 1 Hari)</span>
+                <span className="text-rose-400">• (Salah 5x = Tidak Bisa Login 1 Hari Tanpa Banned)</span>
               </div>
             )}
           </div>
 
-          <form onSubmit={handleVerifyExistingCardPin} className="space-y-3.5">
+          {renderLoginLock1DayBox(activeTargetAccount)}
+
+          <form onSubmit={handleVerifyExistingCardPin} className="space-y-3.5 mt-3">
             <div className="relative">
               <KeyRound className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
@@ -2038,7 +2199,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                 onChange={(e) => setExistingPinInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder="••••••"
                 required
-                className="w-full pl-10 pr-12 py-3.5 rounded-xl bg-slate-950 border border-slate-700 text-center text-lg font-mono tracking-[0.5em] text-white focus:border-cyan-400 focus:outline-none"
+                disabled={getAccountLoginLockInfo(activeTargetAccount).isLocked}
+                className="w-full pl-10 pr-12 py-3.5 rounded-xl bg-slate-950 border border-slate-700 text-center text-lg font-mono tracking-[0.5em] text-white focus:border-cyan-400 focus:outline-none disabled:opacity-50"
               />
               <button
                 type="button"
@@ -2058,11 +2220,14 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
 
             <button
               type="submit"
-              disabled={existingPinInput.length !== 6}
+              disabled={
+                existingPinInput.length !== 6 ||
+                getAccountLoginLockInfo(activeTargetAccount).isLocked
+              }
               className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-black text-sm shadow-xl shadow-cyan-500/20 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50"
             >
               <CheckCircle2 className="w-5 h-5" />
-              <span>Verifikasi PIN &amp; Masuk ke "{activeTargetAccount.fullName}"</span>
+              <span>Verifikasi PIN &amp; Masuk ke &ldquo;{activeTargetAccount.fullName}&rdquo;</span>
             </button>
           </form>
 

@@ -1,5 +1,5 @@
 /**
- * Bank Nusantara — Katalog Permata (250 Paket 1 s/d 11.099, Maks Rp 998.910),
+ * Bank Nusantara — Katalog Permata (250 Paket Mulai dari 11 Diamond / Rp 1.000 s/d 11.099, Maks Rp 998.910),
  * Perhitungan Custom Dua Arah, Pengaturan Fitur Keluarga, dan Kontrol Visibilitas Tab.
  */
 import {
@@ -10,17 +10,19 @@ import {
   UiVisibilityNavKey,
 } from '../types/bank';
 
+export const MIN_DIAMOND_PACKAGE_AMOUNT = 11;
+export const MIN_DIAMOND_PURCHASE_RUPIAH = 1_000;
 export const MAX_DIAMOND_PACKAGE_AMOUNT = 11_099;
 export const MAX_DIAMOND_PURCHASE_RUPIAH = 998_910; // Harga dasar sebelum angka unik 3 digit QRIS
-export const DEFAULT_DIAMOND_PRICE_RUPIAH = 90; // 55% lebih murah dari Rp 200
-export const DIAMOND_CONFIG_REVISION = 3; // Revisi batas ganda 11.099 & Rp 998.910
+export const DEFAULT_DIAMOND_PRICE_RUPIAH = 90; // 11 Diamond = mulai dari Rp 1.000
+export const DIAMOND_CONFIG_REVISION = 4; // Revisi mulai 11 Diamond (Rp 1.000) s/d 11.099 (Rp 998.910)
 
 export const DEFAULT_DIAMOND_SYSTEM_CONFIG: DiamondSystemConfig = {
   baseDiamondPriceRupiah: DEFAULT_DIAMOND_PRICE_RUPIAH,
   diamondDiscountPercent: 0,
   priceRevision: DIAMOND_CONFIG_REVISION,
   allowCustomAmount: true,
-  minCustomDiamond: 1,
+  minCustomDiamond: MIN_DIAMOND_PACKAGE_AMOUNT,
   maxCustomDiamond: MAX_DIAMOND_PACKAGE_AMOUNT,
   maxPurchaseRupiah: MAX_DIAMOND_PURCHASE_RUPIAH,
   useUniqueCode3Digit: true,
@@ -128,19 +130,18 @@ export const DIAMOND_FEATURE_METADATA: Array<{
 
 /**
  * Menghasilkan tepat 250 pilihan paket unik dan menaik halus
- * mulai dari 1 hingga tepat 11.099.
+ * mulai dari tepat 11 Diamond (Rp 1.000) hingga tepat 11.099 Diamond.
  */
 function build250DiamondPackages(): DiamondPackageItem[] {
   const starter = [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-    12, 15, 18, 20, 25, 30, 35, 40, 45, 50,
-    55, 60, 65, 70, 75, 80, 85, 90, 95, 100,
-    110, 120, 130, 140, 150, 160, 175, 190, 200,
-    225, 250, 275, 300,
+    11, 12, 14, 15, 16, 18, 20, 22, 25, 28,
+    30, 35, 40, 45, 50, 55, 60, 65, 70, 75,
+    80, 85, 90, 95, 100, 110, 120, 130, 140, 150,
+    160, 175, 190, 200, 225, 250, 275, 300,
   ];
 
   const set = new Set<number>(starter);
-  const remainingSlots = 250 - set.size; // 207 slots between 301 and 11099
+  const remainingSlots = 250 - set.size;
 
   const minVal = 310;
   const maxVal = MAX_DIAMOND_PACKAGE_AMOUNT;
@@ -162,15 +163,19 @@ function build250DiamondPackages(): DiamondPackageItem[] {
     while (set.has(val) && val < MAX_DIAMOND_PACKAGE_AMOUNT) {
       val += 1;
     }
-    while (set.has(val) && val > 1) {
+    while (set.has(val) && val > MIN_DIAMOND_PACKAGE_AMOUNT) {
       val -= 1;
     }
-    set.add(val);
+    if (val >= MIN_DIAMOND_PACKAGE_AMOUNT) {
+      set.add(val);
+    }
   }
 
-  set.add(1);
+  set.add(MIN_DIAMOND_PACKAGE_AMOUNT);
   set.add(MAX_DIAMOND_PACKAGE_AMOUNT);
-  const sorted = Array.from(set).sort((a, b) => a - b);
+  const sorted = Array.from(set)
+    .filter((v) => v >= MIN_DIAMOND_PACKAGE_AMOUNT)
+    .sort((a, b) => a - b);
   while (sorted.length > 250) {
     sorted.splice(Math.floor(sorted.length / 2), 1);
   }
@@ -194,7 +199,7 @@ function build250DiamondPackages(): DiamondPackageItem[] {
       id: idx + 1,
       diamonds,
       tierLabel,
-      isPopular: [100, 500, 1000, 2500, 5000, 10000, MAX_DIAMOND_PACKAGE_AMOUNT].includes(diamonds),
+      isPopular: [11, 100, 500, 1000, 2500, 5000, 10000, MAX_DIAMOND_PACKAGE_AMOUNT].includes(diamonds),
     };
   });
 }
@@ -203,6 +208,7 @@ export const DIAMOND_PACKAGES_250: DiamondPackageItem[] = build250DiamondPackage
 
 /**
  * Mengembalikan batas efektif ganda yang selalu mengunci:
+ * - Jumlah minimal >= 11 Diamond (mulai dari Rp 1.000)
  * - Jumlah maksimal <= min(11.099, config.maxCustomDiamond)
  * - Harga dasar maksimal <= min(Rp 998.910, config.maxPurchaseRupiah)
  */
@@ -210,6 +216,7 @@ export function getEffectiveDiamondPurchaseLimits(config: DiamondSystemConfig): 
   baseUnitPrice: number;
   discountPercent: number;
   effectiveUnitPrice: number;
+  minDiamonds: number;
   minRupiah: number;
   maxDiamonds: number;
   maxBaseRupiah: number;
@@ -223,36 +230,49 @@ export function getEffectiveDiamondPurchaseLimits(config: DiamondSystemConfig): 
   const discountPercent = Math.min(99, Math.max(0, Math.round(Number(config.diamondDiscountPercent) || 0)));
   const effectiveUnitPrice = Math.max(0.01, baseUnitPrice * (1 - discountPercent / 100));
 
+  const minDiamonds = Math.max(
+    MIN_DIAMOND_PACKAGE_AMOUNT,
+    Math.round(Number(config.minCustomDiamond) || MIN_DIAMOND_PACKAGE_AMOUNT)
+  );
+
   const configuredMaxDiamonds = Math.min(
     MAX_DIAMOND_PACKAGE_AMOUNT,
-    Math.max(1, Math.round(Number(config.maxCustomDiamond) || MAX_DIAMOND_PACKAGE_AMOUNT))
+    Math.max(minDiamonds, Math.round(Number(config.maxCustomDiamond) || MAX_DIAMOND_PACKAGE_AMOUNT))
   );
   const configuredMaxRupiah = Math.min(
     MAX_DIAMOND_PURCHASE_RUPIAH,
-    Math.max(1, Math.round(Number(config.maxPurchaseRupiah) || MAX_DIAMOND_PURCHASE_RUPIAH))
+    Math.max(MIN_DIAMOND_PURCHASE_RUPIAH, Math.round(Number(config.maxPurchaseRupiah) || MAX_DIAMOND_PURCHASE_RUPIAH))
   );
 
   // Cari jumlah maksimal agar harga dasarnya tidak melebihi configuredMaxRupiah
   let maxByRupiah = Math.floor(configuredMaxRupiah / effectiveUnitPrice);
   while (
-    maxByRupiah > 1 &&
-    Math.max(1, Math.round(maxByRupiah * baseUnitPrice * (1 - discountPercent / 100))) > configuredMaxRupiah
+    maxByRupiah > minDiamonds &&
+    Math.max(
+      MIN_DIAMOND_PURCHASE_RUPIAH,
+      Math.round(maxByRupiah * baseUnitPrice * (1 - discountPercent / 100))
+    ) > configuredMaxRupiah
   ) {
     maxByRupiah -= 1;
   }
 
-  const maxDiamonds = Math.max(1, Math.min(configuredMaxDiamonds, Math.max(1, maxByRupiah)));
+  const maxDiamonds = Math.max(
+    minDiamonds,
+    Math.min(configuredMaxDiamonds, Math.max(minDiamonds, maxByRupiah))
+  );
   const exactPriceForMax = Math.max(
-    1,
+    MIN_DIAMOND_PURCHASE_RUPIAH,
     Math.round(maxDiamonds * baseUnitPrice * (1 - discountPercent / 100))
   );
   const maxBaseRupiah = Math.min(configuredMaxRupiah, exactPriceForMax);
-  const minRupiah = Math.max(1, Math.round(baseUnitPrice * (1 - discountPercent / 100)));
+  const rawMinPrice = Math.round(minDiamonds * baseUnitPrice * (1 - discountPercent / 100));
+  const minRupiah = Math.max(MIN_DIAMOND_PURCHASE_RUPIAH, rawMinPrice);
 
   return {
     baseUnitPrice,
     discountPercent,
     effectiveUnitPrice,
+    minDiamonds,
     minRupiah,
     maxDiamonds,
     maxBaseRupiah,
@@ -274,12 +294,22 @@ export function calculateDiamondPurchasePrice(
   wasClampedToMax: boolean;
 } {
   const limits = getEffectiveDiamondPurchaseLimits(config);
-  const rawQty = Math.max(1, Math.floor(Number(diamonds) || 1));
+  const rawQty = Math.max(limits.minDiamonds, Math.floor(Number(diamonds) || limits.minDiamonds));
   const qty = Math.min(limits.maxDiamonds, rawQty);
   const wasClampedToMax = rawQty > limits.maxDiamonds;
 
-  const originalPrice = qty * limits.baseUnitPrice;
-  const computedFinal = Math.max(1, Math.round(originalPrice * (1 - limits.discountPercent / 100)));
+  // Harga dasar untuk 11 Diamond dengan tarif standar Rp 90 adalah minimal Rp 1.000
+  const rawOriginal = qty * limits.baseUnitPrice;
+  const originalPrice =
+    qty === MIN_DIAMOND_PACKAGE_AMOUNT && rawOriginal < MIN_DIAMOND_PURCHASE_RUPIAH
+      ? MIN_DIAMOND_PURCHASE_RUPIAH
+      : Math.max(MIN_DIAMOND_PURCHASE_RUPIAH, rawOriginal);
+
+  const discountedRaw = Math.round(originalPrice * (1 - limits.discountPercent / 100));
+  const computedFinal =
+    limits.discountPercent === 0
+      ? Math.max(MIN_DIAMOND_PURCHASE_RUPIAH, discountedRaw)
+      : Math.max(1, discountedRaw);
   const finalPrice = Math.min(limits.configuredMaxRupiah, computedFinal);
   const discountSaved = Math.max(0, originalPrice - finalPrice);
 
@@ -296,9 +326,9 @@ export function calculateDiamondPurchasePrice(
 
 /**
  * Menghitung jumlah permata dari budget Rupiah custom:
+ * - Minimal mulai dari Rp 1.000 (11 Diamond pada tarif standar).
  * - Diskon aktif membuat jumlah permata bertambah dari budget yang diketik.
- * - Dibulatkan ke bawah (floor) agar total bayar QRIS tidak pernah melebihi budget ketikan.
- * - Otomatis terkunci pada batas ganda (maks 11.099 & maks Rp 998.910).
+ * - Otomatis terkunci pada batas ganda (11..11.099 Diamond & Rp 1.000..Rp 998.910).
  */
 export function calculateDiamondsFromRupiahBudget(
   budgetRupiah: number,
@@ -339,13 +369,15 @@ export function calculateDiamondsFromRupiahBudget(
   const effectiveBudget = Math.min(cleanBudget, limits.maxBaseRupiah);
 
   let rawDiamonds = Math.floor(effectiveBudget / limits.effectiveUnitPrice);
+  if (effectiveBudget === MIN_DIAMOND_PURCHASE_RUPIAH && rawDiamonds < limits.minDiamonds) {
+    rawDiamonds = limits.minDiamonds;
+  }
   const wasClampedByQty = rawDiamonds > limits.maxDiamonds;
-  let qty = Math.max(1, Math.min(limits.maxDiamonds, rawDiamonds));
+  let qty = Math.max(limits.minDiamonds, Math.min(limits.maxDiamonds, rawDiamonds));
 
-  // Pastikan harga akhir tidak melebihi effectiveBudget (pembulatan ke bawah yang ketat)
   while (
-    qty > 1 &&
-    Math.max(1, Math.round(qty * limits.baseUnitPrice * (1 - limits.discountPercent / 100))) > effectiveBudget
+    qty > limits.minDiamonds &&
+    calculateDiamondPurchasePrice(qty, config).finalPrice > effectiveBudget
   ) {
     qty -= 1;
   }

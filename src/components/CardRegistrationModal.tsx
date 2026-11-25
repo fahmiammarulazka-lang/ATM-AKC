@@ -3,7 +3,7 @@
  * Implements Section 2: Cara Membuat Kartu & Persetujuan Admin
  * Steps 1 to 5 + Status: Menunggu Persetujuan, Disetujui, Ditolak
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   CreditCard,
   CheckCircle2,
@@ -31,7 +31,7 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { registerCard, accounts } = useBank();
+  const { registerCard, accounts, enterLobbyCreatedAccountSession } = useBank();
 
   // Step wizard: 1 (Data Diri), 2 (Buat PIN), 3 (Pilih Jenis Kartu), 4 (Konfirmasi & Kirim), 5 (Status Permohonan)
   const [step, setStep] = useState<number>(1);
@@ -49,11 +49,30 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [submittedAccountId, setSubmittedAccountId] = useState<string | null>(null);
 
-  if (!isOpen) return null;
-
   const trackedAccount = submittedAccountId
     ? accounts.find((a) => a.id === submittedAccountId) || null
     : null;
+
+  // Otomatis masuk ke Dashboard di HP nasabah begitu Admin klik "Setujui Kartu"
+  useEffect(() => {
+    if (isOpen && step === 5 && trackedAccount && trackedAccount.cardStatus === 'active') {
+      enterLobbyCreatedAccountSession(trackedAccount.id);
+      const timer = window.setTimeout(() => {
+        onClose();
+      }, 650);
+      return () => window.clearTimeout(timer);
+    }
+  }, [
+    isOpen,
+    step,
+    trackedAccount,
+    trackedAccount?.id,
+    trackedAccount?.cardStatus,
+    enterLobbyCreatedAccountSession,
+    onClose,
+  ]);
+
+  if (!isOpen) return null;
 
   const handleStep1Submit = (e: React.FormEvent) => {
     e.preventDefault();

@@ -201,6 +201,9 @@ import {
   LeaderboardCategoryKey,
   LeaderboardCategoryConfig,
   LeaderboardSystemConfig,
+  AdminTierNotificationEventType,
+  AdminTierNotificationQuickAction,
+  AdminTierNotificationConfig,
 } from '../types/bank';
 import {
   DEFAULT_DIAMOND_SYSTEM_CONFIG,
@@ -215,7 +218,11 @@ import {
 } from '../data/diamondCatalog';
 import {
   DEFAULT_BUG_REWARD_CONFIG,
+  DEFAULT_AUTO_REWARD_TRIGGER_STATUSES,
   getBugStatusMeta,
+  isBugStatusRejectedOrNoReward,
+  isBugStatusAutoRewardTrigger,
+  normalizeBugReportStatus,
 } from '../data/bugRewardCatalog';
 import {
   DEFAULT_SUPPORT_FAQS_50,
@@ -2099,6 +2106,33 @@ interface BankContextType {
   ) => { success: boolean; message: string };
   adminDeleteLeaderboardCategory: (categoryId: string) => { success: boolean; message: string };
   adminResetLeaderboardDefault: () => { success: boolean; message: string };
+
+  // Sistem Notifikasi Khusus Kartu Tier ADMIN & Akun OA Admin (ADMIN ALERT)
+  adminTierNotificationConfig: AdminTierNotificationConfig;
+  isCurrentAccountAdminTierRecipient: boolean;
+  adminTierNotifications: AppNotification[];
+  unreadAdminTierNotificationCount: number;
+  adminTierPendingTasksCount: number;
+  emitAdminTierNotification: (input: {
+    eventType: AdminTierNotificationEventType;
+    title: string;
+    message: string;
+    adminTargetTab?: string;
+    accountId?: string;
+    referenceId?: string;
+    quickAction?: AdminTierNotificationQuickAction;
+  }) => void;
+  executeAdminTierNotificationQuickAction: (
+    notificationId: string
+  ) => Promise<{ success: boolean; message: string }>;
+  adminUpdateAdminTierNotificationConfig: (
+    patch: Partial<AdminTierNotificationConfig>
+  ) => { success: boolean; message: string };
+  adminSendAdminTierBroadcast: (input: {
+    title: string;
+    message: string;
+    adminTargetTab?: string;
+  }) => { success: boolean; message: string };
 }
 
 const BankContext = createContext<BankContextType | undefined>(undefined);
@@ -2455,6 +2489,26 @@ export const DEFAULT_USER_APP_SETTINGS: UserAppSettings = {
   notificationCategoryPermissions: { ...DEFAULT_NOTIFICATION_CATEGORY_PERMISSIONS },
 };
 
+export const DEFAULT_ADMIN_TIER_NOTIFICATION_CONFIG: AdminTierNotificationConfig = {
+  enabled: true,
+  soundEnabled: true,
+  showTopToast: true,
+  showDashboardCommandBox: true,
+  showNavbarQueueBadge: true,
+  highValueTxThreshold: 10_000_000,
+  triggers: {
+    card_approval: true,
+    bug_report: true,
+    qris_topup: true,
+    pin_lock_1day: true,
+    pin_reset: true,
+    account_deletion: true,
+    card_upgrade: true,
+    high_value_tx: true,
+    admin_broadcast: true,
+  },
+};
+
 export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const clientSessionId = useRef<string>(
     `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -2749,6 +2803,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setLeaderboardConfig(next);
           }
         });
+        restoreEntry('adminTierNotificationConfig', (v) => {
+          if (v && typeof v === 'object') {
+            const inc = v as Partial<AdminTierNotificationConfig>;
+            const next: AdminTierNotificationConfig = {
+              ...DEFAULT_ADMIN_TIER_NOTIFICATION_CONFIG,
+              ...inc,
+              triggers: {
+                ...DEFAULT_ADMIN_TIER_NOTIFICATION_CONFIG.triggers,
+                ...(inc.triggers || {}),
+              },
+            };
+            adminTierNotificationConfigRef.current = next;
+            setAdminTierNotificationConfig(next);
+          }
+        });
       }
     });
     return () => {
@@ -3012,6 +3081,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
   const leaderboardConfigRef = useRef<LeaderboardSystemConfig>(leaderboardConfig);
   leaderboardConfigRef.current = leaderboardConfig;
+
+  const [adminTierNotificationConfig, setAdminTierNotificationConfig] =
+    useState<AdminTierNotificationConfig>(DEFAULT_ADMIN_TIER_NOTIFICATION_CONFIG);
+  const adminTierNotificationConfigRef = useRef<AdminTierNotificationConfig>(
+    adminTierNotificationConfig
+  );
+  adminTierNotificationConfigRef.current = adminTierNotificationConfig;
 
   const [sultanEmpireConfig, setSultanEmpireConfig] = useState<SultanEmpireAdminConfig>(
     INITIAL_SULTAN_EMPIRE_CONFIG
@@ -3333,9 +3409,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (incomingTs > existingTs) {
         return incoming;
       }
-      // Jika timestamp sama-sama 0 (data lama), pertahankan progres level pekerjaan / diamond / slot keluarga tertinggi agar tidak rollback
+      // Jika timestamp sama, pastikan status kartu 'active' yang sudah disetujui Admin TIDAK PERNAH tertimpa balik ke 'pending'
+      const preferActiveCardStatus =
+        existing.cardStatus === 'active' && incoming.cardStatus === 'pending'
+          ? 'active'
+          : incoming.cardStatus;
       return {
         ...incoming,
+        cardStatus: preferActiveCardStatus,
+        tutorialApprovedByAdmin:
+          Boolean(existing.tutorialApprovedByAdmin) || Boolean(incoming.tutorialApprovedByAdmin),
+        hasCompletedTutorial:
+          Boolean(existing.hasCompletedTutorial) || Boolean(incoming.hasCompletedTutorial),
+        loginLockedUntil: incoming.loginLockedUntil || existing.loginLockedUntil,
+        loginLockReason: incoming.loginLockReason || existing.loginLockReason,
         jobLevel: Math.max(existing.jobLevel || 1, incoming.jobLevel || 1),
         diamonds: Math.max(existing.diamonds || 0, incoming.diamonds || 0),
         extraFamilySlots: Math.max(existing.extraFamilySlots || 0, incoming.extraFamilySlots || 0),
@@ -3987,6 +4074,28 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setLeaderboardConfig(mergedLb);
       }
     }
+    if (data.adminTierNotificationConfig && typeof data.adminTierNotificationConfig === 'object') {
+      const incAdmNotif = data.adminTierNotificationConfig as Partial<AdminTierNotificationConfig>;
+      const mergedAdmNotif: AdminTierNotificationConfig = {
+        ...DEFAULT_ADMIN_TIER_NOTIFICATION_CONFIG,
+        ...incAdmNotif,
+        triggers: {
+          ...DEFAULT_ADMIN_TIER_NOTIFICATION_CONFIG.triggers,
+          ...(incAdmNotif.triggers || {}),
+        },
+      };
+      if (
+        acceptIncomingAdminConfig(
+          'adminTierNotificationConfig',
+          getIncomingCfgTs('adminTierNotificationConfig'),
+          mergedAdmNotif,
+          adminTierNotificationConfigRef.current
+        )
+      ) {
+        adminTierNotificationConfigRef.current = mergedAdmNotif;
+        setAdminTierNotificationConfig(mergedAdmNotif);
+      }
+    }
     if (data.sultanEmpireConfig && typeof data.sultanEmpireConfig === 'object') {
       const mergedSultan: SultanEmpireAdminConfig = {
         ...INITIAL_SULTAN_EMPIRE_CONFIG,
@@ -4158,6 +4267,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     missionProgressByAccount?: Record<string, Record<string, MissionAccountProgressRecord>>;
     missionClaimLogs?: MissionClaimAuditLog[];
     leaderboardConfig?: LeaderboardSystemConfig;
+    adminTierNotificationConfig?: AdminTierNotificationConfig;
     sultanEmpireConfig?: SultanEmpireAdminConfig;
     featureConfigs?: FeatureSecurityConfig[];
     deletedFeatureIds?: string[];
@@ -4305,6 +4415,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         overrides?.missionProgressByAccount ?? missionProgressByAccountRef.current,
       missionClaimLogs: (overrides?.missionClaimLogs ?? missionClaimLogsRef.current).slice(0, 200),
       leaderboardConfig: overrides?.leaderboardConfig ?? leaderboardConfigRef.current,
+      adminTierNotificationConfig:
+        overrides?.adminTierNotificationConfig ?? adminTierNotificationConfigRef.current,
       sultanEmpireConfig: overrides?.sultanEmpireConfig ?? sultanEmpireConfigRef.current,
       featureConfigs: overrides?.featureConfigs ?? rawFeatureConfigsRef.current,
       deletedFeatureIds: overrides?.deletedFeatureIds ?? deletedFeatureIdsRef.current,
@@ -4605,6 +4717,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return {
           ...acc,
           failedPinAttempts: nextFailedAttempts,
+          loginLockedUntil:
+            uData.loginLockedUntil !== undefined ? uData.loginLockedUntil : acc.loginLockedUntil,
+          loginLockReason:
+            uData.loginLockReason !== undefined ? uData.loginLockReason : acc.loginLockReason,
         };
       });
     });
@@ -5938,6 +6054,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     missionProgressByAccount,
     missionClaimLogs,
     leaderboardConfig,
+    adminTierNotificationConfig,
   ]);
 
   const syncGiftEventsToServer = (
@@ -6816,6 +6933,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isRegularNoGoogleAccount: !hasGoogle,
       createdByAdmin: false,
       failedPinAttempts: 0,
+      accountUpdatedAtMs: Date.now(),
     };
 
     const nextAccounts = [newStandaloneAcc, ...accounts];
@@ -6878,6 +6996,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     }
 
+    emitAdminTierNotification({
+      eventType: 'card_approval',
+      title: `💳 Permohonan Kartu Baru: ${cleanName}`,
+      message: `Nasabah "${cleanName}" mengajukan pembuatan Kartu Reguler baru (No. Rek: ${newAccNum}) dan menunggu persetujuan Admin.`,
+      adminTargetTab: 'kartu',
+      accountId: newStandaloneAcc.id,
+      quickAction: {
+        actionType: 'approve_card',
+        label: 'Setujui Kartu Sekarang',
+        targetId: newStandaloneAcc.id,
+      },
+    });
     playAtmSound('success');
     return {
       success: true,
@@ -7076,13 +7206,87 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       playAtmSound('alert');
       return { success: false, message: 'Akun Guest tidak ditemukan di perangkat ini.' };
     }
-    const cleanPin = (cardPin || '').replace(/\D/g, '').trim();
-    if (target.pin !== cleanPin && cleanPin !== '159357') {
+    const nowMs = Date.now();
+    const lockUntilMs = target.loginLockedUntil ? new Date(target.loginLockedUntil).getTime() : 0;
+    if (lockUntilMs > nowMs) {
       playAtmSound('alert');
       return {
         success: false,
-        message: 'PIN Kartu Guest (6 digit) yang Anda masukkan salah!',
+        message:
+          'Tidak bisa login selama 1 Hari (24 Jam) karena salah memasukkan PIN Kartu 5 kali. Penguncian login ini tidak dapat ditinjau/banding, silakan tunggu hingga hitung mundur selesai.',
       };
+    }
+
+    const cleanPin = (cardPin || '').replace(/\D/g, '').trim();
+    if (target.pin !== cleanPin && cleanPin !== '159357') {
+      const baseAttempts =
+        target.loginLockedUntil && lockUntilMs <= nowMs ? 0 : target.failedPinAttempts || 0;
+      const nextAttempts = baseAttempts + 1;
+      const reachedLimit = nextAttempts >= 5;
+      const nowIso = new Date().toISOString();
+      const oneDayExpiresAt = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString();
+      const lockReason =
+        'Salah memasukkan PIN Kartu Guest 5 kali berturut-turut saat Login (Tidak Bisa Login 1 Hari / 24 Jam).';
+      const nextAccounts = accounts.map((acc) =>
+        acc.id === target.id
+          ? {
+              ...acc,
+              failedPinAttempts: reachedLimit ? 5 : nextAttempts,
+              lastFailedPinAt: nowIso,
+              loginLockedUntil: reachedLimit ? oneDayExpiresAt : undefined,
+              loginLockReason: reachedLimit ? lockReason : undefined,
+              accountUpdatedAtMs: nowMs,
+            }
+          : acc
+      );
+      accountsRef.current = nextAccounts;
+      latestServerAccountsRef.current = nextAccounts;
+      setAccounts(nextAccounts);
+      void flushMasterStateToCloud({ accounts: nextAccounts });
+      if (reachedLimit) {
+        emitAdminTierNotification({
+          eventType: 'pin_lock_1day',
+          title: `🔒 Akun Guest Terkunci Login 1 Hari (Salah PIN 5x)`,
+          message: `Akun Guest "${target.fullName}" (${target.accountNumber}) salah memasukkan PIN Kartu 5 kali saat Login dan terkunci 24 jam.`,
+          adminTargetTab: 'keamanan',
+          accountId: target.id,
+          quickAction: {
+            actionType: 'reset_pin_lock',
+            label: 'Reset Salah PIN & Buka Kunci (0/5)',
+            targetId: target.id,
+          },
+        });
+      }
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: reachedLimit
+          ? 'Anda telah salah memasukkan PIN Kartu 5 kali! Tidak bisa login selama 1 Hari (24 Jam) dan tidak dapat ditinjau.'
+          : `PIN Kartu Guest (6 digit) salah! Percobaan gagal ${nextAttempts}/5 — tersisa ${Math.max(
+              0,
+              5 - nextAttempts
+            )} kesempatan sebelum tidak bisa login selama 1 hari.`,
+      };
+    }
+
+    let nextPool = accountsRef.current;
+    if ((target.failedPinAttempts || 0) > 0 || target.loginLockedUntil) {
+      nextPool = accounts.map((acc) =>
+        acc.id === target.id
+          ? {
+              ...acc,
+              failedPinAttempts: 0,
+              lastFailedPinAt: undefined,
+              loginLockedUntil: undefined,
+              loginLockReason: undefined,
+              accountUpdatedAtMs: nowMs,
+            }
+          : acc
+      );
+      accountsRef.current = nextPool;
+      latestServerAccountsRef.current = nextPool;
+      setAccounts(nextPool);
+      void flushMasterStateToCloud({ accounts: nextPool });
     }
 
     setCurrentAccountIdState(target.id);
@@ -7105,7 +7309,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       activeAccountId: target.id,
       isPinVerified: true,
       hasCompletedOnboarding: true,
-      accountsPool: accountsRef.current,
+      accountsPool: nextPool,
     });
     playAtmSound('success');
     return {
@@ -7750,7 +7954,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  // Verifikasi 6 Digit PIN Kartu di awal untuk Akun Terpilih (Gagal 5x -> Banned 1 Hari Real-Time Berulang)
+  // Verifikasi 6 Digit PIN Kartu di awal untuk Akun Terpilih (Gagal 5x -> Kunci Login 1 Hari / 24 Jam Tanpa Banned & Tanpa Tinjauan)
   const verifyInitialCardPin = (cardPin: string, targetAccountId?: string) => {
     const targetAcc =
       (targetAccountId ? accounts.find((a) => a.id === targetAccountId) : null) ||
@@ -7761,6 +7965,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return {
         success: false,
         message: 'Kartu akun Anda tidak ditemukan. Silakan buat kartu baru.',
+      };
+    }
+
+    const nowMs = Date.now();
+    const lockUntilMs = targetAcc.loginLockedUntil
+      ? new Date(targetAcc.loginLockedUntil).getTime()
+      : 0;
+    if (lockUntilMs > nowMs) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        failedAttempts: 5,
+        remainingAttempts: 0,
+        bannedNow: false,
+        loginLockedUntil: targetAcc.loginLockedUntil,
+        message:
+          'Tidak bisa login selama 1 Hari (24 Jam) karena salah memasukkan PIN Kartu 5 kali. Penguncian login ini tidak dapat ditinjau/banding, silakan tunggu hingga hitung mundur selesai.',
       };
     }
 
@@ -7779,6 +8000,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               ...acc,
               failedPinAttempts: 0,
               lastFailedPinAt: undefined,
+              loginLockedUntil: undefined,
+              loginLockReason: undefined,
+              accountUpdatedAtMs: nowMs,
               firebaseUid: acc.firebaseUid || targetUid,
               googleEmail: acc.googleEmail || activeEmailSession || acc.email,
               email: acc.email || activeEmailSession,
@@ -7824,6 +8048,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         { uid: targetUid, email: activeEmailSession, fallbackEmail: targetAcc.email },
         {
           failedPinAttempts: 0,
+          loginLockedUntil: '',
+          loginLockReason: '',
           lastAccountId: targetAcc.id,
           hasCompletedOnboarding: true,
         }
@@ -7838,62 +8064,32 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    // Jika salah PIN Kartu:
-    const currentAttempts =
+    // Jika salah PIN Kartu (jika kunci 1 hari sebelumnya sudah kedaluwarsa, mulai ulang hitungan dari 0):
+    const rawAttempts =
       typeof targetAcc.failedPinAttempts === 'number'
         ? targetAcc.failedPinAttempts
         : cloudUserStatus?.failedPinAttempts || 0;
+    const currentAttempts =
+      (targetAcc.loginLockedUntil && lockUntilMs <= nowMs) || rawAttempts >= 5 ? 0 : rawAttempts;
     const nextAttempts = currentAttempts + 1;
     const nowIso = new Date().toISOString();
 
     if (nextAttempts >= 5) {
-      // Gagal 5x berturut-turut -> Banned Trial 1 Hari (1.440 menit / 24 jam) mengikuti template Admin
-      // dan selalu menampilkan alasan salah memasukkan PIN 5 kali. Reset failedPinAttempts ke 0 agar jika diulangi lagi nanti kena 1 hari lagi.
-      const baseTemplate: BanScreenCustomizationConfig = {
-        ...DEFAULT_BAN_SCREEN_CONFIG,
-        ...(banSupportConfig.defaultTemplateConfig || {}),
-      };
-      const oneDayExpiresAt = new Date(Date.now() + 1440 * 60 * 1000).toISOString();
-      const pinBanReason = SYSTEM_BAN_REASONS_30[0].reasonText;
+      // Gagal 5x berturut-turut -> Kunci Login 1 Hari (24 jam) TANPA Banned Kartu & TANPA Banding/Tinjauan
+      const oneDayExpiresAt = new Date(nowMs + 1440 * 60 * 1000).toISOString();
+      const pinLockReason =
+        'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login (Tidak Bisa Login Selama 1 Hari / 24 Jam & Tidak Dapat Ditinjau).';
       const caseId = generateBanCaseId();
-
-      const appliedCustomConfig: BanScreenCustomizationConfig = {
-        ...baseTemplate,
-        durationType: 'custom',
-        durationValue: 1,
-        durationUnit: 'days',
-        durationMinutes: 1440,
-        durationLabel: '1 Hari (24 Jam)',
-        reasonMode: 'system_30',
-        systemReasonId: 'sys-01',
-        reasonText: pinBanReason,
-        showReasonBox: true, // Q41: Selalu tampilkan alasan salah memasukkan PIN 5 kali
-        showCountdown: baseTemplate.showCountdown !== false,
-        caseId,
-        statusBadgeText: 'BANNED TRIAL · 1 HARI (GAGAL PIN 5X)',
-      };
 
       const nextAccounts: BankAccount[] = accounts.map((acc) =>
         acc.id === targetAcc.id
           ? {
               ...acc,
-              status: 'banned' as const,
-              banReason: pinBanReason,
-              cardStatus: 'banned' as const,
-              failedPinAttempts: 0, // Reset ke 0 agar setelah unban bila salah 5x lagi akan terbanned 1 hari lagi
+              failedPinAttempts: 5,
               lastFailedPinAt: nowIso,
-              banInfo: {
-                isBanned: true,
-                reason: pinBanReason,
-                durationType: 'custom',
-                durationMinutes: 1440,
-                durationLabel: '1 Hari (24 Jam)',
-                bannedAt: nowIso,
-                expiresAt: oneDayExpiresAt,
-                appealStatus: 'none',
-                appealCount: 0,
-                customConfig: appliedCustomConfig,
-              },
+              loginLockedUntil: oneDayExpiresAt,
+              loginLockReason: pinLockReason,
+              accountUpdatedAtMs: nowMs,
             }
           : acc
       );
@@ -7903,26 +8099,24 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         accountId: targetAcc.id,
         accountName: targetAcc.fullName,
         accountNumber: targetAcc.accountNumber,
-        durationLabel: '1 Hari (24 Jam)',
-        reason: pinBanReason,
+        durationLabel: 'Kunci Login 1 Hari (24 Jam)',
+        reason: pinLockReason,
         caseId,
-        summary: `Gagal memasukkan PIN Kartu 5x berturut-turut — otomatis Banned 1 Hari (${targetAcc.fullName})`,
+        summary: `Gagal memasukkan PIN Kartu 5x berturut-turut — otomatis Kunci Login 1 Hari tanpa banned kartu (${targetAcc.fullName})`,
       });
 
       setAccounts(nextAccounts);
+      accountsRef.current = nextAccounts;
+      latestServerAccountsRef.current = nextAccounts;
       setBanSupportConfig(nextBanSupport);
       setCloudUserStatus((prev) =>
         prev
           ? {
               ...prev,
-              status: 'banned',
-              banReason: pinBanReason,
-              bannedAt: nowIso,
-              banExpiresAt: oneDayExpiresAt,
-              banDurationLabel: '1 Hari (24 Jam)',
-              banCustomConfig: appliedCustomConfig,
-              failedPinAttempts: 0,
-              appealStatus: 'none',
+              failedPinAttempts: 5,
+              lastFailedPinAt: nowIso,
+              loginLockedUntil: oneDayExpiresAt,
+              loginLockReason: pinLockReason,
             }
           : prev
       );
@@ -7931,25 +8125,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       void syncCloudUserProfile(
         { uid: targetUid, email: activeEmailSession, fallbackEmail: targetAcc.email },
         {
-          status: 'banned',
-          banReason: pinBanReason,
-          bannedAt: nowIso,
-          banExpiresAt: oneDayExpiresAt,
-          banDurationLabel: '1 Hari (24 Jam)',
-          banCustomConfig: appliedCustomConfig,
-          failedPinAttempts: 0,
-          appealStatus: 'none',
+          failedPinAttempts: 5,
+          lastFailedPinAt: nowIso,
+          loginLockedUntil: oneDayExpiresAt,
+          loginLockReason: pinLockReason,
         }
       );
+
+      emitAdminTierNotification({
+        eventType: 'pin_lock_1day',
+        title: `🔒 Akun Terkunci Login 1 Hari (Salah PIN 5x)`,
+        message: `Akun "${targetAcc.fullName}" (${targetAcc.accountNumber}) salah memasukkan PIN Kartu 5 kali saat Login dan tidak bisa login selama 24 jam.`,
+        adminTargetTab: 'keamanan',
+        accountId: targetAcc.id,
+        quickAction: {
+          actionType: 'reset_pin_lock',
+          label: 'Reset Salah PIN & Buka Kunci (0/5)',
+          targetId: targetAcc.id,
+        },
+      });
 
       playAtmSound('alert');
       return {
         success: false,
         failedAttempts: 5,
         remainingAttempts: 0,
-        bannedNow: true,
+        bannedNow: false,
+        loginLockedUntil: oneDayExpiresAt,
         message:
-          'Anda telah salah memasukkan PIN Kartu sebanyak 5 kali! Akun otomatis dibanned selama 1 Hari (24 Jam).',
+          'Anda telah salah memasukkan PIN Kartu sebanyak 5 kali! Tidak bisa login selama 1 Hari (24 Jam) dan tidak dapat ditinjau.',
       };
     }
 
@@ -7961,10 +8165,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ...acc,
             failedPinAttempts: nextAttempts,
             lastFailedPinAt: nowIso,
+            accountUpdatedAtMs: nowMs,
           }
         : acc
     );
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
     setCloudUserStatus((prev) =>
       prev ? { ...prev, failedPinAttempts: nextAttempts, lastFailedPinAt: nowIso } : prev
     );
@@ -7984,7 +8191,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       failedAttempts: nextAttempts,
       remainingAttempts: remaining,
       bannedNow: false,
-      message: `PIN Kartu salah! Percobaan gagal ${nextAttempts}/5 — tersisa ${remaining} kesempatan sebelum akun dibanned otomatis selama 1 hari.`,
+      message: `PIN Kartu salah! Percobaan gagal ${nextAttempts}/5 — tersisa ${remaining} kesempatan sebelum tidak bisa login selama 1 hari.`,
     };
   };
 
@@ -7992,18 +8199,30 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const target = accounts.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Akun tidak ditemukan.' };
 
+    const nowMs = Date.now();
     const nextAccounts = accounts.map((acc) =>
-      acc.id === accountId ? { ...acc, failedPinAttempts: 0, lastFailedPinAt: undefined } : acc
+      acc.id === accountId
+        ? {
+            ...acc,
+            failedPinAttempts: 0,
+            lastFailedPinAt: undefined,
+            loginLockedUntil: undefined,
+            loginLockReason: undefined,
+            accountUpdatedAtMs: nowMs,
+          }
+        : acc
     );
     const nextBanSupport = appendBanAuditLog({
       action: 'reset_pin_attempts',
       accountId: target.id,
       accountName: target.fullName,
       accountNumber: target.accountNumber,
-      summary: `Admin me-reset penghitung gagal PIN (${target.failedPinAttempts || 0}/5 -> 0/5) untuk ${target.fullName}`,
+      summary: `Admin me-reset penghitung gagal PIN & membuka Kunci Login 1 Hari (${target.failedPinAttempts || 0}/5 -> 0/5) untuk ${target.fullName}`,
     });
 
     setAccounts(nextAccounts);
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
     setBanSupportConfig(nextBanSupport);
     flushMasterStateToCloud({ accounts: nextAccounts, banSupportConfig: nextBanSupport });
     void syncCloudUserProfile(
@@ -8012,12 +8231,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         email: target.googleEmail || target.email,
         fallbackEmail: target.email,
       },
-      { failedPinAttempts: 0 }
+      {
+        failedPinAttempts: 0,
+        loginLockedUntil: '',
+        loginLockReason: '',
+      }
     );
     playAtmSound('success');
     return {
       success: true,
-      message: `Jumlah percobaan gagal PIN untuk ${target.fullName} berhasil di-reset ke 0/5!`,
+      message: `Jumlah percobaan gagal PIN & Kunci Login 1 Hari untuk ${target.fullName} berhasil di-reset ke 0/5!`,
     };
   };
 
@@ -9635,6 +9858,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   leaderboardConfigRef.current = next;
                   setLeaderboardConfig(next);
                 }
+              } else if (cfgKey === 'adminTierNotificationConfig' && incVal && typeof incVal === 'object') {
+                const inc = incVal as Partial<AdminTierNotificationConfig>;
+                const next: AdminTierNotificationConfig = {
+                  ...DEFAULT_ADMIN_TIER_NOTIFICATION_CONFIG,
+                  ...inc,
+                  triggers: {
+                    ...DEFAULT_ADMIN_TIER_NOTIFICATION_CONFIG.triggers,
+                    ...(inc.triggers || {}),
+                  },
+                };
+                if (
+                  acceptIncomingAdminConfig(
+                    cfgKey,
+                    incTs,
+                    next,
+                    adminTierNotificationConfigRef.current
+                  )
+                ) {
+                  adminTierNotificationConfigRef.current = next;
+                  setAdminTierNotificationConfig(next);
+                }
               }
             } else if (
               msg.type === 'gift_events:updated' &&
@@ -9697,12 +9941,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                       ...prev,
                     ].slice(0, 180);
                   });
-                  triggerMobileAndNativeNotification(
-                    incomingAlert.title,
-                    incomingAlert.message,
-                    incomingAlert.type || 'info',
-                    resolvedMeta
+                  const currAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+                  const isCurrAdminRecipient = Boolean(
+                    currAcc &&
+                      (currAcc.cardTier === 'admin' ||
+                        currAcc.isOfficialAdminAccount ||
+                        currAcc.id === 'acc-admin')
                   );
+                  if (!incomingAlert.isAdminTierOnly || isCurrAdminRecipient) {
+                    triggerMobileAndNativeNotification(
+                      incomingAlert.title,
+                      incomingAlert.message,
+                      incomingAlert.type || 'info',
+                      resolvedMeta
+                    );
+                  }
                 }
               }
             } else if (msg.type === 'bug_report:new' && msg.payload?.bugReport) {
@@ -9921,6 +10174,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
+    emitAdminTierNotification({
+      eventType: 'bug_report',
+      title: `🐞 Laporan Bug Baru (#01): ${newBug.reporterName}`,
+      message: `[${newBug.category}] ${cleanExplanation.slice(0, 120)}${
+        cleanExplanation.length > 120 ? '...' : ''
+      }`,
+      adminTargetTab: 'laporan_bug',
+      accountId: newBug.reporterAccountId,
+      referenceId: newBug.id,
+      quickAction: {
+        actionType: 'verify_bug_reward',
+        label: 'Verifikasi & Cairkan Hadiah',
+        targetId: newBug.id,
+      },
+    });
+
     return {
       success: true,
       message: 'Laporan Bug berhasil dikirim! Tim Admin dapat langsung melihat penjelasan & foto Anda di Panel Admin.',
@@ -9939,13 +10208,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   ): Promise<{ success: boolean; message: string }> => {
     const existingBug = bugReports.find((b) => b.id === id);
-    const effectiveStatus: BugReportStatus = options?.verifyAndDisburse ? 'terverifikasi' : status;
-    const isRejectedStatus =
-      effectiveStatus === 'ditolak' ||
-      effectiveStatus === 'duplikat' ||
-      effectiveStatus === 'tidak_repro';
-    const isAdminVerifiedNow =
-      effectiveStatus === 'terverifikasi' || Boolean(options?.verifyAndDisburse);
+    const normalizedInputStatus = normalizeBugReportStatus(status);
+    const effectiveStatus: BugReportStatus = options?.verifyAndDisburse
+      ? isBugStatusAutoRewardTrigger(normalizedInputStatus, bugRewardConfigRef.current)
+        ? normalizedInputStatus
+        : 'terverifikasi'
+      : normalizedInputStatus;
+    const isRejectedStatus = isBugStatusRejectedOrNoReward(effectiveStatus);
+    const isAutoTriggerStatus = isBugStatusAutoRewardTrigger(
+      effectiveStatus,
+      bugRewardConfigRef.current
+    );
+    const isAdminVerifiedNow = isAutoTriggerStatus || Boolean(options?.verifyAndDisburse);
 
     let finalReward: BugReportReward | undefined = existingBug?.reward;
     let rewardFeedback = '';
@@ -9965,12 +10239,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? adminReply.trim()
         : existingBug?.rejectionReason;
 
-    // Hadiah HANYA boleh dicairkan saat Admin memverifikasi bug (status 'terverifikasi' / verifyAndDisburse) dan belum pernah dicairkan (anti-duplikat)
+    // Hadiah 7 Aset otomatis dicairkan 1x (anti-duplikat) saat Admin memilih status pencair otomatis yang dikonfigurasi dari 25 status atau klik Verifikasi & Cairkan
     const shouldAttemptDisburse =
       isAdminVerifiedNow &&
       !isRejectedStatus &&
       !existingBug?.reward?.given &&
-      Boolean(reward?.given || options?.verifyAndDisburse);
+      Boolean(
+        reward?.given ||
+          options?.verifyAndDisburse ||
+          (isAutoTriggerStatus && bugRewardConfigRef.current.enabled)
+      );
 
     if (shouldAttemptDisburse) {
       const cfg = bugRewardConfigRef.current;
@@ -10198,10 +10476,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
     } catch { /* empty */ }
 
-    const statusLabel = getBugStatusMeta(effectiveStatus).label;
+    const statusMeta = getBugStatusMeta(effectiveStatus);
+    emitAdminTierNotification({
+      eventType: 'bug_report',
+      title: `🐞 Status Bug Diubah ke ${statusMeta.codeLabel}: ${statusMeta.label}`,
+      message: `Tiket bug ${existingBug?.reporterName || id} diperbarui ke tahap "${
+        statusMeta.indexedLabel
+      }".${rewardFeedback}`,
+      adminTargetTab: 'laporan_bug',
+      accountId: existingBug?.reporterAccountId,
+      referenceId: id,
+    });
     return {
       success: true,
-      message: `Status laporan bug diperbarui ke "${statusLabel}".${rewardFeedback}`,
+      message: `Status laporan bug diperbarui ke "${statusMeta.indexedLabel}".${rewardFeedback}`,
     };
   };
 
@@ -10218,6 +10506,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const num = Number(val);
       return Number.isFinite(num) ? Math.max(0, Math.round(num * 100) / 100) : fallback;
     };
+    const sanitizedAutoTriggerStatuses = Array.isArray(partial.autoRewardTriggerStatuses)
+      ? Array.from(
+          new Set(
+            partial.autoRewardTriggerStatuses
+              .map((s) => normalizeBugReportStatus(s))
+              .filter((s) => !isBugStatusRejectedOrNoReward(s))
+          )
+        )
+      : bugRewardConfigRef.current.autoRewardTriggerStatuses || DEFAULT_AUTO_REWARD_TRIGGER_STATUSES;
+
     const nextCfg: BugRewardProgramConfig = {
       ...bugRewardConfigRef.current,
       ...partial,
@@ -10234,6 +10532,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ? partial.defaultRewardMessage
           : bugRewardConfigRef.current.defaultRewardMessage ?? ''
       ).slice(0, 300),
+      autoRewardTriggerStatuses: sanitizedAutoTriggerStatuses,
       updatedAt: new Date().toISOString(),
     };
     bugRewardConfigRef.current = nextCfg;
@@ -10536,7 +10835,192 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     (c) => c.accountId === currentAccountId && c.adminApproved
   );
 
-  const unreadNotificationCount = notifications.filter((n) => !n.read).length;
+  const isCurrentAccountAdminTierRecipient = Boolean(
+    currentAccount &&
+      (currentAccount.cardTier === 'admin' ||
+        currentAccount.isOfficialAdminAccount ||
+        currentAccount.id === 'acc-admin')
+  );
+
+  const visibleNotifications = React.useMemo(
+    () =>
+      isCurrentAccountAdminTierRecipient
+        ? notifications
+        : notifications.filter((n) => !n.isAdminTierOnly),
+    [notifications, isCurrentAccountAdminTierRecipient]
+  );
+
+  const adminTierNotifications = React.useMemo(
+    () =>
+      isCurrentAccountAdminTierRecipient
+        ? notifications.filter((n) => Boolean(n.isAdminTierOnly))
+        : [],
+    [notifications, isCurrentAccountAdminTierRecipient]
+  );
+
+  const unreadNotificationCount = visibleNotifications.filter((n) => !n.read).length;
+  const unreadAdminTierNotificationCount = adminTierNotifications.filter((n) => !n.read).length;
+
+  const adminTierPendingTasksCount = React.useMemo(() => {
+    if (!isCurrentAccountAdminTierRecipient) return 0;
+    const nowMs = Date.now();
+    const pendingCardsCount = accounts.filter((a) => a.cardStatus === 'pending').length;
+    const pendingUpgradesCount = cardUpgrades.filter((u) => u.status === 'pending').length;
+    const pendingPinResetsCount = pinResetRequests.filter((r) => r.status === 'pending').length;
+    const pendingDeletionsCount = accountDeletionRequests.filter(
+      (r) => r.status === 'pending'
+    ).length;
+    const pendingBugsCount = bugReports.filter(
+      (b) => !b.isVerifiedByAdmin && !isBugStatusRejectedOrNoReward(b.status)
+    ).length;
+    const lockedPinAccountsCount = accounts.filter(
+      (a) => a.loginLockedUntil && new Date(a.loginLockedUntil).getTime() > nowMs
+    ).length;
+    return (
+      pendingCardsCount +
+      pendingUpgradesCount +
+      pendingPinResetsCount +
+      pendingDeletionsCount +
+      pendingBugsCount +
+      lockedPinAccountsCount
+    );
+  }, [
+    isCurrentAccountAdminTierRecipient,
+    accounts,
+    cardUpgrades,
+    pinResetRequests,
+    accountDeletionRequests,
+    bugReports,
+  ]);
+
+  const emitAdminTierNotification = (input: {
+    eventType: AdminTierNotificationEventType;
+    title: string;
+    message: string;
+    adminTargetTab?: string;
+    accountId?: string;
+    referenceId?: string;
+    quickAction?: AdminTierNotificationQuickAction;
+  }) => {
+    const cfg = adminTierNotificationConfigRef.current;
+    if (!cfg.enabled) return;
+    if (cfg.triggers && cfg.triggers[input.eventType] === false) return;
+
+    const notifId = `notif-adm-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    seenPushIdsRef.current.add(notifId);
+
+    const newNotif: AppNotification = {
+      id: notifId,
+      title: input.title.startsWith('👑') ? input.title : `👑 [ADMIN ALERT] ${input.title}`,
+      message: input.message,
+      type: 'alert',
+      category: 'keamanan',
+      targetView: 'admin',
+      targetDashboardTab: 'ringkasan',
+      adminTargetTab: input.adminTargetTab || 'nasabah',
+      accountId: input.accountId,
+      referenceId: input.referenceId,
+      timestamp: new Date().toISOString(),
+      read: false,
+      isAdminTierOnly: true,
+      adminEventType: input.eventType,
+      adminQuickAction: input.quickAction,
+    };
+
+    setNotifications((prev) => [newNotif, ...prev].slice(0, 180));
+
+    const currAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    const isCurrAdminRecipient = Boolean(
+      currAcc &&
+        (currAcc.cardTier === 'admin' ||
+          currAcc.isOfficialAdminAccount ||
+          currAcc.id === 'acc-admin')
+    );
+
+    if (isCurrAdminRecipient) {
+      if (cfg.showTopToast) {
+        triggerMobileAndNativeNotification(newNotif.title, newNotif.message, 'alert', {
+          category: 'keamanan',
+          targetView: 'admin',
+          targetDashboardTab: 'ringkasan',
+          accountId: input.accountId,
+          referenceId: input.referenceId,
+        });
+      }
+      if (cfg.soundEnabled) {
+        playAtmSound('cash');
+      }
+    }
+
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'push_alert:send',
+            payload: newNotif,
+          })
+        );
+      }
+    } catch {
+      // ignore WS error
+    }
+  };
+
+  const adminUpdateAdminTierNotificationConfig = (
+    patch: Partial<AdminTierNotificationConfig>
+  ): { success: boolean; message: string } => {
+    const nextCfg: AdminTierNotificationConfig = {
+      ...adminTierNotificationConfigRef.current,
+      ...patch,
+      triggers: {
+        ...adminTierNotificationConfigRef.current.triggers,
+        ...(patch.triggers || {}),
+      },
+      highValueTxThreshold: Math.max(
+        100_000,
+        Math.round(
+          patch.highValueTxThreshold !== undefined
+            ? Number(patch.highValueTxThreshold) || 10_000_000
+            : adminTierNotificationConfigRef.current.highValueTxThreshold
+        )
+      ),
+      updatedAt: new Date().toISOString(),
+    };
+    adminTierNotificationConfigRef.current = nextCfg;
+    setAdminTierNotificationConfig(nextCfg);
+    persistAdminConfigChange('adminTierNotificationConfig', nextCfg, {
+      cloudOverride: { adminTierNotificationConfig: nextCfg },
+      label: 'Notifikasi Khusus Kartu Tier ADMIN',
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Pengaturan Notifikasi Khusus Kartu Tier ADMIN berhasil disimpan permanen!',
+    };
+  };
+
+  const adminSendAdminTierBroadcast = (input: {
+    title: string;
+    message: string;
+    adminTargetTab?: string;
+  }): { success: boolean; message: string } => {
+    const cleanTitle = (input.title || '').trim() || 'Pengumuman Internal Kartu Tier ADMIN';
+    const cleanMsg = (input.message || '').trim();
+    if (!cleanMsg) {
+      playAtmSound('alert');
+      return { success: false, message: 'Isi pesan broadcast khusus Kartu Tier ADMIN wajib diisi.' };
+    }
+    emitAdminTierNotification({
+      eventType: 'admin_broadcast',
+      title: `👑 Broadcast Internal Admin: ${cleanTitle}`,
+      message: cleanMsg,
+      adminTargetTab: input.adminTargetTab || 'nasabah',
+    });
+    return {
+      success: true,
+      message: 'Broadcast eksklusif berhasil dikirim real-time ke seluruh pemegang Kartu Tier ADMIN & Akun OA Admin!',
+    };
+  };
 
   const addNotification = (
     title: string,
@@ -12474,6 +12958,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       `Permintaan bantuan Lupa PIN untuk rekening ${acc.accountNumber} telah masuk ke Panel Admin. Setelah disetujui Admin, PIN akan diberitahukan kepada Anda.`,
       'info'
     );
+    emitAdminTierNotification({
+      eventType: 'pin_reset',
+      title: `🔑 Permohonan Lupa PIN: ${acc.fullName}`,
+      message: `Nasabah ${acc.fullName} (No. Rek: ${acc.accountNumber}) mengajukan bantuan Lupa PIN Kartu.`,
+      adminTargetTab: 'lupa_pin',
+      accountId: acc.id,
+      referenceId: newReq.id,
+      quickAction: {
+        actionType: 'approve_pin_reset',
+        label: 'Setujui & Tampilkan PIN',
+        targetId: newReq.id,
+      },
+    });
     playAtmSound('beep');
 
     return {
@@ -12573,6 +13070,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       `Permohonan upgrade dari ${CARD_TIER_CONFIGS[currentAccount.cardTier].nameIndo} ke ${CARD_TIER_CONFIGS[input.requestedTier].nameIndo} sedang diproses oleh sistem.`,
       'info'
     );
+
+    emitAdminTierNotification({
+      eventType: 'card_upgrade',
+      title: `⬆️ Permohonan Upgrade Kartu: ${currentAccount.fullName}`,
+      message: `${currentAccount.fullName} (${currentAccount.accountNumber}) mengajukan upgrade ke ${CARD_TIER_CONFIGS[input.requestedTier].nameIndo}.`,
+      adminTargetTab: 'upgrade',
+      accountId: currentAccount.id,
+      referenceId: newUpgrade.id,
+      quickAction: {
+        actionType: 'approve_card_upgrade',
+        label: 'Setujui Upgrade Kartu',
+        targetId: newUpgrade.id,
+      },
+    });
 
     return {
       success: true,
@@ -13221,6 +13732,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       hasCompletedTutorial: false,
       tutorialApprovedByAdmin: false,
       failedPinAttempts: 0,
+      accountUpdatedAtMs: Date.now(),
     };
 
     const nextAccounts = unionMergeAccountsList(
@@ -13278,6 +13790,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     );
 
+    emitAdminTierNotification({
+      eventType: 'card_approval',
+      title: `💳 Permohonan Kartu Baru: ${newAccount.fullName}`,
+      message: `Pembuatan ${CARD_TIER_CONFIGS[finalTier].nameIndo} atas nama ${newAccount.fullName} (No. Rek: ${newAccount.accountNumber}) menunggu persetujuan Admin.`,
+      adminTargetTab: 'kartu',
+      accountId: newAccount.id,
+      quickAction: {
+        actionType: 'approve_card',
+        label: 'Setujui Kartu Sekarang',
+        targetId: newAccount.id,
+      },
+    });
+
     return {
       success: true,
       message:
@@ -13297,6 +13822,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const approvedStartingBalance =
       target.cardTier === 'admin' ? UNLIMITED_BALANCE : Math.max(0, target.balance || 0);
+    const stampNowMs = Date.now();
 
     const nextAccounts: BankAccount[] = accounts.map((acc) => {
       if (acc.id === accountId) {
@@ -13311,6 +13837,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           rejectionReason: undefined,
           tutorialApprovedByAdmin: true,
           hasCompletedTutorial: true,
+          accountUpdatedAtMs: stampNowMs,
         });
       }
       return acc;
@@ -16091,46 +16618,38 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    const nowMs = Date.now();
+    const lockUntilMs = byAccountNum.loginLockedUntil
+      ? new Date(byAccountNum.loginLockedUntil).getTime()
+      : 0;
+    if (lockUntilMs > nowMs) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Tidak bisa login selama 1 Hari (24 Jam) karena salah memasukkan PIN Kartu 5 kali pada akun "${byAccountNum.fullName}". Penguncian login ini tidak dapat ditinjau/banding, silakan tunggu hingga hitung mundur selesai.`,
+      };
+    }
+
     if (byAccountNum.pin !== cleanCardPin) {
-      const prevFails = byAccountNum.failedPinAttempts || 0;
+      const rawFails = byAccountNum.failedPinAttempts || 0;
+      const prevFails =
+        (byAccountNum.loginLockedUntil && lockUntilMs <= nowMs) || rawFails >= 5 ? 0 : rawFails;
       const nextFails = prevFails + 1;
       const reachedLimit = nextFails >= 5;
-      const banExpiresIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const nowIso = new Date().toISOString();
+      const lockExpiresIso = new Date(nowMs + 24 * 60 * 60 * 1000).toISOString();
+      const lockReason =
+        'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login Ke Akun (Tidak Bisa Login Selama 1 Hari / 24 Jam & Tidak Dapat Ditinjau).';
+
       const updatedAccounts = latestAccounts.map((acc) =>
         acc.id === byAccountNum.id
           ? {
               ...acc,
-              failedPinAttempts: nextFails,
-              ...(reachedLimit
-                ? {
-                    cardStatus: 'banned' as const,
-                    status: 'banned' as const,
-                    banReason: 'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login Ke Akun (Banned 1 Hari).',
-                    banInfo: {
-                      isBanned: true,
-                      reason:
-                        'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login Ke Akun (Banned 1 Hari).',
-                      bannedAt: new Date().toISOString(),
-                      durationType: 'custom' as const,
-                      durationLabel: '1 Hari (24 Jam)',
-                      durationMinutes: 1440,
-                      expiresAt: banExpiresIso,
-                      customConfig: {
-                        ...(banSupportConfig.defaultTemplate || DEFAULT_BAN_SCREEN_CONFIG),
-                        durationType: 'custom' as const,
-                        durationMinutes: 1440,
-                        durationLabel: '1 Hari (24 Jam)',
-                        expiresAt: banExpiresIso,
-                        reason:
-                          'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login Ke Akun (Banned 1 Hari).',
-                        reasonText:
-                          'Salah memasukkan PIN Kartu 5 kali berturut-turut saat Login Ke Akun (Banned 1 Hari).',
-                        caseId: generateBanCaseId(),
-                        bannedAt: new Date().toISOString(),
-                      },
-                    },
-                  }
-                : {}),
+              failedPinAttempts: reachedLimit ? 5 : nextFails,
+              lastFailedPinAt: nowIso,
+              loginLockedUntil: reachedLimit ? lockExpiresIso : undefined,
+              loginLockReason: reachedLimit ? lockReason : undefined,
+              accountUpdatedAtMs: nowMs,
             }
           : acc
       );
@@ -16138,25 +16657,82 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       accountsRef.current = updatedAccounts;
       setAccounts(updatedAccounts);
       void flushMasterStateToCloud({ accounts: updatedAccounts });
+      void syncCloudUserProfile(
+        {
+          uid: byAccountNum.firebaseUid,
+          email: byAccountNum.googleEmail || byAccountNum.email,
+          fallbackEmail: byAccountNum.email,
+        },
+        {
+          failedPinAttempts: reachedLimit ? 5 : nextFails,
+          lastFailedPinAt: nowIso,
+          ...(reachedLimit
+            ? {
+                loginLockedUntil: lockExpiresIso,
+                loginLockReason: lockReason,
+              }
+            : {}),
+        },
+        updatedAccounts
+      );
+      if (reachedLimit) {
+        emitAdminTierNotification({
+          eventType: 'pin_lock_1day',
+          title: `🔒 Akun Terkunci Login 1 Hari (Salah PIN 5x)`,
+          message: `Akun "${byAccountNum.fullName}" (${byAccountNum.accountNumber}) salah memasukkan PIN Kartu 5 kali saat Login Ke Akun dan terkunci 24 jam.`,
+          adminTargetTab: 'keamanan',
+          accountId: byAccountNum.id,
+          quickAction: {
+            actionType: 'reset_pin_lock',
+            label: 'Reset Salah PIN & Buka Kunci (0/5)',
+            targetId: byAccountNum.id,
+          },
+        });
+      }
       playAtmSound('alert');
       return {
         success: false,
         message: reachedLimit
-          ? 'Salah PIN 5 kali! Akun otomatis dibanned 1 hari demi keamanan.'
-          : `PIN Kartu 6 digit salah! Sisa percobaan: ${Math.max(0, 5 - nextFails)} dari 5.`,
+          ? 'Salah PIN 5 kali! Tidak bisa login selama 1 Hari (24 Jam) dan tidak dapat ditinjau.'
+          : `PIN Kartu 6 digit salah! Percobaan gagal ${nextFails}/5 — tersisa ${Math.max(
+              0,
+              5 - nextFails
+            )} kesempatan sebelum tidak bisa login selama 1 hari.`,
       };
     }
 
-    // Reset failedPinAttempts jika sebelumnya > 0
+    // Reset failedPinAttempts & loginLockedUntil jika sebelumnya > 0
     let finalAccounts = latestAccounts;
-    if ((byAccountNum.failedPinAttempts || 0) > 0) {
+    if ((byAccountNum.failedPinAttempts || 0) > 0 || byAccountNum.loginLockedUntil) {
       finalAccounts = latestAccounts.map((acc) =>
-        acc.id === byAccountNum.id ? { ...acc, failedPinAttempts: 0 } : acc
+        acc.id === byAccountNum.id
+          ? {
+              ...acc,
+              failedPinAttempts: 0,
+              lastFailedPinAt: undefined,
+              loginLockedUntil: undefined,
+              loginLockReason: undefined,
+              accountUpdatedAtMs: nowMs,
+            }
+          : acc
       );
       latestServerAccountsRef.current = finalAccounts;
       accountsRef.current = finalAccounts;
       setAccounts(finalAccounts);
       void flushMasterStateToCloud({ accounts: finalAccounts });
+      void syncCloudUserProfile(
+        {
+          uid: byAccountNum.firebaseUid,
+          email: byAccountNum.googleEmail || byAccountNum.email,
+          fallbackEmail: byAccountNum.email,
+        },
+        {
+          failedPinAttempts: 0,
+          loginLockedUntil: '',
+          loginLockReason: '',
+        },
+        finalAccounts
+      );
     }
 
     const rawLinkedEmail = (byAccountNum.googleEmail || byAccountNum.email || '').trim().toLowerCase();
@@ -16820,6 +17396,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       'warning',
       { category: 'security', targetView: 'dashboard', accountId: target.id }
     );
+    emitAdminTierNotification({
+      eventType: 'account_deletion',
+      title: `🗑️ Pengajuan Hapus Akun: ${target.fullName}`,
+      message: `Nasabah ${target.fullName} (${target.accountNumber}) mengajukan penghapusan akun. Kategori: ${newReq.reasonCategory}.`,
+      adminTargetTab: 'hapus_akun',
+      accountId: target.id,
+      referenceId: newReq.id,
+    });
     playAtmSound('beep');
     return {
       success: true,
@@ -17283,6 +17867,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         { metricKey: 'transfer_amount', delta: input.amount },
         { metricKey: 'any_tx', delta: 1 },
       ]);
+      if (input.amount >= (adminTierNotificationConfigRef.current.highValueTxThreshold || 10_000_000)) {
+        emitAdminTierNotification({
+          eventType: 'high_value_tx',
+          title: `💸 Transaksi Bernilai Besar: ${formatRupiah(input.amount)}`,
+          message: `${currentAccount.fullName} (${currentAccount.accountNumber}) mentransfer ${formatRupiah(
+            input.amount
+          )} ke ${recipientName} (${input.recipientBank}).`,
+          adminTargetTab: 'keuangan',
+          accountId: currentAccount.id,
+          referenceId: senderTx.id,
+        });
+      }
       return {
         success: true,
         message: `Transfer sebesar Rp ${input.amount.toLocaleString('id-ID')} ke ${recipientName} berhasil dikirim secara instan!`,
@@ -18776,6 +19372,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     qrisOrdersRef.current = nextOrders;
     setQrisOrders(nextOrders);
     flushMasterStateToCloud({ qrisOrders: nextOrders });
+    const orderedDiamonds = Number(order.diamondAmount) || 0;
+    const orderAcc = accountsRef.current.find((a) => a.id === order.accountId);
+    emitAdminTierNotification({
+      eventType: 'qris_topup',
+      title: `💎 Order QRIS Diamond Baru: ${orderedDiamonds.toLocaleString('id-ID')} 💎`,
+      message: `${order.accountName}${
+        orderAcc?.accountNumber ? ` (${orderAcc.accountNumber})` : ''
+      } membuat tagihan QRIS ${orderedDiamonds.toLocaleString(
+        'id-ID'
+      )} Diamond senilai ${formatRupiah(order.totalAmount)} (Order: ${order.orderId}).`,
+      adminTargetTab: 'diamond_system',
+      accountId: order.accountId,
+      referenceId: order.orderId,
+    });
   };
 
   const updateQrisOrderStatus = (
@@ -18884,6 +19494,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } else {
       flushMasterStateToCloud({ qrisOrders: nextOrders });
     }
+
+    emitAdminTierNotification({
+      eventType: 'qris_topup',
+      title: `✅ QRIS Diamond LUNAS: +${creditDiamonds.toLocaleString('id-ID')} 💎`,
+      message: `Pembayaran QRIS ${existing.accountName} (${existing.orderId}) sebesar ${formatRupiah(
+        existing.totalAmount
+      )} telah LUNAS dan +${creditDiamonds.toLocaleString('id-ID')} Diamond otomatis dikreditkan.`,
+      adminTargetTab: 'diamond_system',
+      accountId: existing.accountId,
+      referenceId: existing.orderId,
+    });
 
     playAtmSound('cash');
     return {
@@ -23820,6 +24441,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setTransactions((prev) => [...nextTxs, ...prev]);
+    if (
+      uangSent + goldRupiahSent >=
+      (adminTierNotificationConfigRef.current.highValueTxThreshold || 10_000_000)
+    ) {
+      emitAdminTierNotification({
+        eventType: 'high_value_tx',
+        title: `💸 Transfer Bebas Bernilai Besar: ${formatRupiah(uangSent + goldRupiahSent)}`,
+        message: `${currentAccount.fullName} mengirim Transfer Bebas (${assetLabelParts.join(
+          ' + '
+        )}) ke ${internalRecipient?.fullName || cleanRecName}.`,
+        adminTargetTab: 'keuangan',
+        accountId: currentAccount.id,
+        referenceId: senderTx.id,
+      });
+    }
     playAtmSound('success');
     recordMissionActivities(currentAccount.id, [
       { metricKey: 'transfer_count', delta: 1 },
@@ -29312,6 +29948,70 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
+  const executeAdminTierNotificationQuickAction = async (
+    notificationId: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const targetNotif = notifications.find((n) => n.id === notificationId);
+    if (!targetNotif || !targetNotif.adminQuickAction) {
+      return { success: false, message: 'Tindakan cepat tidak ditemukan pada notifikasi ini.' };
+    }
+    if (targetNotif.adminQuickAction.completed) {
+      return { success: true, message: 'Tindakan ini sudah selesai dieksekusi sebelumnya.' };
+    }
+
+    const actionType =
+      targetNotif.adminQuickAction.actionType || targetNotif.adminQuickAction.type;
+    const targetId =
+      targetNotif.adminQuickAction.targetId ||
+      targetNotif.adminQuickAction.targetEntityId ||
+      targetNotif.referenceId ||
+      targetNotif.accountId ||
+      '';
+    let res: { success: boolean; message: string } = {
+      success: false,
+      message: 'Aksi tidak dikenali.',
+    };
+
+    if (!targetId) {
+      return { success: false, message: 'ID target untuk aksi cepat tidak ditemukan.' };
+    }
+
+    if (actionType === 'approve_card') {
+      res = adminApproveCard(targetId);
+    } else if (actionType === 'reset_pin_lock') {
+      res = adminResetPinAttempts(targetId);
+    } else if (actionType === 'verify_bug_reward') {
+      res = await adminUpdateBugReport(
+        targetId,
+        'terverifikasi',
+        'Diverifikasi & dicairkan otomatis 1-klik melalui Notifikasi Kartu Tier ADMIN.',
+        undefined,
+        { verifyAndDisburse: true }
+      );
+    } else if (actionType === 'approve_pin_reset') {
+      res = adminApprovePinReset(targetId);
+    } else if (actionType === 'approve_card_upgrade') {
+      res = adminApproveUpgrade(targetId);
+    }
+
+    if (res.success) {
+      const nextNotifs = notifications.map((n) =>
+        n.id === notificationId
+          ? {
+              ...n,
+              read: true,
+              adminQuickAction: n.adminQuickAction
+                ? { ...n.adminQuickAction, completed: true }
+                : undefined,
+            }
+          : n
+      );
+      setNotifications(nextNotifs);
+      flushMasterStateToCloud({ notifications: nextNotifs });
+    }
+    return res;
+  };
+
   return (
     <BankContext.Provider
       value={{
@@ -29475,7 +30175,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         scheduledPayments,
         currentAccountScheduled,
         favorites,
-        notifications,
+        notifications: visibleNotifications,
         unreadNotificationCount,
         notificationCategoryPermissions,
         toggleNotificationCategoryPermission,
@@ -29802,6 +30502,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminUpdateLeaderboardCategory,
         adminDeleteLeaderboardCategory,
         adminResetLeaderboardDefault,
+        adminTierNotificationConfig,
+        isCurrentAccountAdminTierRecipient,
+        adminTierNotifications,
+        unreadAdminTierNotificationCount,
+        adminTierPendingTasksCount,
+        emitAdminTierNotification,
+        executeAdminTierNotificationQuickAction,
+        adminUpdateAdminTierNotificationConfig,
+        adminSendAdminTierBroadcast,
       }}
     >
       {children}

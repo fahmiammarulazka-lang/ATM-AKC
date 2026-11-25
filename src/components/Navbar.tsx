@@ -125,6 +125,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     uiVisibilityConfig,
     syncTelemetry,
     missions,
+    isCurrentAccountAdminTierRecipient,
+    adminTierNotificationConfig,
+    adminTierNotifications,
+    unreadAdminTierNotificationCount,
+    adminTierPendingTasksCount,
+    executeAdminTierNotificationQuickAction,
   } = useBank();
 
   const activeMissionsCount = React.useMemo(
@@ -197,6 +203,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [showProfileStatsModal, setShowProfileStatsModal] = useState<boolean>(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState<boolean>(false);
   const [selectedNotifCategory, setSelectedNotifCategory] = useState<NotificationCategory10Key | null>(null);
+  const [notifTabMode, setNotifTabMode] = useState<'all_categories' | 'admin_tier'>('all_categories');
+  const [quickActionToast, setQuickActionToast] = useState<string>('');
+
+  useEffect(() => {
+    if (!isCurrentAccountAdminTierRecipient && notifTabMode === 'admin_tier') {
+      setNotifTabMode('all_categories');
+    }
+  }, [isCurrentAccountAdminTierRecipient, notifTabMode]);
 
   const { handleBankClick, handleNusantaraClick } = useSecretAdminSequence(onSecretAdminTrigger);
 
@@ -238,6 +252,19 @@ export const Navbar: React.FC<NavbarProps> = ({
   const handleNotificationItemClick = (n: typeof notifications[number]) => {
     markNotificationAsRead(n.id);
     setShowNotifDropdown(false);
+    if (n.isAdminTierOnly || n.targetView === 'admin') {
+      setActiveView('admin');
+      if (n.adminTargetTab) {
+        window.setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent('bn:navigate-admin', {
+              detail: { adminTab: n.adminTargetTab },
+            })
+          );
+        }, 60);
+      }
+      return;
+    }
     window.dispatchEvent(
       new CustomEvent('bn:navigate', {
         detail: {
@@ -534,7 +561,33 @@ export const Navbar: React.FC<NavbarProps> = ({
             </>
           )}
 
-          {/* 🔔 Tombol Notifikasi (10 Jenis dengan Centang Izin & Drill-Down) */}
+          {/* 👑 Lencana Antrean Admin Khusus Kartu Tier ADMIN & Akun OA Admin */}
+          {isCurrentAccountAdminTierRecipient &&
+            adminTierNotificationConfig.enabled &&
+            adminTierNotificationConfig.showNavbarQueueBadge && (
+              <button
+                type="button"
+                onClick={() => {
+                  setNotifTabMode('admin_tier');
+                  setSelectedNotifCategory(null);
+                  setShowNotifDropdown(true);
+                  setShowProfileStatsModal(false);
+                }}
+                className="relative flex items-center gap-1 h-7 sm:h-8 px-2 sm:px-2.5 rounded-lg sm:rounded-xl bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-600/20 hover:from-amber-500/35 hover:to-yellow-500/35 border border-amber-400/70 text-amber-200 font-black text-[10px] sm:text-[11px] shadow-md shadow-amber-500/15 transition cursor-pointer shrink-0"
+                title="Pusat Antrean & Notifikasi Khusus Kartu Tier ADMIN"
+              >
+                <Crown className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span className="hidden md:inline">Admin Alert</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-mono text-[9px] sm:text-[10px] font-black tabular-nums">
+                  {adminTierPendingTasksCount}
+                </span>
+                {unreadAdminTierNotificationCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 border border-slate-950 animate-pulse" />
+                )}
+              </button>
+            )}
+
+          {/* 🔔 Tombol Notifikasi (10 Jenis dengan Centang Izin & Drill-Down + Tab Khusus Admin Tier) */}
           <div className="relative shrink-0">
             <button
               type="button"
@@ -559,8 +612,143 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             {showNotifDropdown && (
-              <div className="absolute right-0 mt-2 w-[min(22rem,calc(100vw-1rem))] sm:w-[26rem] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 z-50 text-xs space-y-2.5">
-                {selectedNotifCategory === null ? (
+              <div className="absolute right-0 mt-2 w-[min(23rem,calc(100vw-1rem))] sm:w-[27rem] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-3 z-50 text-xs space-y-2.5">
+                {/* TAB KHUSUS KARTU TIER ADMIN & AKUN OA ADMIN */}
+                {isCurrentAccountAdminTierRecipient && (
+                  <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-950 border border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNotifTabMode('admin_tier');
+                        setSelectedNotifCategory(null);
+                      }}
+                      className={`py-1.5 px-2.5 rounded-lg font-black text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                        notifTabMode === 'admin_tier'
+                          ? 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950 shadow'
+                          : 'text-amber-300 hover:bg-slate-900'
+                      }`}
+                    >
+                      <Crown className="w-3.5 h-3.5 shrink-0" />
+                      <span>Admin Tier ({unreadAdminTierNotificationCount})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNotifTabMode('all_categories')}
+                      className={`py-1.5 px-2.5 rounded-lg font-black text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                        notifTabMode === 'all_categories'
+                          ? 'bg-cyan-500 text-slate-950 shadow'
+                          : 'text-slate-300 hover:bg-slate-900'
+                      }`}
+                    >
+                      <Bell className="w-3.5 h-3.5 shrink-0" />
+                      <span>10 Jenis ({notifications.length})</span>
+                    </button>
+                  </div>
+                )}
+
+                {isCurrentAccountAdminTierRecipient && notifTabMode === 'admin_tier' ? (
+                  <div className="space-y-2.5">
+                    <div className="p-2.5 rounded-xl bg-gradient-to-r from-amber-500/15 via-slate-950 to-yellow-500/15 border border-amber-400/50 flex items-center justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[9px] uppercase">
+                            👑 ADMIN ALERT
+                          </span>
+                          <span className="font-black text-amber-200 text-[11px]">
+                            Khusus Kartu Tier ADMIN
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-300 mt-0.5">
+                          Antrean aktif: <strong className="text-amber-300">{adminTierPendingTasksCount} tugas</strong> · Privasi terjaga
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNotifDropdown(false);
+                          setActiveView('admin');
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[10px] cursor-pointer shrink-0"
+                      >
+                        Panel Admin
+                      </button>
+                    </div>
+
+                    {quickActionToast && (
+                      <div className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-400/40 text-emerald-200 text-[11px] font-bold">
+                        {quickActionToast}
+                      </div>
+                    )}
+
+                    <div className="max-h-80 overflow-y-auto space-y-2 pr-0.5">
+                      {adminTierNotifications.length === 0 ? (
+                        <div className="text-center py-6 px-3 rounded-xl bg-slate-950/70 border border-slate-800 space-y-1">
+                          <p className="font-bold text-amber-200 text-xs">
+                            Belum ada Notifikasi Admin baru
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            Permohonan kartu baru, laporan bug, salah PIN 5x (kunci 1 hari), lupa PIN, upgrade kartu, dan QRIS Diamond akan langsung muncul real-time di sini.
+                          </p>
+                        </div>
+                      ) : (
+                        adminTierNotifications.slice(0, 40).map((n) => (
+                          <div
+                            key={n.id}
+                            onClick={() => handleNotificationItemClick(n)}
+                            className={`p-2.5 rounded-xl border transition cursor-pointer space-y-1.5 ${
+                              n.read
+                                ? 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-amber-500/40'
+                                : 'bg-gradient-to-br from-amber-950/40 via-slate-950 to-slate-900 border-amber-400/70 text-white shadow-md'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="px-1.5 py-0.2 rounded bg-amber-400/20 border border-amber-300/50 text-amber-300 text-[9px] font-black uppercase">
+                                👑 ADMIN ALERT
+                              </span>
+                              <span className="text-[9px] text-slate-400 font-mono tabular-nums">
+                                {new Date(n.timestamp).toLocaleTimeString('id-ID', {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </span>
+                            </div>
+                            <div className="font-black text-white text-[11px] leading-snug">
+                              {n.title}
+                            </div>
+                            <p className="text-[11px] text-slate-300 leading-relaxed">
+                              {n.message}
+                            </p>
+                            <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1">
+                              {n.adminQuickAction && !n.adminQuickAction.completed ? (
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const res = await executeAdminTierNotificationQuickAction(n.id);
+                                    setQuickActionToast(res.message);
+                                    window.setTimeout(() => setQuickActionToast(''), 4000);
+                                  }}
+                                  className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 font-black text-[10px] cursor-pointer shadow"
+                                >
+                                  ⚡ {n.adminQuickAction.label}
+                                </button>
+                              ) : n.adminQuickAction?.completed ? (
+                                <span className="px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-bold">
+                                  ✓ Sudah Diproses 1-Klik
+                                </span>
+                              ) : (
+                                <span />
+                              )}
+                              <span className="text-[10px] font-bold text-amber-300 hover:underline">
+                                Buka Tab Panel Admin →
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ) : selectedNotifCategory === null ? (
                   <>
                     {/* LEVEL 1 HEADER */}
                     <div className="flex items-center justify-between border-b border-slate-800 pb-2 gap-2">

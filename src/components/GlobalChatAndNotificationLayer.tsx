@@ -264,36 +264,44 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
         </div>
       )}
 
-      {/* FLOATING PUSH NOTIFICATION BANNERS (BACKGROUND + MULTI-EVENT STREAM) */}
+      {/* FLOATING PUSH NOTIFICATION BANNERS (BACKGROUND + MULTI-EVENT STREAM + ADMIN ALERT GOLD) */}
       {activePushBanners.length > 0 && (
         <div className="fixed top-20 right-3 sm:right-5 z-[120] flex flex-col gap-2 w-[calc(100%-1.5rem)] max-w-sm pointer-events-none">
           {activePushBanners.slice(0, 5).map((banner) => {
-            const accentClass =
-              banner.type === 'success'
-                ? 'border-emerald-400/70 bg-slate-950/95 text-emerald-100'
-                : banner.type === 'warning'
-                ? 'border-amber-400/70 bg-slate-950/95 text-amber-100'
-                : banner.type === 'alert'
-                ? 'border-rose-500/70 bg-slate-950/95 text-rose-100'
-                : 'border-cyan-400/60 bg-slate-950/95 text-slate-100';
+            const isAdminAlertBanner =
+              banner.title.includes('[ADMIN ALERT]') ||
+              banner.title.startsWith('👑') ||
+              banner.targetView === 'admin';
 
-            const catLabel =
-              banner.category === 'transaction'
-                ? 'Konfirmasi Transaksi'
-                : banner.category === 'loan'
-                ? 'Status Pinjaman'
-                : banner.category === 'security'
-                ? 'Keamanan Kartu'
-                : 'Info Bank';
+            const accentClass = isAdminAlertBanner
+              ? 'border-amber-400 bg-gradient-to-r from-amber-950/95 via-slate-950/95 to-yellow-950/95 text-amber-100 ring-1 ring-amber-400/50'
+              : banner.type === 'success'
+              ? 'border-emerald-400/70 bg-slate-950/95 text-emerald-100'
+              : banner.type === 'warning'
+              ? 'border-amber-400/70 bg-slate-950/95 text-amber-100'
+              : banner.type === 'alert'
+              ? 'border-rose-500/70 bg-slate-950/95 text-rose-100'
+              : 'border-cyan-400/60 bg-slate-950/95 text-slate-100';
 
-            const catColor =
-              banner.category === 'transaction'
-                ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30'
-                : banner.category === 'loan'
-                ? 'text-amber-300 bg-amber-500/15 border-amber-500/30'
-                : banner.category === 'security'
-                ? 'text-rose-300 bg-rose-500/15 border-rose-500/30'
-                : 'text-cyan-300 bg-cyan-500/15 border-cyan-500/30';
+            const catLabel = isAdminAlertBanner
+              ? '👑 ADMIN ALERT • TIER ADMIN'
+              : banner.category === 'transaction'
+              ? 'Konfirmasi Transaksi'
+              : banner.category === 'loan'
+              ? 'Status Pinjaman'
+              : banner.category === 'security'
+              ? 'Keamanan Kartu'
+              : 'Info Bank';
+
+            const catColor = isAdminAlertBanner
+              ? 'text-amber-950 bg-gradient-to-r from-amber-300 to-yellow-400 border-amber-200 font-black'
+              : banner.category === 'transaction'
+              ? 'text-emerald-300 bg-emerald-500/15 border-emerald-500/30'
+              : banner.category === 'loan'
+              ? 'text-amber-300 bg-amber-500/15 border-amber-500/30'
+              : banner.category === 'security'
+              ? 'text-rose-300 bg-rose-500/15 border-rose-500/30'
+              : 'text-cyan-300 bg-cyan-500/15 border-cyan-500/30';
 
             return (
               <div
@@ -312,15 +320,23 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
                 className={`pointer-events-auto p-3.5 rounded-2xl border shadow-2xl backdrop-blur-md flex items-start justify-between gap-2.5 animate-in slide-in-from-right-4 duration-200 cursor-pointer hover:brightness-110 transition ${accentClass}`}
               >
                 <div className="flex items-start gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-xl bg-amber-400/15 border border-amber-400/40 flex items-center justify-center shrink-0 mt-0.5">
-                    <BellRing className="w-4 h-4 text-amber-400" />
+                  <div
+                    className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-0.5 ${
+                      isAdminAlertBanner
+                        ? 'bg-amber-400/25 border-amber-300/70'
+                        : 'bg-amber-400/15 border-amber-400/40'
+                    }`}
+                  >
+                    <BellRing className="w-4 h-4 text-amber-300" />
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5 mb-0.5">
                       <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${catColor}`}>
                         {catLabel}
                       </span>
-                      <span className="text-[9px] text-slate-400">Ketuk untuk buka</span>
+                      <span className="text-[9px] text-slate-400">
+                        {isAdminAlertBanner ? 'Buka Panel Admin' : 'Ketuk untuk buka'}
+                      </span>
                     </div>
                     <div className="font-black text-xs text-white truncate">{banner.title}</div>
                     <p className="text-[11px] text-slate-300 mt-0.5 leading-snug line-clamp-3">
@@ -361,7 +377,7 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
                       Lapor Bug & Kendala Aplikasi
                     </h3>
                     <span className="px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-400/40 text-rose-300 text-[10px] font-extrabold uppercase">
-                      Terkirim ke Panel Admin
+                      25 Tahap Resmi (#01–#25)
                     </span>
                   </div>
                   <p className="text-xs text-slate-300 mt-0.5">
@@ -565,10 +581,15 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
 
               {myReports.length > 0 && (
                 <div className="pt-4 border-t border-white/10 space-y-2.5">
-                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-amber-400" />
-                    Riwayat Laporan Bug Kamu ({myReports.length})
-                  </h4>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-amber-400" />
+                      Riwayat Laporan Bug Kamu ({myReports.length})
+                    </h4>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Standar 25 Status (#01 s/d #25)
+                    </span>
+                  </div>
                   <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                     {myReports.map((rep) => {
                       const statusMeta = getBugStatusMeta(rep.status);
@@ -578,12 +599,17 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
                           className="p-3 rounded-2xl bg-slate-800/70 border border-slate-700/70 flex items-start justify-between gap-3 text-xs"
                         >
                           <div className="space-y-1.5 min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
                               <span
                                 className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase ${statusMeta.badgeClass}`}
                               >
                                 <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dotClass}`} />
+                                <span className="font-mono">{statusMeta.codeLabel}</span>
+                                <span>•</span>
                                 <span>{statusMeta.label}</span>
+                              </span>
+                              <span className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-700 text-[9px] font-bold text-slate-300">
+                                {statusMeta.stageGroupTitle}
                               </span>
                               <span className="text-[11px] text-slate-400">
                                 {new Date(rep.createdAt).toLocaleString('id-ID')}

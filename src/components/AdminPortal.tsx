@@ -80,6 +80,7 @@ import {
   AppUpdateVisibilityMode,
   BugReportReward,
   BugReportStatus,
+  AdminTierNotificationEventType,
 } from '../types/bank';
 import { AdminDiamondFamilyTab } from './AdminDiamondFamilyTab';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
@@ -88,8 +89,14 @@ import {
   MAX_DIAMOND_PURCHASE_RUPIAH,
 } from '../data/diamondCatalog';
 import {
-  BUG_REPORT_STATUS_10,
+  BUG_REPORT_STATUS_25,
+  BUG_REPORT_STATUS_25_DESC,
+  BUG_STAGE_GROUPS_DESC,
+  DEFAULT_AUTO_REWARD_TRIGGER_STATUSES,
+  getAdjacentBugStatus,
   getBugStatusMeta,
+  isBugStatusAutoRewardTrigger,
+  isBugStatusRejectedOrNoReward,
   normalizeBugReportStatus,
 } from '../data/bugRewardCatalog';
 import {
@@ -288,6 +295,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     missions,
     leaderboardConfig,
     adminConfigSyncTelemetry,
+    adminTierNotificationConfig,
+    adminUpdateAdminTierNotificationConfig,
+    adminSendAdminTierBroadcast,
+    adminTierNotifications,
+    unreadAdminTierNotificationCount,
+    adminTierPendingTasksCount,
+    executeAdminTierNotificationQuickAction,
   } = useBank();
 
   const [activeAdminTab, setActiveAdminTab] = useState<
@@ -594,10 +608,44 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   const [globalChatAdminName, setGlobalChatAdminName] = useState<string>('Admin Bank Nusantara');
   const [globalChatFeedback, setGlobalChatFeedback] = useState<string>('');
 
-  // State for Bug Reports in Admin Panel
+  // State for Bug Reports in Admin Panel (25 Standardized Statuses #25 down to #01)
   const [bugReplyMap, setBugReplyMap] = useState<Record<string, string>>({});
   const [bugFeedback, setBugFeedback] = useState<string>('');
   const [zoomBugPhotoUrl, setZoomBugPhotoUrl] = useState<string | null>(null);
+  const [bugStatusFilter, setBugStatusFilter] = useState<'all' | BugReportStatus>('all');
+
+  // State for Admin Tier Notification Config & Broadcast
+  const [showAdminTierAlertPanel, setShowAdminTierAlertPanel] = useState<boolean>(true);
+  const [adminTierBroadcastTitle, setAdminTierBroadcastTitle] = useState<string>(
+    '👑 Pengumuman Internal Kartu Tier ADMIN & OA'
+  );
+  const [adminTierBroadcastMsg, setAdminTierBroadcastMsg] = useState<string>(
+    'Harap periksa antrean verifikasi kartu baru, laporan bug, dan transaksi bernilai besar hari ini.'
+  );
+  const [adminTierNotifFeedback, setAdminTierNotifFeedback] = useState<string>('');
+  const [highValueTxThresholdDraft, setHighValueTxThresholdDraft] = useState<string>(() =>
+    String(adminTierNotificationConfig.highValueTxThreshold || 10_000_000)
+  );
+
+  useEffect(() => {
+    setHighValueTxThresholdDraft(
+      String(adminTierNotificationConfig.highValueTxThreshold || 10_000_000)
+    );
+  }, [adminTierNotificationConfig.highValueTxThreshold]);
+
+  // Listen to bn:navigate-admin from Notification Bell / Dashboard Command Box / Top Toast
+  useEffect(() => {
+    const handleAdminDeepNav = (e: Event) => {
+      const custom = e as CustomEvent<{ adminTab?: string; entityId?: string }>;
+      const targetTab = custom.detail?.adminTab;
+      if (targetTab) {
+        setActiveAdminTab(targetTab as typeof activeAdminTab);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    };
+    window.addEventListener('bn:navigate-admin', handleAdminDeepNav);
+    return () => window.removeEventListener('bn:navigate-admin', handleAdminDeepNav);
+  }, []);
 
   // Additional States for 25 Super Tools
   const [rainAmount, setRainAmount] = useState<number>(500_000);
@@ -933,6 +981,245 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             {pendingPinResets.length > 0 && <span className="w-2.5 h-2.5 rounded-full bg-rose-400 animate-ping" />}
           </div>
         </div>
+      </div>
+
+      {/* PANEL PENGATURAN & BROADCAST NOTIFIKASI KHUSUS KARTU TIER ADMIN (👑 ADMIN ALERT) */}
+      <div className="rounded-3xl bg-gradient-to-br from-amber-950/85 via-slate-900 to-yellow-950/75 border-2 border-amber-400/70 shadow-xl p-4 sm:p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-300 via-yellow-400 to-amber-500 text-slate-950 flex items-center justify-center font-black shadow-lg shrink-0">
+              <Crown className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-md bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+                  👑 ADMIN ALERT • KHUSUS KARTU TIER ADMIN &amp; OA
+                </span>
+                <span className="text-[11px] font-bold text-amber-200">
+                  {adminTierPendingTasksCount} Antrean Aktif • {unreadAdminTierNotificationCount} Alert Belum Dibaca
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Notifikasi real-time eksklusif untuk akun dengan Kartu Tier <strong>ADMIN</strong> dan <strong>Akun OA Admin</strong> (otomatis tersembunyi saat berganti ke kartu reguler).
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                const res = adminUpdateAdminTierNotificationConfig({
+                  enabled: !adminTierNotificationConfig.enabled,
+                });
+                setAdminTierNotifFeedback(res.message);
+                setTimeout(() => setAdminTierNotifFeedback(''), 4000);
+              }}
+              className={`px-3.5 py-1.5 rounded-xl font-black text-xs cursor-pointer border transition ${
+                adminTierNotificationConfig.enabled
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/60'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+              }`}
+            >
+              {adminTierNotificationConfig.enabled ? '● Sistem Admin Alert: AKTIF' : '○ Sistem Admin Alert: NONAKTIF'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAdminTierAlertPanel((p) => !p)}
+              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-amber-400/40 text-amber-200 text-xs font-bold cursor-pointer"
+            >
+              {showAdminTierAlertPanel ? 'Ringkas Panel ▲' : 'Buka Pengaturan & Broadcast ▼'}
+            </button>
+          </div>
+        </div>
+
+        {adminTierNotifFeedback && (
+          <div className="p-3 rounded-xl bg-emerald-950/90 border border-emerald-400 text-emerald-200 text-xs font-bold flex items-center justify-between">
+            <span>{adminTierNotifFeedback}</span>
+            <button
+              type="button"
+              onClick={() => setAdminTierNotifFeedback('')}
+              className="text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {showAdminTierAlertPanel && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 pt-2 border-t border-amber-500/30 text-xs">
+            {/* Kolom Kiri: Sakelar Kanal Tampilan & 9 Pemicu Otomatis */}
+            <div className="lg:col-span-7 space-y-3 bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-black text-amber-300 text-xs uppercase tracking-wider">
+                  1. Kanal Tampilan &amp; 9 Pemicu Real-Time Kartu Tier ADMIN
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  {
+                    key: 'soundEnabled' as const,
+                    label: '🔊 Bunyi Alert Emas',
+                    val: adminTierNotificationConfig.soundEnabled,
+                  },
+                  {
+                    key: 'showTopToastBanner' as const,
+                    label: '📢 Banner Toast Atas',
+                    val: adminTierNotificationConfig.showTopToastBanner,
+                  },
+                  {
+                    key: 'showDashboardCommandBox' as const,
+                    label: '👑 Kotak Dashboard',
+                    val: adminTierNotificationConfig.showDashboardCommandBox,
+                  },
+                  {
+                    key: 'showNavbarQueueBadge' as const,
+                    label: '🔔 Lencana Navbar',
+                    val: adminTierNotificationConfig.showNavbarQueueBadge,
+                  },
+                ].map((ch) => (
+                  <button
+                    key={ch.key}
+                    type="button"
+                    onClick={() => {
+                      const res = adminUpdateAdminTierNotificationConfig({
+                        [ch.key]: !ch.val,
+                      });
+                      setAdminTierNotifFeedback(res.message);
+                      setTimeout(() => setAdminTierNotifFeedback(''), 3500);
+                    }}
+                    className={`p-2 rounded-xl border text-left font-bold text-[11px] cursor-pointer transition ${
+                      ch.val
+                        ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+                        : 'bg-slate-900 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span>{ch.label}</span>
+                      <span className="text-[10px] font-black">{ch.val ? 'ON' : 'OFF'}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-1">
+                {(
+                  [
+                    { key: 'card_approval', label: 'Permohonan Kartu Baru' },
+                    { key: 'bug_report', label: 'Laporan Bug & Status #25-#01' },
+                    { key: 'qris_topup', label: 'Top-Up Diamond QRIS' },
+                    { key: 'pin_lock_1day', label: 'Kunci Login 1 Hari (PIN 5x)' },
+                    { key: 'pin_reset', label: 'Permohonan Lupa PIN' },
+                    { key: 'account_deletion', label: 'Permohonan Hapus Akun' },
+                    { key: 'card_upgrade', label: 'Permohonan Upgrade Kartu' },
+                    { key: 'high_value_tx', label: 'Transaksi Bernilai Besar' },
+                    { key: 'admin_broadcast', label: 'Broadcast Sesama Tier ADMIN' },
+                  ] as Array<{ key: AdminTierNotificationEventType; label: string }>
+                ).map((tr) => {
+                  const isOn = adminTierNotificationConfig.triggers?.[tr.key] !== false;
+                  return (
+                    <button
+                      key={tr.key}
+                      type="button"
+                      onClick={() => {
+                        const res = adminUpdateAdminTierNotificationConfig({
+                          triggers: {
+                            ...adminTierNotificationConfig.triggers,
+                            [tr.key]: !isOn,
+                          },
+                        });
+                        setAdminTierNotifFeedback(res.message);
+                        setTimeout(() => setAdminTierNotifFeedback(''), 3500);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-xl border text-left text-[10px] font-bold flex items-center justify-between gap-1 cursor-pointer transition ${
+                        isOn
+                          ? 'bg-emerald-500/15 border-emerald-400/50 text-emerald-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-500'
+                      }`}
+                    >
+                      <span className="truncate">{tr.label}</span>
+                      <span className="font-mono font-black shrink-0">{isOn ? '✓' : '✕'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                <span className="text-[11px] font-bold text-slate-300 shrink-0">
+                  Ambang Notifikasi Transaksi Besar (Rp):
+                </span>
+                <input
+                  type="number"
+                  min={100_000}
+                  step={500_000}
+                  value={highValueTxThresholdDraft}
+                  onChange={(e) => setHighValueTxThresholdDraft(e.target.value)}
+                  className="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 font-mono text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextVal = Math.max(
+                      100_000,
+                      Math.floor(Number(highValueTxThresholdDraft) || 10_000_000)
+                    );
+                    const res = adminUpdateAdminTierNotificationConfig({
+                      highValueTxThreshold: nextVal,
+                    });
+                    setAdminTierNotifFeedback(res.message);
+                    setTimeout(() => setAdminTierNotifFeedback(''), 3500);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer shrink-0"
+                >
+                  Simpan Ambang
+                </button>
+              </div>
+            </div>
+
+            {/* Kolom Kanan: Kirim Broadcast Khusus ke Sesama Pemegang Kartu Tier ADMIN */}
+            <div className="lg:col-span-5 space-y-2.5 bg-slate-950/80 p-3.5 rounded-2xl border border-amber-500/40 flex flex-col justify-between">
+              <div className="space-y-2">
+                <span className="font-black text-amber-300 text-xs uppercase tracking-wider block">
+                  2. Kirim Broadcast Khusus Sesama Kartu Tier ADMIN
+                </span>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Pesan ini hanya masuk ke Lonceng tab <strong>👑 Admin Tier</strong>, Banner Toast Emas, dan Kotak Komando pada akun berstatus <strong>Kartu Tier ADMIN</strong> &amp; <strong>OA Admin</strong>.
+                </p>
+                <input
+                  type="text"
+                  value={adminTierBroadcastTitle}
+                  onChange={(e) => setAdminTierBroadcastTitle(e.target.value)}
+                  placeholder="Judul Broadcast Admin Tier..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-200 font-bold text-xs"
+                />
+                <textarea
+                  rows={2}
+                  value={adminTierBroadcastMsg}
+                  onChange={(e) => setAdminTierBroadcastMsg(e.target.value)}
+                  placeholder="Tulis isi pengumuman internal khusus sesama pemegang Kartu Tier ADMIN..."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const res = adminSendAdminTierBroadcast({
+                    title: adminTierBroadcastTitle,
+                    message: adminTierBroadcastMsg,
+                    adminTargetTab: activeAdminTab,
+                  });
+                  setAdminTierNotifFeedback(res.message);
+                  setTimeout(() => setAdminTierNotifFeedback(''), 4500);
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-black text-xs cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
+              >
+                <Megaphone className="w-4 h-4" />
+                <span>Siarkan ke Seluruh Kartu Tier ADMIN Sekarang</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Admin Tabs */}
@@ -2880,6 +3167,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     pointsAmount: parseAdminInt(bugCfgDraft.pointsAmount, 0),
                     familySlotAmount: parseAdminInt(bugCfgDraft.familySlotAmount, 0),
                     defaultRewardMessage: bugCfgDraft.defaultRewardMessage,
+                    autoRewardTriggerStatuses:
+                      bugRewardConfig.autoRewardTriggerStatuses ??
+                      DEFAULT_AUTO_REWARD_TRIGGER_STATUSES,
                   });
                   isBugCfgDirtyRef.current = false;
                   setBugFeedback(res.message);
@@ -2899,6 +3189,77 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 <span>Reset Default</span>
               </button>
             </div>
+
+            {/* PILIH STATUS PENCAIR OTOMATIS HADIAH 7 ASET (BEBAS PILIH DARI 25 STATUS — URUT #25 TURUN KE #01) */}
+            <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-emerald-500/35 space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <span className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
+                    <BadgeCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>
+                      Pilih Status Pencair Otomatis Hadiah 7 Aset (Urut #25 Paling Atas Turun ke #01 Paling Bawah)
+                    </span>
+                  </span>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Klik status mana saja di bawah ini untuk mengaktifkan/menonaktifkan pencairan otomatis hadiah 7 aset saat laporan bug diubah ke status tersebut (dilengkapi kunci anti-ganda 1x per tiket).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = adminUpdateBugRewardConfig({
+                      autoRewardTriggerStatuses: DEFAULT_AUTO_REWARD_TRIGGER_STATUSES,
+                    });
+                    setBugFeedback(res.message);
+                    setTimeout(() => setBugFeedback(''), 4000);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-[10px] font-bold cursor-pointer shrink-0"
+                >
+                  Reset Status Pencair Standar
+                </button>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pr-1">
+                {BUG_REPORT_STATUS_25_DESC.map((st) => {
+                  const activeTriggers =
+                    bugRewardConfig.autoRewardTriggerStatuses &&
+                    bugRewardConfig.autoRewardTriggerStatuses.length > 0
+                      ? bugRewardConfig.autoRewardTriggerStatuses
+                      : DEFAULT_AUTO_REWARD_TRIGGER_STATUSES;
+                  const isTrigger = activeTriggers.includes(st.key);
+                  const isNoRewardStatus = isBugStatusRejectedOrNoReward(st.key);
+                  return (
+                    <button
+                      key={st.key}
+                      type="button"
+                      disabled={isNoRewardStatus}
+                      onClick={() => {
+                        const nextList = isTrigger
+                          ? activeTriggers.filter((k) => k !== st.key)
+                          : [...activeTriggers, st.key];
+                        const res = adminUpdateBugRewardConfig({
+                          autoRewardTriggerStatuses: nextList,
+                        });
+                        setBugFeedback(res.message);
+                        setTimeout(() => setBugFeedback(''), 3500);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer flex items-center gap-1 ${
+                        isNoRewardStatus
+                          ? 'bg-slate-950/50 border-slate-800 text-slate-600 cursor-not-allowed'
+                          : isTrigger
+                          ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200 shadow-sm'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600'
+                      }`}
+                      title={st.description}
+                    >
+                      <span>{isTrigger ? '🎁' : '○'}</span>
+                      <span>{st.indexedLabel}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {confirmResetBugCfg && (
               <div className="p-3 rounded-xl bg-rose-950/90 border border-rose-400 text-rose-100 flex flex-wrap items-center justify-between gap-2">
                 <span className="font-bold">Konfirmasi kembalikan paket hadiah laporan bug ke nilai standar?</span>
@@ -2924,6 +3285,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         familySlotAmount: 0,
                         defaultRewardMessage:
                           'Terima kasih atas kontribusi laporan bug! Hadiah resmi Bank Nusantara telah dikirim ke rekening Anda.',
+                        autoRewardTriggerStatuses: DEFAULT_AUTO_REWARD_TRIGGER_STATUSES,
                       });
                       isBugCfgDirtyRef.current = false;
                       setConfirmResetBugCfg(false);
@@ -2936,6 +3298,88 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 </div>
               </div>
             )}
+          </div>
+
+          {/* BARISAN KOTAK FILTER & PENGHITUNG JUMLAH TIKET 25 STATUS (URUT DARI #25 PALING ATAS TURUN KE #01 PALING BAWAH) */}
+          <div className="p-4 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 className="text-xs font-black text-amber-300 uppercase tracking-wider">
+                  Filter &amp; Ringkasan 25 Status Laporan Bug (Urut Rapi dari #25 Paling Atas Turun ke #01 Paling Bawah)
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  Dikelompokkan ke dalam 5 Tahap Resmi (Penutupan #25–#21 → Uji &amp; Rilis #20–#16 → Perbaikan #15–#11 → Investigasi #10–#06 → Tahap Awal #05–#01).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBugStatusFilter('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer border transition ${
+                  bugStatusFilter === 'all'
+                    ? 'bg-amber-400 text-slate-950 border-amber-300'
+                    : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-slate-800'
+                }`}
+              >
+                Tampilkan Semua Status ({bugReports.length} Tiket)
+              </button>
+            </div>
+
+            <div className="space-y-2.5">
+              {BUG_STAGE_GROUPS_DESC.map((group) => (
+                <div
+                  key={group.stageGroup}
+                  className="p-2.5 rounded-xl bg-slate-900/75 border border-slate-800/90 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between text-[10px] font-black text-cyan-300 uppercase tracking-wider">
+                    <span>{group.stageGroupTitle}</span>
+                    <span className="font-mono text-slate-400">{group.rangeLabel}</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-5 gap-1.5">
+                    {group.statuses.map((st) => {
+                      const count = bugReports.filter(
+                        (b) => normalizeBugReportStatus(b.status) === st.key
+                      ).length;
+                      const isSelected = bugStatusFilter === st.key;
+                      return (
+                        <button
+                          key={st.key}
+                          type="button"
+                          onClick={() =>
+                            setBugStatusFilter((prev) => (prev === st.key ? 'all' : st.key))
+                          }
+                          className={`p-2 rounded-xl border text-left transition cursor-pointer flex items-center justify-between gap-1.5 ${
+                            isSelected
+                              ? 'bg-amber-500/25 border-amber-400 text-white ring-1 ring-amber-400'
+                              : count > 0
+                              ? 'bg-slate-950 border-slate-700 text-slate-200 hover:border-amber-400/50'
+                              : 'bg-slate-950/50 border-slate-800/80 text-slate-500 hover:border-slate-700'
+                          }`}
+                          title={st.description}
+                        >
+                          <div className="min-w-0">
+                            <span className="text-[10px] font-mono font-black text-amber-300 block">
+                              {st.codeLabel}
+                            </span>
+                            <span className="text-[10px] font-bold truncate block">
+                              {st.shortLabel}
+                            </span>
+                          </div>
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md font-mono text-[10px] font-black shrink-0 ${
+                              count > 0
+                                ? 'bg-amber-400 text-slate-950'
+                                : 'bg-slate-900 text-slate-500'
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
 
           {bugFeedback && (
@@ -2960,455 +3404,539 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             </div>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              {bugReports.map((bug) => {
-                const statusMeta = getBugStatusMeta(bug.status);
-                const normalizedStatus = normalizeBugReportStatus(bug.status);
-                const ticketDraft = getBugTicketRewardDraft(bug.id);
-                const isAlreadyRewarded = Boolean(bug.reward?.given);
-                const isRejected = normalizedStatus === 'ditolak' || normalizedStatus === 'duplikat' || normalizedStatus === 'tidak_repro';
+              {bugReports
+                .filter((bug) =>
+                  bugStatusFilter === 'all'
+                    ? true
+                    : normalizeBugReportStatus(bug.status) === bugStatusFilter
+                )
+                .map((bug) => {
+                  const statusMeta = getBugStatusMeta(bug.status);
+                  const normalizedStatus = normalizeBugReportStatus(bug.status);
+                  const prevStepMeta = getAdjacentBugStatus(normalizedStatus, 'down');
+                  const nextStepMeta = getAdjacentBugStatus(normalizedStatus, 'up');
+                  const ticketDraft = getBugTicketRewardDraft(bug.id);
+                  const isAlreadyRewarded = Boolean(bug.reward?.given);
+                  const isRejected = isBugStatusRejectedOrNoReward(normalizedStatus);
+                  const isAutoRewardStatus = isBugStatusAutoRewardTrigger(
+                    normalizedStatus,
+                    bugRewardConfig.autoRewardTriggerStatuses
+                  );
 
-                return (
-                  <div
-                    key={bug.id}
-                    className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 hover:border-amber-400/50 transition-all flex flex-col justify-between gap-4"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-2.5">
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase ${statusMeta.badgeClass}`}
-                            >
-                              <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dotClass}`} />
-                              <span>{statusMeta.label}</span>
-                            </span>
-                            <span className="px-2 py-0.5 rounded bg-slate-900 text-cyan-300 font-mono text-[10px] border border-slate-800">
-                              {bug.category}
-                            </span>
-                            {isAlreadyRewarded && (
-                              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-black">
-                                Hadiah Cair (Terkunci 1x)
+                  return (
+                    <div
+                      key={bug.id}
+                      className="p-4 sm:p-5 rounded-2xl bg-slate-950 border border-slate-800 hover:border-amber-400/50 transition-all flex flex-col justify-between gap-4"
+                    >
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-2.5">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase ${statusMeta.badgeClass}`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dotClass}`} />
+                                <span>{statusMeta.indexedLabel}</span>
                               </span>
-                            )}
+                              <span className="px-2 py-0.5 rounded bg-slate-900 text-amber-300 font-mono text-[10px] border border-amber-500/30 font-bold">
+                                {statusMeta.stageGroupTitle} ({statusMeta.indexNumber}/25)
+                              </span>
+                              <span className="px-2 py-0.5 rounded bg-slate-900 text-cyan-300 font-mono text-[10px] border border-slate-800">
+                                {bug.category}
+                              </span>
+                              {isAlreadyRewarded ? (
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-black">
+                                  Hadiah Cair (Terkunci 1x)
+                                </span>
+                              ) : isAutoRewardStatus ? (
+                                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-200 border border-amber-400/40 text-[10px] font-bold">
+                                  🎁 Status Pencair Otomatis
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-[11px] text-slate-400 italic">
+                              Tahap #{String(statusMeta.indexNumber).padStart(2, '0')}: {statusMeta.description}
+                            </p>
+                            <h4 className="font-extrabold text-white text-sm pt-0.5">
+                              {bug.reporterName}
+                              {bug.reporterAccountNumber && (
+                                <span className="text-amber-300 font-mono text-xs ml-1.5">
+                                  ({bug.reporterAccountNumber})
+                                </span>
+                              )}
+                            </h4>
+                            <span className="text-[10px] font-mono text-slate-400 block">
+                              Waktu Lapor: {new Date(bug.createdAt).toLocaleString('id-ID')}
+                              {bug.verifiedAt && ` • Diverifikasi: ${new Date(bug.verifiedAt).toLocaleString('id-ID')}`}
+                            </span>
                           </div>
-                          <h4 className="font-extrabold text-white text-sm mt-1">
-                            {bug.reporterName}
-                            {bug.reporterAccountNumber && (
-                              <span className="text-amber-300 font-mono text-xs ml-1.5">
-                                ({bug.reporterAccountNumber})
-                              </span>
-                            )}
-                          </h4>
-                          <span className="text-[10px] font-mono text-slate-400 block">
-                            Waktu Lapor: {new Date(bug.createdAt).toLocaleString('id-ID')}
-                            {bug.verifiedAt && ` • Diverifikasi: ${new Date(bug.verifiedAt).toLocaleString('id-ID')}`}
+
+                          <button
+                            type="button"
+                            onClick={() => adminDeleteBugReport(bug.id)}
+                            className="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 cursor-pointer"
+                            title="Hapus laporan bug ini"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* Penjelasan Bug (Wajib) */}
+                        <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold block">
+                            PENJELASAN BUG DARI PELAPOR:
                           </span>
+                          <p className="text-white font-semibold text-xs sm:text-sm whitespace-pre-line leading-relaxed">
+                            {bug.explanation}
+                          </p>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => adminDeleteBugReport(bug.id)}
-                          className="p-1.5 rounded-lg bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 cursor-pointer"
-                          title="Hapus laporan bug ini"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {bug.rejectionReason && (
+                          <div className="px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/35 text-rose-200 text-[11px]">
+                            <strong>Catatan Penolakan:</strong> {bug.rejectionReason}
+                          </div>
+                        )}
+
+                        {/* Foto Lampiran (Opsional) */}
+                        {bug.photoDataUrl ? (
+                          <div className="p-3 rounded-xl bg-slate-900/70 border border-emerald-500/40 space-y-2">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-mono uppercase text-emerald-300 font-bold flex items-center gap-1">
+                                <ImageIcon className="w-3.5 h-3.5" />
+                                <span>FOTO BUKTI TERLAMPIR ({bug.photoFileName || 'Foto Bebas'}):</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setZoomBugPhotoUrl(bug.photoDataUrl || null)}
+                                className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold cursor-pointer hover:bg-emerald-500/30"
+                              >
+                                Perbesar Foto
+                              </button>
+                            </div>
+                            <div className="rounded-xl overflow-hidden bg-black/70 border border-slate-800 max-h-56 flex items-center justify-center">
+                              <img
+                                src={bug.photoDataUrl}
+                                alt="Lampiran Bug"
+                                onClick={() => setZoomBugPhotoUrl(bug.photoDataUrl || null)}
+                                className="max-h-52 w-auto object-contain cursor-pointer hover:opacity-90"
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="px-3 py-2 rounded-xl bg-slate-900/40 border border-slate-800/80 text-[11px] text-slate-500 italic">
+                            Tanpa lampiran foto (Pengguna hanya mengirim penjelasan).
+                          </div>
+                        )}
                       </div>
 
-                      {/* Penjelasan Bug (Wajib) */}
-                      <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold block">
-                          PENJELASAN BUG DARI PELAPOR:
-                        </span>
-                        <p className="text-white font-semibold text-xs sm:text-sm whitespace-pre-line leading-relaxed">
-                          {bug.explanation}
-                        </p>
-                      </div>
+                      {/* Admin Controls: 25 Reverse-Ordered Statuses (#25 down to #01) + Quick Step Up/Down, Reply, Per-Ticket 7-Asset Rewards */}
+                      <div className="pt-3 border-t border-slate-800 space-y-3">
+                        <div className="space-y-2">
+                          <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                            <label className="text-[10px] font-bold uppercase text-amber-300 shrink-0">
+                              25 Status (Urut #25 → #01):
+                            </label>
+                            <select
+                              value={normalizedStatus}
+                              onChange={async (e) => {
+                                const nextStatus = e.target.value as BugReportStatus;
+                                const res = await adminUpdateBugReport(
+                                  bug.id,
+                                  nextStatus,
+                                  bugReplyMap[bug.id] !== undefined ? bugReplyMap[bug.id] : bug.adminReply
+                                );
+                                setBugFeedback(res.message);
+                                setTimeout(() => setBugFeedback(''), 3500);
+                              }}
+                              className="flex-1 bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-white text-xs font-bold cursor-pointer"
+                            >
+                              {BUG_STAGE_GROUPS_DESC.map((grp) => (
+                                <optgroup
+                                  key={grp.stageGroup}
+                                  label={`━━ ${grp.stageGroupTitle} (${grp.rangeLabel}) ━━`}
+                                >
+                                  {grp.statuses.map((st) => (
+                                    <option key={st.key} value={st.key}>
+                                      {st.indexedLabel}
+                                      {isBugStatusAutoRewardTrigger(
+                                        st.key,
+                                        bugRewardConfig.autoRewardTriggerStatuses
+                                      )
+                                        ? ' 🎁 (Auto-Cair Hadiah)'
+                                        : ''}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ))}
+                            </select>
+                          </div>
 
-                      {bug.rejectionReason && (
-                        <div className="px-3 py-2 rounded-xl bg-rose-500/10 border border-rose-500/35 text-rose-200 text-[11px]">
-                          <strong>Catatan Penolakan:</strong> {bug.rejectionReason}
-                        </div>
-                      )}
-
-                      {/* Foto Lampiran (Opsional) */}
-                      {bug.photoDataUrl ? (
-                        <div className="p-3 rounded-xl bg-slate-900/70 border border-emerald-500/40 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-mono uppercase text-emerald-300 font-bold flex items-center gap-1">
-                              <ImageIcon className="w-3.5 h-3.5" />
-                              <span>FOTO BUKTI TERLAMPIR ({bug.photoFileName || 'Foto Bebas'}):</span>
-                            </span>
+                          {/* Tombol Cepat Turun Tahap (-1) & Naik Tahap (+1) */}
+                          <div className="grid grid-cols-2 gap-2">
                             <button
                               type="button"
-                              onClick={() => setZoomBugPhotoUrl(bug.photoDataUrl || null)}
-                              className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold cursor-pointer hover:bg-emerald-500/30"
+                              disabled={!prevStepMeta}
+                              onClick={async () => {
+                                if (!prevStepMeta) return;
+                                const res = await adminUpdateBugReport(
+                                  bug.id,
+                                  prevStepMeta.key,
+                                  bugReplyMap[bug.id] !== undefined ? bugReplyMap[bug.id] : bug.adminReply
+                                );
+                                setBugFeedback(res.message);
+                                setTimeout(() => setBugFeedback(''), 3500);
+                              }}
+                              className="py-1.5 px-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 disabled:opacity-40 border border-slate-700 text-slate-200 text-[11px] font-bold cursor-pointer flex items-center justify-center gap-1 truncate"
+                              title={prevStepMeta ? `Turun ke ${prevStepMeta.label}` : 'Sudah di tahap #01 paling awal'}
                             >
-                              Perbesar Foto
+                              <span>⬇ Turun Tahap:</span>
+                              <span className="text-amber-300 truncate">
+                                {prevStepMeta ? `${prevStepMeta.codeLabel} ${prevStepMeta.shortLabel}` : 'Mentok #01'}
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={!nextStepMeta}
+                              onClick={async () => {
+                                if (!nextStepMeta) return;
+                                const res = await adminUpdateBugReport(
+                                  bug.id,
+                                  nextStepMeta.key,
+                                  bugReplyMap[bug.id] !== undefined ? bugReplyMap[bug.id] : bug.adminReply
+                                );
+                                setBugFeedback(res.message);
+                                setTimeout(() => setBugFeedback(''), 3500);
+                              }}
+                              className="py-1.5 px-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-40 border border-amber-400/50 text-amber-200 text-[11px] font-black cursor-pointer flex items-center justify-center gap-1 truncate"
+                              title={nextStepMeta ? `Naik ke ${nextStepMeta.label}` : 'Sudah di tahap #25 paling atas'}
+                            >
+                              <span>⬆ Naik Tahap:</span>
+                              <span className="text-white truncate">
+                                {nextStepMeta ? `${nextStepMeta.codeLabel} ${nextStepMeta.shortLabel}` : 'Mentok #25'}
+                              </span>
                             </button>
                           </div>
-                          <div className="rounded-xl overflow-hidden bg-black/70 border border-slate-800 max-h-56 flex items-center justify-center">
-                            <img
-                              src={bug.photoDataUrl}
-                              alt="Lampiran Bug"
-                              onClick={() => setZoomBugPhotoUrl(bug.photoDataUrl || null)}
-                              className="max-h-52 w-auto object-contain cursor-pointer hover:opacity-90"
+                        </div>
+
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={bugReplyMap[bug.id] ?? bug.adminReply ?? ''}
+                            onChange={(e) =>
+                              setBugReplyMap((prev) => ({ ...prev, [bug.id]: e.target.value }))
+                            }
+                            placeholder="Tulis balasan / catatan perbaikan Admin..."
+                            className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-[11px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const replyText = bugReplyMap[bug.id] ?? bug.adminReply ?? '';
+                              const res = await adminUpdateBugReport(bug.id, normalizedStatus, replyText);
+                              setBugFeedback(res.message);
+                              setTimeout(() => setBugFeedback(''), 3500);
+                            }}
+                            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-[11px] cursor-pointer shrink-0 border border-slate-700"
+                          >
+                            Simpan Balasan
+                          </button>
+                        </div>
+
+                        {/* Rincian Hadiah 7 Aset (Sudah Cair & Terkunci vs Siap Diverifikasi) */}
+                        {isAlreadyRewarded && bug.reward ? (
+                          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-400/40 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-[11px] font-black text-emerald-300 flex items-center gap-1.5">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Hadiah Terverifikasi Sudah Cair (Terkunci Anti-Ganda):</span>
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 text-[10px] font-bold tabular-nums">
+                              {(bug.reward.cashAmount || 0) > 0 && (
+                                <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200">
+                                  +{formatRupiah(bug.reward.cashAmount || 0)}
+                                </span>
+                              )}
+                              {(bug.reward.coinAmount || 0) > 0 && (
+                                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-200">
+                                  +{(bug.reward.coinAmount || 0).toLocaleString('id-ID')} Coin
+                                </span>
+                              )}
+                              {(bug.reward.diamondAmount || 0) > 0 && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-200">
+                                  <span>+{(bug.reward.diamondAmount || 0).toLocaleString('id-ID')}</span>
+                                  <DiamondIcon tone="bright" className="w-3 h-3" />
+                                </span>
+                              )}
+                              {(bug.reward.goldGrams || 0) > 0 && (
+                                <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-200">
+                                  +{(bug.reward.goldGrams || 0).toLocaleString('id-ID')} gr Emas 24K
+                                </span>
+                              )}
+                              {(bug.reward.voucherAmount || 0) > 0 && (
+                                <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-200">
+                                  +{(bug.reward.voucherAmount || 0).toLocaleString('id-ID')} Voucher
+                                </span>
+                              )}
+                              {(bug.reward.pointsAmount || 0) > 0 && (
+                                <span className="px-2 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-200">
+                                  +{(bug.reward.pointsAmount || 0).toLocaleString('id-ID')} Poin
+                                </span>
+                              )}
+                              {(bug.reward.familySlotAmount || 0) > 0 && (
+                                <span className="px-2 py-0.5 rounded bg-teal-500/20 text-teal-200">
+                                  +{(bug.reward.familySlotAmount || 0).toLocaleString('id-ID')} Slot Keluarga
+                                </span>
+                              )}
+                            </div>
+                            {bug.reward.adminRewardMessage && (
+                              <p className="text-[11px] text-amber-100/90 italic">
+                                Pesan Hadiah: &ldquo;{bug.reward.adminRewardMessage}&rdquo;
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-700/80 space-y-2.5">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
+                                <Gift className="w-3.5 h-3.5" />
+                                <span>Paket Hadiah Laporan Ini (Otomatis dari Default, Bisa Diubah)</span>
+                              </span>
+                              {!bugRewardConfig.enabled && (
+                                <span className="text-[10px] font-bold text-slate-400">
+                                  Program Global Nonaktif (tetap bisa cair manual saat Verifikasi)
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 tabular-nums">
+                              <div>
+                                <label className="text-[10px] text-slate-400 block">Saldo (Rp)</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={ticketDraft.cashAmount}
+                                  onChange={(e) =>
+                                    setBugRewardDraftMap((prev) => ({
+                                      ...prev,
+                                      [bug.id]: {
+                                        ...ticketDraft,
+                                        cashAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                                      },
+                                    }))
+                                  }
+                                  className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-emerald-300 font-mono text-[11px]"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-400 block">Coin Spin</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={ticketDraft.coinAmount}
+                                  onChange={(e) =>
+                                    setBugRewardDraftMap((prev) => ({
+                                      ...prev,
+                                      [bug.id]: {
+                                        ...ticketDraft,
+                                        coinAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                                      },
+                                    }))
+                                  }
+                                  className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-amber-300 font-mono text-[11px]"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-400 flex items-center gap-1">
+                                  <span>Permata</span>
+                                  <DiamondIcon tone="bright" className="w-3 h-3" />
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={ticketDraft.diamondAmount}
+                                  onChange={(e) =>
+                                    setBugRewardDraftMap((prev) => ({
+                                      ...prev,
+                                      [bug.id]: {
+                                        ...ticketDraft,
+                                        diamondAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                                      },
+                                    }))
+                                  }
+                                  className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-[11px]"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-400 block">Emas 24K (gr)</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={ticketDraft.goldGrams}
+                                  onChange={(e) =>
+                                    setBugRewardDraftMap((prev) => ({
+                                      ...prev,
+                                      [bug.id]: {
+                                        ...ticketDraft,
+                                        goldGrams: Math.max(0, Number(e.target.value) || 0),
+                                      },
+                                    }))
+                                  }
+                                  className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-yellow-300 font-mono text-[11px]"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-400 block">Voucher Lv</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={ticketDraft.voucherAmount}
+                                  onChange={(e) =>
+                                    setBugRewardDraftMap((prev) => ({
+                                      ...prev,
+                                      [bug.id]: {
+                                        ...ticketDraft,
+                                        voucherAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                                      },
+                                    }))
+                                  }
+                                  className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-indigo-300 font-mono text-[11px]"
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] text-slate-400 block">Poin</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={ticketDraft.pointsAmount}
+                                  onChange={(e) =>
+                                    setBugRewardDraftMap((prev) => ({
+                                      ...prev,
+                                      [bug.id]: {
+                                        ...ticketDraft,
+                                        pointsAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                                      },
+                                    }))
+                                  }
+                                  className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-fuchsia-300 font-mono text-[11px]"
+                                />
+                              </div>
+                              <div className="col-span-2">
+                                <label className="text-[10px] text-slate-400 block">Slot Keluarga</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  value={ticketDraft.familySlotAmount}
+                                  onChange={(e) =>
+                                    setBugRewardDraftMap((prev) => ({
+                                      ...prev,
+                                      [bug.id]: {
+                                        ...ticketDraft,
+                                        familySlotAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                                      },
+                                    }))
+                                  }
+                                  className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-teal-300 font-mono text-[11px]"
+                                />
+                              </div>
+                            </div>
+
+                            <input
+                              type="text"
+                              value={ticketDraft.adminRewardMessage}
+                              onChange={(e) =>
+                                setBugRewardDraftMap((prev) => ({
+                                  ...prev,
+                                  [bug.id]: {
+                                    ...ticketDraft,
+                                    adminRewardMessage: e.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="Pesan hadiah personal dari Admin untuk pelapor..."
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-[11px]"
                             />
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="px-3 py-2 rounded-xl bg-slate-900/40 border border-slate-800/80 text-[11px] text-slate-500 italic">
-                          Tanpa lampiran foto (Pengguna hanya mengirim penjelasan).
-                        </div>
-                      )}
-                    </div>
 
-                    {/* Admin Controls: 10 Statuses, Reply, Per-Ticket 7-Asset Rewards, Verify & Reject */}
-                    <div className="pt-3 border-t border-slate-800 space-y-3">
-                      <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
-                        <label className="text-[10px] font-bold uppercase text-slate-400 shrink-0">
-                          Status 10 Tahap:
-                        </label>
-                        <select
-                          value={normalizedStatus}
-                          onChange={async (e) => {
-                            const nextStatus = e.target.value as BugReportStatus;
-                            const res = await adminUpdateBugReport(
-                              bug.id,
-                              nextStatus,
-                              bugReplyMap[bug.id] !== undefined ? bugReplyMap[bug.id] : bug.adminReply
-                            );
-                            setBugFeedback(res.message);
-                            setTimeout(() => setBugFeedback(''), 3500);
-                          }}
-                          className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs font-bold cursor-pointer"
-                        >
-                          {BUG_REPORT_STATUS_10.map((st) => (
-                            <option key={st.key} value={st.key}>
-                              {st.label}
-                            </option>
-                          ))}
-                        </select>
+                            <input
+                              type="text"
+                              value={bugRejectionReasonMap[bug.id] ?? bug.rejectionReason ?? ''}
+                              onChange={(e) =>
+                                setBugRejectionReasonMap((prev) => ({
+                                  ...prev,
+                                  [bug.id]: e.target.value,
+                                }))
+                              }
+                              placeholder="Alasan penolakan (opsional, jika menekan Tolak / Tidak Valid)..."
+                              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-rose-200 text-[11px]"
+                            />
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const replyText = bugReplyMap[bug.id] ?? bug.adminReply ?? '';
+                                  const rewardPayload: BugReportReward = {
+                                    given: true,
+                                    cashAmount: Math.max(0, Math.floor(Number(ticketDraft.cashAmount) || 0)),
+                                    coinAmount: Math.max(0, Math.floor(Number(ticketDraft.coinAmount) || 0)),
+                                    diamondAmount: Math.max(0, Math.floor(Number(ticketDraft.diamondAmount) || 0)),
+                                    goldGrams: Math.max(0, Math.round((Number(ticketDraft.goldGrams) || 0) * 100) / 100),
+                                    voucherAmount: Math.max(0, Math.floor(Number(ticketDraft.voucherAmount) || 0)),
+                                    pointsAmount: Math.max(0, Math.floor(Number(ticketDraft.pointsAmount) || 0)),
+                                    familySlotAmount: Math.max(0, Math.floor(Number(ticketDraft.familySlotAmount) || 0)),
+                                    adminRewardMessage: ticketDraft.adminRewardMessage || '',
+                                  };
+                                  const res = await adminUpdateBugReport(
+                                    bug.id,
+                                    'terverifikasi',
+                                    replyText,
+                                    rewardPayload,
+                                    { verifyAndDisburse: true }
+                                  );
+                                  setBugFeedback(res.message);
+                                  setTimeout(() => setBugFeedback(''), 5000);
+                                }}
+                                className="py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
+                              >
+                                <BadgeCheck className="w-4 h-4 shrink-0" />
+                                <span>Verifikasi Bug (#05) &amp; Cairkan Hadiah</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const replyText = bugReplyMap[bug.id] ?? bug.adminReply ?? '';
+                                  const reason =
+                                    (bugRejectionReasonMap[bug.id] ?? '').trim() ||
+                                    'Laporan tidak valid atau belum terbukti sebagai bug sistem.';
+                                  const res = await adminUpdateBugReport(
+                                    bug.id,
+                                    'ditolak',
+                                    replyText || reason,
+                                    undefined,
+                                    { rejectionReason: reason }
+                                  );
+                                  setBugFeedback(res.message);
+                                  setTimeout(() => setBugFeedback(''), 4500);
+                                }}
+                                className={`py-2.5 px-3 rounded-xl font-black text-[11px] cursor-pointer flex items-center justify-center gap-1.5 border ${
+                                  isRejected
+                                    ? 'bg-rose-500/30 text-rose-200 border-rose-400'
+                                    : 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/40'
+                                }`}
+                              >
+                                <XCircle className="w-4 h-4 shrink-0" />
+                                <span>Tolak (#24) / Tidak Valid (Tanpa Hadiah)</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={bugReplyMap[bug.id] ?? bug.adminReply ?? ''}
-                          onChange={(e) =>
-                            setBugReplyMap((prev) => ({ ...prev, [bug.id]: e.target.value }))
-                          }
-                          placeholder="Tulis balasan / catatan perbaikan Admin..."
-                          className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-[11px]"
-                        />
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            const replyText = bugReplyMap[bug.id] ?? bug.adminReply ?? '';
-                            const res = await adminUpdateBugReport(bug.id, normalizedStatus, replyText);
-                            setBugFeedback(res.message);
-                            setTimeout(() => setBugFeedback(''), 3500);
-                          }}
-                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-[11px] cursor-pointer shrink-0 border border-slate-700"
-                        >
-                          Simpan Balasan
-                        </button>
-                      </div>
-
-                      {/* Rincian Hadiah 7 Aset (Sudah Cair & Terkunci vs Siap Diverifikasi) */}
-                      {isAlreadyRewarded && bug.reward ? (
-                        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-400/40 space-y-1.5">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-[11px] font-black text-emerald-300 flex items-center gap-1.5">
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Hadiah Terverifikasi Sudah Cair (Terkunci Anti-Ganda):</span>
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5 text-[10px] font-bold tabular-nums">
-                            {(bug.reward.cashAmount || 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200">
-                                +{formatRupiah(bug.reward.cashAmount || 0)}
-                              </span>
-                            )}
-                            {(bug.reward.coinAmount || 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-200">
-                                +{(bug.reward.coinAmount || 0).toLocaleString('id-ID')} Coin
-                              </span>
-                            )}
-                            {(bug.reward.diamondAmount || 0) > 0 && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-200">
-                                <span>+{(bug.reward.diamondAmount || 0).toLocaleString('id-ID')}</span>
-                                <DiamondIcon tone="bright" className="w-3 h-3" />
-                              </span>
-                            )}
-                            {(bug.reward.goldGrams || 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-200">
-                                +{(bug.reward.goldGrams || 0).toLocaleString('id-ID')} gr Emas 24K
-                              </span>
-                            )}
-                            {(bug.reward.voucherAmount || 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-200">
-                                +{(bug.reward.voucherAmount || 0).toLocaleString('id-ID')} Voucher
-                              </span>
-                            )}
-                            {(bug.reward.pointsAmount || 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-200">
-                                +{(bug.reward.pointsAmount || 0).toLocaleString('id-ID')} Poin
-                              </span>
-                            )}
-                            {(bug.reward.familySlotAmount || 0) > 0 && (
-                              <span className="px-2 py-0.5 rounded bg-teal-500/20 text-teal-200">
-                                +{(bug.reward.familySlotAmount || 0).toLocaleString('id-ID')} Slot Keluarga
-                              </span>
-                            )}
-                          </div>
-                          {bug.reward.adminRewardMessage && (
-                            <p className="text-[11px] text-amber-100/90 italic">
-                              Pesan Hadiah: &ldquo;{bug.reward.adminRewardMessage}&rdquo;
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-700/80 space-y-2.5">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
-                              <Gift className="w-3.5 h-3.5" />
-                              <span>Paket Hadiah Laporan Ini (Otomatis dari Default, Bisa Diubah)</span>
-                            </span>
-                            {!bugRewardConfig.enabled && (
-                              <span className="text-[10px] font-bold text-slate-400">
-                                Program Global Nonaktif (tetap bisa cair manual saat Verifikasi)
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 tabular-nums">
-                            <div>
-                              <label className="text-[10px] text-slate-400 block">Saldo (Rp)</label>
-                              <input
-                                type="number"
-                                min={0}
-                                value={ticketDraft.cashAmount}
-                                onChange={(e) =>
-                                  setBugRewardDraftMap((prev) => ({
-                                    ...prev,
-                                    [bug.id]: {
-                                      ...ticketDraft,
-                                      cashAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                                    },
-                                  }))
-                                }
-                                className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-emerald-300 font-mono text-[11px]"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] text-slate-400 block">Coin Spin</label>
-                              <input
-                                type="number"
-                                min={0}
-                                value={ticketDraft.coinAmount}
-                                onChange={(e) =>
-                                  setBugRewardDraftMap((prev) => ({
-                                    ...prev,
-                                    [bug.id]: {
-                                      ...ticketDraft,
-                                      coinAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                                    },
-                                  }))
-                                }
-                                className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-amber-300 font-mono text-[11px]"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] text-slate-400 flex items-center gap-1">
-                                <span>Permata</span>
-                                <DiamondIcon tone="bright" className="w-3 h-3" />
-                              </label>
-                              <input
-                                type="number"
-                                min={0}
-                                value={ticketDraft.diamondAmount}
-                                onChange={(e) =>
-                                  setBugRewardDraftMap((prev) => ({
-                                    ...prev,
-                                    [bug.id]: {
-                                      ...ticketDraft,
-                                      diamondAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                                    },
-                                  }))
-                                }
-                                className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-cyan-300 font-mono text-[11px]"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] text-slate-400 block">Emas 24K (gr)</label>
-                              <input
-                                type="number"
-                                min={0}
-                                step="0.01"
-                                value={ticketDraft.goldGrams}
-                                onChange={(e) =>
-                                  setBugRewardDraftMap((prev) => ({
-                                    ...prev,
-                                    [bug.id]: {
-                                      ...ticketDraft,
-                                      goldGrams: Math.max(0, Number(e.target.value) || 0),
-                                    },
-                                  }))
-                                }
-                                className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-yellow-300 font-mono text-[11px]"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] text-slate-400 block">Voucher Lv</label>
-                              <input
-                                type="number"
-                                min={0}
-                                value={ticketDraft.voucherAmount}
-                                onChange={(e) =>
-                                  setBugRewardDraftMap((prev) => ({
-                                    ...prev,
-                                    [bug.id]: {
-                                      ...ticketDraft,
-                                      voucherAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                                    },
-                                  }))
-                                }
-                                className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-indigo-300 font-mono text-[11px]"
-                              />
-                            </div>
-                            <div>
-                              <label className="text-[10px] text-slate-400 block">Poin</label>
-                              <input
-                                type="number"
-                                min={0}
-                                value={ticketDraft.pointsAmount}
-                                onChange={(e) =>
-                                  setBugRewardDraftMap((prev) => ({
-                                    ...prev,
-                                    [bug.id]: {
-                                      ...ticketDraft,
-                                      pointsAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                                    },
-                                  }))
-                                }
-                                className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-fuchsia-300 font-mono text-[11px]"
-                              />
-                            </div>
-                            <div className="col-span-2">
-                              <label className="text-[10px] text-slate-400 block">Slot Keluarga</label>
-                              <input
-                                type="number"
-                                min={0}
-                                value={ticketDraft.familySlotAmount}
-                                onChange={(e) =>
-                                  setBugRewardDraftMap((prev) => ({
-                                    ...prev,
-                                    [bug.id]: {
-                                      ...ticketDraft,
-                                      familySlotAmount: Math.max(0, Math.floor(Number(e.target.value) || 0)),
-                                    },
-                                  }))
-                                }
-                                className="w-full px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-teal-300 font-mono text-[11px]"
-                              />
-                            </div>
-                          </div>
-
-                          <input
-                            type="text"
-                            value={ticketDraft.adminRewardMessage}
-                            onChange={(e) =>
-                              setBugRewardDraftMap((prev) => ({
-                                ...prev,
-                                [bug.id]: {
-                                  ...ticketDraft,
-                                  adminRewardMessage: e.target.value,
-                                },
-                              }))
-                            }
-                            placeholder="Pesan hadiah personal dari Admin untuk pelapor..."
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white text-[11px]"
-                          />
-
-                          <input
-                            type="text"
-                            value={bugRejectionReasonMap[bug.id] ?? bug.rejectionReason ?? ''}
-                            onChange={(e) =>
-                              setBugRejectionReasonMap((prev) => ({
-                                ...prev,
-                                [bug.id]: e.target.value,
-                              }))
-                            }
-                            placeholder="Alasan penolakan (opsional, jika menekan Tolak / Tidak Valid)..."
-                            className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-rose-200 text-[11px]"
-                          />
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const replyText = bugReplyMap[bug.id] ?? bug.adminReply ?? '';
-                                const rewardPayload: BugReportReward = {
-                                  given: true,
-                                  cashAmount: Math.max(0, Math.floor(Number(ticketDraft.cashAmount) || 0)),
-                                  coinAmount: Math.max(0, Math.floor(Number(ticketDraft.coinAmount) || 0)),
-                                  diamondAmount: Math.max(0, Math.floor(Number(ticketDraft.diamondAmount) || 0)),
-                                  goldGrams: Math.max(0, Math.round((Number(ticketDraft.goldGrams) || 0) * 100) / 100),
-                                  voucherAmount: Math.max(0, Math.floor(Number(ticketDraft.voucherAmount) || 0)),
-                                  pointsAmount: Math.max(0, Math.floor(Number(ticketDraft.pointsAmount) || 0)),
-                                  familySlotAmount: Math.max(0, Math.floor(Number(ticketDraft.familySlotAmount) || 0)),
-                                  adminRewardMessage: ticketDraft.adminRewardMessage || '',
-                                };
-                                const res = await adminUpdateBugReport(
-                                  bug.id,
-                                  'terverifikasi',
-                                  replyText,
-                                  rewardPayload,
-                                  { verifyAndDisburse: true }
-                                );
-                                setBugFeedback(res.message);
-                                setTimeout(() => setBugFeedback(''), 5000);
-                              }}
-                              className="py-2.5 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] cursor-pointer flex items-center justify-center gap-1.5"
-                            >
-                              <BadgeCheck className="w-4 h-4 shrink-0" />
-                              <span>Verifikasi Bug &amp; Cairkan Hadiah</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const replyText = bugReplyMap[bug.id] ?? bug.adminReply ?? '';
-                                const reason =
-                                  (bugRejectionReasonMap[bug.id] ?? '').trim() ||
-                                  'Laporan tidak valid atau belum terbukti sebagai bug sistem.';
-                                const res = await adminUpdateBugReport(
-                                  bug.id,
-                                  'ditolak',
-                                  replyText || reason,
-                                  undefined,
-                                  { rejectionReason: reason }
-                                );
-                                setBugFeedback(res.message);
-                                setTimeout(() => setBugFeedback(''), 4500);
-                              }}
-                              className={`py-2.5 px-3 rounded-xl font-black text-[11px] cursor-pointer flex items-center justify-center gap-1.5 border ${
-                                isRejected
-                                  ? 'bg-rose-500/30 text-rose-200 border-rose-400'
-                                  : 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/40'
-                              }`}
-                            >
-                              <XCircle className="w-4 h-4 shrink-0" />
-                              <span>Tolak / Tidak Valid (Tanpa Hadiah)</span>
-                            </button>
-                          </div>
-                        </div>
-                      )}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           )}
 
