@@ -125,6 +125,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     adminTierPendingTasksCount,
     executeAdminTierNotificationQuickAction,
     markNotificationAsRead,
+    reportLivePresence,
   } = useBank();
 
   const isPrivacyMasked = Boolean(currentAccount?.hideSensitiveNumbers);
@@ -152,6 +153,30 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       );
     }
   }, [requestedSubTab]);
+
+  // Laporkan sub-tab Mobile Banking yang sedang dilihat nasabah untuk fitur Intip Live Admin
+  useEffect(() => {
+    if (!currentAccount?.id) return;
+    const SUBTAB_LABELS: Record<DashboardTab, { label: string; action: string }> = {
+      ringkasan: { label: 'Ringkasan Rekening', action: 'Melihat Saldo & Kartu di Ringkasan' },
+      pekerjaan: { label: 'Karir & Bisnis Sultan', action: 'Membuka Tab Karir & Sultan Empire' },
+      layanan: { label: 'Layanan Digital & QRIS', action: 'Membuka Menu Layanan Digital / QRIS' },
+      chat: { label: 'Nusantara Chat', action: 'Membuka Tab Chat di Dashboard' },
+      transfer: { label: 'Transfer Dana', action: 'Menyiapkan Transfer Dana di Dashboard' },
+      emas: { label: 'Tabungan Emas 24K', action: 'Mengecek Tabungan Emas 24K' },
+      pinjaman: { label: 'Pinjaman Online', action: 'Membuka Menu Pinjaman Online' },
+      mutasi: { label: 'Mutasi Rekening', action: 'Memeriksa Riwayat Mutasi Rekening' },
+      jadwal: { label: 'Pembayaran Terjadwal', action: 'Melihat Jadwal Pembayaran Otomatis' },
+    };
+    const meta = SUBTAB_LABELS[activeTab] || { label: activeTab, action: `Membuka Tab ${activeTab}` };
+    reportLivePresence({
+      viewKey: 'dashboard',
+      screenLabel: `Mobile Banking • ${meta.label}`,
+      subTabLabel: meta.label,
+      actionLabel: meta.action,
+      statusOverride: 'online',
+    });
+  }, [activeTab, currentAccount?.id]);
 
   const [prefillTransfer, setPrefillTransfer] = useState<{ account: string; bank: string } | null>(
     null

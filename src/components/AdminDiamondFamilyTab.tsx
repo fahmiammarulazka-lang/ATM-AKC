@@ -20,7 +20,6 @@ import {
 } from '../data/diamondCatalog';
 import { formatRupiah, formatAssetCount, isAdminCardAccount } from '../utils/bankUtils';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
-import { AdminWarningStudioSection } from './AdminWarningStudioSection';
 
 interface QrisGatewayStatusInfo {
   hasLoginId: boolean;
@@ -558,9 +557,6 @@ export const AdminDiamondFamilyTab: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* SECTION 1C: STUDIO PERINGATAN SISTEM NASABAH (25 PRESET + MANUAL) */}
-      <AdminWarningStudioSection />
 
       {/* SECTION 2: MONITOR INTEGRASI QRIS & RIWAYAT ORDER */}
       <div className="rounded-3xl border-2 border-sky-500/50 bg-slate-900/95 p-4 sm:p-6 shadow-xl space-y-4">

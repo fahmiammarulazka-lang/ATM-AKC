@@ -3081,6 +3081,35 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v14-37-45',
+    version: 'v14.37.45',
+    releaseType: 'feature_and_bug',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v14.37.45 (Format S+D): Sinkronisasi Hapus Permanen Lintas Perangkat (Laptop & HP), Intip Live Nasabah Real-Time (Online/Idle/Off), 69 Jenis Deteksi Otomatis & Tab Studio Peringatan',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 20:30 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 20:30 WIB',
+    description:
+      'Pembaruan v14.37.45 menerapkan kenaikan versi ganda Format S + D (v14.36.44 -> v14.37.45): memperbaiki bug sinkronisasi hapus antar perangkat dengan sistem tombstone permanen anti-muncul kembali dan hak tulis konfigurasi global khusus Admin untuk seluruh fitur Panel Admin, menghadirkan fitur Intip Live Nasabah Real-Time (status Online, Idle Diam, atau Lagi Off beserta layar aktif, aksi real-time, perangkat, saldo, dan 10 riwayat aksi), memperluas Pendeteksi Otomatis menjadi 69 jenis dalam 10 kategori fitur tanpa tombol simulasi, serta menyempurnakan Tab Studio Peringatan dengan mode Pop-up Tengah & Banner Atas.',
+    highlights: [
+      'Perbaikan Sinkronisasi Hapus Permanen Lintas Perangkat (Laptop <-> HP <-> Cloud): Penghapusan Peringatan Sistem, Pop-up Web, Efek Dashboard, Misi, Kode Redeem, Hadiah Surat, Aturan Fitur, Akun, Peran Dev, Riwayat Update, Chat Global, Laporan Bug, Tiket Mintol, dan FAQ di Laptop langsung terhapus permanen di HP & Cloud dengan daftar ID terhapus anti-muncul kembali dan hak tulis konfigurasi global khusus Admin.',
+      'Fitur Intip Live Nasabah Real-Time di Live Monitor Aktivitas: Menampilkan status kehadiran langsung (Online, Idle Diam, atau Lagi Off beserta waktunya), jenis perangkat HP/Laptop, durasi online, halaman/tab yang sedang dibuka detik ini, aktivitas spesifik, saldo & aset real-time, 10 riwayat aksi terakhir, serta tombol kirim peringatan Pop-up/Banner langsung, Jeda Spin, Bekukan Sementara, dan Reset Percobaan PIN.',
+      'Ekspansi 69 Jenis Deteksi Otomatis (10 Kategori Fitur): Mencakup Spin & Gacha, Transaksi Saldo, QRIS & Top-Up, Keamanan PIN, Kartu & Akun, Karir & Bisnis Sultan, Emas & Transfer Bebas, Misi & Redeem, Bug & Mintol, serta Aktivitas Admin, Manipulasi Sistem & Anomali Perangkat lengkap dengan filter pencarian, sakelar ON/OFF per jenis, tombol Aktifkan Semua/Matikan Semua/Reset Default, dan pengaturan batas & jendela waktu per aturan.',
+      'Tab Khusus Studio Peringatan & Pemberitahuan Nasabah: Mode Pop-up Tengah (modal tengah layar) dan Banner Atas tampil terpisah sesuai pilihan atau bersamaan, dilengkapi pratinjau visual, tukar mode 1-klik, dan tombol tutup eksklusif bagi Kartu Tier ADMIN.',
+    ],
+    changes: [
+      'Perbaikan Sinkronisasi Hapus Permanen Lintas Perangkat (Laptop <-> HP <-> Cloud): Penghapusan Peringatan Sistem, Pop-up Web, Efek Dashboard, Misi, Kode Redeem, Hadiah Surat, Aturan Fitur, Akun, Peran Dev, Riwayat Update, Chat Global, Laporan Bug, Tiket Mintol, dan FAQ di Laptop langsung terhapus permanen di HP & Cloud dengan daftar ID terhapus anti-muncul kembali dan hak tulis konfigurasi global khusus Admin.',
+      'Fitur Intip Live Nasabah Real-Time di Live Monitor Aktivitas: Menampilkan status kehadiran langsung (Online, Idle Diam, atau Lagi Off beserta waktunya), jenis perangkat HP/Laptop, durasi online, halaman/tab yang sedang dibuka detik ini, aktivitas spesifik, saldo & aset real-time, 10 riwayat aksi terakhir, serta tombol kirim peringatan Pop-up/Banner langsung, Jeda Spin, Bekukan Sementara, dan Reset Percobaan PIN.',
+      'Ekspansi 69 Jenis Deteksi Otomatis (10 Kategori Fitur): Mencakup Spin & Gacha, Transaksi Saldo, QRIS & Top-Up, Keamanan PIN, Kartu & Akun, Karir & Bisnis Sultan, Emas & Transfer Bebas, Misi & Redeem, Bug & Mintol, serta Aktivitas Admin, Manipulasi Sistem & Anomali Perangkat lengkap dengan filter pencarian, sakelar ON/OFF per jenis, tombol Aktifkan Semua/Matikan Semua/Reset Default, dan pengaturan batas & jendela waktu per aturan.',
+      'Tab Khusus Studio Peringatan & Pemberitahuan Nasabah: Mode Pop-up Tengah (modal tengah layar) dan Banner Atas tampil terpisah sesuai pilihan atau bersamaan, dilengkapi pratinjau visual, tukar mode 1-klik, dan tombol tutup eksklusif bagi Kartu Tier ADMIN.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-25T13:30:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v14-36-44',
     version: 'v14.36.44',
     releaseType: 'feature_and_bug',
@@ -3105,8 +3134,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Pemberitahuan Sistem Pindah ke Paling Atas Layar & Atas Panel Admin (Sticky Top Bar): Seluruh Pemberitahuan Sistem (termasuk mode yang sebelumnya Pop-up) kini ditampilkan rapi sebagai bar pemberitahuan yang menempel (sticky) di bagian paling atas layar agar selalu terlihat jelas.',
       'Tombol Tanda Silang (X) Eksklusif Kartu Tier ADMIN: Hanya akun dengan Kartu Tier ADMIN dan Akun OA Admin yang memiliki tanda silang (X) penutup pada Pemberitahuan Sistem (termasuk yang berstatus Permanen), Kotak Pusat Komando Dashboard, item Lonceng Notifikasi, dan Banner Toast atas; menutup pemberitahuan di layar Admin sendiri sementara di layar nasabah lain tetap tampil.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-25T12:00:00.000Z',
     isAutoDetected: true,

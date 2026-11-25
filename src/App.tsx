@@ -56,6 +56,7 @@ import {
 
 function BankAppContent() {
   const {
+    currentAccount,
     adminUnlocked,
     setAdminUnlocked,
     resetAllData,
@@ -68,6 +69,7 @@ function BankAppContent() {
     activeBanLockState,
     markLatestAppUpdateSeen,
     uiVisibilityConfig,
+    reportLivePresence,
   } = useBank();
   const [activeView, setActiveView] = useState<AppNavView>('dashboard');
   const [hiddenTabNotice, setHiddenTabNotice] = useState<string>('');
@@ -119,6 +121,39 @@ function BankAppContent() {
       markLatestAppUpdateSeen();
     }
   }, [activeView, markLatestAppUpdateSeen]);
+
+  // Laporkan halaman/tab yang sedang dibuka nasabah secara real-time untuk fitur Intip Live di Panel Admin
+  useEffect(() => {
+    if (!currentAccount?.id) return;
+    const VIEW_LABELS: Record<AppNavView, { screen: string; action: string }> = {
+      dashboard: { screen: 'Mobile Banking • Dashboard Utama', action: 'Melihat Dashboard Mobile Banking' },
+      missions: { screen: 'Misi & Target Harian', action: 'Membuka Halaman Misi & Hadiah' },
+      leaderboard: { screen: 'Papan Peringkat Sultan', action: 'Melihat Papan Peringkat Nasabah' },
+      family: { screen: 'Keluarga Bank Nusantara', action: 'Membuka Workspace Keluarga' },
+      debt: { screen: 'Kotak Hutang & Cicilan', action: 'Mengecek Kotak Hutang & Cicilan' },
+      transfer: { screen: 'Transfer & Transfer Bebas', action: 'Sedang di Menu Transfer Dana' },
+      emas: { screen: 'Tabungan Emas 24K', action: 'Melihat Harga & Investasi Emas 24K' },
+      anggaran: { screen: 'Anggaran & Pengeluaran', action: 'Mengatur Anggaran Bulanan' },
+      redeem: { screen: 'Kode Redeem & Voucher', action: 'Membuka Halaman Klaim Kode Redeem' },
+      jobs: { screen: 'Karir & Bisnis Sultan Empire', action: 'Melihat Lowongan Karir & Bisnis Sultan' },
+      spin_wheel: { screen: 'Spin the Wheel (Roda Berhadiah)', action: 'Sedang di Arena Spin the Wheel' },
+      atm: { screen: 'Simulator Mesin ATM', action: 'Mengoperasikan Mesin ATM Digital' },
+      guide: { screen: 'Panduan & Bantuan Nasabah', action: 'Membaca Panduan & FAQ Nasabah' },
+      chat: { screen: 'Nusantara Chat', action: 'Membuka Ruang Pesan Nusantara Chat' },
+      updates: { screen: 'Riwayat Update Website', action: 'Melihat Catatan Rilis & Update Terbaru' },
+      admin: { screen: 'Panel Admin Bank Nusantara', action: 'Mengelola Panel Admin Bank Nusantara' },
+    };
+    const meta = VIEW_LABELS[activeView] || {
+      screen: `Halaman ${activeView}`,
+      action: `Membuka ${activeView}`,
+    };
+    reportLivePresence({
+      viewKey: activeView,
+      screenLabel: meta.screen,
+      actionLabel: meta.action,
+      statusOverride: 'online',
+    });
+  }, [activeView, currentAccount?.id]);
 
   // Jika nasabah sedang membuka tab yang baru saja disembunyikan Admin, pindahkan otomatis ke Mobile Banking + tampilkan pesan info
   useEffect(() => {

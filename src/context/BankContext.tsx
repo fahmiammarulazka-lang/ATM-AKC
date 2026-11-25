@@ -210,7 +210,20 @@ import {
   LiveSystemActivityLog,
   AutoDetectedAnomalyAlert,
   LiveActivityDetectorConfig,
+  AdminDeletableCollectionKey,
+  DeletedAdminItemIdsMap,
+  CustomerPresenceRecord,
+  CustomerPresenceRecentAction,
+  CustomerPresenceStatus,
 } from '../types/bank';
+import {
+  AUTO_DETECTOR_69_RULES,
+  createDefault69RulesEnabledMap,
+  createDefault69ThresholdsMap,
+  createDefault69WindowsMap,
+  getAutoDetectorRuleByKey,
+  type AutoDetectorCategoryKey,
+} from '../data/autoDetector69Catalog';
 import {
   DEFAULT_DIAMOND_SYSTEM_CONFIG,
   DEFAULT_FAMILY_SYSTEM_CONFIG,
@@ -2141,10 +2154,12 @@ interface BankContextType {
   }) => { success: boolean; message: string };
   dismissNotification: (id: string) => void;
 
-  // Live Monitor Aktivitas Nasabah & Admin Real-Time + Pendeteksi Otomatis (Spin 10x sebanyak 5x, dll.)
+  // Live Monitor Aktivitas Nasabah & Admin Real-Time + Intip Live Kehadiran + 69 Pendeteksi Otomatis
   liveActivityLogs: LiveSystemActivityLog[];
   autoDetectedAnomalies: AutoDetectedAnomalyAlert[];
   liveActivityDetectorConfig: LiveActivityDetectorConfig;
+  customerPresenceMap: Record<string, CustomerPresenceRecord>;
+  deletedAdminItemIds: DeletedAdminItemIdsMap;
   accountSpinCounters: Record<
     string,
     {
@@ -2154,11 +2169,29 @@ interface BankContextType {
       lastSpinAt?: string;
     }
   >;
+  reportLivePresence: (input: {
+    viewKey?: string;
+    screenLabel?: string;
+    actionLabel?: string;
+    subTabLabel?: string;
+    statusOverride?: CustomerPresenceStatus;
+    forceStatus?: CustomerPresenceStatus;
+  }) => void;
   recordLiveActivity: (entry: Omit<LiveSystemActivityLog, 'id' | 'timestamp'>) => void;
   clearLiveActivityLogs: () => void;
   adminUpdateLiveActivityDetectorConfig: (
     partial: Partial<LiveActivityDetectorConfig>
   ) => { success: boolean; message: string };
+  adminToggleAll69DetectorRules: (
+    enabled: boolean,
+    category?: AutoDetectorCategoryKey
+  ) => { success: boolean; message: string };
+  adminUpdateSingle69DetectorRule: (
+    ruleKey: string,
+    patch: { enabled?: boolean; threshold?: number; windowMinutes?: number }
+  ) => { success: boolean; message: string };
+  adminResetAll69DetectorRules: () => { success: boolean; message: string };
+  adminQuickResetPinAttempts: (accountId: string) => { success: boolean; message: string };
   adminHandleAnomalyAction: (
     anomalyId: string,
     action:
@@ -2166,6 +2199,7 @@ interface BankContextType {
       | 'unpause_spin'
       | 'freeze_account'
       | 'unfreeze_account'
+      | 'reset_pin'
       | 'ignore'
       | 'resolve'
   ) => { success: boolean; message: string };
@@ -2563,12 +2597,9 @@ export const DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG: LiveActivityDetectorConfig =
   repeatedPinFailThreshold: 3,
   largeAssetMutationThresholdRupiah: 25_000_000,
   pauseSpinDefaultMinutes: 10,
-  rulesEnabled: {
-    spin_10x_streak: true,
-    rapid_tx_topup: true,
-    repeated_pin_fail: true,
-    large_asset_mutation: true,
-  },
+  rulesEnabled: createDefault69RulesEnabledMap(),
+  ruleThresholds: createDefault69ThresholdsMap(),
+  ruleWindowMinutes: createDefault69WindowsMap(),
 };
 
 export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -2624,9 +2655,68 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     lastConfigLabel: null,
   });
   const configUpdatedAtMsMapRef = useRef<Record<string, number>>({});
+  const adminConfigRevisionMapRef = useRef<Record<string, number>>({});
+  const [deletedAdminItemIds, setDeletedAdminItemIds] = useState<DeletedAdminItemIdsMap>({});
+  const deletedAdminItemIdsRef = useRef<DeletedAdminItemIdsMap>({});
+  deletedAdminItemIdsRef.current = deletedAdminItemIds;
+  const adminUnlockedRef = useRef<boolean>(false);
   const supportFaqsUpdatedAtMsRef = useRef<number>(0);
   const supportContactUpdatedAtMsRef = useRef<number>(0);
   const banSupportUpdatedAtMsRef = useRef<number>(0);
+
+  const mergeDeletedAdminItemIds = (incomingMap?: unknown): DeletedAdminItemIdsMap => {
+    if (!incomingMap || typeof incomingMap !== 'object') {
+      return deletedAdminItemIdsRef.current;
+    }
+    let changed = false;
+    const next: DeletedAdminItemIdsMap = { ...deletedAdminItemIdsRef.current };
+    for (const [k, rawList] of Object.entries(incomingMap as Record<string, unknown>)) {
+      if (!Array.isArray(rawList) || rawList.length === 0) continue;
+      const colKey = k as AdminDeletableCollectionKey;
+      const prevList = Array.isArray(next[colKey]) ? next[colKey]! : [];
+      const merged = Array.from(new Set([...prevList, ...rawList.map(String)])).slice(-800);
+      if (merged.length !== prevList.length) {
+        next[colKey] = merged;
+        changed = true;
+      }
+    }
+    if (changed) {
+      deletedAdminItemIdsRef.current = next;
+      setDeletedAdminItemIds(next);
+      void saveAdminPersistentDataIdb({ deletedAdminItemIds: next as Record<string, string[]> });
+    }
+    return next;
+  };
+
+  const recordDeletedAdminItemIds = (
+    collectionKey: AdminDeletableCollectionKey,
+    ids: string[]
+  ): DeletedAdminItemIdsMap => {
+    const clean = ids.map((x) => String(x || '').trim()).filter(Boolean);
+    if (clean.length === 0) return deletedAdminItemIdsRef.current;
+    const prevList = Array.isArray(deletedAdminItemIdsRef.current[collectionKey])
+      ? deletedAdminItemIdsRef.current[collectionKey]!
+      : [];
+    const merged = Array.from(new Set([...prevList, ...clean])).slice(-800);
+    const next: DeletedAdminItemIdsMap = {
+      ...deletedAdminItemIdsRef.current,
+      [collectionKey]: merged,
+    };
+    deletedAdminItemIdsRef.current = next;
+    setDeletedAdminItemIds(next);
+    void saveAdminPersistentDataIdb({ deletedAdminItemIds: next as Record<string, string[]> });
+    return next;
+  };
+
+  const filterListByAdminTombstones = <T extends { id?: string }>(
+    collectionKey: AdminDeletableCollectionKey,
+    items: T[]
+  ): T[] => {
+    const delList = deletedAdminItemIdsRef.current[collectionKey];
+    if (!Array.isArray(delList) || delList.length === 0) return items;
+    const delSet = new Set(delList);
+    return items.filter((item) => !item?.id || !delSet.has(String(item.id)));
+  };
 
   const formatWibClockLabel = (isoOrMs?: string | number | null): string => {
     try {
@@ -2657,13 +2747,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     key: string,
     incomingTs: number,
     incomingVal: unknown,
-    currentVal: unknown
+    currentVal: unknown,
+    incomingRev = 0
   ): boolean => {
     const localTs = Number(configUpdatedAtMsMapRef.current[key]) || 0;
+    const localRev = Number(adminConfigRevisionMapRef.current[key]) || 0;
+
+    // Prioritas 1: Monotonic Revision Counter (kebal perbedaan jam Laptop vs HP!)
+    if (incomingRev > 0) {
+      if (localRev > 0 && incomingRev < localRev) {
+        return false;
+      }
+      if (incomingRev > localRev) {
+        adminConfigRevisionMapRef.current[key] = incomingRev;
+        if (incomingTs > 0) {
+          configUpdatedAtMsMapRef.current[key] = incomingTs;
+        }
+        // Simpan paksa ke IndexedDB (termasuk array kosong []) agar reload HP tidak menghidupkan data terhapus
+        void saveAdminPersistentDataIdb({
+          forceAuthoritativeOverwrite: true,
+          adminConfigRevisionMap: { [key]: incomingRev },
+          configs: {
+            [key]: {
+              value: incomingVal,
+              updatedAtMs: incomingTs || Date.now(),
+            },
+          },
+        });
+        return !areConfigValuesEqual(incomingVal, currentVal);
+      }
+    }
+
+    // Prioritas 2: Timestamp fallback jika revision sama / belum ada
     if (localTs > 0 && incomingTs > 0 && incomingTs < localTs) {
       return false;
     }
-    if (localTs > 0 && incomingTs === 0) {
+    if (localTs > 0 && incomingTs === 0 && incomingRev === 0) {
       return false;
     }
     if (incomingTs > localTs) {
@@ -2672,6 +2791,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (areConfigValuesEqual(incomingVal, currentVal)) {
       return false;
     }
+    void saveAdminPersistentDataIdb({
+      forceAuthoritativeOverwrite: true,
+      configs: {
+        [key]: {
+          value: incomingVal,
+          updatedAtMs: incomingTs || Date.now(),
+        },
+      },
+    });
     return true;
   };
 
@@ -2689,6 +2817,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
     void readAdminPersistentDataIdb().then((adminCache) => {
       if (!active || !adminCache) return;
+      if (adminCache.deletedAdminItemIds && typeof adminCache.deletedAdminItemIds === 'object') {
+        mergeDeletedAdminItemIds(adminCache.deletedAdminItemIds as DeletedAdminItemIdsMap);
+      }
+      if (adminCache.adminConfigRevisionMap && typeof adminCache.adminConfigRevisionMap === 'object') {
+        for (const [revKey, revVal] of Object.entries(adminCache.adminConfigRevisionMap)) {
+          const n = Number(revVal) || 0;
+          if (n > (adminConfigRevisionMapRef.current[revKey] || 0)) {
+            adminConfigRevisionMapRef.current[revKey] = n;
+          }
+        }
+      }
       if (adminCache.lastAdminSavedAtIso) {
         setLastAdminSavedAtIso(adminCache.lastAdminSavedAtIso);
         setAdminConfigSyncTelemetry((prev) => ({
@@ -2699,9 +2838,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }));
       }
       if (Array.isArray(adminCache.supportFaqs) && adminCache.supportFaqs.length > 0) {
-        const upgradedFaqs = ensureUpgraded350SupportFaqs(
-          adminCache.supportFaqs as SupportFaqItem[],
-          DEFAULT_SUPPORT_FAQS_350
+        const upgradedFaqs = filterListByAdminTombstones(
+          'supportFaqs',
+          ensureUpgraded350SupportFaqs(
+            adminCache.supportFaqs as SupportFaqItem[],
+            DEFAULT_SUPPORT_FAQS_350
+          )
         );
         const ts = Number(adminCache.supportFaqsUpdatedAtMs) || adminCache.cachedAtMs || Date.now();
         supportFaqsUpdatedAtMsRef.current = ts;
@@ -2786,8 +2928,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
         restoreEntry('adminWarnings', (v) => {
           if (Array.isArray(v)) {
-            adminWarningsRef.current = v as AdminSystemWarning[];
-            setAdminWarnings(v as AdminSystemWarning[]);
+            const cleanWarnings = filterListByAdminTombstones('adminWarnings', v as AdminSystemWarning[]);
+            adminWarningsRef.current = cleanWarnings;
+            setAdminWarnings(cleanWarnings);
           }
         });
         restoreEntry('spinWheelConfig', (v) => {
@@ -2827,8 +2970,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
         restoreEntry('devRoles', (v) => {
           if (Array.isArray(v) && v.length > 0) {
-            devRolesRef.current = v as DevRoleConfig[];
-            setDevRoles(v as DevRoleConfig[]);
+            const cleanRoles = filterListByAdminTombstones('devRoles', v as DevRoleConfig[]);
+            if (cleanRoles.length > 0) {
+              devRolesRef.current = cleanRoles;
+              setDevRoles(cleanRoles);
+            }
           }
         });
         restoreEntry('featureConfigs', (v) => {
@@ -2837,10 +2983,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setFeatureConfigs(v as FeatureSecurityConfig[]);
           }
         });
+        restoreEntry('deletedFeatureIds', (v) => {
+          if (Array.isArray(v)) {
+            deletedFeatureIdsRef.current = v as string[];
+            setDeletedFeatureIds(v as string[]);
+          }
+        });
         restoreEntry('missions', (v) => {
           if (Array.isArray(v)) {
-            missionsRef.current = v as AppMissionDefinition[];
-            setMissions(v as AppMissionDefinition[]);
+            const cleanMissions = filterListByAdminTombstones('missions', v as AppMissionDefinition[]);
+            missionsRef.current = cleanMissions;
+            setMissions(cleanMissions);
           }
         });
         restoreEntry('missionConfig', (v) => {
@@ -2878,6 +3031,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             };
             adminTierNotificationConfigRef.current = next;
             setAdminTierNotificationConfig(next);
+          }
+        });
+        restoreEntry('liveActivityDetectorConfig', (v) => {
+          if (v && typeof v === 'object') {
+            const inc = v as Partial<LiveActivityDetectorConfig>;
+            const next: LiveActivityDetectorConfig = {
+              ...DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG,
+              ...inc,
+              rulesEnabled: {
+                ...DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.rulesEnabled,
+                ...(inc.rulesEnabled || {}),
+              },
+              ruleThresholds: {
+                ...(DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.ruleThresholds || {}),
+                ...(inc.ruleThresholds || {}),
+              },
+              ruleWindowMinutes: {
+                ...(DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.ruleWindowMinutes || {}),
+                ...(inc.ruleWindowMinutes || {}),
+              },
+            };
+            liveActivityDetectorConfigRef.current = next;
+            setLiveActivityDetectorConfig(next);
           }
         });
       }
@@ -3168,9 +3344,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       accountName: 'Admin Utama Bank Nusantara',
       accountNumber: '9999999999',
       cardTier: 'admin',
-      actionTitle: 'Mengaktifkan Sistem Live Monitor & Pendeteksi Otomatis v14.36.44',
+      actionTitle: 'Mengaktifkan Sistem Live Monitor, Intip Live & 69 Pendeteksi Otomatis v14.37.45',
       description:
-        'Pemantauan real-time seluruh aktivitas nasabah & admin aktif dengan aturan deteksi Spin 10x sebanyak 5x (50 putaran) dalam 5 menit.',
+        'Pemantauan real-time seluruh aktivitas, kehadiran Online/Idle/Off, sinkronisasi hapus permanen lintas perangkat, serta 69 jenis deteksi otomatis aktif.',
     },
     {
       id: 'act-init-cust-1',
@@ -3256,6 +3432,30 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [currentAccountId, setCurrentAccountIdState] = useState<string>('');
   const [userRole, setUserRoleState] = useState<'customer' | 'admin'>('customer');
   const [adminUnlocked, setAdminUnlockedState] = useState<boolean>(false);
+  adminUnlockedRef.current = adminUnlocked;
+
+  // Real-time Customer Presence Map (untuk fitur Intip Live di Live Monitor Aktivitas)
+  const [customerPresenceMap, setCustomerPresenceMap] = useState<
+    Record<string, CustomerPresenceRecord>
+  >({});
+  const customerPresenceMapRef = useRef<Record<string, CustomerPresenceRecord>>({});
+  customerPresenceMapRef.current = customerPresenceMap;
+  const livePresenceCurrentScreenRef = useRef<{
+    viewKey: string;
+    screenLabel: string;
+    actionLabel: string;
+    subTabLabel?: string;
+    recentActions: CustomerPresenceRecentAction[];
+  }>({
+    viewKey: 'dashboard',
+    screenLabel: 'Mobile Banking • Ringkasan',
+    actionLabel: 'Membuka Aplikasi Bank Nusantara',
+    recentActions: [],
+  });
+  const lastUserActivityMsRef = useRef<number>(Date.now());
+  const sessionOnlineSinceIsoRef = useRef<string>(new Date().toISOString());
+  const detectorCooldownByKeyRef = useRef<Record<string, number>>({});
+  const detectorWindowEventsRef = useRef<Record<string, number[]>>({});
 
   const [rawFeatureConfigs, setFeatureConfigs] = useState<FeatureSecurityConfig[]>(INITIAL_FEATURE_CONFIGS);
   const rawFeatureConfigsRef = useRef<FeatureSecurityConfig[]>(rawFeatureConfigs);
@@ -3832,8 +4032,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         giftEventsUpdatedAtMs: giftEventsUpdatedAtMsRef.current || Date.now(),
       });
     }
+    // 0. Sinkronkan daftar ID terhapus permanen (Tombstone Anti-Zombie) & Revision Counter terlebih dahulu!
+    if (data.deletedAdminItemIds && typeof data.deletedAdminItemIds === 'object') {
+      mergeDeletedAdminItemIds(data.deletedAdminItemIds as DeletedAdminItemIdsMap);
+    }
+    const incomingRevMap: Record<string, number> =
+      data.adminConfigRevisionMap && typeof data.adminConfigRevisionMap === 'object'
+        ? (data.adminConfigRevisionMap as Record<string, number>)
+        : {};
+    const getIncomingCfgRev = (k: string): number => Number(incomingRevMap[k]) || 0;
+
     if (Array.isArray(data.dashboardEffectEvents)) {
-      const incomingDashEvents = data.dashboardEffectEvents as AdminDashboardEffectPackage[];
+      const incomingDashEvents = filterListByAdminTombstones(
+        'dashboardEffectEvents',
+        data.dashboardEffectEvents as AdminDashboardEffectPackage[]
+      );
       let hadPhantomUntouchedDefault = false;
       const sanitizedDashEvents = incomingDashEvents.map((pkg) => {
         if (isUntouchedAutoSeededDefaultStage(pkg)) {
@@ -3849,7 +4062,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       hasLoadedDashboardEffectsRef.current = true;
       dashboardEffectEventsRef.current = sanitizedDashEvents;
       setDashboardEffectEvents(sanitizedDashEvents);
-      if (hadPhantomUntouchedDefault && !hasCleanedPhantomDefaultStagesRef.current) {
+      if (
+        hadPhantomUntouchedDefault &&
+        !hasCleanedPhantomDefaultStagesRef.current &&
+        adminUnlockedRef.current
+      ) {
         hasCleanedPhantomDefaultStagesRef.current = true;
         window.setTimeout(() => {
           void flushMasterStateToCloud({ dashboardEffectEvents: sanitizedDashEvents });
@@ -3875,9 +4092,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const incomingBanTs =
         Number((data as any).banSupportUpdatedAtMs) ||
         (incomingBan.updatedAt ? Date.parse(incomingBan.updatedAt) : 0) ||
-        Number(data.updatedAtMs) ||
         0;
-      if (incomingBanTs >= banSupportUpdatedAtMsRef.current || banSupportUpdatedAtMsRef.current === 0) {
+      const incomingBanRev = getIncomingCfgRev('banSupportConfig');
+      const localBanRev = adminConfigRevisionMapRef.current.banSupportConfig || 0;
+      if (
+        incomingBanRev > localBanRev ||
+        (incomingBanRev === localBanRev &&
+          (incomingBanTs >= banSupportUpdatedAtMsRef.current || banSupportUpdatedAtMsRef.current === 0))
+      ) {
+        if (incomingBanRev > localBanRev) adminConfigRevisionMapRef.current.banSupportConfig = incomingBanRev;
         if (incomingBanTs > 0) {
           banSupportUpdatedAtMsRef.current = incomingBanTs;
         }
@@ -3908,18 +4131,24 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
     if (Array.isArray(data.supportFaqs)) {
-      const incomingFaqsTs =
-        Number((data as any).supportFaqsUpdatedAtMs) || Number(data.updatedAtMs) || 0;
+      const incomingFaqsTs = Number((data as any).supportFaqsUpdatedAtMs) || 0;
+      const incomingFaqsRev = getIncomingCfgRev('supportFaqs');
+      const localFaqsRev = adminConfigRevisionMapRef.current.supportFaqs || 0;
       if (
-        incomingFaqsTs >= supportFaqsUpdatedAtMsRef.current ||
-        supportFaqsUpdatedAtMsRef.current === 0
+        incomingFaqsRev > localFaqsRev ||
+        (incomingFaqsRev === localFaqsRev &&
+          (incomingFaqsTs >= supportFaqsUpdatedAtMsRef.current || supportFaqsUpdatedAtMsRef.current === 0))
       ) {
+        if (incomingFaqsRev > localFaqsRev) adminConfigRevisionMapRef.current.supportFaqs = incomingFaqsRev;
         if (incomingFaqsTs > 0) {
           supportFaqsUpdatedAtMsRef.current = incomingFaqsTs;
         }
-        const upgradedFaqs = ensureUpgraded350SupportFaqs(
-          data.supportFaqs as SupportFaqItem[],
-          DEFAULT_SUPPORT_FAQS_350
+        const upgradedFaqs = filterListByAdminTombstones(
+          'supportFaqs',
+          ensureUpgraded350SupportFaqs(
+            data.supportFaqs as SupportFaqItem[],
+            DEFAULT_SUPPORT_FAQS_350
+          )
         );
         setSupportFaqs(upgradedFaqs);
         void saveAdminPersistentDataIdb({
@@ -3933,7 +4162,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const incomingContactTs =
         Number((data as any).supportContactUpdatedAtMs) ||
         (incomingContact.updatedAt ? Date.parse(incomingContact.updatedAt) : 0) ||
-        Number(data.updatedAtMs) ||
         0;
       if (
         incomingContactTs >= supportContactUpdatedAtMsRef.current ||
@@ -3954,7 +4182,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
       }
     }
-    const incomingSealTs = Number(data.letterSealUpdatedAtMs || data.updatedAtMs || 0);
+    const incomingSealTs = Number(data.letterSealUpdatedAtMs || 0);
     if (
       data.defaultLetterSealConfig &&
       typeof data.defaultLetterSealConfig === 'object' &&
@@ -3979,8 +4207,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       data.configUpdatedAtMsMap && typeof data.configUpdatedAtMsMap === 'object'
         ? (data.configUpdatedAtMsMap as Record<string, number>)
         : {};
-    const getIncomingCfgTs = (k: string): number =>
-      Number(incomingCfgTsMap[k]) || Number(data.updatedAtMs) || 0;
+    // PENTING: Jangan fallback ke data.updatedAtMs agar aksi nasabah di HP tidak pernah menimpa timestamp konfigurasi Admin!
+    const getIncomingCfgTs = (k: string): number => Number(incomingCfgTsMap[k]) || 0;
 
     if (data.jobCoinBonusConfig && typeof data.jobCoinBonusConfig === 'object') {
       const mergedJobBonus: JobCoinBonusConfig = {
@@ -3992,7 +4220,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'jobCoinBonusConfig',
           getIncomingCfgTs('jobCoinBonusConfig'),
           mergedJobBonus,
-          jobCoinBonusConfigRef.current
+          jobCoinBonusConfigRef.current,
+          getIncomingCfgRev('jobCoinBonusConfig')
         )
       ) {
         jobCoinBonusConfigRef.current = mergedJobBonus;
@@ -4009,7 +4238,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'spinWheelConfig',
           getIncomingCfgTs('spinWheelConfig'),
           mergedSpin,
-          spinWheelConfigRef.current
+          spinWheelConfigRef.current,
+          getIncomingCfgRev('spinWheelConfig')
         )
       ) {
         spinWheelConfigRef.current = mergedSpin;
@@ -4047,7 +4277,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'diamondConfig',
           getIncomingCfgTs('diamondConfig'),
           nextDiamondCfg,
-          diamondConfigRef.current
+          diamondConfigRef.current,
+          getIncomingCfgRev('diamondConfig')
         )
       ) {
         diamondConfigRef.current = nextDiamondCfg;
@@ -4069,7 +4300,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'uiVisibilityConfig',
           getIncomingCfgTs('uiVisibilityConfig'),
           mergedVis,
-          uiVisibilityConfigRef.current
+          uiVisibilityConfigRef.current,
+          getIncomingCfgRev('uiVisibilityConfig')
         )
       ) {
         uiVisibilityConfigRef.current = mergedVis;
@@ -4077,13 +4309,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
     if (Array.isArray(data.adminWarnings)) {
-      const incomingWarnings = data.adminWarnings as AdminSystemWarning[];
+      const incomingWarnings = filterListByAdminTombstones(
+        'adminWarnings',
+        data.adminWarnings as AdminSystemWarning[]
+      );
       if (
         acceptIncomingAdminConfig(
           'adminWarnings',
           getIncomingCfgTs('adminWarnings'),
           incomingWarnings,
-          adminWarningsRef.current
+          adminWarningsRef.current,
+          getIncomingCfgRev('adminWarnings')
         )
       ) {
         adminWarningsRef.current = incomingWarnings;
@@ -4101,7 +4337,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'bugRewardConfig',
           getIncomingCfgTs('bugRewardConfig'),
           mergedBugCfg,
-          bugRewardConfigRef.current
+          bugRewardConfigRef.current,
+          getIncomingCfgRev('bugRewardConfig')
         )
       ) {
         bugRewardConfigRef.current = mergedBugCfg;
@@ -4123,7 +4360,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'familyConfig',
           getIncomingCfgTs('familyConfig'),
           mergedFamCfg,
-          familyConfigRef.current
+          familyConfigRef.current,
+          getIncomingCfgRev('familyConfig')
         )
       ) {
         familyConfigRef.current = mergedFamCfg;
@@ -4131,18 +4369,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
     if (Array.isArray(data.families)) {
-      const incomingFamilies = data.families as FamilyGroup[];
+      const incomingFamilies = filterListByAdminTombstones(
+        'families',
+        data.families as FamilyGroup[]
+      );
       familiesRef.current = incomingFamilies;
       setFamilies(incomingFamilies);
     }
     if (Array.isArray(data.missions)) {
-      const incomingMissions = data.missions as AppMissionDefinition[];
+      const incomingMissions = filterListByAdminTombstones(
+        'missions',
+        data.missions as AppMissionDefinition[]
+      );
       if (
         acceptIncomingAdminConfig(
           'missions',
           getIncomingCfgTs('missions'),
           incomingMissions,
-          missionsRef.current
+          missionsRef.current,
+          getIncomingCfgRev('missions')
         )
       ) {
         missionsRef.current = incomingMissions;
@@ -4159,7 +4404,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'missionConfig',
           getIncomingCfgTs('missionConfig'),
           mergedMissionCfg,
-          missionConfigRef.current
+          missionConfigRef.current,
+          getIncomingCfgRev('missionConfig')
         )
       ) {
         missionConfigRef.current = mergedMissionCfg;
@@ -4194,7 +4440,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'leaderboardConfig',
           getIncomingCfgTs('leaderboardConfig'),
           mergedLb,
-          leaderboardConfigRef.current
+          leaderboardConfigRef.current,
+          getIncomingCfgRev('leaderboardConfig')
         )
       ) {
         leaderboardConfigRef.current = mergedLb;
@@ -4216,11 +4463,43 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'adminTierNotificationConfig',
           getIncomingCfgTs('adminTierNotificationConfig'),
           mergedAdmNotif,
-          adminTierNotificationConfigRef.current
+          adminTierNotificationConfigRef.current,
+          getIncomingCfgRev('adminTierNotificationConfig')
         )
       ) {
         adminTierNotificationConfigRef.current = mergedAdmNotif;
         setAdminTierNotificationConfig(mergedAdmNotif);
+      }
+    }
+    if (data.liveActivityDetectorConfig && typeof data.liveActivityDetectorConfig === 'object') {
+      const incDet = data.liveActivityDetectorConfig as Partial<LiveActivityDetectorConfig>;
+      const mergedDet: LiveActivityDetectorConfig = {
+        ...DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG,
+        ...incDet,
+        rulesEnabled: {
+          ...DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.rulesEnabled,
+          ...(incDet.rulesEnabled || {}),
+        },
+        ruleThresholds: {
+          ...(DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.ruleThresholds || {}),
+          ...(incDet.ruleThresholds || {}),
+        },
+        ruleWindowMinutes: {
+          ...(DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.ruleWindowMinutes || {}),
+          ...(incDet.ruleWindowMinutes || {}),
+        },
+      };
+      if (
+        acceptIncomingAdminConfig(
+          'liveActivityDetectorConfig',
+          getIncomingCfgTs('liveActivityDetectorConfig'),
+          mergedDet,
+          liveActivityDetectorConfigRef.current,
+          getIncomingCfgRev('liveActivityDetectorConfig')
+        )
+      ) {
+        liveActivityDetectorConfigRef.current = mergedDet;
+        setLiveActivityDetectorConfig(mergedDet);
       }
     }
     if (data.sultanEmpireConfig && typeof data.sultanEmpireConfig === 'object') {
@@ -4233,7 +4512,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'sultanEmpireConfig',
           getIncomingCfgTs('sultanEmpireConfig'),
           mergedSultan,
-          sultanEmpireConfigRef.current
+          sultanEmpireConfigRef.current,
+          getIncomingCfgRev('sultanEmpireConfig')
         )
       ) {
         sultanEmpireConfigRef.current = mergedSultan;
@@ -4247,7 +4527,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'featureConfigs',
           getIncomingCfgTs('featureConfigs'),
           incFeat,
-          rawFeatureConfigsRef.current
+          rawFeatureConfigsRef.current,
+          getIncomingCfgRev('featureConfigs')
         )
       ) {
         rawFeatureConfigsRef.current = incFeat;
@@ -4261,7 +4542,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'deletedFeatureIds',
           getIncomingCfgTs('deletedFeatureIds'),
           incDelFeat,
-          deletedFeatureIdsRef.current
+          deletedFeatureIdsRef.current,
+          getIncomingCfgRev('deletedFeatureIds')
         )
       ) {
         deletedFeatureIdsRef.current = incDelFeat;
@@ -4288,7 +4570,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           'goldMarketConfig',
           getIncomingCfgTs('goldMarketConfig'),
           mergedGold,
-          goldMarketConfigRef.current
+          goldMarketConfigRef.current,
+          getIncomingCfgRev('goldMarketConfig')
         )
       ) {
         goldMarketConfigRef.current = mergedGold;
@@ -4308,13 +4591,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     if (Array.isArray(data.budgetAlertHistory)) setBudgetAlertHistory(data.budgetAlertHistory as string[]);
     if (Array.isArray(data.appUpdates) && data.appUpdates.length > 0) {
-      const mergedRes = mergeAutoDetectedAppUpdates(
-        (data.appUpdates as AppUpdateRecord[]).map(sanitizeAppUpdateRecord),
-        INITIAL_APP_UPDATES
+      const filteredIncomingUpdates = filterListByAdminTombstones(
+        'appUpdates',
+        (data.appUpdates as AppUpdateRecord[]).map(sanitizeAppUpdateRecord)
       );
-      const cleanedMerged = mergedRes.mergedUpdates.map(sanitizeAppUpdateRecord);
+      const filteredCatalog = filterListByAdminTombstones('appUpdates', INITIAL_APP_UPDATES);
+      const mergedRes = mergeAutoDetectedAppUpdates(filteredIncomingUpdates, filteredCatalog);
+      const cleanedMerged = filterListByAdminTombstones(
+        'appUpdates',
+        mergedRes.mergedUpdates.map(sanitizeAppUpdateRecord)
+      );
       setAppUpdates(cleanedMerged);
-      if (mergedRes.didChange && !hasSyncedAutoBuildRef.current) {
+      if (mergedRes.didChange && !hasSyncedAutoBuildRef.current && adminUnlockedRef.current) {
         hasSyncedAutoBuildRef.current = true;
         window.setTimeout(() => {
           flushMasterStateToCloud({ appUpdates: cleanedMerged });
@@ -4322,32 +4610,54 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }, 400);
       }
     } else if (!hasSyncedAutoBuildRef.current) {
-      const mergedRes = mergeAutoDetectedAppUpdates([], INITIAL_APP_UPDATES);
+      const filteredCatalog = filterListByAdminTombstones('appUpdates', INITIAL_APP_UPDATES);
+      const mergedRes = mergeAutoDetectedAppUpdates([], filteredCatalog);
       const cleanedMerged = mergedRes.mergedUpdates.map(sanitizeAppUpdateRecord);
       setAppUpdates(cleanedMerged);
       hasSyncedAutoBuildRef.current = true;
-      window.setTimeout(() => {
-        flushMasterStateToCloud({ appUpdates: cleanedMerged });
-      }, 600);
     }
     if (Array.isArray(data.devRoles) && data.devRoles.length > 0) {
-      const incRoles = data.devRoles as DevRoleConfig[];
+      const incRoles = filterListByAdminTombstones('devRoles', data.devRoles as DevRoleConfig[]);
       if (
+        incRoles.length > 0 &&
         acceptIncomingAdminConfig(
           'devRoles',
           getIncomingCfgTs('devRoles'),
           incRoles,
-          devRolesRef.current
+          devRolesRef.current,
+          getIncomingCfgRev('devRoles')
         )
       ) {
         devRolesRef.current = incRoles;
         setDevRoles(incRoles);
       }
     }
-    if (Array.isArray(data.adminHelpRequests)) setAdminHelpRequests(data.adminHelpRequests as AdminHelpRequestRecord[]);
-    if (Array.isArray(data.websitePopups)) setWebsitePopups(data.websitePopups as WebsiteSystemPopupNotification[]);
-    if (Array.isArray(data.globalChats)) setGlobalChats(data.globalChats as GlobalChatMessage[]);
-    if (Array.isArray(data.bugReports)) setBugReports(data.bugReports as BugReportRecord[]);
+    if (Array.isArray(data.adminHelpRequests)) {
+      setAdminHelpRequests(
+        filterListByAdminTombstones(
+          'adminHelpRequests',
+          data.adminHelpRequests as AdminHelpRequestRecord[]
+        )
+      );
+    }
+    if (Array.isArray(data.websitePopups)) {
+      setWebsitePopups(
+        filterListByAdminTombstones(
+          'websitePopups',
+          data.websitePopups as WebsiteSystemPopupNotification[]
+        )
+      );
+    }
+    if (Array.isArray(data.globalChats)) {
+      setGlobalChats(
+        filterListByAdminTombstones('globalChats', data.globalChats as GlobalChatMessage[])
+      );
+    }
+    if (Array.isArray(data.bugReports)) {
+      setBugReports(
+        filterListByAdminTombstones('bugReports', data.bugReports as BugReportRecord[])
+      );
+    }
 
     window.setTimeout(() => {
       isApplyingFirestoreRef.current = false;
@@ -4395,6 +4705,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     missionClaimLogs?: MissionClaimAuditLog[];
     leaderboardConfig?: LeaderboardSystemConfig;
     adminTierNotificationConfig?: AdminTierNotificationConfig;
+    liveActivityDetectorConfig?: LiveActivityDetectorConfig;
     sultanEmpireConfig?: SultanEmpireAdminConfig;
     featureConfigs?: FeatureSecurityConfig[];
     deletedFeatureIds?: string[];
@@ -4412,11 +4723,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     websitePopups?: WebsiteSystemPopupNotification[];
     globalChats?: GlobalChatMessage[];
     bugReports?: BugReportRecord[];
+    deletedAdminItemIds?: DeletedAdminItemIdsMap;
+    adminConfigRevisionMap?: Record<string, number>;
   }) => {
     const nowMs = Date.now();
     lastFirestoreWriteMsRef.current = nowMs;
     lastSyncEpochRef.current = nowMs;
     setCloudSyncStatus('syncing');
+
+    // Hak Tulis Konfigurasi Global Admin: Hanya Admin (atau pemegang Kartu Tier ADMIN / OA / DevRole) yang boleh menulis ulang konfigurasi global di Cloud!
+    const activeWriterAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    const hasAdminWritePrivilege = Boolean(
+      adminUnlockedRef.current ||
+        activeWriterAcc?.cardTier === 'admin' ||
+        activeWriterAcc?.isOfficialAdminAccount ||
+        activeWriterAcc?.id === 'acc-admin' ||
+        activeWriterAcc?.devRoleId
+    );
 
     const mergedDeletedAccountIds = Array.from(
       new Set([
@@ -4427,14 +4750,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
 
     // 100% Tanpa localStorage & Proteksi Anti-Timpa:
-    // Selalu union-merge akun lokal/overrides dengan latestServerAccountsRef agar perangkat lain tidak pernah menimpa kartu yang baru dibuat di HP/Laptop
     const cloudSyncedAccounts = unionMergeAccountsList(
       overrides?.accounts ?? accountsRef.current,
       [latestServerAccountsRef.current, accounts],
       mergedDeletedAccountIds
     );
     latestServerAccountsRef.current = cloudSyncedAccounts;
-    // Write-through instan ke Fast-Boot IndexedDB setiap kali state akun berubah agar refresh tidak memakai cache basi
     if (cloudSyncedAccounts.length > 0) {
       void saveFastBootSnapshot({
         accounts: cloudSyncedAccounts,
@@ -4448,33 +4769,159 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isNotBotAccountNum = (accNum?: string) =>
       !accNum || !PURGED_BOT_ACCOUNT_NUMBERS.includes(accNum);
 
-    const shouldIncludeGiftSlice =
-      overrides?.giftEvents !== undefined ||
-      overrides?.deletedGiftEventIds !== undefined ||
-      hasLoadedGiftRegistryRef.current;
-    const shouldIncludeSealSlice =
-      overrides?.defaultLetterSealConfig !== undefined || hasLoadedSealRegistryRef.current;
-
-    const shouldIncludeDashboardEffectsSlice =
-      overrides?.dashboardEffectEvents !== undefined || hasLoadedDashboardEffectsRef.current;
-    const resolvedForceClearNonce =
-      overrides?.stageForceClearNonce ?? stageForceClearNonceRef.current;
+    // Hanya tulis slice konfigurasi Admin ke Cloud bila benar-benar diubah secara eksplisit oleh Admin!
+    // Ini mencegah nasabah di HP menimpa atau menghidupkan kembali peringatan/konfigurasi yang baru dihapus Admin di Laptop!
+    const hasAnyAdminOverride = Boolean(
+      overrides &&
+        (overrides.adminWarnings !== undefined ||
+          overrides.banSupportConfig !== undefined ||
+          overrides.supportFaqs !== undefined ||
+          overrides.supportContactConfig !== undefined ||
+          overrides.redeemCodes !== undefined ||
+          overrides.spinWheelConfig !== undefined ||
+          overrides.diamondConfig !== undefined ||
+          overrides.uiVisibilityConfig !== undefined ||
+          overrides.bugRewardConfig !== undefined ||
+          overrides.familyConfig !== undefined ||
+          overrides.missions !== undefined ||
+          overrides.missionConfig !== undefined ||
+          overrides.leaderboardConfig !== undefined ||
+          overrides.adminTierNotificationConfig !== undefined ||
+          overrides.liveActivityDetectorConfig !== undefined ||
+          overrides.sultanEmpireConfig !== undefined ||
+          overrides.featureConfigs !== undefined ||
+          overrides.deletedFeatureIds !== undefined ||
+          overrides.goldMarketConfig !== undefined ||
+          overrides.appUpdates !== undefined ||
+          overrides.devRoles !== undefined ||
+          overrides.defaultLetterSealConfig !== undefined ||
+          overrides.jobCoinBonusConfig !== undefined ||
+          overrides.dashboardEffectEvents !== undefined ||
+          overrides.giftEvents !== undefined ||
+          overrides.deletedGiftEventIds !== undefined ||
+          overrides.websitePopups !== undefined ||
+          overrides.deletedAdminItemIds !== undefined ||
+          overrides.adminConfigRevisionMap !== undefined)
+    );
 
     const payload = sanitizeForFirestore({
       accounts: cloudSyncedAccounts,
       deletedAccountIds: mergedDeletedAccountIds,
-      accountDeletionRequests: (
-        overrides?.accountDeletionRequests ?? accountDeletionRequests
-      ).filter((r) => isNotBotAccountId(r.accountId)),
-      transactions: (overrides?.transactions ?? transactions)
-        .filter(
-          (t) =>
-            isNotBotAccountId(t.accountId) &&
-            isNotBotAccountNum(t.senderAccount) &&
-            isNotBotAccountNum(t.recipientAccount)
-        )
-        .slice(0, 220),
-      ...(shouldIncludeGiftSlice
+      ...(overrides?.accountDeletionRequests !== undefined
+        ? {
+            accountDeletionRequests: overrides.accountDeletionRequests.filter((r) =>
+              isNotBotAccountId(r.accountId)
+            ),
+          }
+        : {}),
+      ...(overrides?.transactions !== undefined
+        ? {
+            transactions: overrides.transactions
+              .filter(
+                (t) =>
+                  isNotBotAccountId(t.accountId) &&
+                  isNotBotAccountNum(t.senderAccount) &&
+                  isNotBotAccountNum(t.recipientAccount)
+              )
+              .slice(0, 220),
+          }
+        : {}),
+      ...(overrides?.pockets !== undefined
+        ? { pockets: overrides.pockets.filter((p) => isNotBotAccountId(p.accountId)) }
+        : {}),
+      ...(overrides?.depositos !== undefined
+        ? { depositos: overrides.depositos.filter((d) => isNotBotAccountId(d.accountId)) }
+        : {}),
+      ...(overrides?.loans !== undefined
+        ? { loans: overrides.loans.filter((l) => isNotBotAccountId(l.accountId)) }
+        : {}),
+      ...(overrides?.scheduledPayments !== undefined
+        ? {
+            scheduledPayments: overrides.scheduledPayments.filter((s) =>
+              isNotBotAccountId(s.accountId)
+            ),
+          }
+        : {}),
+      ...(overrides?.favorites !== undefined
+        ? { favorites: overrides.favorites.filter((f) => isNotBotAccountNum(f.accountNumber)) }
+        : {}),
+      ...(overrides?.notifications !== undefined
+        ? { notifications: overrides.notifications.slice(0, 120) }
+        : {}),
+      ...(overrides?.chats !== undefined
+        ? {
+            chats: overrides.chats
+              .filter(
+                (c) =>
+                  isNotBotAccountNum(c.senderAccount) && isNotBotAccountNum(c.recipientAccount)
+              )
+              .slice(0, 120),
+          }
+        : {}),
+      ...(overrides?.cardUpgrades !== undefined
+        ? { cardUpgrades: overrides.cardUpgrades.filter((u) => isNotBotAccountId(u.accountId)) }
+        : {}),
+      ...(overrides?.pinResetRequests !== undefined
+        ? {
+            pinResetRequests: overrides.pinResetRequests.filter((p) =>
+              isNotBotAccountId(p.accountId)
+            ),
+          }
+        : {}),
+      ...(overrides?.purchasedCodes !== undefined
+        ? {
+            purchasedCodes: overrides.purchasedCodes.filter((v) =>
+              isNotBotAccountId(v.accountId)
+            ),
+          }
+        : {}),
+      ...(overrides?.resiList !== undefined ? { resiList: overrides.resiList } : {}),
+      ...(overrides?.cardlessTokens !== undefined
+        ? {
+            cardlessTokens: overrides.cardlessTokens.filter((c) =>
+              isNotBotAccountId(c.accountId)
+            ),
+          }
+        : {}),
+      ...(overrides?.spinHistory !== undefined
+        ? { spinHistory: overrides.spinHistory.slice(0, 80) }
+        : {}),
+      ...(overrides?.qrisOrders !== undefined
+        ? { qrisOrders: overrides.qrisOrders.slice(0, 120) }
+        : {}),
+      ...(overrides?.families !== undefined ? { families: overrides.families.slice(0, 150) } : {}),
+      ...(overrides?.missionProgressByAccount !== undefined
+        ? { missionProgressByAccount: overrides.missionProgressByAccount }
+        : {}),
+      ...(overrides?.missionClaimLogs !== undefined
+        ? { missionClaimLogs: overrides.missionClaimLogs.slice(0, 200) }
+        : {}),
+      ...(overrides?.userSettings !== undefined ? { userSettings: overrides.userSettings } : {}),
+      ...(overrides?.budgetCategories !== undefined
+        ? { budgetCategories: overrides.budgetCategories }
+        : {}),
+      ...(overrides?.manualExpenses !== undefined
+        ? { manualExpenses: overrides.manualExpenses }
+        : {}),
+      ...(overrides?.budgetTxCategoryMap !== undefined
+        ? { budgetTxCategoryMap: overrides.budgetTxCategoryMap }
+        : {}),
+      ...(overrides?.budgetAlertHistory !== undefined
+        ? { budgetAlertHistory: overrides.budgetAlertHistory }
+        : {}),
+      ...(overrides?.adminHelpRequests !== undefined
+        ? { adminHelpRequests: overrides.adminHelpRequests }
+        : {}),
+      ...(overrides?.globalChats !== undefined
+        ? { globalChats: overrides.globalChats.slice(0, 100) }
+        : {}),
+      ...(overrides?.bugReports !== undefined
+        ? { bugReports: overrides.bugReports.slice(0, 60) }
+        : {}),
+
+      // === KONFIGURASI GLOBAL KHUSUS ADMIN (DILINDUNGI HAK TULIS ADMIN + TOMBSTONE + REVISION) ===
+      ...(hasAdminWritePrivilege &&
+      (overrides?.giftEvents !== undefined || overrides?.deletedGiftEventIds !== undefined)
         ? {
             giftEvents: overrides?.giftEvents ?? giftEventsRef.current,
             deletedGiftEventIds: overrides?.deletedGiftEventIds ?? deletedGiftEventIdsRef.current,
@@ -4482,92 +4929,114 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             giftEventsUpdatedAtMs: giftEventsUpdatedAtMsRef.current || nowMs,
           }
         : {}),
-      ...(shouldIncludeDashboardEffectsSlice
+      ...(hasAdminWritePrivilege && overrides?.dashboardEffectEvents !== undefined
+        ? { dashboardEffectEvents: overrides.dashboardEffectEvents }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.stageForceClearNonce !== undefined
+        ? { stageForceClearNonce: overrides.stageForceClearNonce }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.banSupportConfig !== undefined
         ? {
-            dashboardEffectEvents:
-              overrides?.dashboardEffectEvents ?? dashboardEffectEventsRef.current,
+            banSupportConfig: overrides.banSupportConfig,
+            banSupportUpdatedAtMs: banSupportUpdatedAtMsRef.current || nowMs,
           }
         : {}),
-      ...(overrides?.stageForceClearNonce !== undefined || resolvedForceClearNonce > 0
+      ...(hasAdminWritePrivilege && overrides?.supportFaqs !== undefined
         ? {
-            stageForceClearNonce: resolvedForceClearNonce,
+            supportFaqs: overrides.supportFaqs,
+            supportFaqsUpdatedAtMs: supportFaqsUpdatedAtMsRef.current || nowMs,
           }
         : {}),
-      banSupportConfig: overrides?.banSupportConfig ?? banSupportConfig,
-      banSupportUpdatedAtMs: banSupportUpdatedAtMsRef.current || nowMs,
-      supportFaqs: overrides?.supportFaqs ?? supportFaqs,
-      supportFaqsUpdatedAtMs: supportFaqsUpdatedAtMsRef.current || nowMs,
-      supportContactConfig: overrides?.supportContactConfig ?? supportContactConfig,
-      supportContactUpdatedAtMs: supportContactUpdatedAtMsRef.current || nowMs,
-      pockets: (overrides?.pockets ?? pockets).filter((p) => isNotBotAccountId(p.accountId)),
-      depositos: (overrides?.depositos ?? depositos).filter((d) => isNotBotAccountId(d.accountId)),
-      loans: (overrides?.loans ?? loans).filter((l) => isNotBotAccountId(l.accountId)),
-      scheduledPayments: (overrides?.scheduledPayments ?? scheduledPayments).filter((s) =>
-        isNotBotAccountId(s.accountId)
-      ),
-      favorites: (overrides?.favorites ?? favorites).filter((f) =>
-        isNotBotAccountNum(f.accountNumber)
-      ),
-      notifications: (overrides?.notifications ?? notifications).slice(0, 120),
-      chats: (overrides?.chats ?? chats)
-        .filter((c) => isNotBotAccountNum(c.senderAccount) && isNotBotAccountNum(c.recipientAccount))
-        .slice(0, 120),
-      cardUpgrades: (overrides?.cardUpgrades ?? cardUpgrades).filter((u) =>
-        isNotBotAccountId(u.accountId)
-      ),
-      pinResetRequests: (overrides?.pinResetRequests ?? pinResetRequests).filter((p) =>
-        isNotBotAccountId(p.accountId)
-      ),
-      redeemCodes: overrides?.redeemCodes ?? redeemCodesRef.current,
-      redeemCodesUpdatedAtMs: redeemCodesUpdatedAtMsRef.current || nowMs,
-      purchasedCodes: (overrides?.purchasedCodes ?? purchasedCodes).filter((v) =>
-        isNotBotAccountId(v.accountId)
-      ),
-      resiList: overrides?.resiList ?? resiList,
-      cardlessTokens: (overrides?.cardlessTokens ?? cardlessTokens).filter((c) =>
-        isNotBotAccountId(c.accountId)
-      ),
-      spinWheelConfig: overrides?.spinWheelConfig ?? spinWheelConfigRef.current,
-      spinHistory: (overrides?.spinHistory ?? spinHistory).slice(0, 80),
-      diamondConfig: overrides?.diamondConfig ?? diamondConfigRef.current,
-      uiVisibilityConfig: overrides?.uiVisibilityConfig ?? uiVisibilityConfigRef.current,
-      adminWarnings: overrides?.adminWarnings ?? adminWarningsRef.current,
-      bugRewardConfig: overrides?.bugRewardConfig ?? bugRewardConfigRef.current,
-      qrisOrders: (overrides?.qrisOrders ?? qrisOrdersRef.current).slice(0, 120),
-      familyConfig: overrides?.familyConfig ?? familyConfigRef.current,
-      families: (overrides?.families ?? familiesRef.current).slice(0, 150),
-      missions: (overrides?.missions ?? missionsRef.current).slice(0, 120),
-      missionConfig: overrides?.missionConfig ?? missionConfigRef.current,
-      missionProgressByAccount:
-        overrides?.missionProgressByAccount ?? missionProgressByAccountRef.current,
-      missionClaimLogs: (overrides?.missionClaimLogs ?? missionClaimLogsRef.current).slice(0, 200),
-      leaderboardConfig: overrides?.leaderboardConfig ?? leaderboardConfigRef.current,
-      adminTierNotificationConfig:
-        overrides?.adminTierNotificationConfig ?? adminTierNotificationConfigRef.current,
-      sultanEmpireConfig: overrides?.sultanEmpireConfig ?? sultanEmpireConfigRef.current,
-      featureConfigs: overrides?.featureConfigs ?? rawFeatureConfigsRef.current,
-      deletedFeatureIds: overrides?.deletedFeatureIds ?? deletedFeatureIdsRef.current,
-      userSettings: overrides?.userSettings ?? userSettingsRef.current,
-      goldMarketConfig: overrides?.goldMarketConfig ?? goldMarketConfigRef.current,
-      budgetCategories: overrides?.budgetCategories ?? budgetCategories,
-      manualExpenses: overrides?.manualExpenses ?? manualExpenses,
-      budgetTxCategoryMap: overrides?.budgetTxCategoryMap ?? budgetTxCategoryMap,
-      budgetAlertHistory: overrides?.budgetAlertHistory ?? budgetAlertHistory,
-      appUpdates: overrides?.appUpdates ?? appUpdates,
-      devRoles: overrides?.devRoles ?? devRolesRef.current,
-      ...(shouldIncludeSealSlice
+      ...(hasAdminWritePrivilege && overrides?.supportContactConfig !== undefined
         ? {
-            defaultLetterSealConfig:
-              overrides?.defaultLetterSealConfig ?? defaultLetterSealConfigRef.current,
+            supportContactConfig: overrides.supportContactConfig,
+            supportContactUpdatedAtMs: supportContactUpdatedAtMsRef.current || nowMs,
+          }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.redeemCodes !== undefined
+        ? {
+            redeemCodes: overrides.redeemCodes,
+            redeemCodesUpdatedAtMs: redeemCodesUpdatedAtMsRef.current || nowMs,
+          }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.spinWheelConfig !== undefined
+        ? { spinWheelConfig: overrides.spinWheelConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.diamondConfig !== undefined
+        ? { diamondConfig: overrides.diamondConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.uiVisibilityConfig !== undefined
+        ? { uiVisibilityConfig: overrides.uiVisibilityConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.adminWarnings !== undefined
+        ? { adminWarnings: overrides.adminWarnings }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.bugRewardConfig !== undefined
+        ? { bugRewardConfig: overrides.bugRewardConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.familyConfig !== undefined
+        ? { familyConfig: overrides.familyConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.missions !== undefined
+        ? { missions: overrides.missions.slice(0, 120) }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.missionConfig !== undefined
+        ? { missionConfig: overrides.missionConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.leaderboardConfig !== undefined
+        ? { leaderboardConfig: overrides.leaderboardConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.adminTierNotificationConfig !== undefined
+        ? { adminTierNotificationConfig: overrides.adminTierNotificationConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.liveActivityDetectorConfig !== undefined
+        ? { liveActivityDetectorConfig: overrides.liveActivityDetectorConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.sultanEmpireConfig !== undefined
+        ? { sultanEmpireConfig: overrides.sultanEmpireConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.featureConfigs !== undefined
+        ? { featureConfigs: overrides.featureConfigs }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.deletedFeatureIds !== undefined
+        ? { deletedFeatureIds: overrides.deletedFeatureIds }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.goldMarketConfig !== undefined
+        ? { goldMarketConfig: overrides.goldMarketConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.appUpdates !== undefined
+        ? { appUpdates: overrides.appUpdates }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.devRoles !== undefined
+        ? { devRoles: overrides.devRoles }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.defaultLetterSealConfig !== undefined
+        ? {
+            defaultLetterSealConfig: overrides.defaultLetterSealConfig,
             letterSealUpdatedAtMs: letterSealUpdatedAtMsRef.current || nowMs,
           }
         : {}),
-      jobCoinBonusConfig: overrides?.jobCoinBonusConfig ?? jobCoinBonusConfigRef.current,
-      configUpdatedAtMsMap: { ...configUpdatedAtMsMapRef.current },
-      adminHelpRequests: overrides?.adminHelpRequests ?? adminHelpRequests,
-      websitePopups: (overrides?.websitePopups ?? websitePopups).slice(0, 40),
-      globalChats: (overrides?.globalChats ?? globalChats).slice(0, 100),
-      bugReports: (overrides?.bugReports ?? bugReports).slice(0, 60),
+      ...(hasAdminWritePrivilege && overrides?.jobCoinBonusConfig !== undefined
+        ? { jobCoinBonusConfig: overrides.jobCoinBonusConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.websitePopups !== undefined
+        ? { websitePopups: overrides.websitePopups.slice(0, 40) }
+        : {}),
+      ...(hasAdminWritePrivilege && hasAnyAdminOverride
+        ? {
+            configUpdatedAtMsMap: { ...configUpdatedAtMsMapRef.current },
+            adminConfigRevisionMap: {
+              ...adminConfigRevisionMapRef.current,
+              ...(overrides?.adminConfigRevisionMap || {}),
+            },
+            deletedAdminItemIds: {
+              ...deletedAdminItemIdsRef.current,
+              ...(overrides?.deletedAdminItemIds || {}),
+            },
+          }
+        : overrides?.deletedAdminItemIds
+        ? { deletedAdminItemIds: overrides.deletedAdminItemIds }
+        : {}),
       writerSessionId: clientSessionId,
       updatedAtMs: nowMs,
       updatedAt: new Date(nowMs).toISOString(),
@@ -4688,15 +5157,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       cloudOverride?: Record<string, any>;
       label?: string;
       skipServerGeneric?: boolean;
+      deletedIds?: string[];
+      collectionKey?: AdminDeletableCollectionKey;
     }
   ) => {
     const nowMs = Date.now();
     const nowIso = new Date(nowMs).toISOString();
     const wibLabel = formatWibClockLabel(nowMs);
+    const nextRev = (Number(adminConfigRevisionMapRef.current[key]) || 0) + 1;
+    adminConfigRevisionMapRef.current = {
+      ...adminConfigRevisionMapRef.current,
+      [key]: nextRev,
+    };
     configUpdatedAtMsMapRef.current = {
       ...configUpdatedAtMsMapRef.current,
       [key]: nowMs,
     };
+    let nextTombstones = deletedAdminItemIdsRef.current;
+    if (options?.collectionKey && Array.isArray(options.deletedIds) && options.deletedIds.length > 0) {
+      nextTombstones = recordDeletedAdminItemIds(options.collectionKey, options.deletedIds);
+    }
     setLastAdminSavedAtIso(nowIso);
     setAdminConfigSyncTelemetry({
       status: 'saved',
@@ -4705,7 +5185,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       lastConfigLabel: options?.label || key,
     });
     void saveAdminPersistentDataIdb({
+      forceAuthoritativeOverwrite: true,
       lastAdminSavedAtIso: nowIso,
+      adminConfigRevisionMap: { [key]: nextRev },
+      deletedAdminItemIds: nextTombstones as Record<string, string[]>,
       configs: {
         [key]: {
           value,
@@ -4719,20 +5202,40 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           wsRef.current.send(
             JSON.stringify({
               type: 'admin_config:sync',
-              payload: { key, value, updatedAtMs: nowMs },
+              payload: {
+                key,
+                value,
+                updatedAtMs: nowMs,
+                revision: nextRev,
+                deletedIds: options?.deletedIds,
+                collectionKey: options?.collectionKey,
+                deletedAdminItemIds: nextTombstones,
+              },
             })
           );
         }
         void fetch('/api/admin-config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key, value, updatedAtMs: nowMs }),
+          body: JSON.stringify({
+            key,
+            value,
+            updatedAtMs: nowMs,
+            revision: nextRev,
+            deletedIds: options?.deletedIds,
+            collectionKey: options?.collectionKey,
+            deletedAdminItemIds: nextTombstones,
+          }),
         });
       } catch {
         // ignore offline
       }
     }
-    flushMasterStateToCloud(options?.cloudOverride);
+    flushMasterStateToCloud({
+      ...(options?.cloudOverride || {}),
+      deletedAdminItemIds: nextTombstones,
+      adminConfigRevisionMap: { ...adminConfigRevisionMapRef.current },
+    });
   };
 
   const applyCloudUserDocSnapshot = (
@@ -9312,9 +9815,53 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setConnectedDevicesCount(Math.max(1, data.connectedDevices));
         }
 
+        // 0. Sinkronkan daftar ID terhapus permanen (Tombstone Anti-Zombie) terlebih dahulu!
+        if (data.deletedAdminItemIds && typeof data.deletedAdminItemIds === 'object') {
+          mergeDeletedAdminItemIds(data.deletedAdminItemIds as DeletedAdminItemIdsMap);
+        }
+
+        if (data.customerPresenceMap && typeof data.customerPresenceMap === 'object') {
+          setCustomerPresenceMap((prev) => ({
+            ...prev,
+            ...(data.customerPresenceMap as Record<string, CustomerPresenceRecord>),
+          }));
+        }
+
+        if (Array.isArray(data.liveActivityLogs) && data.liveActivityLogs.length > 0) {
+          setLiveActivityLogs((prev) => {
+            const byId = new Map<string, LiveSystemActivityLog>();
+            for (const item of data.liveActivityLogs as LiveSystemActivityLog[]) {
+              if (item?.id) byId.set(item.id, item);
+            }
+            for (const item of prev) {
+              if (item?.id && !byId.has(item.id)) byId.set(item.id, item);
+            }
+            return Array.from(byId.values())
+              .sort((a, b) => Date.parse(b.timestamp || '') - Date.parse(a.timestamp || ''))
+              .slice(0, 500);
+          });
+        }
+
+        if (Array.isArray(data.autoDetectedAnomalies) && data.autoDetectedAnomalies.length > 0) {
+          setAutoDetectedAnomalies((prev) => {
+            const byId = new Map<string, AutoDetectedAnomalyAlert>();
+            for (const item of data.autoDetectedAnomalies as AutoDetectedAnomalyAlert[]) {
+              if (item?.id) byId.set(item.id, item);
+            }
+            for (const item of prev) {
+              if (item?.id && !byId.has(item.id)) byId.set(item.id, item);
+            }
+            return Array.from(byId.values())
+              .sort((a, b) => Date.parse(b.detectedAt || '') - Date.parse(a.detectedAt || ''))
+              .slice(0, 120);
+          });
+        }
+
         if (Array.isArray(data.globalChats)) {
-          const incomingChats: GlobalChatMessage[] = data.globalChats;
-          // Check for any newly arrived chat message not seen before
+          const incomingChats: GlobalChatMessage[] = filterListByAdminTombstones(
+            'globalChats',
+            data.globalChats
+          );
           incomingChats.forEach((msg) => {
             if (!seenChatIdsRef.current.has(msg.id)) {
               handleIncomingGlobalChat(msg, null, !isInitial);
@@ -9324,7 +9871,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         if (Array.isArray(data.websitePopups)) {
-          const incomingPopups: WebsiteSystemPopupNotification[] = data.websitePopups;
+          const incomingPopups: WebsiteSystemPopupNotification[] = filterListByAdminTombstones(
+            'websitePopups',
+            data.websitePopups
+          );
           incomingPopups.forEach((p) => {
             if (!seenPopupIdsRef.current.has(p.id)) {
               handleIncomingPopup(p, !isInitial);
@@ -9333,13 +9883,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
 
         if (Array.isArray(data.bugReports)) {
-          setBugReports(data.bugReports);
+          setBugReports(filterListByAdminTombstones('bugReports', data.bugReports));
         }
 
         const srvTsMap: Record<string, number> =
           data.configUpdatedAtMsMap && typeof data.configUpdatedAtMsMap === 'object'
             ? (data.configUpdatedAtMsMap as Record<string, number>)
             : {};
+        const srvRevMap: Record<string, number> =
+          data.adminConfigRevisionMap && typeof data.adminConfigRevisionMap === 'object'
+            ? (data.adminConfigRevisionMap as Record<string, number>)
+            : {};
+        const getSrvRev = (k: string): number => Number(srvRevMap[k]) || 0;
 
         if (data.diamondConfig && typeof data.diamondConfig === 'object') {
           const incD = data.diamondConfig as Partial<DiamondSystemConfig>;
@@ -9360,21 +9915,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             },
           };
           const incDTs = Number(srvTsMap.diamondConfig) || 0;
-          if (acceptIncomingAdminConfig('diamondConfig', incDTs, mergedD, diamondConfigRef.current)) {
+          if (
+            acceptIncomingAdminConfig(
+              'diamondConfig',
+              incDTs,
+              mergedD,
+              diamondConfigRef.current,
+              getSrvRev('diamondConfig')
+            )
+          ) {
             diamondConfigRef.current = mergedD;
             setDiamondConfig(mergedD);
-          } else if (
-            isInitial &&
-            (configUpdatedAtMsMapRef.current.diamondConfig || 0) > incDTs
-          ) {
-            void fetch('/api/diamond-config', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                diamondConfig: diamondConfigRef.current,
-                updatedAtMs: configUpdatedAtMsMapRef.current.diamondConfig,
-              }),
-            }).catch(() => {});
           }
         }
 
@@ -9394,51 +9945,32 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               'uiVisibilityConfig',
               incVisTs,
               mergedVis,
-              uiVisibilityConfigRef.current
+              uiVisibilityConfigRef.current,
+              getSrvRev('uiVisibilityConfig')
             )
           ) {
             uiVisibilityConfigRef.current = mergedVis;
             setUiVisibilityConfig(mergedVis);
-          } else if (
-            isInitial &&
-            (configUpdatedAtMsMapRef.current.uiVisibilityConfig || 0) > incVisTs
-          ) {
-            void fetch('/api/ui-visibility', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                uiVisibilityConfig: uiVisibilityConfigRef.current,
-                updatedAtMs: configUpdatedAtMsMapRef.current.uiVisibilityConfig,
-              }),
-            }).catch(() => {});
           }
         }
 
         if (Array.isArray(data.adminWarnings)) {
-          const incomingWarnings = data.adminWarnings as AdminSystemWarning[];
+          const incomingWarnings = filterListByAdminTombstones(
+            'adminWarnings',
+            data.adminWarnings as AdminSystemWarning[]
+          );
           const incWarnTs = Number(srvTsMap.adminWarnings) || 0;
           if (
             acceptIncomingAdminConfig(
               'adminWarnings',
               incWarnTs,
               incomingWarnings,
-              adminWarningsRef.current
+              adminWarningsRef.current,
+              getSrvRev('adminWarnings')
             )
           ) {
             adminWarningsRef.current = incomingWarnings;
             setAdminWarnings(incomingWarnings);
-          } else if (
-            isInitial &&
-            (configUpdatedAtMsMapRef.current.adminWarnings || 0) > incWarnTs
-          ) {
-            void fetch('/api/admin-warnings', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                adminWarnings: adminWarningsRef.current,
-                updatedAtMs: configUpdatedAtMsMapRef.current.adminWarnings,
-              }),
-            }).catch(() => {});
           }
         }
 
@@ -9453,23 +9985,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               'bugRewardConfig',
               incBugTs,
               mergedBugCfg,
-              bugRewardConfigRef.current
+              bugRewardConfigRef.current,
+              getSrvRev('bugRewardConfig')
             )
           ) {
             bugRewardConfigRef.current = mergedBugCfg;
             setBugRewardConfig(mergedBugCfg);
-          } else if (
-            isInitial &&
-            (configUpdatedAtMsMapRef.current.bugRewardConfig || 0) > incBugTs
-          ) {
-            void fetch('/api/bug-reward-config', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                bugRewardConfig: bugRewardConfigRef.current,
-                updatedAtMs: configUpdatedAtMsMapRef.current.bugRewardConfig,
-              }),
-            }).catch(() => {});
           }
         }
 
@@ -9480,23 +10001,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             currentVal: T,
             applyFn: (v: T) => void
           ) => {
-            if (srvCfgs[key] === undefined) {
-              if (isInitial && (configUpdatedAtMsMapRef.current[key] || 0) > 0) {
-                void fetch('/api/admin-config', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    key,
-                    value: currentVal,
-                    updatedAtMs: configUpdatedAtMsMapRef.current[key],
-                  }),
-                }).catch(() => {});
-              }
-              return;
-            }
+            if (srvCfgs[key] === undefined) return;
             const incTs = Number(srvTsMap[key]) || 0;
             const incVal = srvCfgs[key] as T;
-            if (acceptIncomingAdminConfig(key, incTs, incVal, currentVal)) {
+            if (acceptIncomingAdminConfig(key, incTs, incVal, currentVal, getSrvRev(key))) {
               applyFn(incVal);
             }
           };
@@ -9537,8 +10045,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
           applyGenericFromSrv('devRoles', devRolesRef.current, (v) => {
             if (Array.isArray(v) && v.length > 0) {
-              devRolesRef.current = v;
-              setDevRoles(v);
+              const clean = filterListByAdminTombstones('devRoles', v as DevRoleConfig[]);
+              if (clean.length > 0) {
+                devRolesRef.current = clean;
+                setDevRoles(clean);
+              }
             }
           });
           applyGenericFromSrv('featureConfigs', rawFeatureConfigsRef.current, (v) => {
@@ -9547,10 +10058,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               setFeatureConfigs(v);
             }
           });
+          applyGenericFromSrv('deletedFeatureIds', deletedFeatureIdsRef.current, (v) => {
+            if (Array.isArray(v)) {
+              deletedFeatureIdsRef.current = v as string[];
+              setDeletedFeatureIds(v as string[]);
+            }
+          });
           applyGenericFromSrv('missions', missionsRef.current, (v) => {
             if (Array.isArray(v)) {
-              missionsRef.current = v;
-              setMissions(v);
+              const clean = filterListByAdminTombstones('missions', v as AppMissionDefinition[]);
+              missionsRef.current = clean;
+              setMissions(clean);
             }
           });
           applyGenericFromSrv('missionConfig', missionConfigRef.current, (v) => {
@@ -9575,6 +10093,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               setLeaderboardConfig(next);
             }
           });
+          applyGenericFromSrv('liveActivityDetectorConfig', liveActivityDetectorConfigRef.current, (v) => {
+            if (v && typeof v === 'object') {
+              const inc = v as Partial<LiveActivityDetectorConfig>;
+              const next: LiveActivityDetectorConfig = {
+                ...DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG,
+                ...inc,
+                rulesEnabled: {
+                  ...DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.rulesEnabled,
+                  ...(inc.rulesEnabled || {}),
+                },
+                ruleThresholds: {
+                  ...(DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.ruleThresholds || {}),
+                  ...(inc.ruleThresholds || {}),
+                },
+                ruleWindowMinutes: {
+                  ...(DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.ruleWindowMinutes || {}),
+                  ...(inc.ruleWindowMinutes || {}),
+                },
+              };
+              liveActivityDetectorConfigRef.current = next;
+              setLiveActivityDetectorConfig(next);
+            }
+          });
         }
 
         if (Array.isArray(data.deletedGiftEventIds)) {
@@ -9587,7 +10128,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         const serverGiftTs = Number(data.giftEventsUpdatedAtMs) || 0;
         if (Boolean(data.giftEventsInitialized) && Array.isArray(data.giftEvents)) {
-          if (serverGiftTs > giftEventsUpdatedAtMsRef.current) {
+          if (serverGiftTs >= giftEventsUpdatedAtMsRef.current) {
             const deletedSet = new Set([
               ...deletedGiftEventIdsRef.current,
               ...(Array.isArray(data.deletedGiftEventIds) ? data.deletedGiftEventIds : []),
@@ -9608,25 +10149,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               giftEventsInitialized: true,
               giftEventsUpdatedAtMs: serverGiftTs,
             });
-          } else if (
-            hasLoadedGiftRegistryRef.current &&
-            giftEventsUpdatedAtMsRef.current > serverGiftTs
-          ) {
-            syncGiftEventsToServer(
-              giftEventsRef.current,
-              deletedGiftEventIdsRef.current,
-              giftEventsUpdatedAtMsRef.current
-            );
           }
-        } else if (
-          hasLoadedGiftRegistryRef.current &&
-          giftEventsUpdatedAtMsRef.current > 0
-        ) {
-          syncGiftEventsToServer(
-            giftEventsRef.current,
-            deletedGiftEventIdsRef.current,
-            giftEventsUpdatedAtMsRef.current
-          );
         }
 
         if (Array.isArray(data.pushAlerts)) {
@@ -9689,30 +10212,75 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
+            if (msg.payload?.deletedAdminItemIds && typeof msg.payload.deletedAdminItemIds === 'object') {
+              mergeDeletedAdminItemIds(msg.payload.deletedAdminItemIds as DeletedAdminItemIdsMap);
+            }
             if (msg.type === 'init' && msg.payload) {
-              if (Array.isArray(msg.payload.globalChats)) {
-                msg.payload.globalChats.forEach((c: GlobalChatMessage) => seenChatIdsRef.current.add(c.id));
-                setGlobalChats(msg.payload.globalChats);
+              if (msg.payload.customerPresenceMap && typeof msg.payload.customerPresenceMap === 'object') {
+                setCustomerPresenceMap((prev) => ({
+                  ...prev,
+                  ...(msg.payload.customerPresenceMap as Record<string, CustomerPresenceRecord>),
+                }));
               }
-              if (Array.isArray(msg.payload.websitePopups)) {
-                msg.payload.websitePopups.forEach((p: WebsiteSystemPopupNotification) =>
-                  seenPopupIdsRef.current.add(p.id)
-                );
-                setWebsitePopups((prev) => {
-                  const existingIds = new Set(prev.map((x) => x.id));
-                  const added = msg.payload.websitePopups.filter(
-                    (x: WebsiteSystemPopupNotification) => !existingIds.has(x.id)
-                  );
-                  return [...added, ...prev];
+              if (Array.isArray(msg.payload.liveActivityLogs) && msg.payload.liveActivityLogs.length > 0) {
+                setLiveActivityLogs((prev) => {
+                  const byId = new Map<string, LiveSystemActivityLog>();
+                  for (const item of msg.payload.liveActivityLogs as LiveSystemActivityLog[]) {
+                    if (item?.id) byId.set(item.id, item);
+                  }
+                  for (const item of prev) {
+                    if (item?.id && !byId.has(item.id)) byId.set(item.id, item);
+                  }
+                  return Array.from(byId.values())
+                    .sort((a, b) => Date.parse(b.timestamp || '') - Date.parse(a.timestamp || ''))
+                    .slice(0, 500);
                 });
               }
+              if (Array.isArray(msg.payload.autoDetectedAnomalies) && msg.payload.autoDetectedAnomalies.length > 0) {
+                setAutoDetectedAnomalies((prev) => {
+                  const byId = new Map<string, AutoDetectedAnomalyAlert>();
+                  for (const item of msg.payload.autoDetectedAnomalies as AutoDetectedAnomalyAlert[]) {
+                    if (item?.id) byId.set(item.id, item);
+                  }
+                  for (const item of prev) {
+                    if (item?.id && !byId.has(item.id)) byId.set(item.id, item);
+                  }
+                  return Array.from(byId.values())
+                    .sort((a, b) => Date.parse(b.detectedAt || '') - Date.parse(a.detectedAt || ''))
+                    .slice(0, 120);
+                });
+              }
+              if (Array.isArray(msg.payload.globalChats)) {
+                const cleanChats = filterListByAdminTombstones(
+                  'globalChats',
+                  msg.payload.globalChats as GlobalChatMessage[]
+                );
+                cleanChats.forEach((c) => seenChatIdsRef.current.add(c.id));
+                setGlobalChats(cleanChats);
+              }
+              if (Array.isArray(msg.payload.websitePopups)) {
+                const cleanPopups = filterListByAdminTombstones(
+                  'websitePopups',
+                  msg.payload.websitePopups as WebsiteSystemPopupNotification[]
+                );
+                cleanPopups.forEach((p) => seenPopupIdsRef.current.add(p.id));
+                setWebsitePopups(cleanPopups);
+              }
               if (Array.isArray(msg.payload.bugReports)) {
-                setBugReports(msg.payload.bugReports);
+                setBugReports(
+                  filterListByAdminTombstones('bugReports', msg.payload.bugReports as BugReportRecord[])
+                );
               }
               const initTsMap: Record<string, number> =
                 msg.payload.configUpdatedAtMsMap && typeof msg.payload.configUpdatedAtMsMap === 'object'
                   ? (msg.payload.configUpdatedAtMsMap as Record<string, number>)
                   : {};
+              const initRevMap: Record<string, number> =
+                msg.payload.adminConfigRevisionMap && typeof msg.payload.adminConfigRevisionMap === 'object'
+                  ? (msg.payload.adminConfigRevisionMap as Record<string, number>)
+                  : {};
+              const getInitRev = (k: string): number => Number(initRevMap[k]) || 0;
+
               if (msg.payload.diamondConfig && typeof msg.payload.diamondConfig === 'object') {
                 const incD = msg.payload.diamondConfig as Partial<DiamondSystemConfig>;
                 const mergedD: DiamondSystemConfig = {
@@ -9736,7 +10304,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     'diamondConfig',
                     Number(initTsMap.diamondConfig) || 0,
                     mergedD,
-                    diamondConfigRef.current
+                    diamondConfigRef.current,
+                    getInitRev('diamondConfig')
                   )
                 ) {
                   diamondConfigRef.current = mergedD;
@@ -9758,7 +10327,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     'uiVisibilityConfig',
                     Number(initTsMap.uiVisibilityConfig) || 0,
                     mergedVis,
-                    uiVisibilityConfigRef.current
+                    uiVisibilityConfigRef.current,
+                    getInitRev('uiVisibilityConfig')
                   )
                 ) {
                   uiVisibilityConfigRef.current = mergedVis;
@@ -9766,13 +10336,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 }
               }
               if (Array.isArray(msg.payload.adminWarnings)) {
-                const incomingWarnings = msg.payload.adminWarnings as AdminSystemWarning[];
+                const incomingWarnings = filterListByAdminTombstones(
+                  'adminWarnings',
+                  msg.payload.adminWarnings as AdminSystemWarning[]
+                );
                 if (
                   acceptIncomingAdminConfig(
                     'adminWarnings',
                     Number(initTsMap.adminWarnings) || 0,
                     incomingWarnings,
-                    adminWarningsRef.current
+                    adminWarningsRef.current,
+                    getInitRev('adminWarnings')
                   )
                 ) {
                   adminWarningsRef.current = incomingWarnings;
@@ -9789,7 +10363,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     'bugRewardConfig',
                     Number(initTsMap.bugRewardConfig) || 0,
                     mergedBugCfg,
-                    bugRewardConfigRef.current
+                    bugRewardConfigRef.current,
+                    getInitRev('bugRewardConfig')
                   )
                 ) {
                   bugRewardConfigRef.current = mergedBugCfg;
@@ -9806,7 +10381,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 Boolean(msg.payload.giftEventsInitialized) &&
                 Array.isArray(msg.payload.giftEvents)
               ) {
-                if (initGiftTs > giftEventsUpdatedAtMsRef.current) {
+                if (initGiftTs >= giftEventsUpdatedAtMsRef.current) {
                   const deletedSet = new Set([
                     ...deletedGiftEventIdsRef.current,
                     ...(Array.isArray(msg.payload.deletedGiftEventIds)
@@ -9823,15 +10398,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   setGiftEventsInitialized(true);
                   giftEventsRef.current = nextGifts;
                   setGiftEvents(nextGifts);
-                } else if (
-                  hasLoadedGiftRegistryRef.current &&
-                  giftEventsUpdatedAtMsRef.current > initGiftTs
-                ) {
-                  syncGiftEventsToServer(
-                    giftEventsRef.current,
-                    deletedGiftEventIdsRef.current,
-                    giftEventsUpdatedAtMsRef.current
-                  );
                 }
               }
               if (Array.isArray(msg.payload.pushAlerts)) {
@@ -9840,6 +10406,27 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               if (typeof msg.payload.connectedDevices === 'number') {
                 setConnectedDevicesCount(Math.max(1, msg.payload.connectedDevices));
               }
+            } else if (msg.type === 'presence:updated' && msg.payload?.record?.accountId) {
+              const rec = msg.payload.record as CustomerPresenceRecord;
+              setCustomerPresenceMap((prev) => ({
+                ...prev,
+                [rec.accountId]: rec,
+              }));
+            } else if (msg.type === 'live_activity:new' && msg.payload?.entry?.id) {
+              const incEntry = msg.payload.entry as LiveSystemActivityLog;
+              setLiveActivityLogs((prev) => {
+                if (prev.some((x) => x.id === incEntry.id)) return prev;
+                return [incEntry, ...prev].slice(0, 500);
+              });
+            } else if (msg.type === 'anomaly:updated' && msg.payload?.alert?.id) {
+              const incAlert = msg.payload.alert as AutoDetectedAnomalyAlert;
+              setAutoDetectedAnomalies((prev) => {
+                const exists = prev.some((x) => x.id === incAlert.id);
+                if (exists) {
+                  return prev.map((x) => (x.id === incAlert.id ? incAlert : x));
+                }
+                return [incAlert, ...prev].slice(0, 120);
+              });
             } else if (msg.type === 'diamond_config:updated' && msg.payload?.diamondConfig) {
               const incD = msg.payload.diamondConfig as Partial<DiamondSystemConfig>;
               const mergedD: DiamondSystemConfig = {
@@ -9859,7 +10446,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 },
               };
               const ts = Number(msg.payload?.updatedAtMs) || Date.now();
-              if (acceptIncomingAdminConfig('diamondConfig', ts, mergedD, diamondConfigRef.current)) {
+              const rev = Number(msg.payload?.revision) || 0;
+              if (acceptIncomingAdminConfig('diamondConfig', ts, mergedD, diamondConfigRef.current, rev)) {
                 diamondConfigRef.current = mergedD;
                 setDiamondConfig(mergedD);
               }
@@ -9874,26 +10462,33 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 },
               };
               const ts = Number(msg.payload?.updatedAtMs) || Date.now();
+              const rev = Number(msg.payload?.revision) || 0;
               if (
                 acceptIncomingAdminConfig(
                   'uiVisibilityConfig',
                   ts,
                   mergedVis,
-                  uiVisibilityConfigRef.current
+                  uiVisibilityConfigRef.current,
+                  rev
                 )
               ) {
                 uiVisibilityConfigRef.current = mergedVis;
                 setUiVisibilityConfig(mergedVis);
               }
             } else if (msg.type === 'admin_warnings:updated' && Array.isArray(msg.payload?.adminWarnings)) {
-              const incomingWarnings = msg.payload.adminWarnings as AdminSystemWarning[];
+              const incomingWarnings = filterListByAdminTombstones(
+                'adminWarnings',
+                msg.payload.adminWarnings as AdminSystemWarning[]
+              );
               const ts = Number(msg.payload?.updatedAtMs) || Date.now();
+              const rev = Number(msg.payload?.revision) || 0;
               if (
                 acceptIncomingAdminConfig(
                   'adminWarnings',
                   ts,
                   incomingWarnings,
-                  adminWarningsRef.current
+                  adminWarningsRef.current,
+                  rev
                 )
               ) {
                 adminWarningsRef.current = incomingWarnings;
@@ -9905,12 +10500,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 ...(msg.payload.bugRewardConfig as Partial<BugRewardProgramConfig>),
               };
               const ts = Number(msg.payload?.updatedAtMs) || Date.now();
+              const rev = Number(msg.payload?.revision) || 0;
               if (
                 acceptIncomingAdminConfig(
                   'bugRewardConfig',
                   ts,
                   mergedBugCfg,
-                  bugRewardConfigRef.current
+                  bugRewardConfigRef.current,
+                  rev
                 )
               ) {
                 bugRewardConfigRef.current = mergedBugCfg;
@@ -9920,54 +10517,62 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const cfgKey = String(msg.payload.key);
               const incVal = msg.payload.value;
               const incTs = Number(msg.payload.updatedAtMs) || Date.now();
+              const incRev = Number(msg.payload.revision) || 0;
               if (cfgKey === 'spinWheelConfig' && incVal && typeof incVal === 'object') {
                 const next = { ...INITIAL_SPIN_WHEEL_CONFIG, ...(incVal as Partial<SpinWheelAdminConfig>) };
-                if (acceptIncomingAdminConfig(cfgKey, incTs, next, spinWheelConfigRef.current)) {
+                if (acceptIncomingAdminConfig(cfgKey, incTs, next, spinWheelConfigRef.current, incRev)) {
                   spinWheelConfigRef.current = next;
                   setSpinWheelConfig(next);
                 }
               } else if (cfgKey === 'goldMarketConfig' && incVal && typeof incVal === 'object') {
                 const next = { ...createInitialGoldMarketConfig(), ...(incVal as Partial<GoldAndTransferMarketConfig>) };
-                if (acceptIncomingAdminConfig(cfgKey, incTs, next, goldMarketConfigRef.current)) {
+                if (acceptIncomingAdminConfig(cfgKey, incTs, next, goldMarketConfigRef.current, incRev)) {
                   goldMarketConfigRef.current = next;
                   setGoldMarketConfig(next);
                 }
               } else if (cfgKey === 'sultanEmpireConfig' && incVal && typeof incVal === 'object') {
                 const next = { ...INITIAL_SULTAN_EMPIRE_CONFIG, ...(incVal as Partial<SultanEmpireAdminConfig>) };
-                if (acceptIncomingAdminConfig(cfgKey, incTs, next, sultanEmpireConfigRef.current)) {
+                if (acceptIncomingAdminConfig(cfgKey, incTs, next, sultanEmpireConfigRef.current, incRev)) {
                   sultanEmpireConfigRef.current = next;
                   setSultanEmpireConfig(next);
                 }
               } else if (cfgKey === 'familyConfig' && incVal && typeof incVal === 'object') {
                 const next = { ...DEFAULT_FAMILY_SYSTEM_CONFIG, ...(incVal as Partial<FamilySystemConfig>) };
-                if (acceptIncomingAdminConfig(cfgKey, incTs, next, familyConfigRef.current)) {
+                if (acceptIncomingAdminConfig(cfgKey, incTs, next, familyConfigRef.current, incRev)) {
                   familyConfigRef.current = next;
                   setFamilyConfig(next);
                 }
               } else if (cfgKey === 'jobCoinBonusConfig' && incVal && typeof incVal === 'object') {
                 const next = { ...DEFAULT_JOB_COIN_BONUS_CONFIG, ...(incVal as Partial<JobCoinBonusConfig>) };
-                if (acceptIncomingAdminConfig(cfgKey, incTs, next, jobCoinBonusConfigRef.current)) {
+                if (acceptIncomingAdminConfig(cfgKey, incTs, next, jobCoinBonusConfigRef.current, incRev)) {
                   jobCoinBonusConfigRef.current = next;
                   setJobCoinBonusConfig(next);
                 }
               } else if (cfgKey === 'devRoles' && Array.isArray(incVal) && incVal.length > 0) {
-                if (acceptIncomingAdminConfig(cfgKey, incTs, incVal, devRolesRef.current)) {
-                  devRolesRef.current = incVal;
-                  setDevRoles(incVal);
+                const cleanRoles = filterListByAdminTombstones('devRoles', incVal as DevRoleConfig[]);
+                if (cleanRoles.length > 0 && acceptIncomingAdminConfig(cfgKey, incTs, cleanRoles, devRolesRef.current, incRev)) {
+                  devRolesRef.current = cleanRoles;
+                  setDevRoles(cleanRoles);
                 }
               } else if (cfgKey === 'featureConfigs' && Array.isArray(incVal)) {
-                if (acceptIncomingAdminConfig(cfgKey, incTs, incVal, rawFeatureConfigsRef.current)) {
+                if (acceptIncomingAdminConfig(cfgKey, incTs, incVal, rawFeatureConfigsRef.current, incRev)) {
                   rawFeatureConfigsRef.current = incVal;
                   setFeatureConfigs(incVal);
                 }
+              } else if (cfgKey === 'deletedFeatureIds' && Array.isArray(incVal)) {
+                if (acceptIncomingAdminConfig(cfgKey, incTs, incVal, deletedFeatureIdsRef.current, incRev)) {
+                  deletedFeatureIdsRef.current = incVal as string[];
+                  setDeletedFeatureIds(incVal as string[]);
+                }
               } else if (cfgKey === 'missions' && Array.isArray(incVal)) {
-                if (acceptIncomingAdminConfig(cfgKey, incTs, incVal, missionsRef.current)) {
-                  missionsRef.current = incVal;
-                  setMissions(incVal);
+                const cleanMissions = filterListByAdminTombstones('missions', incVal as AppMissionDefinition[]);
+                if (acceptIncomingAdminConfig(cfgKey, incTs, cleanMissions, missionsRef.current, incRev)) {
+                  missionsRef.current = cleanMissions;
+                  setMissions(cleanMissions);
                 }
               } else if (cfgKey === 'missionConfig' && incVal && typeof incVal === 'object') {
                 const next = { ...DEFAULT_MISSION_SYSTEM_CONFIG, ...(incVal as Partial<MissionSystemConfig>) };
-                if (acceptIncomingAdminConfig(cfgKey, incTs, next, missionConfigRef.current)) {
+                if (acceptIncomingAdminConfig(cfgKey, incTs, next, missionConfigRef.current, incRev)) {
                   missionConfigRef.current = next;
                   setMissionConfig(next);
                 }
@@ -9981,7 +10586,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                       ? inc.categories
                       : DEFAULT_LEADERBOARD_SYSTEM_CONFIG.categories,
                 };
-                if (acceptIncomingAdminConfig(cfgKey, incTs, next, leaderboardConfigRef.current)) {
+                if (acceptIncomingAdminConfig(cfgKey, incTs, next, leaderboardConfigRef.current, incRev)) {
                   leaderboardConfigRef.current = next;
                   setLeaderboardConfig(next);
                 }
@@ -10000,11 +10605,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     cfgKey,
                     incTs,
                     next,
-                    adminTierNotificationConfigRef.current
+                    adminTierNotificationConfigRef.current,
+                    incRev
                   )
                 ) {
                   adminTierNotificationConfigRef.current = next;
                   setAdminTierNotificationConfig(next);
+                }
+              } else if (cfgKey === 'liveActivityDetectorConfig' && incVal && typeof incVal === 'object') {
+                const inc = incVal as Partial<LiveActivityDetectorConfig>;
+                const next: LiveActivityDetectorConfig = {
+                  ...DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG,
+                  ...inc,
+                  rulesEnabled: {
+                    ...DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.rulesEnabled,
+                    ...(inc.rulesEnabled || {}),
+                  },
+                  ruleThresholds: {
+                    ...(DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.ruleThresholds || {}),
+                    ...(inc.ruleThresholds || {}),
+                  },
+                  ruleWindowMinutes: {
+                    ...(DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG.ruleWindowMinutes || {}),
+                    ...(inc.ruleWindowMinutes || {}),
+                  },
+                };
+                if (
+                  acceptIncomingAdminConfig(
+                    cfgKey,
+                    incTs,
+                    next,
+                    liveActivityDetectorConfigRef.current,
+                    incRev
+                  )
+                ) {
+                  liveActivityDetectorConfigRef.current = next;
+                  setLiveActivityDetectorConfig(next);
                 }
               }
             } else if (
@@ -10040,9 +10676,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             } else if (msg.type === 'global_chat:new' && msg.payload?.message) {
               handleIncomingGlobalChat(msg.payload.message, msg.payload.popup, true);
             } else if (msg.type === 'global_chat:delete' && msg.payload?.id) {
+              recordDeletedAdminItemIds('globalChats', [String(msg.payload.id)]);
               setGlobalChats((prev) => prev.filter((m) => m.id !== msg.payload.id));
             } else if (msg.type === 'global_chat:clear') {
-              setGlobalChats([]);
+              setGlobalChats((prev) => {
+                recordDeletedAdminItemIds('globalChats', prev.map((m) => m.id));
+                return [];
+              });
             } else if (msg.type === 'website_popup:new' && msg.payload?.popup) {
               handleIncomingPopup(msg.payload.popup, true);
             } else if (msg.type === 'push_alert:new' && msg.payload?.alert) {
@@ -10096,9 +10736,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const updatedBug: BugReportRecord = msg.payload.bugReport;
               setBugReports((prev) => prev.map((b) => (b.id === updatedBug.id ? updatedBug : b)));
             } else if (msg.type === 'bug_report:deleted' && msg.payload?.id) {
+              recordDeletedAdminItemIds('bugReports', [String(msg.payload.id)]);
               setBugReports((prev) => prev.filter((b) => b.id !== msg.payload.id));
             } else if (msg.type === 'bug_report:clear') {
-              setBugReports([]);
+              setBugReports((prev) => {
+                recordDeletedAdminItemIds('bugReports', prev.map((b) => b.id));
+                return [];
+              });
             } else if (msg.type === 'qris_payment:paid' && msg.payload?.order?.orderId) {
               const paidOrderId = String(msg.payload.order.orderId);
               const providerRef = msg.payload.order.providerReference
@@ -10234,14 +10878,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteGlobalChatMessage = async (id: string) => {
-    setGlobalChats((prev) => prev.filter((m) => m.id !== id));
+    const nextTombstones = recordDeletedAdminItemIds('globalChats', [id]);
+    const nextList = globalChats.filter((m) => m.id !== id);
+    setGlobalChats(nextList);
+    flushMasterStateToCloud({ globalChats: nextList, deletedAdminItemIds: nextTombstones });
     try {
       await fetch(`/api/global-chat/${id}`, { method: 'DELETE' });
     } catch { /* empty */ }
   };
 
   const clearGlobalChatMessages = async () => {
+    const allIds = globalChats.map((m) => m.id);
+    const nextTombstones = recordDeletedAdminItemIds('globalChats', allIds);
     setGlobalChats([]);
+    flushMasterStateToCloud({ globalChats: [], deletedAdminItemIds: nextTombstones });
     try {
       await fetch('/api/global-chat/clear', { method: 'POST' });
     } catch { /* empty */ }
@@ -10758,25 +11408,51 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { success: true, message: 'Semua tab & fitur telah ditampilkan kembali.' };
   };
 
-  const syncAdminWarningsToServer = (nextList: AdminSystemWarning[]) => {
-    adminWarningsRef.current = nextList;
-    setAdminWarnings(nextList);
-    persistAdminConfigChange('adminWarnings', nextList, {
-      cloudOverride: { adminWarnings: nextList },
+  const syncAdminWarningsToServer = (
+    nextList: AdminSystemWarning[],
+    deletedIds?: string[]
+  ) => {
+    const nextTombstones =
+      Array.isArray(deletedIds) && deletedIds.length > 0
+        ? recordDeletedAdminItemIds('adminWarnings', deletedIds)
+        : deletedAdminItemIdsRef.current;
+    const filteredList = filterListByAdminTombstones('adminWarnings', nextList);
+    adminWarningsRef.current = filteredList;
+    setAdminWarnings(filteredList);
+    persistAdminConfigChange('adminWarnings', filteredList, {
+      cloudOverride: { adminWarnings: filteredList },
       label: 'Peringatan Sistem',
       skipServerGeneric: true,
+      deletedIds,
+      collectionKey: deletedIds && deletedIds.length > 0 ? 'adminWarnings' : undefined,
     });
     const ts = configUpdatedAtMsMapRef.current.adminWarnings || Date.now();
+    const rev = adminConfigRevisionMapRef.current.adminWarnings || 1;
     try {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(
-          JSON.stringify({ type: 'admin_warnings:sync', payload: { adminWarnings: nextList, updatedAtMs: ts } })
+          JSON.stringify({
+            type: 'admin_warnings:sync',
+            payload: {
+              adminWarnings: filteredList,
+              updatedAtMs: ts,
+              revision: rev,
+              deletedIds,
+              deletedAdminItemIds: nextTombstones,
+            },
+          })
         );
       }
       void fetch('/api/admin-warnings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminWarnings: nextList, updatedAtMs: ts }),
+        body: JSON.stringify({
+          adminWarnings: filteredList,
+          updatedAtMs: ts,
+          revision: rev,
+          deletedIds,
+          deletedAdminItemIds: nextTombstones,
+        }),
       });
     } catch { /* empty */ }
   };
@@ -10872,15 +11548,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const adminDeleteWarning = (id: string): { success: boolean; message: string } => {
     const nextList = adminWarningsRef.current.filter((w) => w.id !== id);
-    syncAdminWarningsToServer(nextList);
+    syncAdminWarningsToServer(nextList, [id]);
     try {
       void fetch(`/api/admin-warnings/${id}`, { method: 'DELETE' });
     } catch { /* empty */ }
-    return { success: true, message: 'Peringatan berhasil dihapus permanen.' };
+    return { success: true, message: 'Peringatan berhasil dihapus permanen di Laptop, HP & Cloud.' };
   };
 
   const adminDeleteBugReport = async (id: string) => {
-    setBugReports((prev) => prev.filter((b) => b.id !== id));
+    const nextTombstones = recordDeletedAdminItemIds('bugReports', [id]);
+    const nextList = bugReports.filter((b) => b.id !== id);
+    setBugReports(nextList);
+    flushMasterStateToCloud({ bugReports: nextList, deletedAdminItemIds: nextTombstones });
     playAtmSound('beep');
     try {
       await fetch(`/api/bug-reports/${id}`, { method: 'DELETE' });
@@ -10888,7 +11567,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const adminClearBugReports = async () => {
+    const allIds = bugReports.map((b) => b.id);
+    const nextTombstones = recordDeletedAdminItemIds('bugReports', allIds);
     setBugReports([]);
+    flushMasterStateToCloud({ bugReports: [], deletedAdminItemIds: nextTombstones });
     playAtmSound('beep');
     try {
       await fetch('/api/bug-reports/clear', { method: 'POST' });
@@ -11391,7 +12073,652 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   };
 
-  // ================= LIVE MONITOR AKTIVITAS & PENDETEKSI OTOMATIS REAL-TIME =================
+  // ================= REAL-TIME CUSTOMER PRESENCE (INTIP LIVE), LIVE MONITOR & 69 PENDETEKSI OTOMATIS =================
+  const detectCurrentDeviceProfile = (): {
+    deviceType: 'mobile' | 'desktop';
+    deviceLabel: string;
+  } => {
+    if (typeof navigator === 'undefined') {
+      return { deviceType: 'desktop', deviceLabel: 'Laptop / Desktop' };
+    }
+    const ua = navigator.userAgent || '';
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile/i.test(ua) || (typeof window !== 'undefined' && window.innerWidth <= 768);
+    if (isMobile) {
+      const osLabel = /iPhone|iPad|iPod/i.test(ua)
+        ? 'HP iPhone / iOS'
+        : /Android/i.test(ua)
+        ? 'HP Android'
+        : 'HP / Mobile';
+      return { deviceType: 'mobile', deviceLabel: osLabel };
+    }
+    const desktopOs = /Mac OS/i.test(ua)
+      ? 'Laptop Mac'
+      : /Windows/i.test(ua)
+      ? 'Laptop Windows'
+      : 'Laptop / Desktop';
+    return { deviceType: 'desktop', deviceLabel: desktopOs };
+  };
+
+  const lastCloudPresencePushMsRef = useRef<number>(0);
+
+  const reportLivePresence = (input: {
+    viewKey?: string;
+    screenLabel?: string;
+    actionLabel?: string;
+    subTabLabel?: string;
+    statusOverride?: CustomerPresenceStatus;
+    forceStatus?: CustomerPresenceStatus;
+  }) => {
+    const acc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    if (!acc) return;
+
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const prevScreen = livePresenceCurrentScreenRef.current;
+
+    const nextViewKey = input.viewKey || prevScreen.viewKey || 'dashboard';
+    const nextScreenLabel = input.screenLabel || prevScreen.screenLabel || 'Mobile Banking';
+    const nextActionLabel = input.actionLabel || prevScreen.actionLabel || 'Aktif di Bank Nusantara';
+    const nextSubTabLabel = input.subTabLabel ?? prevScreen.subTabLabel;
+
+    let nextRecent = prevScreen.recentActions;
+    const isNewAction =
+      input.actionLabel &&
+      (nextRecent.length === 0 ||
+        (nextRecent[0].actionLabel || nextRecent[0].title) !== input.actionLabel ||
+        nowMs - Date.parse(nextRecent[0].timestamp || '') > 4000);
+    if (isNewAction) {
+      nextRecent = [
+        {
+          id: `pa-${nowMs}-${Math.floor(Math.random() * 1000)}`,
+          title: nextActionLabel,
+          screenLabel: nextScreenLabel,
+          actionLabel: nextActionLabel,
+          timestamp: nowIso,
+        },
+        ...nextRecent,
+      ].slice(0, 10);
+    }
+
+    livePresenceCurrentScreenRef.current = {
+      viewKey: nextViewKey,
+      screenLabel: nextScreenLabel,
+      actionLabel: nextActionLabel,
+      subTabLabel: nextSubTabLabel,
+      recentActions: nextRecent,
+    };
+
+    const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    const idleDurationMs = nowMs - lastUserActivityMsRef.current;
+    const explicitStatus = input.statusOverride || input.forceStatus;
+    const computedStatus: CustomerPresenceStatus =
+      explicitStatus || (isHidden ? 'offline' : idleDurationMs >= 45_000 ? 'idle' : 'online');
+
+    const { deviceType, deviceLabel } = detectCurrentDeviceProfile();
+    const prevRecord = customerPresenceMapRef.current[acc.id];
+
+    // Deteksi #62: Multi-Device / Pergantian Perangkat Cepat (HP <-> Laptop dalam waktu singkat)
+    if (
+      prevRecord &&
+      prevRecord.sessionId &&
+      prevRecord.sessionId !== clientSessionId &&
+      prevRecord.status === 'online' &&
+      nowMs - (prevRecord.lastHeartbeatMs || prevRecord.lastHeartbeatAtMs || 0) < 25_000 &&
+      prevRecord.deviceType !== deviceType
+    ) {
+      trigger69AutoDetectorAlert({
+        ruleKey: 'multi_device_collision',
+        account: acc,
+        occurrenceCount: 2,
+        detailSummary: `Akun "${acc.fullName}" (${acc.accountNumber}) terdeteksi aktif bersamaan di ${prevRecord.deviceLabel || prevRecord.deviceType} dan ${deviceLabel}!`,
+        deviceLabel: `${prevRecord.deviceLabel || prevRecord.deviceType} + ${deviceLabel}`,
+      });
+    }
+
+    const resolvedOnlineSince =
+      computedStatus === 'offline'
+        ? prevRecord?.onlineSinceIso || prevRecord?.onlineSince || sessionOnlineSinceIsoRef.current
+        : sessionOnlineSinceIsoRef.current;
+    const resolvedLastOffline =
+      computedStatus === 'offline'
+        ? nowIso
+        : prevRecord?.lastOfflineAtIso || prevRecord?.lastOfflineAt;
+
+    const record: CustomerPresenceRecord = {
+      accountId: acc.id,
+      accountName: acc.fullName,
+      fullName: acc.fullName,
+      accountNumber: acc.accountNumber,
+      cardTier: acc.cardTier,
+      cardStatus: acc.cardStatus,
+      status: computedStatus,
+      currentView: nextViewKey,
+      currentViewKey: nextViewKey,
+      currentScreenLabel: nextScreenLabel,
+      currentActionLabel:
+        computedStatus === 'offline'
+          ? 'Keluar / Menutup Aplikasi (Lagi Off)'
+          : computedStatus === 'idle'
+          ? `Diam / Idle di ${nextScreenLabel}`
+          : nextActionLabel,
+      currentSubTabLabel: nextSubTabLabel,
+      deviceType,
+      deviceLabel,
+      sessionId: clientSessionId,
+      onlineSince: resolvedOnlineSince,
+      onlineSinceIso: resolvedOnlineSince,
+      lastHeartbeatMs: nowMs,
+      lastHeartbeatAtMs: nowMs,
+      lastInteractionAtMs: lastUserActivityMsRef.current,
+      lastActiveAt: nowIso,
+      lastActiveAtIso: nowIso,
+      lastOfflineAt: resolvedLastOffline,
+      lastOfflineAtIso: resolvedLastOffline,
+      balanceSnapshot: acc.balance,
+      goldGramsSnapshot: acc.goldGrams,
+      spinCoinsSnapshot: acc.spinCoins,
+      diamondsSnapshot: acc.diamonds,
+      recentActions: nextRecent,
+    };
+
+    setCustomerPresenceMap((prev) => ({
+      ...prev,
+      [acc.id]: record,
+    }));
+
+    // 1. Kirim instan lewat WebSocket (<50ms)
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'presence:heartbeat',
+            payload: { record },
+          })
+        );
+      }
+    } catch { /* empty */ }
+
+    // 2. Fallback REST / sendBeacon saat offline agar status "Lagi Off" selalu terkirim walau tab ditutup
+    if (computedStatus === 'offline') {
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+          const blob = new Blob([JSON.stringify({ record })], { type: 'application/json' });
+          navigator.sendBeacon('/api/presence', blob);
+        } else {
+          void fetch('/api/presence', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ record }),
+            keepalive: true,
+          }).catch(() => {});
+        }
+      } catch { /* empty */ }
+    } else if (input.viewKey || input.actionLabel || nowMs - lastCloudPresencePushMsRef.current > 8000) {
+      try {
+        void fetch('/api/presence', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ record }),
+        }).catch(() => {});
+      } catch { /* empty */ }
+    }
+
+    // 3. Mirror ke Firestore `bank_state_v1/live_presence` untuk lintas jaringan Laptop <-> HP Cloud!
+    const shouldPushCloud =
+      computedStatus === 'offline' ||
+      Boolean(input.viewKey) ||
+      nowMs - lastCloudPresencePushMsRef.current >= 9000;
+    if (shouldPushCloud) {
+      lastCloudPresencePushMsRef.current = nowMs;
+      void writeCloudDoc(
+        'bank_state_v1',
+        'live_presence',
+        sanitizeForFirestore({
+          [acc.id]: record,
+          updatedAtMs: nowMs,
+        }) as Record<string, unknown>,
+        { merge: true }
+      ).catch(() => {});
+    }
+  };
+
+  // Subscribe Firestore `bank_state_v1/live_presence` agar Laptop Admin langsung melihat status Online/Idle/Lagi Off dari HP manapun!
+  useEffect(() => {
+    const unsub = subscribeCloudDoc('bank_state_v1', 'live_presence', (docData) => {
+      if (!docData || typeof docData !== 'object') return;
+      const incomingEntries: Record<string, CustomerPresenceRecord> = {};
+      for (const [k, v] of Object.entries(docData)) {
+        if (k === 'updatedAtMs' || k === 'updatedAt') continue;
+        if (v && typeof v === 'object' && (v as CustomerPresenceRecord).accountId) {
+          incomingEntries[k] = v as CustomerPresenceRecord;
+        }
+      }
+      if (Object.keys(incomingEntries).length > 0) {
+        setCustomerPresenceMap((prev) => {
+          const merged = { ...prev };
+          for (const [accId, rec] of Object.entries(incomingEntries)) {
+            const existing = merged[accId];
+            if (!existing || (rec.lastHeartbeatMs || 0) >= (existing.lastHeartbeatMs || 0)) {
+              merged[accId] = rec;
+            }
+          }
+          return merged;
+        });
+      }
+    });
+    return () => {
+      try {
+        unsub();
+      } catch { /* empty */ }
+    };
+  }, []);
+
+  // Automatic 5-second Presence Heartbeat + Idle Tracker + Instant Offline Beacon on Tab Hide/Close
+  useEffect(() => {
+    if (!currentAccountId) return;
+    sessionOnlineSinceIsoRef.current = new Date().toISOString();
+    lastUserActivityMsRef.current = Date.now();
+    reportLivePresence({ statusOverride: 'online' });
+
+    const markUserInteracted = () => {
+      const wasIdle = Date.now() - lastUserActivityMsRef.current >= 45_000;
+      lastUserActivityMsRef.current = Date.now();
+      if (wasIdle) {
+        reportLivePresence({ statusOverride: 'online' });
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        reportLivePresence({ statusOverride: 'offline' });
+      } else {
+        lastUserActivityMsRef.current = Date.now();
+        reportLivePresence({ statusOverride: 'online' });
+      }
+    };
+
+    const handlePageHide = () => {
+      reportLivePresence({ statusOverride: 'offline' });
+    };
+
+    window.addEventListener('pointerdown', markUserInteracted, { passive: true });
+    window.addEventListener('keydown', markUserInteracted, { passive: true });
+    window.addEventListener('touchstart', markUserInteracted, { passive: true });
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handlePageHide);
+
+    const hbInterval = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      reportLivePresence({});
+    }, 5000);
+
+    return () => {
+      window.clearInterval(hbInterval);
+      window.removeEventListener('pointerdown', markUserInteracted);
+      window.removeEventListener('keydown', markUserInteracted);
+      window.removeEventListener('touchstart', markUserInteracted);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handlePageHide);
+    };
+  }, [currentAccountId]);
+
+  const trigger69AutoDetectorAlert = (params: {
+    ruleKey: AutoDetectorRuleKey;
+    account: BankAccount;
+    occurrenceCount?: number;
+    thresholdOverride?: number;
+    windowOverride?: number;
+    totalRewardOrAmount?: number;
+    rewardBreakdownText?: string;
+    detailSummary?: string;
+    titleOverride?: string;
+    deviceLabel?: string;
+  }) => {
+    const cfg = liveActivityDetectorConfigRef.current;
+    if (!cfg.enabled) return;
+    if (cfg.rulesEnabled[params.ruleKey] === false) return;
+
+    const ruleMeta = getAutoDetectorRuleByKey(params.ruleKey);
+    const cooldownKey = `${params.ruleKey}:${params.account.id}`;
+    const nowMs = Date.now();
+    // Anti-spam cooldown 18 detik untuk aturan yang sama pada akun yang sama (kecuali spin_10x_streak)
+    if (
+      params.ruleKey !== 'spin_10x_streak' &&
+      nowMs - (detectorCooldownByKeyRef.current[cooldownKey] || 0) < 18_000
+    ) {
+      return;
+    }
+    detectorCooldownByKeyRef.current[cooldownKey] = nowMs;
+
+    const thresholdCount =
+      params.thresholdOverride ??
+      cfg.ruleThresholds?.[params.ruleKey] ??
+      ruleMeta?.defaultThreshold ??
+      1;
+    const windowMinutes =
+      params.windowOverride ??
+      cfg.ruleWindowMinutes?.[params.ruleKey] ??
+      ruleMeta?.defaultWindowMinutes ??
+      5;
+    const occ = params.occurrenceCount ?? thresholdCount;
+    const alertId = `anom-${params.ruleKey}-${nowMs}-${Math.floor(Math.random() * 1000)}`;
+    const ruleTag = ruleMeta ? `#${String(ruleMeta.code).padStart(2, '0')} ${ruleMeta.title}` : params.ruleKey;
+    const presenceRec = customerPresenceMapRef.current[params.account.id];
+    const resolvedDevice = params.deviceLabel || presenceRec?.deviceLabel || detectCurrentDeviceProfile().deviceLabel;
+
+    const newAlert: AutoDetectedAnomalyAlert = {
+      id: alertId,
+      ruleKey: params.ruleKey,
+      ruleCode: ruleMeta?.code,
+      ruleNumber: ruleMeta?.code,
+      categoryKey: ruleMeta?.category,
+      ruleCategory: ruleMeta?.category,
+      severity: ruleMeta?.severity || 'tinggi',
+      accountId: params.account.id,
+      accountName: params.account.fullName,
+      accountNumber: params.account.accountNumber,
+      cardTier: params.account.cardTier,
+      title: params.titleOverride || `Deteksi #${String(ruleMeta?.code || 0).padStart(2, '0')}: ${ruleMeta?.title || params.ruleKey}`,
+      detailSummary:
+        params.detailSummary ||
+        `Nasabah "${params.account.fullName}" (Rek: ${params.account.accountNumber}) memicu aturan ${ruleTag} (${occ}/${thresholdCount} dalam ${windowMinutes} menit).`,
+      occurrenceCount: occ,
+      thresholdCount,
+      windowMinutes,
+      totalRewardOrAmount: params.totalRewardOrAmount ?? 0,
+      rewardBreakdownText: params.rewardBreakdownText || '',
+      detectedAt: new Date(nowMs).toISOString(),
+      status: 'active',
+      deviceLabel: resolvedDevice,
+    };
+
+    setAutoDetectedAnomalies((prev) => [newAlert, ...prev].slice(0, 120));
+
+    // Broadcast alert ke perangkat Admin lain lewat WS
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'anomaly:push', payload: { alert: newAlert } }));
+      }
+    } catch { /* empty */ }
+
+    if (cfg.soundAlertEnabled) {
+      playAtmSound('alert');
+    }
+
+    emitAdminTierNotification({
+      eventType: 'anomaly_detector',
+      title: `🚨 DETEKSI ${ruleTag}: ${params.account.fullName}`,
+      message: newAlert.detailSummary,
+      adminTargetTab: 'live_monitor',
+      accountId: params.account.id,
+      referenceId: alertId,
+      quickAction: {
+        actionType: params.ruleKey.startsWith('spin_') ? 'pause_spin' : 'open_admin_tab',
+        targetId: params.account.id,
+        label: params.ruleKey.startsWith('spin_')
+          ? `Jeda Spin ${cfg.pauseSpinDefaultMinutes || 10} Menit`
+          : 'Intip Live di Monitor',
+        adminTab: 'live_monitor',
+      },
+    });
+  };
+
+  // Evaluasi otomatis 69 aturan deteksi dari setiap aktivitas real-time
+  const evaluate69RulesFromLiveActivity = (entry: LiveSystemActivityLog) => {
+    const cfg = liveActivityDetectorConfigRef.current;
+    if (!cfg.enabled) return;
+    if (entry.actorRole === 'auto_detector') return;
+
+    const acc = accountsRef.current.find((a) => a.id === entry.accountId);
+    if (!acc) return;
+
+    const nowMs = Date.now();
+    const titleLower = `${entry.actionTitle} ${entry.description}`.toLowerCase();
+
+    const trackAndCheckCount = (
+      ruleKey: AutoDetectorRuleKey,
+      amountVal = 0,
+      customDetail?: string
+    ): boolean => {
+      if (cfg.rulesEnabled[ruleKey] === false) return false;
+      const meta = getAutoDetectorRuleByKey(ruleKey);
+      const threshold = cfg.ruleThresholds?.[ruleKey] ?? meta?.defaultThreshold ?? 5;
+      const winMin = cfg.ruleWindowMinutes?.[ruleKey] ?? meta?.defaultWindowMinutes ?? 5;
+      const winMs = Math.max(1, winMin) * 60_000;
+      const bucketKey = `${ruleKey}:${acc.id}`;
+      const list = (detectorWindowEventsRef.current[bucketKey] || []).filter((t) => nowMs - t <= winMs);
+      list.push(nowMs);
+      detectorWindowEventsRef.current[bucketKey] = list;
+      if (list.length >= threshold) {
+        trigger69AutoDetectorAlert({
+          ruleKey,
+          account: acc,
+          occurrenceCount: list.length,
+          thresholdOverride: threshold,
+          windowOverride: winMin,
+          totalRewardOrAmount: amountVal,
+          detailSummary:
+            customDetail ||
+            `Nasabah "${acc.fullName}" (${acc.accountNumber}) memicu ${meta?.title || ruleKey} sebanyak ${list.length}x dalam ${winMin} menit terakhir.`,
+        });
+        return true;
+      }
+      return false;
+    };
+
+    const checkThresholdAmount = (
+      ruleKey: AutoDetectorRuleKey,
+      val: number,
+      customDetail?: string
+    ) => {
+      if (cfg.rulesEnabled[ruleKey] === false) return;
+      const meta = getAutoDetectorRuleByKey(ruleKey);
+      const threshold = cfg.ruleThresholds?.[ruleKey] ?? meta?.defaultThreshold ?? 10_000_000;
+      if (val >= threshold) {
+        trigger69AutoDetectorAlert({
+          ruleKey,
+          account: acc,
+          occurrenceCount: 1,
+          thresholdOverride: threshold,
+          totalRewardOrAmount: val,
+          detailSummary:
+            customDetail ||
+            `Akun "${acc.fullName}" (${acc.accountNumber}) mencatat nominal ${formatRupiah(val)} (melewati batas ${formatRupiah(threshold)}) pada "${entry.actionTitle}".`,
+        });
+      }
+    };
+
+    const amt = Math.abs(Number(entry.amountRupiah) || 0);
+
+    // 1. Spin & Gacha (Rules #01 - #08)
+    if (entry.category === 'spin_game') {
+      if (entry.spinCountType === 1) trackAndCheckCount('spin_1x_spam', amt);
+      if (entry.spinCountType === 3 || entry.spinCountType === 5 || entry.spinCountType === 7) {
+        trackAndCheckCount('spin_multi_burst', amt);
+      }
+      if (amt > 0) checkThresholdAmount('spin_jackpot_win_spike', amt);
+      if ((acc.spinCoins || 0) <= 0) trackAndCheckCount('spin_zero_coin_attempt', 0);
+      if (acc.spinPausedUntil && new Date(acc.spinPausedUntil).getTime() > nowMs) {
+        trackAndCheckCount('spin_while_paused_attempt', 0);
+      }
+      const hourWib = Number(
+        new Date(nowMs).toLocaleString('en-US', { timeZone: 'Asia/Jakarta', hour: '2-digit', hour12: false })
+      );
+      if (hourWib >= 0 && hourWib < 5) {
+        trackAndCheckCount('spin_midnight_anomaly', amt);
+      }
+    }
+
+    // 2. Transaksi & Saldo (Rules #09 - #16)
+    if (entry.category === 'transaction') {
+      trackAndCheckCount('rapid_tx_burst', amt);
+      if (titleLower.includes('transfer')) {
+        trackAndCheckCount('rapid_transfer_out', amt);
+        if (titleLower.includes('antar') || titleLower.includes('keluar')) {
+          checkThresholdAmount('large_single_transfer', amt);
+        }
+      }
+      if (titleLower.includes('tarik tunai') || titleLower.includes('atm')) {
+        trackAndCheckCount('atm_rapid_withdrawal', amt);
+      }
+      if (titleLower.includes('setor') || titleLower.includes('deposit')) {
+        checkThresholdAmount('large_balance_inflow', amt);
+      }
+      if (titleLower.includes('hutang') || titleLower.includes('pinjaman')) {
+        trackAndCheckCount('debt_loan_abuse', amt);
+      }
+      if (titleLower.includes('deposito')) {
+        trackAndCheckCount('deposito_rapid_break', amt);
+      }
+      if (amt >= (cfg.largeAssetMutationThresholdRupiah || 25_000_000)) {
+        checkThresholdAmount('large_asset_mutation', amt);
+      }
+    }
+
+    // 3. QRIS, Top Up & Diamond (Rules #17 - #23)
+    if (titleLower.includes('qris') || titleLower.includes('diamond') || titleLower.includes('top up')) {
+      if (titleLower.includes('qris')) {
+        trackAndCheckCount('qris_rapid_order', amt);
+        checkThresholdAmount('qris_large_payment', amt);
+      }
+      if (titleLower.includes('diamond')) {
+        trackAndCheckCount('diamond_rapid_purchase', amt);
+        checkThresholdAmount('diamond_huge_package', amt);
+      }
+      if (titleLower.includes('top up')) {
+        trackAndCheckCount('topup_burst_short_window', amt);
+      }
+      if (titleLower.includes('batal') || titleLower.includes('expired') || titleLower.includes('kedaluwarsa')) {
+        trackAndCheckCount('qris_repeated_cancel_expire', amt);
+      }
+    }
+
+    // 4. Keamanan PIN & Login (Rules #24 - #30)
+    if (entry.category === 'auth_security') {
+      if (titleLower.includes('gagal pin') || titleLower.includes('pin salah')) {
+        trackAndCheckCount('repeated_pin_fail', 0);
+      }
+      if (titleLower.includes('ganti akun') || titleLower.includes('pindah akun') || titleLower.includes('switch')) {
+        trackAndCheckCount('rapid_account_switch', 0);
+      }
+      if (titleLower.includes('reset pin') || titleLower.includes('lupa pin')) {
+        trackAndCheckCount('pin_reset_spam', 0);
+      }
+      if (titleLower.includes('login')) {
+        trackAndCheckCount('login_burst_rapid', 0);
+      }
+      if (titleLower.includes('admin pin') || titleLower.includes('panel admin')) {
+        trackAndCheckCount('admin_pin_fail_attempt', 0);
+      }
+      if (titleLower.includes('banned') || titleLower.includes('blokir')) {
+        trackAndCheckCount('banned_account_access_try', 0);
+      }
+    }
+
+    // 5. Kartu & Akun (Rules #31 - #37)
+    if (
+      entry.category === 'auth_security' ||
+      titleLower.includes('kartu') ||
+      titleLower.includes('upgrade') ||
+      titleLower.includes('hapus akun')
+    ) {
+      if (titleLower.includes('buat kartu') || titleLower.includes('daftar kartu')) {
+        trackAndCheckCount('rapid_card_creation', 0);
+      }
+      if (titleLower.includes('upgrade') || titleLower.includes('naik tier')) {
+        trackAndCheckCount('rapid_tier_upgrade_req', 0);
+      }
+      if (titleLower.includes('hapus akun') || titleLower.includes('tutup akun')) {
+        trackAndCheckCount('account_deletion_spam', 0);
+      }
+      if (titleLower.includes('beku') || titleLower.includes('frozen')) {
+        trackAndCheckCount('frozen_card_usage_attempt', 0);
+      }
+    }
+
+    // 6. Karir & Bisnis Sultan (Rules #38 - #44)
+    if (
+      titleLower.includes('kerja') ||
+      titleLower.includes('gaji') ||
+      titleLower.includes('bisnis') ||
+      titleLower.includes('sultan') ||
+      titleLower.includes('empire')
+    ) {
+      trackAndCheckCount('sultan_rapid_collect', amt);
+      if (titleLower.includes('klaim gaji') || titleLower.includes('pekerjaan')) {
+        trackAndCheckCount('job_salary_rapid_claim', amt);
+      }
+      if (titleLower.includes('upgrade')) {
+        trackAndCheckCount('sultan_rapid_upgrade', amt);
+      }
+      if (amt > 0) checkThresholdAmount('sultan_profit_spike', amt);
+    }
+
+    // 7. Emas & Transfer Bebas (Rules #45 - #51)
+    if (titleLower.includes('emas') || titleLower.includes('transfer bebas') || titleLower.includes('24k')) {
+      if (titleLower.includes('beli emas') || titleLower.includes('jual emas')) {
+        trackAndCheckCount('gold_rapid_trade', amt);
+        checkThresholdAmount('gold_large_purchase', amt);
+      }
+      if (titleLower.includes('transfer bebas')) {
+        trackAndCheckCount('transfer_bebas_rapid', amt);
+        checkThresholdAmount('transfer_bebas_large_asset', amt);
+      }
+    }
+
+    // 8. Misi & Kode Redeem (Rules #52 - #57)
+    if (titleLower.includes('misi') || titleLower.includes('redeem') || titleLower.includes('hadiah') || titleLower.includes('surat')) {
+      if (titleLower.includes('redeem')) {
+        if (titleLower.includes('gagal') || titleLower.includes('tidak valid') || titleLower.includes('salah')) {
+          trackAndCheckCount('redeem_brute_force_fail', 0);
+        } else {
+          trackAndCheckCount('redeem_rapid_claim', amt);
+        }
+      }
+      if (titleLower.includes('misi')) {
+        trackAndCheckCount('mission_rapid_claim', amt);
+      }
+      if (titleLower.includes('hadiah') || titleLower.includes('surat')) {
+        trackAndCheckCount('gift_letter_rapid_claim', amt);
+      }
+    }
+
+    // 9. Chat, Bug & Mintol (Rules #58 - #63)
+    if (titleLower.includes('bug')) {
+      trackAndCheckCount('bug_report_spam', 0);
+    }
+    if (titleLower.includes('mintol') || titleLower.includes('bantuan admin')) {
+      trackAndCheckCount('mintol_ticket_spam', 0);
+    }
+    if (titleLower.includes('chat global')) {
+      trackAndCheckCount('global_chat_flood', 0);
+    }
+
+    // 10. Aktivitas Admin & Sistem (Rules #64 - #69)
+    if (entry.actorRole === 'admin' || entry.category === 'admin_action') {
+      if (amt >= (cfg.largeAssetMutationThresholdRupiah || 25_000_000)) {
+        checkThresholdAmount('admin_large_balance_edit', amt);
+      }
+      if (titleLower.includes('hapus') || titleLower.includes('bersihkan')) {
+        trackAndCheckCount('admin_mass_delete_action', 0);
+      }
+      if (titleLower.includes('peringatan') || titleLower.includes('siaran') || titleLower.includes('broadcast')) {
+        trackAndCheckCount('admin_warning_broadcast_burst', 0);
+      }
+      if (titleLower.includes('role') || titleLower.includes('tier') || titleLower.includes('dev')) {
+        trackAndCheckCount('admin_role_tier_change', 0);
+      }
+      if (titleLower.includes('quick login') || titleLower.includes('intip') || titleLower.includes('masuk ke akun')) {
+        trackAndCheckCount('admin_quick_login_impersonate', 0);
+      }
+      if (titleLower.includes('konfigurasi') || titleLower.includes('aturan') || titleLower.includes('pendeteksi')) {
+        trackAndCheckCount('admin_config_rapid_change', 0);
+      }
+    }
+  };
+
   const recordLiveActivity = (entry: Omit<LiveSystemActivityLog, 'id' | 'timestamp'>) => {
     const newEntry: LiveSystemActivityLog = {
       ...entry,
@@ -11399,6 +12726,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       timestamp: new Date().toISOString(),
     };
     setLiveActivityLogs((prev) => [newEntry, ...prev].slice(0, 500));
+
+    // Perbarui aksi terakhir di kehadiran real-time jika ini aktivitas akun aktif
+    if (entry.accountId === currentAccountIdRef.current && entry.actorRole !== 'auto_detector') {
+      reportLivePresence({ actionLabel: entry.actionTitle });
+    }
+
+    // Siarkan real-time ke Panel Admin di perangkat lain lewat WebSocket
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'live_activity:push', payload: { entry: newEntry } }));
+      }
+    } catch { /* empty */ }
+
+    // Evaluasi otomatis terhadap 69 Jenis Deteksi Otomatis
+    evaluate69RulesFromLiveActivity(newEntry);
   };
 
   const clearLiveActivityLogs = () => {
@@ -11448,24 +12790,148 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ...prev.rulesEnabled,
         ...(partial.rulesEnabled || {}),
       },
+      ruleThresholds: {
+        ...(prev.ruleThresholds || {}),
+        ...(partial.ruleThresholds || {}),
+      },
+      ruleWindowMinutes: {
+        ...(prev.ruleWindowMinutes || {}),
+        ...(partial.ruleWindowMinutes || {}),
+      },
       updatedAt: new Date().toISOString(),
     };
     liveActivityDetectorConfigRef.current = nextCfg;
     setLiveActivityDetectorConfig(nextCfg);
-    recordLiveActivity({
-      actorRole: 'admin',
-      category: 'admin_action',
-      accountId: currentAccount?.id || 'acc-admin',
-      accountName: currentAccount?.fullName || 'Admin Bank Nusantara',
-      accountNumber: currentAccount?.accountNumber,
-      cardTier: currentAccount?.cardTier || 'admin',
-      actionTitle: 'Mengubah Konfigurasi Pendeteksi Otomatis Real-Time',
-      description: `Batas Spin 10x: ${nextCfg.spin10xThresholdCount}x dalam ${nextCfg.spin10xWindowMinutes} menit • Transaksi Cepat: ${nextCfg.rapidTxThresholdCount}x/${nextCfg.rapidTxWindowMinutes}m • Mutasi Besar: ${formatRupiah(nextCfg.largeAssetMutationThresholdRupiah)}.`,
+    persistAdminConfigChange('liveActivityDetectorConfig', nextCfg, {
+      cloudOverride: { liveActivityDetectorConfig: nextCfg },
+      label: '69 Jenis Deteksi Otomatis',
     });
     playAtmSound('success');
     return {
       success: true,
-      message: `Konfigurasi Pendeteksi Otomatis disimpan (Deteksi Spin 10x sebanyak ${nextCfg.spin10xThresholdCount}x dalam ${nextCfg.spin10xWindowMinutes} menit)!`,
+      message: `Konfigurasi 69 Deteksi Otomatis disimpan & disinkronkan real-time ke semua perangkat!`,
+    };
+  };
+
+  const adminToggleAll69DetectorRules = (
+    enabled: boolean,
+    category?: AutoDetectorCategoryKey
+  ): { success: boolean; message: string } => {
+    const prev = liveActivityDetectorConfigRef.current;
+    const nextEnabled: Record<AutoDetectorRuleKey, boolean> = { ...prev.rulesEnabled };
+    let count = 0;
+    for (const rule of AUTO_DETECTOR_69_RULES) {
+      if (!category || rule.category === category) {
+        nextEnabled[rule.key] = enabled;
+        count += 1;
+      }
+    }
+    adminUpdateLiveActivityDetectorConfig({ rulesEnabled: nextEnabled });
+    return {
+      success: true,
+      message: `${count} aturan deteksi otomatis berhasil ${enabled ? 'diaktifkan' : 'dinonaktifkan'}.`,
+    };
+  };
+
+  const adminUpdateSingle69DetectorRule = (
+    ruleKey: AutoDetectorRuleKey,
+    patch: { enabled?: boolean; threshold?: number; windowMinutes?: number }
+  ): { success: boolean; message: string } => {
+    const prev = liveActivityDetectorConfigRef.current;
+    const meta = getAutoDetectorRuleByKey(ruleKey);
+    const nextRulesEnabled = {
+      ...prev.rulesEnabled,
+      ...(patch.enabled !== undefined ? { [ruleKey]: patch.enabled } : {}),
+    };
+    const nextThresholds = {
+      ...(prev.ruleThresholds || {}),
+      ...(patch.threshold !== undefined ? { [ruleKey]: Math.max(1, Math.round(patch.threshold)) } : {}),
+    };
+    const nextWindows = {
+      ...(prev.ruleWindowMinutes || {}),
+      ...(patch.windowMinutes !== undefined
+        ? { [ruleKey]: Math.max(1, Math.min(1440, Math.round(patch.windowMinutes))) }
+        : {}),
+    };
+    const syncLegacy: Partial<LiveActivityDetectorConfig> = {
+      rulesEnabled: nextRulesEnabled,
+      ruleThresholds: nextThresholds,
+      ruleWindowMinutes: nextWindows,
+    };
+    if (ruleKey === 'spin_10x_streak') {
+      if (patch.threshold !== undefined) syncLegacy.spin10xThresholdCount = Math.max(1, Math.round(patch.threshold));
+      if (patch.windowMinutes !== undefined) syncLegacy.spin10xWindowMinutes = Math.max(1, Math.round(patch.windowMinutes));
+    } else if (ruleKey === 'rapid_tx_burst') {
+      if (patch.threshold !== undefined) syncLegacy.rapidTxThresholdCount = Math.max(2, Math.round(patch.threshold));
+      if (patch.windowMinutes !== undefined) syncLegacy.rapidTxWindowMinutes = Math.max(1, Math.round(patch.windowMinutes));
+    } else if (ruleKey === 'repeated_pin_fail') {
+      if (patch.threshold !== undefined) syncLegacy.repeatedPinFailThreshold = Math.max(2, Math.round(patch.threshold));
+    } else if (ruleKey === 'large_asset_mutation') {
+      if (patch.threshold !== undefined) syncLegacy.largeAssetMutationThresholdRupiah = Math.max(100_000, Math.round(patch.threshold));
+    }
+    adminUpdateLiveActivityDetectorConfig(syncLegacy);
+    return {
+      success: true,
+      message: `Aturan #${meta?.code ?? ''} "${meta?.title || ruleKey}" diperbarui.`,
+    };
+  };
+
+  const adminResetAll69DetectorRules = (): { success: boolean; message: string } => {
+    const fresh: LiveActivityDetectorConfig = {
+      ...DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG,
+      rulesEnabled: createDefault69RulesEnabledMap(),
+      ruleThresholds: createDefault69ThresholdsMap(),
+      ruleWindowMinutes: createDefault69WindowsMap(),
+      updatedAt: new Date().toISOString(),
+    };
+    liveActivityDetectorConfigRef.current = fresh;
+    setLiveActivityDetectorConfig(fresh);
+    persistAdminConfigChange('liveActivityDetectorConfig', fresh, {
+      cloudOverride: { liveActivityDetectorConfig: fresh },
+      label: 'Reset 69 Aturan Deteksi Default',
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Seluruh 69 Jenis Deteksi Otomatis dikembalikan ke pengaturan default aktif!',
+    };
+  };
+
+  const adminQuickResetPinAttempts = (
+    accountId: string
+  ): { success: boolean; message: string } => {
+    const target = accountsRef.current.find((a) => a.id === accountId);
+    if (!target) {
+      return { success: false, message: 'Akun nasabah tidak ditemukan.' };
+    }
+    const nowMs = Date.now();
+    const nextAccounts = accountsRef.current.map((a) =>
+      a.id === accountId
+        ? {
+            ...a,
+            failedPinAttempts: 0,
+            loginLockedUntil: undefined,
+            accountUpdatedAtMs: nowMs,
+          }
+        : a
+    );
+    accountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
+    recordLiveActivity({
+      actorRole: 'admin',
+      category: 'admin_action',
+      accountId: target.id,
+      accountName: target.fullName,
+      accountNumber: target.accountNumber,
+      cardTier: target.cardTier,
+      actionTitle: `Reset Percobaan PIN: ${target.fullName}`,
+      description: `Admin mereset hitungan salah PIN akun ${target.fullName} (${target.accountNumber}) menjadi 0.`,
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Percobaan salah PIN akun ${target.fullName} berhasil direset menjadi 0!`,
     };
   };
 
@@ -11492,7 +12958,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             spinPausedUntil: nextPausedUntil,
             spinPauseReason: isCurrentlyPaused
               ? undefined
-              : `Dijeda sementara ${mins} menit oleh Admin setelah deteksi Spin 10x beruntun.`,
+              : `Dijeda sementara ${mins} menit oleh Admin setelah deteksi aktivitas otomatis.`,
             accountUpdatedAtMs: nowMs,
           }
         : a
@@ -11531,6 +12997,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       | 'unpause_spin'
       | 'freeze_account'
       | 'unfreeze_account'
+      | 'reset_pin'
       | 'ignore'
       | 'resolve'
   ): { success: boolean; message: string } => {
@@ -11539,8 +13006,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Data peringatan deteksi otomatis tidak ditemukan.' };
     }
     const target = accountsRef.current.find((a) => a.id === alertItem.accountId);
-    let actionLabel = 'Ditandai Selesai oleh Admin';
-    let feedbackMsg = 'Peringatan deteksi otomatis telah ditandai selesai.';
+    let actionLabel = 'Ditandai Aman oleh Admin';
+    let feedbackMsg = 'Peringatan deteksi otomatis telah ditandai aman.';
 
     if (action === 'pause_spin' || action === 'unpause_spin') {
       const res = adminToggleAccountSpinPause(alertItem.accountId);
@@ -11548,6 +13015,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         action === 'pause_spin'
           ? `Spin Dijeda ${liveActivityDetectorConfigRef.current.pauseSpinDefaultMinutes || 10} Menit`
           : 'Jeda Spin Dicabut';
+      feedbackMsg = res.message;
+    } else if (action === 'reset_pin') {
+      const res = adminQuickResetPinAttempts(alertItem.accountId);
+      actionLabel = 'Percobaan PIN Direset';
       feedbackMsg = res.message;
     } else if (action === 'freeze_account' || action === 'unfreeze_account') {
       if (target) {
@@ -11584,15 +13055,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     setAutoDetectedAnomalies((prev) =>
-      prev.map((item) =>
-        item.id === anomalyId
-          ? {
-              ...item,
-              status: action === 'ignore' ? 'ignored' : 'resolved',
-              actionTakenLabel: actionLabel,
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.id !== anomalyId) return item;
+        const updated: AutoDetectedAnomalyAlert = {
+          ...item,
+          status: action === 'ignore' ? 'ignored' : 'resolved',
+          actionTakenLabel: actionLabel,
+        };
+        try {
+          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'anomaly:push', payload: { alert: updated } }));
+          }
+        } catch { /* empty */ }
+        return updated;
+      })
     );
     playAtmSound('beep');
     return { success: true, message: feedbackMsg };
@@ -11614,25 +13090,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       totalRewardAmount,
       rewardBreakdownText,
     } = params;
-    const alertId = `anom-spin10x-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const newAlert: AutoDetectedAnomalyAlert = {
-      id: alertId,
+    trigger69AutoDetectorAlert({
       ruleKey: 'spin_10x_streak',
-      accountId: account.id,
-      accountName: account.fullName,
-      accountNumber: account.accountNumber,
-      cardTier: account.cardTier,
-      title: `Deteksi Otomatis: Spin 10x Sebanyak ${streakCount}x (${streakCount * 10} Putaran)!`,
-      detailSummary: `Nasabah "${account.fullName}" (Rek: ${account.accountNumber}) melakukan Spin 10x sebanyak ${streakCount} kali (batas: ${thresholdCount}x) dalam ${windowMinutes} menit terakhir dengan total hadiah ${formatRupiah(totalRewardAmount)}.`,
+      account,
       occurrenceCount: streakCount,
-      thresholdCount,
-      windowMinutes,
+      thresholdOverride: thresholdCount,
+      windowOverride: windowMinutes,
       totalRewardOrAmount: totalRewardAmount,
       rewardBreakdownText,
-      detectedAt: new Date().toISOString(),
-      status: 'active',
-    };
-    setAutoDetectedAnomalies((prev) => [newAlert, ...prev].slice(0, 100));
+      titleOverride: `Deteksi #01: Spin 10x Sebanyak ${streakCount}x (${streakCount * 10} Putaran)!`,
+      detailSummary: `Nasabah "${account.fullName}" (Rek: ${account.accountNumber}) melakukan Spin 10x sebanyak ${streakCount} kali (batas: ${thresholdCount}x) dalam ${windowMinutes} menit terakhir dengan total hadiah ${formatRupiah(totalRewardAmount)}.`,
+    });
 
     recordLiveActivity({
       actorRole: 'auto_detector',
@@ -11641,7 +13109,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       accountName: account.fullName,
       accountNumber: account.accountNumber,
       cardTier: account.cardTier,
-      actionTitle: `🚨 DETEKSI OTOMATIS: Spin 10x Sebanyak ${streakCount}x (${streakCount * 10} Putaran)`,
+      actionTitle: `🚨 DETEKSI #01: Spin 10x Sebanyak ${streakCount}x (${streakCount * 10} Putaran)`,
       description: `Nasabah ${account.fullName} (${account.accountNumber}) mencapai ${streakCount}/${thresholdCount} kali Spin 10x dalam ${windowMinutes} menit. Total hadiah diperoleh: ${formatRupiah(totalRewardAmount)} (${rewardBreakdownText}).`,
       amountRupiah: totalRewardAmount,
       spinCountType: 10,
@@ -11651,75 +13119,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isAnomalyDetected: true,
       anomalyRuleKey: 'spin_10x_streak',
     });
-
-    if (liveActivityDetectorConfigRef.current.soundAlertEnabled) {
-      playAtmSound('alert');
-    }
-
-    emitAdminTierNotification({
-      eventType: 'anomaly_detector',
-      title: `👑 DETEKSI OTOMATIS: ${account.fullName} Spin 10x Sebanyak ${streakCount}x!`,
-      message: `Rekening ${account.accountNumber} (${account.fullName}) melakukan Spin 10x sebanyak ${streakCount} kali (${streakCount * 10} putaran) dalam ${windowMinutes} menit terakhir. Total hadiah: ${formatRupiah(totalRewardAmount)}.`,
-      adminTargetTab: 'live_monitor',
-      accountId: account.id,
-      referenceId: alertId,
-      quickAction: {
-        actionType: 'pause_spin',
-        targetId: account.id,
-        label: `Jeda Spin ${liveActivityDetectorConfigRef.current.pauseSpinDefaultMinutes || 10} Menit`,
-        adminTab: 'live_monitor',
-      },
-    });
   };
 
-  const adminSimulateSpin10x5xDetection = (
-    accountId?: string
-  ): { success: boolean; message: string } => {
-    const target =
-      (accountId ? accountsRef.current.find((a) => a.id === accountId) : undefined) ||
-      accountsRef.current.find((a) => a.cardTier !== 'admin') ||
-      currentAccount ||
-      accountsRef.current[0];
-    if (!target) {
-      return { success: false, message: 'Tidak ada akun nasabah untuk disimulasikan.' };
-    }
-    const cfg = liveActivityDetectorConfigRef.current;
-    const threshold = cfg.spin10xThresholdCount || 5;
-    const winMins = cfg.spin10xWindowMinutes || 5;
-    const nowMs = Date.now();
-    const simEvents = Array.from({ length: threshold }, (_, idx) => ({
-      ts: nowMs - (threshold - 1 - idx) * 8000,
-      spinCount: 10 as const,
-      wonAmount: 1_250_000 + idx * 250_000,
-      prizesText: 'Rp 500rb, Rp 250rb, Rp 500rb (+7 hadiah lainnya)',
-    }));
-    spinEventsByAccountRef.current[target.id] = simEvents;
-    const totalSimWon = simEvents.reduce((sum, e) => sum + e.wonAmount, 0);
-
-    setAccountSpinCounters((prev) => ({
-      ...prev,
-      [target.id]: {
-        spin1xCount: spin1xTotalByAccountRef.current[target.id] || 0,
-        spin10xCountInWindow: threshold,
-        totalSpinsInWindow: threshold * 10,
-        lastSpinAt: new Date(nowMs).toISOString(),
-      },
-    }));
-
-    triggerSpin10xStreakAnomalyAlert({
-      account: target,
-      streakCount: threshold,
-      thresholdCount: threshold,
-      windowMinutes: winMins,
-      totalRewardAmount: totalSimWon,
-      rewardBreakdownText: `${threshold}x Putaran Spin 10x (${threshold * 10} Hadiah Roda) • Total ${formatRupiah(totalSimWon)}`,
-    });
-
-    return {
-      success: true,
-      message: `Simulasi Deteksi Otomatis (${target.fullName} Spin 10x sebanyak ${threshold}x) berhasil dipicu! Periksa Bar Peringatan di atas Panel Admin & Lonceng Notifikasi Admin Tier.`,
-    };
-  };
+  // Dipertahankan hanya demi kompatibilitas tipe internal (tidak ditampilkan tombol simulasi di UI sesuai pilihan user)
+  const adminSimulateSpin10x5xDetection = (): { success: boolean; message: string } => ({
+    success: false,
+    message: 'Mode simulasi dinonaktifkan. Sistem menunggu pemicu aktivitas nasabah secara real-time.',
+  });
 
   // Pantau transaksi baru secara otomatis untuk dicatat ke Live Monitor & dievaluasi oleh Pendeteksi Otomatis
   const seenLiveTxIdsRef = useRef<Set<string>>(
@@ -12248,8 +13654,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const deleteRedeemCode = (id: string) => {
+    const nextTombstones = recordDeletedAdminItemIds('redeemCodes', [id]);
     const nextList = sanitizeRedeemCodesList(redeemCodesRef.current).filter((r) => r.id !== id);
     void persistRedeemCodesImmediately(nextList);
+    flushMasterStateToCloud({ redeemCodes: nextList, deletedAdminItemIds: nextTombstones });
     playAtmSound('beep');
   };
 
@@ -15794,20 +17202,30 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const adminDeleteSupportFaq = (id: string): { success: boolean; message: string } => {
     const nowMs = Date.now();
     const nowIso = new Date(nowMs).toISOString();
+    const nextTombstones = recordDeletedAdminItemIds('supportFaqs', [id]);
+    const nextRev = (adminConfigRevisionMapRef.current.supportFaqs || 0) + 1;
+    adminConfigRevisionMapRef.current.supportFaqs = nextRev;
     const nextFaqs = supportFaqs.filter((f) => f.id !== id);
     supportFaqsUpdatedAtMsRef.current = nowMs;
     setLastAdminSavedAtIso(nowIso);
     setSupportFaqs(nextFaqs);
     void saveAdminPersistentDataIdb({
+      forceAuthoritativeOverwrite: true,
       supportFaqs: nextFaqs,
       supportFaqsUpdatedAtMs: nowMs,
       lastAdminSavedAtIso: nowIso,
+      adminConfigRevisionMap: { supportFaqs: nextRev },
+      deletedAdminItemIds: nextTombstones as Record<string, string[]>,
     });
-    flushMasterStateToCloud({ supportFaqs: nextFaqs });
+    flushMasterStateToCloud({
+      supportFaqs: nextFaqs,
+      deletedAdminItemIds: nextTombstones,
+      adminConfigRevisionMap: { ...adminConfigRevisionMapRef.current },
+    });
     playAtmSound('success');
     return {
       success: true,
-      message: `Item FAQ berhasil dihapus secara permanen. Sisa ${nextFaqs.length} bantuan FAQ aktif.`,
+      message: `Item FAQ berhasil dihapus secara permanen di semua perangkat. Sisa ${nextFaqs.length} bantuan FAQ aktif.`,
     };
   };
 
@@ -19600,18 +21018,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const adminDeleteAppUpdate = (id: string): { success: boolean; message: string } => {
-    setAppUpdates((prev) => {
-      const filtered = prev.filter((u) => u.id !== id);
-      if (filtered.length > 0 && !filtered.some((u) => u.isCurrent)) {
-        filtered[0] = { ...filtered[0], isCurrent: true };
-      }
-      syncUpdatesToServer(filtered);
-      return filtered;
-    });
+    const nextTombstones = recordDeletedAdminItemIds('appUpdates', [id]);
+    const filtered = appUpdates.filter((u) => u.id !== id);
+    if (filtered.length > 0 && !filtered.some((u) => u.isCurrent)) {
+      filtered[0] = { ...filtered[0], isCurrent: true };
+    }
+    setAppUpdates(filtered);
+    flushMasterStateToCloud({ appUpdates: filtered, deletedAdminItemIds: nextTombstones });
+    syncUpdatesToServer(filtered);
     playAtmSound('beep');
     return {
       success: true,
-      message: 'Catatan Riwayat Update telah dihapus.',
+      message: 'Catatan Riwayat Update telah dihapus permanen di Laptop, HP & Cloud.',
     };
   };
 
@@ -25815,12 +27233,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const adminDeleteMintolRequest = (requestId: string) => {
-    setAdminHelpRequests((prev) => prev.filter((r) => r.id !== requestId));
+    const nextTombstones = recordDeletedAdminItemIds('adminHelpRequests', [requestId]);
+    const nextList = adminHelpRequests.filter((r) => r.id !== requestId);
+    setAdminHelpRequests(nextList);
+    flushMasterStateToCloud({ adminHelpRequests: nextList, deletedAdminItemIds: nextTombstones });
     playAtmSound('beep');
   };
 
   const adminClearMintolRequests = () => {
+    const allIds = adminHelpRequests.map((r) => r.id);
+    const nextTombstones = recordDeletedAdminItemIds('adminHelpRequests', allIds);
     setAdminHelpRequests([]);
+    flushMasterStateToCloud({ adminHelpRequests: [], deletedAdminItemIds: nextTombstones });
     playAtmSound('beep');
   };
 
@@ -28377,18 +29801,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const adminDeleteDashboardEffect = (packageId: string) => {
+    const nextTombstones = recordDeletedAdminItemIds('dashboardEffectEvents', [packageId]);
     const nextList = dashboardEffectEvents.filter((e) => e.id !== packageId);
     hasLoadedDashboardEffectsRef.current = true;
     dashboardEffectEventsRef.current = nextList;
     setDashboardEffectEvents(nextList);
-    flushMasterStateToCloud({ dashboardEffectEvents: nextList });
+    flushMasterStateToCloud({
+      dashboardEffectEvents: nextList,
+      deletedAdminItemIds: nextTombstones,
+    });
     if (activeDashboardEffectModal?.packageId === packageId) {
       setActiveDashboardEffectModal(null);
     }
     playAtmSound('beep');
     return {
       success: true,
-      message: 'Paket Efek Dashboard berhasil dihapus dari seluruh perangkat & Cloud!',
+      message: 'Paket Efek Dashboard berhasil dihapus permanen di Laptop, HP & Cloud!',
     };
   };
 
@@ -30160,9 +31588,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     persistAdminConfigChange('missions', nextList, {
       cloudOverride: { missions: nextList },
       label: 'Hapus Misi',
+      deletedIds: [missionId],
+      collectionKey: 'missions',
     });
     playAtmSound('beep');
-    return { success: true, message: `Misi "${found.title}" berhasil dihapus.` };
+    return { success: true, message: `Misi "${found.title}" berhasil dihapus permanen di semua perangkat.` };
   };
 
   const adminDuplicateMission = (missionId: string) => {
@@ -31256,9 +32686,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         autoDetectedAnomalies,
         liveActivityDetectorConfig,
         accountSpinCounters,
+        customerPresenceMap,
+        deletedAdminItemIds,
+        reportLivePresence,
         recordLiveActivity,
         clearLiveActivityLogs,
         adminUpdateLiveActivityDetectorConfig,
+        adminToggleAll69DetectorRules,
+        adminUpdateSingle69DetectorRule,
+        adminResetAll69DetectorRules,
+        adminQuickResetPinAttempts,
         adminHandleAnomalyAction,
         adminToggleAccountSpinPause,
         adminSimulateSpin10x5xDetection,

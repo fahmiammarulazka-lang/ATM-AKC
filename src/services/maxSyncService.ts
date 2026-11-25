@@ -412,6 +412,9 @@ export interface AdminPersistentDataCache {
   bankSettings?: any;
   bankSettingsUpdatedAtMs?: number;
   configs?: Record<string, AdminConfigCacheEntry>;
+  deletedAdminItemIds?: Record<string, string[]>;
+  adminConfigRevisionMap?: Record<string, number>;
+  forceAuthoritativeOverwrite?: boolean;
   lastAdminSavedAtIso?: string;
   cachedAtMs: number;
 }
@@ -446,13 +449,14 @@ export function saveAdminPersistentDataIdb(
       const nextConfigs: Record<string, AdminConfigCacheEntry> = {
         ...(existing.configs || {}),
       };
+      const forceOverwrite = Boolean(patch.forceAuthoritativeOverwrite);
 
       if (patch.configs && typeof patch.configs === 'object') {
         for (const [key, entry] of Object.entries(patch.configs)) {
           if (!entry || entry.value === undefined) continue;
           const incomingTs = Number(entry.updatedAtMs) || nowMs;
           const existingTs = Number(nextConfigs[key]?.updatedAtMs) || 0;
-          if (incomingTs >= existingTs) {
+          if (forceOverwrite || incomingTs >= existingTs) {
             nextConfigs[key] = {
               value: entry.value,
               updatedAtMs: incomingTs,
@@ -462,9 +466,35 @@ export function saveAdminPersistentDataIdb(
         }
       }
 
+      const nextDeletedMap: Record<string, string[]> = {
+        ...(existing.deletedAdminItemIds || {}),
+      };
+      if (patch.deletedAdminItemIds && typeof patch.deletedAdminItemIds === 'object') {
+        for (const [k, arr] of Object.entries(patch.deletedAdminItemIds)) {
+          if (Array.isArray(arr)) {
+            const prevArr = Array.isArray(nextDeletedMap[k]) ? nextDeletedMap[k] : [];
+            nextDeletedMap[k] = Array.from(new Set([...prevArr, ...arr.map(String)])).slice(-800);
+          }
+        }
+      }
+
+      const nextRevisionMap: Record<string, number> = {
+        ...(existing.adminConfigRevisionMap || {}),
+      };
+      if (patch.adminConfigRevisionMap && typeof patch.adminConfigRevisionMap === 'object') {
+        for (const [k, rev] of Object.entries(patch.adminConfigRevisionMap)) {
+          const numRev = Number(rev) || 0;
+          if (numRev > (Number(nextRevisionMap[k]) || 0)) {
+            nextRevisionMap[k] = numRev;
+          }
+        }
+      }
+
       const next: AdminPersistentDataCache = {
         ...existing,
         configs: nextConfigs,
+        deletedAdminItemIds: nextDeletedMap,
+        adminConfigRevisionMap: nextRevisionMap,
         cachedAtMs: nowMs,
         lastAdminSavedAtIso: patch.lastAdminSavedAtIso || existing.lastAdminSavedAtIso || new Date(nowMs).toISOString(),
       };

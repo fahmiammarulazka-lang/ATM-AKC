@@ -2133,7 +2133,71 @@ export interface AdminTierNotificationConfig {
   updatedAt?: string;
 }
 
-// ==================== LIVE MONITOR AKTIVITAS NASABAH & ADMIN + PENDETEKSI OTOMATIS REAL-TIME ====================
+// ==================== TOMBSTONE REGISTRY PENGHAPUSAN GLOBAL ADMIN (ANTI-MUNCUL LAGI DI HP) ====================
+export type AdminDeletableCollectionKey =
+  | 'adminWarnings'
+  | 'websitePopups'
+  | 'dashboardEffectEvents'
+  | 'missions'
+  | 'redeemCodes'
+  | 'giftEvents'
+  | 'bugReports'
+  | 'globalChats'
+  | 'adminHelpRequests'
+  | 'supportFaqs'
+  | 'appUpdates'
+  | 'devRoles'
+  | 'accounts'
+  | 'families'
+  | 'banPresets';
+
+export type DeletedAdminItemIdsMap = Partial<Record<AdminDeletableCollectionKey, string[]>>;
+
+// ==================== KEHADIRAN NASABAH REAL-TIME (FITUR INTIP LIVE ADMIN) ====================
+export type CustomerPresenceStatus = 'online' | 'idle' | 'offline';
+
+export interface CustomerPresenceRecentAction {
+  id: string;
+  title?: string;
+  actionLabel?: string;
+  screenLabel: string;
+  timestamp: string;
+}
+
+export interface CustomerPresenceRecord {
+  accountId: string;
+  accountNumber: string;
+  accountName?: string;
+  fullName?: string;
+  cardTier: CardTier;
+  cardStatus?: CardStatus;
+  status: CustomerPresenceStatus;
+  currentView?: string;
+  currentViewKey?: string;
+  currentScreenLabel: string;
+  currentActionLabel: string;
+  currentSubTabLabel?: string;
+  deviceType: 'mobile' | 'desktop' | 'HP / Mobile' | 'Laptop / Desktop';
+  deviceLabel?: string;
+  browserLabel?: string;
+  sessionId: string;
+  lastActiveAt?: string;
+  lastActiveAtIso?: string;
+  lastHeartbeatAtMs?: number;
+  lastHeartbeatMs?: number;
+  lastInteractionAtMs?: number;
+  onlineSince?: string;
+  onlineSinceIso?: string;
+  lastOfflineAt?: string;
+  lastOfflineAtIso?: string;
+  balanceSnapshot?: number;
+  goldGramsSnapshot?: number;
+  spinCoinsSnapshot?: number;
+  diamondsSnapshot?: number;
+  recentActions: CustomerPresenceRecentAction[];
+}
+
+// ==================== LIVE MONITOR AKTIVITAS NASABAH & ADMIN + 69 PENDETEKSI OTOMATIS REAL-TIME ====================
 export type LiveActivityActorRole = 'nasabah' | 'admin' | 'auto_detector';
 
 export type LiveActivityCategory =
@@ -2143,11 +2207,7 @@ export type LiveActivityCategory =
   | 'admin_action'
   | 'auto_detector';
 
-export type AutoDetectorRuleKey =
-  | 'spin_10x_streak'
-  | 'rapid_tx_topup'
-  | 'repeated_pin_fail'
-  | 'large_asset_mutation';
+export type AutoDetectorRuleKey = string;
 
 export interface LiveSystemActivityLog {
   id: string;
@@ -2168,11 +2228,19 @@ export interface LiveSystemActivityLog {
   prizesSummary?: string;
   isAnomalyDetected?: boolean;
   anomalyRuleKey?: AutoDetectorRuleKey;
+  anomalyRuleCode?: number;
+  screenLabel?: string;
+  deviceType?: 'mobile' | 'desktop' | 'HP / Mobile' | 'Laptop / Desktop';
 }
 
 export interface AutoDetectedAnomalyAlert {
   id: string;
   ruleKey: AutoDetectorRuleKey;
+  ruleCode?: number;
+  ruleNumber?: number;
+  categoryKey?: string;
+  ruleCategory?: string;
+  severity?: 'kritis' | 'tinggi' | 'menengah';
   accountId: string;
   accountName: string;
   accountNumber: string;
@@ -2183,7 +2251,8 @@ export interface AutoDetectedAnomalyAlert {
   thresholdCount: number;
   windowMinutes: number;
   totalRewardOrAmount: number;
-  rewardBreakdownText: string;
+  rewardBreakdownText?: string;
+  deviceLabel?: string;
   detectedAt: string;
   status: 'active' | 'ignored' | 'resolved';
   actionTakenLabel?: string;
@@ -2199,6 +2268,8 @@ export interface LiveActivityDetectorConfig {
   repeatedPinFailThreshold: number;
   largeAssetMutationThresholdRupiah: number;
   pauseSpinDefaultMinutes: number;
-  rulesEnabled: Record<AutoDetectorRuleKey, boolean>;
+  rulesEnabled: Record<string, boolean>;
+  ruleThresholds?: Record<string, number>;
+  ruleWindowMinutes?: Record<string, number>;
   updatedAt?: string;
 }

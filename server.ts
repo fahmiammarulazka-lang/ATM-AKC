@@ -119,6 +119,11 @@ interface PersistedGlobalState {
   bugRewardConfig?: Record<string, unknown> | null;
   adminConfigs: Record<string, unknown>;
   configUpdatedAtMsMap: Record<string, number>;
+  adminConfigRevisionMap: Record<string, number>;
+  deletedAdminItemIds: Record<string, string[]>;
+  customerPresenceMap: Record<string, Record<string, unknown>>;
+  liveActivityLogs: Array<Record<string, unknown>>;
+  autoDetectedAnomalies: Array<Record<string, unknown>>;
   sharedBankData: Record<string, unknown>;
   userSnapshotsByScope: Record<string, Record<string, unknown>>;
   qrisOrders: Record<string, ServerQrisOrder>;
@@ -166,6 +171,11 @@ const DEFAULT_STATE: PersistedGlobalState = {
   bugRewardConfig: null,
   adminConfigs: {},
   configUpdatedAtMsMap: {},
+  adminConfigRevisionMap: {},
+  deletedAdminItemIds: {},
+  customerPresenceMap: {},
+  liveActivityLogs: [],
+  autoDetectedAnomalies: [],
   lastUpdated: Date.now(),
 };
 
@@ -214,6 +224,22 @@ function loadPersistedState(): PersistedGlobalState {
           parsed.configUpdatedAtMsMap && typeof parsed.configUpdatedAtMsMap === 'object'
             ? parsed.configUpdatedAtMsMap
             : {},
+        adminConfigRevisionMap:
+          parsed.adminConfigRevisionMap && typeof parsed.adminConfigRevisionMap === 'object'
+            ? parsed.adminConfigRevisionMap
+            : {},
+        deletedAdminItemIds:
+          parsed.deletedAdminItemIds && typeof parsed.deletedAdminItemIds === 'object'
+            ? parsed.deletedAdminItemIds
+            : {},
+        customerPresenceMap:
+          parsed.customerPresenceMap && typeof parsed.customerPresenceMap === 'object'
+            ? parsed.customerPresenceMap
+            : {},
+        liveActivityLogs: Array.isArray(parsed.liveActivityLogs) ? parsed.liveActivityLogs : [],
+        autoDetectedAnomalies: Array.isArray(parsed.autoDetectedAnomalies)
+          ? parsed.autoDetectedAnomalies
+          : [],
         sharedBankData: parsed.sharedBankData || {},
         userSnapshotsByScope:
           parsed.userSnapshotsByScope && typeof parsed.userSnapshotsByScope === 'object'
@@ -244,6 +270,45 @@ function savePersistedState() {
   } catch (err) {
     console.error('Failed to save persisted database state:', err);
   }
+}
+
+function recordServerTombstones(collectionKey: string, ids: string[]) {
+  if (!collectionKey || !Array.isArray(ids) || ids.length === 0) return;
+  const cleanIds = ids.map((x) => String(x || '').trim()).filter(Boolean);
+  if (cleanIds.length === 0) return;
+  const prev = Array.isArray(serverState.deletedAdminItemIds?.[collectionKey])
+    ? serverState.deletedAdminItemIds[collectionKey]
+    : [];
+  serverState.deletedAdminItemIds = {
+    ...(serverState.deletedAdminItemIds || {}),
+    [collectionKey]: Array.from(new Set([...prev, ...cleanIds])).slice(-800),
+  };
+}
+
+function mergeIncomingTombstonesMap(incomingMap: unknown) {
+  if (!incomingMap || typeof incomingMap !== 'object') return;
+  for (const [k, list] of Object.entries(incomingMap as Record<string, unknown>)) {
+    if (Array.isArray(list)) {
+      recordServerTombstones(k, list.map((x) => String(x)));
+    }
+  }
+}
+
+function filterListByServerTombstones<T extends { id?: unknown }>(collectionKey: string, list: T[]): T[] {
+  const deleted = serverState.deletedAdminItemIds?.[collectionKey];
+  if (!Array.isArray(deleted) || deleted.length === 0) return list;
+  const delSet = new Set(deleted);
+  return list.filter((item) => !item?.id || !delSet.has(String(item.id)));
+}
+
+function bumpServerConfigRevision(key: string, incomingRev?: number): number {
+  const cur = Number(serverState.adminConfigRevisionMap?.[key]) || 0;
+  const next = incomingRev && incomingRev > cur ? incomingRev : cur + 1;
+  serverState.adminConfigRevisionMap = {
+    ...(serverState.adminConfigRevisionMap || {}),
+    [key]: next,
+  };
+  return next;
 }
 
 async function startServer() {
@@ -292,6 +357,11 @@ async function startServer() {
             bugRewardConfig: serverState.bugRewardConfig || null,
             adminConfigs: serverState.adminConfigs || {},
             configUpdatedAtMsMap: serverState.configUpdatedAtMsMap || {},
+            adminConfigRevisionMap: serverState.adminConfigRevisionMap || {},
+            deletedAdminItemIds: serverState.deletedAdminItemIds || {},
+            customerPresenceMap: serverState.customerPresenceMap || {},
+            liveActivityLogs: serverState.liveActivityLogs || [],
+            autoDetectedAnomalies: serverState.autoDetectedAnomalies || [],
             sharedBankData: serverState.sharedBankData,
             connectedDevices: clients.size,
             lastUpdated: serverState.lastUpdated,
@@ -408,10 +478,21 @@ async function startServer() {
           });
         } else if (msg.type === 'admin_warnings:sync' && Array.isArray(msg.payload?.adminWarnings)) {
           const incomingTs = Number(msg.payload?.updatedAtMs) || 0;
+          const incomingRev = Number(msg.payload?.revision) || 0;
           const currentTs = Number(serverState.configUpdatedAtMsMap?.adminWarnings) || 0;
-          if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) return;
-          const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
-          serverState.adminWarnings = (msg.payload.adminWarnings as Array<Record<string, unknown>>).slice(0, 100);
+          const currentRev = Number(serverState.adminConfigRevisionMap?.adminWarnings) || 0;
+          if (incomingRev > 0 && currentRev > 0 && incomingRev < currentRev) return;
+          if (incomingRev === 0 && incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) return;
+          if (Array.isArray(msg.payload?.deletedIds)) {
+            recordServerTombstones('adminWarnings', msg.payload.deletedIds);
+          }
+          mergeIncomingTombstonesMap(msg.payload?.deletedAdminItemIds);
+          const nextTs = Math.max(Date.now(), incomingTs, currentTs + 1);
+          const nextRev = bumpServerConfigRevision('adminWarnings', incomingRev);
+          serverState.adminWarnings = filterListByServerTombstones(
+            'adminWarnings',
+            (msg.payload.adminWarnings as Array<Record<string, unknown>>).slice(0, 100)
+          );
           serverState.configUpdatedAtMsMap = {
             ...(serverState.configUpdatedAtMsMap || {}),
             adminWarnings: nextTs,
@@ -423,7 +504,13 @@ async function startServer() {
           savePersistedState();
           broadcastToAll({
             type: 'admin_warnings:updated',
-            payload: { adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
+            payload: {
+              adminWarnings: serverState.adminWarnings,
+              updatedAtMs: nextTs,
+              revision: nextRev,
+              deletedAdminItemIds: serverState.deletedAdminItemIds,
+              lastUpdated: serverState.lastUpdated,
+            },
           });
         } else if (msg.type === 'bug_reward_config:sync' && msg.payload && typeof msg.payload === 'object') {
           const rawBug = (msg.payload.bugRewardConfig || msg.payload) as Record<string, unknown>;
@@ -462,35 +549,92 @@ async function startServer() {
           const cfgKey = String(msg.payload.key).trim().slice(0, 80);
           if (!cfgKey || msg.payload.value === undefined) return;
           const incomingTs = Number(msg.payload.updatedAtMs) || 0;
+          const incomingRev = Number(msg.payload.revision) || 0;
           const currentTs = Number(serverState.configUpdatedAtMsMap?.[cfgKey]) || 0;
-          if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) return;
-          const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
+          const currentRev = Number(serverState.adminConfigRevisionMap?.[cfgKey]) || 0;
+          if (incomingRev > 0 && currentRev > 0 && incomingRev < currentRev) return;
+          if (incomingRev === 0 && incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) return;
+          if (Array.isArray(msg.payload.deletedIds)) {
+            recordServerTombstones(cfgKey, msg.payload.deletedIds);
+          }
+          mergeIncomingTombstonesMap(msg.payload.deletedAdminItemIds);
+          const nextTs = Math.max(Date.now(), incomingTs, currentTs + 1);
+          const nextRev = bumpServerConfigRevision(cfgKey, incomingRev);
+          const nextVal = Array.isArray(msg.payload.value)
+            ? filterListByServerTombstones(cfgKey, msg.payload.value as Array<{ id?: unknown }>)
+            : msg.payload.value;
           serverState.adminConfigs = {
             ...(serverState.adminConfigs || {}),
-            [cfgKey]: msg.payload.value,
+            [cfgKey]: nextVal,
           };
           serverState.configUpdatedAtMsMap = {
             ...(serverState.configUpdatedAtMsMap || {}),
             [cfgKey]: nextTs,
           };
-          if (cfgKey === 'bugRewardConfig' && msg.payload.value && typeof msg.payload.value === 'object') {
-            serverState.bugRewardConfig = msg.payload.value as Record<string, unknown>;
-          } else if (cfgKey === 'diamondConfig' && msg.payload.value && typeof msg.payload.value === 'object') {
-            serverState.diamondConfig = msg.payload.value as Record<string, unknown>;
-          } else if (cfgKey === 'uiVisibilityConfig' && msg.payload.value && typeof msg.payload.value === 'object') {
-            serverState.uiVisibilityConfig = msg.payload.value as Record<string, unknown>;
-          } else if (cfgKey === 'adminWarnings' && Array.isArray(msg.payload.value)) {
-            serverState.adminWarnings = msg.payload.value as Array<Record<string, unknown>>;
+          if (cfgKey === 'bugRewardConfig' && nextVal && typeof nextVal === 'object') {
+            serverState.bugRewardConfig = nextVal as Record<string, unknown>;
+          } else if (cfgKey === 'diamondConfig' && nextVal && typeof nextVal === 'object') {
+            serverState.diamondConfig = nextVal as Record<string, unknown>;
+          } else if (cfgKey === 'uiVisibilityConfig' && nextVal && typeof nextVal === 'object') {
+            serverState.uiVisibilityConfig = nextVal as Record<string, unknown>;
+          } else if (cfgKey === 'adminWarnings' && Array.isArray(nextVal)) {
+            serverState.adminWarnings = nextVal as Array<Record<string, unknown>>;
+          } else if (cfgKey === 'bugReports' && Array.isArray(nextVal)) {
+            serverState.bugReports = nextVal as ServerBugReport[];
+          } else if (cfgKey === 'globalChats' && Array.isArray(nextVal)) {
+            serverState.globalChats = nextVal as ServerGlobalChatMessage[];
+          } else if (cfgKey === 'websitePopups' && Array.isArray(nextVal)) {
+            serverState.websitePopups = nextVal as ServerPopupNotification[];
           }
           savePersistedState();
           broadcastToAll({
             type: 'admin_config:updated',
             payload: {
               key: cfgKey,
-              value: msg.payload.value,
+              value: nextVal,
               updatedAtMs: nextTs,
+              revision: nextRev,
+              deletedAdminItemIds: serverState.deletedAdminItemIds,
               lastUpdated: serverState.lastUpdated,
             },
+          });
+        } else if (msg.type === 'presence:heartbeat' && msg.payload && msg.payload.accountId) {
+          const accId = String(msg.payload.accountId);
+          serverState.customerPresenceMap = {
+            ...(serverState.customerPresenceMap || {}),
+            [accId]: {
+              ...(msg.payload as Record<string, unknown>),
+              serverReceivedAtMs: Date.now(),
+            },
+          };
+          broadcastToAll({
+            type: 'presence:updated',
+            payload: {
+              accountId: accId,
+              presence: serverState.customerPresenceMap[accId],
+            },
+          });
+        } else if (msg.type === 'live_activity:push' && msg.payload && msg.payload.id) {
+          const entry = msg.payload as Record<string, unknown>;
+          if (!serverState.liveActivityLogs.some((l) => String(l.id) === String(entry.id))) {
+            serverState.liveActivityLogs = [entry, ...serverState.liveActivityLogs].slice(0, 500);
+            broadcastToAll({
+              type: 'live_activity:new',
+              payload: { entry },
+            });
+          }
+        } else if (msg.type === 'anomaly:push' && msg.payload && msg.payload.id) {
+          const alertItem = msg.payload as Record<string, unknown>;
+          const exists = serverState.autoDetectedAnomalies.some((a) => String(a.id) === String(alertItem.id));
+          serverState.autoDetectedAnomalies = exists
+            ? serverState.autoDetectedAnomalies.map((a) =>
+                String(a.id) === String(alertItem.id) ? alertItem : a
+              )
+            : [alertItem, ...serverState.autoDetectedAnomalies].slice(0, 120);
+          savePersistedState();
+          broadcastToAll({
+            type: 'anomaly:updated',
+            payload: { alert: alertItem, autoDetectedAnomalies: serverState.autoDetectedAnomalies },
           });
         } else if (msg.type === 'bank_data:sync' && msg.payload) {
           serverState.sharedBankData = {
@@ -699,10 +843,48 @@ async function startServer() {
       bugRewardConfig: serverState.bugRewardConfig || null,
       adminConfigs: serverState.adminConfigs || {},
       configUpdatedAtMsMap: serverState.configUpdatedAtMsMap || {},
+      adminConfigRevisionMap: serverState.adminConfigRevisionMap || {},
+      deletedAdminItemIds: serverState.deletedAdminItemIds || {},
+      customerPresenceMap: serverState.customerPresenceMap || {},
+      liveActivityLogs: serverState.liveActivityLogs || [],
+      autoDetectedAnomalies: serverState.autoDetectedAnomalies || [],
       sharedBankData: serverState.sharedBankData,
       connectedDevices: Math.max(1, clients.size),
       lastUpdated: serverState.lastUpdated,
     });
+  });
+
+  app.get('/api/presence', (_req, res) => {
+    res.json({
+      success: true,
+      customerPresenceMap: serverState.customerPresenceMap || {},
+      liveActivityLogs: serverState.liveActivityLogs || [],
+      autoDetectedAnomalies: serverState.autoDetectedAnomalies || [],
+      serverTimeMs: Date.now(),
+    });
+  });
+
+  app.post('/api/presence', (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const accId = typeof body.accountId === 'string' ? body.accountId.trim() : '';
+    if (!accId) {
+      res.status(400).json({ success: false, message: 'accountId wajib diisi.' });
+      return;
+    }
+    const record = {
+      ...body,
+      accountId: accId,
+      serverReceivedAtMs: Date.now(),
+    };
+    serverState.customerPresenceMap = {
+      ...(serverState.customerPresenceMap || {}),
+      [accId]: record,
+    };
+    broadcastToAll({
+      type: 'presence:updated',
+      payload: { accountId: accId, presence: record },
+    });
+    res.json({ success: true, presence: record, serverTimeMs: Date.now() });
   });
 
   app.get('/api/admin-config', (_req, res) => {
@@ -722,51 +904,86 @@ async function startServer() {
       return;
     }
     const incomingTs = Number(req.body?.updatedAtMs) || 0;
+    const incomingRev = Number(req.body?.revision) || 0;
     const currentTs = Number(serverState.configUpdatedAtMsMap?.[rawKey]) || 0;
-    if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
+    const currentRev = Number(serverState.adminConfigRevisionMap?.[rawKey]) || 0;
+    if (incomingRev > 0 && currentRev > 0 && incomingRev < currentRev) {
       res.json({
         success: true,
         ignoredStale: true,
         key: rawKey,
         value: serverState.adminConfigs?.[rawKey],
         updatedAtMs: currentTs,
+        revision: currentRev,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
         lastUpdated: serverState.lastUpdated,
       });
       return;
     }
-    const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
+    if (incomingRev === 0 && incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
+      res.json({
+        success: true,
+        ignoredStale: true,
+        key: rawKey,
+        value: serverState.adminConfigs?.[rawKey],
+        updatedAtMs: currentTs,
+        revision: currentRev,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      });
+      return;
+    }
+    if (Array.isArray(req.body?.deletedIds)) {
+      recordServerTombstones(rawKey, req.body.deletedIds);
+    }
+    mergeIncomingTombstonesMap(req.body?.deletedAdminItemIds);
+    const nextTs = Math.max(Date.now(), incomingTs, currentTs + 1);
+    const nextRev = bumpServerConfigRevision(rawKey, incomingRev);
+    const filteredVal = Array.isArray(value)
+      ? filterListByServerTombstones(rawKey, value as Array<{ id?: unknown }>)
+      : value;
     serverState.adminConfigs = {
       ...(serverState.adminConfigs || {}),
-      [rawKey]: value,
+      [rawKey]: filteredVal,
     };
     serverState.configUpdatedAtMsMap = {
       ...(serverState.configUpdatedAtMsMap || {}),
       [rawKey]: nextTs,
     };
-    if (rawKey === 'bugRewardConfig' && value && typeof value === 'object') {
-      serverState.bugRewardConfig = value as Record<string, unknown>;
-    } else if (rawKey === 'diamondConfig' && value && typeof value === 'object') {
-      serverState.diamondConfig = value as Record<string, unknown>;
-    } else if (rawKey === 'uiVisibilityConfig' && value && typeof value === 'object') {
-      serverState.uiVisibilityConfig = value as Record<string, unknown>;
-    } else if (rawKey === 'adminWarnings' && Array.isArray(value)) {
-      serverState.adminWarnings = value as Array<Record<string, unknown>>;
+    if (rawKey === 'bugRewardConfig' && filteredVal && typeof filteredVal === 'object') {
+      serverState.bugRewardConfig = filteredVal as Record<string, unknown>;
+    } else if (rawKey === 'diamondConfig' && filteredVal && typeof filteredVal === 'object') {
+      serverState.diamondConfig = filteredVal as Record<string, unknown>;
+    } else if (rawKey === 'uiVisibilityConfig' && filteredVal && typeof filteredVal === 'object') {
+      serverState.uiVisibilityConfig = filteredVal as Record<string, unknown>;
+    } else if (rawKey === 'adminWarnings' && Array.isArray(filteredVal)) {
+      serverState.adminWarnings = filteredVal as Array<Record<string, unknown>>;
+    } else if (rawKey === 'bugReports' && Array.isArray(filteredVal)) {
+      serverState.bugReports = filteredVal as ServerBugReport[];
+    } else if (rawKey === 'globalChats' && Array.isArray(filteredVal)) {
+      serverState.globalChats = filteredVal as ServerGlobalChatMessage[];
+    } else if (rawKey === 'websitePopups' && Array.isArray(filteredVal)) {
+      serverState.websitePopups = filteredVal as ServerPopupNotification[];
     }
     savePersistedState();
     broadcastToAll({
       type: 'admin_config:updated',
       payload: {
         key: rawKey,
-        value,
+        value: filteredVal,
         updatedAtMs: nextTs,
+        revision: nextRev,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
         lastUpdated: serverState.lastUpdated,
       },
     });
     res.json({
       success: true,
       key: rawKey,
-      value,
+      value: filteredVal,
       updatedAtMs: nextTs,
+      revision: nextRev,
+      deletedAdminItemIds: serverState.deletedAdminItemIds,
       lastUpdated: serverState.lastUpdated,
     });
   });
@@ -877,24 +1094,57 @@ async function startServer() {
 
   app.post('/api/admin-warnings', (req, res) => {
     const incomingTs = Number(req.body?.updatedAtMs) || 0;
+    const incomingRev = Number(req.body?.revision) || 0;
     const currentTs = Number(serverState.configUpdatedAtMsMap?.adminWarnings) || 0;
-    if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
-      res.json({ success: true, ignoredStale: true, adminWarnings: serverState.adminWarnings, updatedAtMs: currentTs, lastUpdated: serverState.lastUpdated });
+    const currentRev = Number(serverState.adminConfigRevisionMap?.adminWarnings) || 0;
+    if (incomingRev > 0 && currentRev > 0 && incomingRev < currentRev) {
+      res.json({
+        success: true,
+        ignoredStale: true,
+        adminWarnings: serverState.adminWarnings,
+        updatedAtMs: currentTs,
+        revision: currentRev,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      });
       return;
     }
+    if (incomingRev === 0 && incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
+      res.json({
+        success: true,
+        ignoredStale: true,
+        adminWarnings: serverState.adminWarnings,
+        updatedAtMs: currentTs,
+        revision: currentRev,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      });
+      return;
+    }
+    if (Array.isArray(req.body?.deletedIds)) {
+      recordServerTombstones('adminWarnings', req.body.deletedIds);
+    }
+    mergeIncomingTombstonesMap(req.body?.deletedAdminItemIds);
     if (Array.isArray(req.body?.adminWarnings)) {
-      serverState.adminWarnings = (req.body.adminWarnings as Array<Record<string, unknown>>).slice(0, 100);
+      serverState.adminWarnings = filterListByServerTombstones(
+        'adminWarnings',
+        (req.body.adminWarnings as Array<Record<string, unknown>>).slice(0, 100)
+      );
     } else if (req.body && typeof req.body === 'object' && req.body.id) {
       const incoming = req.body as Record<string, unknown>;
       const exists = serverState.adminWarnings.some((w) => String(w.id) === String(incoming.id));
-      serverState.adminWarnings = exists
-        ? serverState.adminWarnings.map((w) => (String(w.id) === String(incoming.id) ? incoming : w))
-        : [incoming, ...serverState.adminWarnings].slice(0, 100);
+      serverState.adminWarnings = filterListByServerTombstones(
+        'adminWarnings',
+        exists
+          ? serverState.adminWarnings.map((w) => (String(w.id) === String(incoming.id) ? incoming : w))
+          : [incoming, ...serverState.adminWarnings].slice(0, 100)
+      );
     } else {
       res.status(400).json({ success: false, message: 'Data peringatan admin tidak valid.' });
       return;
     }
-    const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
+    const nextTs = Math.max(Date.now(), incomingTs, currentTs + 1);
+    const nextRev = bumpServerConfigRevision('adminWarnings', incomingRev);
     serverState.configUpdatedAtMsMap = {
       ...(serverState.configUpdatedAtMsMap || {}),
       adminWarnings: nextTs,
@@ -906,9 +1156,22 @@ async function startServer() {
     savePersistedState();
     broadcastToAll({
       type: 'admin_warnings:updated',
-      payload: { adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
+      payload: {
+        adminWarnings: serverState.adminWarnings,
+        updatedAtMs: nextTs,
+        revision: nextRev,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
     });
-    res.json({ success: true, adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated });
+    res.json({
+      success: true,
+      adminWarnings: serverState.adminWarnings,
+      updatedAtMs: nextTs,
+      revision: nextRev,
+      deletedAdminItemIds: serverState.deletedAdminItemIds,
+      lastUpdated: serverState.lastUpdated,
+    });
   });
 
   app.patch('/api/admin-warnings/:id/resend', (req, res) => {
@@ -930,7 +1193,8 @@ async function startServer() {
       res.status(404).json({ success: false, message: 'Peringatan tidak ditemukan.' });
       return;
     }
-    const nextTs = Date.now();
+    const nextTs = Math.max(Date.now(), (Number(serverState.configUpdatedAtMsMap?.adminWarnings) || 0) + 1);
+    const nextRev = bumpServerConfigRevision('adminWarnings');
     serverState.configUpdatedAtMsMap = {
       ...(serverState.configUpdatedAtMsMap || {}),
       adminWarnings: nextTs,
@@ -942,15 +1206,29 @@ async function startServer() {
     savePersistedState();
     broadcastToAll({
       type: 'admin_warnings:updated',
-      payload: { adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
+      payload: {
+        adminWarnings: serverState.adminWarnings,
+        updatedAtMs: nextTs,
+        revision: nextRev,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
     });
-    res.json({ success: true, adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated });
+    res.json({
+      success: true,
+      adminWarnings: serverState.adminWarnings,
+      updatedAtMs: nextTs,
+      revision: nextRev,
+      lastUpdated: serverState.lastUpdated,
+    });
   });
 
   app.delete('/api/admin-warnings/:id', (req, res) => {
     const targetId = String(req.params.id || '');
+    recordServerTombstones('adminWarnings', [targetId]);
     serverState.adminWarnings = serverState.adminWarnings.filter((w) => String(w.id) !== targetId);
-    const nextTs = Date.now();
+    const nextTs = Math.max(Date.now(), (Number(serverState.configUpdatedAtMsMap?.adminWarnings) || 0) + 1);
+    const nextRev = bumpServerConfigRevision('adminWarnings');
     serverState.configUpdatedAtMsMap = {
       ...(serverState.configUpdatedAtMsMap || {}),
       adminWarnings: nextTs,
@@ -962,9 +1240,22 @@ async function startServer() {
     savePersistedState();
     broadcastToAll({
       type: 'admin_warnings:updated',
-      payload: { adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated },
+      payload: {
+        adminWarnings: serverState.adminWarnings,
+        updatedAtMs: nextTs,
+        revision: nextRev,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
     });
-    res.json({ success: true, adminWarnings: serverState.adminWarnings, updatedAtMs: nextTs, lastUpdated: serverState.lastUpdated });
+    res.json({
+      success: true,
+      adminWarnings: serverState.adminWarnings,
+      updatedAtMs: nextTs,
+      revision: nextRev,
+      deletedAdminItemIds: serverState.deletedAdminItemIds,
+      lastUpdated: serverState.lastUpdated,
+    });
   });
 
   app.get('/api/bug-reward-config', (_req, res) => {
@@ -1117,21 +1408,35 @@ async function startServer() {
 
   app.delete('/api/global-chat/:id', (req, res) => {
     const targetId = req.params.id;
+    recordServerTombstones('globalChats', [targetId]);
+    bumpServerConfigRevision('globalChats');
     serverState.globalChats = serverState.globalChats.filter((m) => m.id !== targetId);
     savePersistedState();
     broadcastToAll({
       type: 'global_chat:delete',
-      payload: { id: targetId, lastUpdated: serverState.lastUpdated },
+      payload: {
+        id: targetId,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
     });
     res.json({ success: true, globalChats: serverState.globalChats });
   });
 
   app.post('/api/global-chat/clear', (_req, res) => {
+    recordServerTombstones(
+      'globalChats',
+      serverState.globalChats.map((m) => m.id)
+    );
+    bumpServerConfigRevision('globalChats');
     serverState.globalChats = [];
     savePersistedState();
     broadcastToAll({
       type: 'global_chat:clear',
-      payload: { lastUpdated: serverState.lastUpdated },
+      payload: {
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
     });
     res.json({ success: true, globalChats: [] });
   });
@@ -1207,21 +1512,35 @@ async function startServer() {
 
   app.delete('/api/bug-reports/:id', (req, res) => {
     const targetId = req.params.id;
+    recordServerTombstones('bugReports', [targetId]);
+    bumpServerConfigRevision('bugReports');
     serverState.bugReports = serverState.bugReports.filter((b) => b.id !== targetId);
     savePersistedState();
     broadcastToAll({
       type: 'bug_report:deleted',
-      payload: { id: targetId, lastUpdated: serverState.lastUpdated },
+      payload: {
+        id: targetId,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
     });
     res.json({ success: true, bugReports: serverState.bugReports });
   });
 
   app.post('/api/bug-reports/clear', (_req, res) => {
+    recordServerTombstones(
+      'bugReports',
+      serverState.bugReports.map((b) => b.id)
+    );
+    bumpServerConfigRevision('bugReports');
     serverState.bugReports = [];
     savePersistedState();
     broadcastToAll({
       type: 'bug_report:clear',
-      payload: { lastUpdated: serverState.lastUpdated },
+      payload: {
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
     });
     res.json({ success: true, bugReports: [] });
   });

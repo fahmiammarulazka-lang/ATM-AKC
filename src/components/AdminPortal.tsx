@@ -141,6 +141,7 @@ import {
   AdminTopAutoDetectorAndSystemWarningBar,
   AdminLiveMonitorTabView,
 } from './AdminLiveMonitorPanel';
+import { AdminWarningStudioSection } from './AdminWarningStudioSection';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -309,12 +310,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     executeAdminTierNotificationQuickAction,
     liveActivityLogs,
     autoDetectedAnomalies,
+    adminWarnings,
   } = useBank();
 
   const [liveMonitorFocusAccountId, setLiveMonitorFocusAccountId] = useState<string | null>(null);
 
   const [activeAdminTab, setActiveAdminTab] = useState<
     | 'live_monitor'
+    | 'warning_studio'
     | 'super_tools'
     | 'missions_admin'
     | 'leaderboard_admin'
@@ -887,7 +890,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           }
           setActiveAdminTab('live_monitor');
         }}
-        onOpenWarningsStudio={() => setActiveAdminTab('super_tools')}
+        onOpenWarningsStudio={() => setActiveAdminTab('warning_studio')}
       />
 
       {/* Admin Header Banner */}
@@ -931,7 +934,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-xs">
+        <div
+          onClick={() => setActiveAdminTab('warning_studio')}
+          className="p-4 rounded-2xl bg-gradient-to-br from-amber-950/90 via-slate-900 to-rose-950/80 border-2 border-amber-400/80 hover:border-amber-300 shadow-lg cursor-pointer transition-all"
+        >
+          <span className="text-amber-300 font-bold block text-[11px]">
+            🚨 Studio Peringatan
+          </span>
+          <div className="font-mono text-xl sm:text-2xl font-black text-white mt-1 flex items-center gap-2">
+            <span>{adminWarnings.filter((w) => w.isActive).length} Aktif</span>
+            {adminWarnings.some((w) => w.isActive) && (
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+            )}
+          </div>
+          <span className="text-[10px] text-amber-200 font-mono block mt-0.5">
+            25 Preset • Pop-up &amp; Banner
+          </span>
+        </div>
+
         <div
           onClick={() => setActiveAdminTab('super_tools')}
           className="p-4 rounded-2xl bg-gradient-to-br from-fuchsia-950/80 via-slate-900 to-indigo-950/80 border-2 border-fuchsia-400/70 hover:border-fuchsia-300 shadow-lg cursor-pointer transition-all"
@@ -1267,6 +1288,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               {autoDetectedAnomalies.filter((a) => a.status === 'active').length} Alert
             </span>
           )}
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('warning_studio')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'warning_studio'
+              ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-rose-400 text-slate-950 font-black shadow-lg shadow-amber-500/30'
+              : 'text-amber-300 hover:text-white hover:bg-amber-950/60 border-2 border-amber-400/80'
+          }`}
+        >
+          <BellRing className="w-4 h-4" />
+          <span>
+            🚨 Studio Peringatan &amp; Pemberitahuan (25 Preset + Manual)
+          </span>
+          <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
+            {adminWarnings.filter((w) => w.isActive).length}/{adminWarnings.length}
+          </span>
         </button>
 
         <button
@@ -1628,6 +1666,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
       {activeAdminTab === 'live_monitor' && (
         <AdminLiveMonitorTabView initialFocusAccountId={liveMonitorFocusAccountId} />
       )}
+
+      {/* ================= ADMIN TAB: STUDIO PERINGATAN & PEMBERITAHUAN NASABAH (25 PRESET + MANUAL) ================= */}
+      {activeAdminTab === 'warning_studio' && <AdminWarningStudioSection />}
 
       {/* ================= ADMIN TAB: PUSAT BANTUAN (50+ FAQ & CONTACT US WA/EMAIL) ================= */}
       {activeAdminTab === 'help_center' && <AdminHelpCenterPanel />}
