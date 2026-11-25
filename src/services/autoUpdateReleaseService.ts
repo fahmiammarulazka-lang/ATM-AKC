@@ -16,7 +16,7 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v14.38.48';
+export const STRUCTURED_BASE_VERSION = 'v15.39.49';
 
 export interface StructuredVersion {
   p: number; // AAA: Major (fitur besar / penambahan > 3 fitur sekaligus)
@@ -214,7 +214,7 @@ export function validateVersionJump(
   candidateVersionStr: string
 ): VersionJumpValidationResult {
   const normalized = normalizeVersionInput(candidateVersionStr);
-  const currentParsed = parseStructuredVersion(currentVersionStr) || { p: 14, w: 38, g: 48 };
+  const currentParsed = parseStructuredVersion(currentVersionStr) || { p: 14, w: 39, g: 49 };
   const currentFormatted = formatStructuredVersion(currentParsed);
 
   const candidateParsed = parseStructuredVersion(candidateVersionStr);
@@ -225,7 +225,7 @@ export function validateVersionJump(
       normalizedVersion: normalized,
       matchedReleaseType: null,
       warningMessage:
-        'Format versi disarankan mengikuti pola vAAA.SSS.DDD dengan angka 00–999 untuk SSS & DDD (contoh: v14.38.48). Anda tetap bisa menyimpan jika memang disengaja.',
+        'Format versi disarankan mengikuti pola vAAA.SSS.DDD dengan angka 00–999 untuk SSS & DDD (contoh: v14.39.49). Anda tetap bisa menyimpan jika memang disengaja.',
     };
   }
 

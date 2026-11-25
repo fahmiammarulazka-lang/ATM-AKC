@@ -12,6 +12,9 @@ import {
   QrCode,
   Sparkles,
   Loader2,
+  Download,
+  Share2,
+  Lock,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { formatRupiah } from '../utils/bankUtils';
@@ -20,6 +23,13 @@ import {
   requestCheckQrisPaymentStatus,
   requestCreateQrisPayment,
 } from '../../buatQrisService';
+import {
+  buildQrisDownloadFilename,
+  canDeviceSharePngFile,
+  downloadPureQrisPng,
+  generatePureQrisHdDataUrl,
+  sharePureQrisPng,
+} from '../utils/qrisDownload';
 import { QrisPaymentOrder } from '../types/bank';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
 
@@ -58,9 +68,17 @@ export const BuatQrisPaymentModal: React.FC = () => {
   const [lastCheckNote, setLastCheckNote] = useState<string>('Menunggu pembayaran via QRIS...');
   const [isRegenerating, setIsRegenerating] = useState<boolean>(false);
   const [paidSuccessBanner, setPaidSuccessBanner] = useState<string | null>(null);
+  const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'success' | 'error'>(
+    'idle'
+  );
+  const [downloadFeedbackMsg, setDownloadFeedbackMsg] = useState<string>('');
+  const [hdQrCache, setHdQrCache] = useState<{ orderId: string; dataUrl: string } | null>(null);
+  const [showMobileFallbackPanel, setShowMobileFallbackPanel] = useState<boolean>(false);
+  const [isSharingQr, setIsSharingQr] = useState<boolean>(false);
 
   const pollTimerRef = useRef<number | null>(null);
   const autoCloseTimerRef = useRef<number | null>(null);
+  const downloadResetTimerRef = useRef<number | null>(null);
   const hasFulfilledRef = useRef<boolean>(false);
 
   const order = activeQrisModalOrder;
@@ -81,6 +99,13 @@ export const BuatQrisPaymentModal: React.FC = () => {
         : null
     );
     setQrRenderError('');
+    setDownloadState('idle');
+    setDownloadFeedbackMsg('');
+    setShowMobileFallbackPanel(false);
+    if (downloadResetTimerRef.current) {
+      window.clearTimeout(downloadResetTimerRef.current);
+      downloadResetTimerRef.current = null;
+    }
 
     if (order.qrisString) {
       let active = true;
@@ -176,6 +201,7 @@ export const BuatQrisPaymentModal: React.FC = () => {
     return () => {
       if (pollTimerRef.current) window.clearInterval(pollTimerRef.current);
       if (autoCloseTimerRef.current) window.clearTimeout(autoCloseTimerRef.current);
+      if (downloadResetTimerRef.current) window.clearTimeout(downloadResetTimerRef.current);
     };
   }, [order?.orderId, order?.status]);
 
@@ -183,6 +209,114 @@ export const BuatQrisPaymentModal: React.FC = () => {
 
   const isExpired = order.status === 'EXPIRED' || remainingSeconds <= 0;
   const isPaid = order.status === 'LUNAS' || Boolean(paidSuccessBanner);
+  const isDownloadDisabled = isExpired || isPaid || !order.qrisString || downloadState === 'downloading';
+  const expectedFilename = buildQrisDownloadFilename(order.orderId, order.totalAmount);
+  const supportsShareFile = canDeviceSharePngFile(expectedFilename);
+
+  const logQrisDownloadActivity = (methodLabel: string) => {
+    if (!currentAccount) return;
+    recordLiveActivity({
+      actorRole: 'nasabah',
+      category: 'transaction',
+      accountId: currentAccount.id,
+      accountName: currentAccount.fullName,
+      accountNumber: currentAccount.accountNumber,
+      cardTier: currentAccount.cardTier,
+      actionTitle: 'Unduh Gambar QRIS HD (1080px)',
+      description: `Nasabah mengunduh file ${expectedFilename} (${formatRupiah(order.totalAmount)}) dari Modal Pembayaran QRIS (${methodLabel}).`,
+      amountRupiah: order.totalAmount,
+    });
+  };
+
+  const handleDownloadQris = async () => {
+    if (isDownloadDisabled) return;
+    setDownloadState('downloading');
+    setDownloadFeedbackMsg('');
+    try {
+      const cachedUrl = hdQrCache && hdQrCache.orderId === order.orderId ? hdQrCache.dataUrl : undefined;
+      const result = await downloadPureQrisPng(
+        {
+          orderId: order.orderId,
+          totalAmount: order.totalAmount,
+          qrisString: order.qrisString,
+        },
+        cachedUrl
+      );
+
+      if (result.dataUrl) {
+        setHdQrCache({ orderId: order.orderId, dataUrl: result.dataUrl });
+      }
+
+      if (result.success) {
+        setDownloadState('success');
+        setDownloadFeedbackMsg(`File ${result.filename} (PNG HD 1080px) siap di-upload ke e-wallet.`);
+        if (result.suggestFallbackPanel) {
+          setShowMobileFallbackPanel(true);
+        }
+        logQrisDownloadActivity(result.suggestFallbackPanel ? 'Unduh + Fallback HP' : 'Unduh Langsung');
+        if (downloadResetTimerRef.current) window.clearTimeout(downloadResetTimerRef.current);
+        downloadResetTimerRef.current = window.setTimeout(() => {
+          setDownloadState('idle');
+        }, 2000);
+      } else {
+        setDownloadState('error');
+        setShowMobileFallbackPanel(true);
+        setDownloadFeedbackMsg(
+          result.error || 'Unduhan langsung dibatasi browser. Gunakan panel Simpan / Bagikan di bawah.'
+        );
+      }
+    } catch {
+      setDownloadState('error');
+      setDownloadFeedbackMsg('Gagal menyiapkan gambar QRIS HD. Silakan tekan Unduh Qris kembali.');
+    }
+  };
+
+  const handleShareQris = async () => {
+    if (isExpired || isPaid || !order.qrisString || isSharingQr) return;
+    setIsSharingQr(true);
+    try {
+      let dataUrl = hdQrCache && hdQrCache.orderId === order.orderId ? hdQrCache.dataUrl : '';
+      if (!dataUrl) {
+        dataUrl = await generatePureQrisHdDataUrl(order.qrisString);
+        setHdQrCache({ orderId: order.orderId, dataUrl });
+      }
+      const shareOutcome = await sharePureQrisPng(dataUrl, expectedFilename);
+      if (shareOutcome === 'shared') {
+        setDownloadState('success');
+        setDownloadFeedbackMsg('QRIS HD 1080px berhasil dibagikan / disimpan ke perangkat.');
+        logQrisDownloadActivity('Bagikan / Simpan HP');
+        if (downloadResetTimerRef.current) window.clearTimeout(downloadResetTimerRef.current);
+        downloadResetTimerRef.current = window.setTimeout(() => {
+          setDownloadState('idle');
+        }, 2000);
+      } else if (shareOutcome === 'unsupported') {
+        setShowMobileFallbackPanel(true);
+        setDownloadFeedbackMsg(
+          'Browser ini belum mendukung Bagikan File langsung. Tekan lama gambar QRIS di bawah lalu pilih Simpan ke Foto.'
+        );
+      }
+    } catch {
+      setShowMobileFallbackPanel(true);
+      setDownloadFeedbackMsg(
+        'Gagal membuka menu Bagikan. Tekan lama gambar QRIS HD di bawah lalu pilih Simpan ke Foto.'
+      );
+    } finally {
+      setIsSharingQr(false);
+    }
+  };
+
+  const handleToggleMobileFallback = async () => {
+    const nextOpen = !showMobileFallbackPanel;
+    setShowMobileFallbackPanel(nextOpen);
+    if (nextOpen && order.qrisString && (!hdQrCache || hdQrCache.orderId !== order.orderId)) {
+      try {
+        const hdUrl = await generatePureQrisHdDataUrl(order.qrisString);
+        setHdQrCache({ orderId: order.orderId, dataUrl: hdUrl });
+      } catch {
+        // Tetap tampilkan qrDataUrl jika gagal
+      }
+    }
+  };
 
   const handleCopy = async (value: string, field: 'amount' | 'orderId') => {
     try {
@@ -409,6 +543,126 @@ export const BuatQrisPaymentModal: React.FC = () => {
                   <p className="mt-1 text-[11px] text-slate-200">
                     Batas waktu 10 menit berakhir. Buat ulang QRIS baru untuk melanjutkan.
                   </p>
+                </div>
+              )}
+            </div>
+
+            {/* Primary Full-Width "Unduh Qris" Button right below QR Code */}
+            <div className="mt-3.5 w-full space-y-2">
+              <button
+                type="button"
+                onClick={() => void handleDownloadQris()}
+                disabled={isDownloadDisabled}
+                aria-label="Unduh Qris"
+                className={`flex min-h-[44px] w-full items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-black shadow-md transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 whitespace-nowrap ${
+                  isPaid || isExpired
+                    ? 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-500 shadow-none'
+                    : downloadState === 'success'
+                    ? 'bg-emerald-600 text-white shadow-emerald-600/25'
+                    : 'bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 text-white shadow-sky-600/25 hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500 active:scale-[0.98] disabled:opacity-60'
+                }`}
+              >
+                {isPaid ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                    <span>Pembayaran Sudah Lunas</span>
+                  </>
+                ) : isExpired ? (
+                  <>
+                    <Lock className="h-4 w-4 shrink-0 text-slate-400" />
+                    <span>QRIS Kedaluwarsa — Tidak Dapat Diunduh</span>
+                  </>
+                ) : downloadState === 'downloading' ? (
+                  <>
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                    <span>Menyiapkan PNG HD 1080px...</span>
+                  </>
+                ) : downloadState === 'success' ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>QRIS Berhasil Diunduh</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4 shrink-0" />
+                    <span>Unduh Qris</span>
+                  </>
+                )}
+              </button>
+
+              {!isPaid && !isExpired && (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-slate-500">
+                  <span>PNG HD 1080px (Hanya QRIS) · Siap upload ke e-wallet</span>
+                  <div className="flex items-center gap-2">
+                    {supportsShareFile && (
+                      <button
+                        type="button"
+                        onClick={() => void handleShareQris()}
+                        disabled={isSharingQr}
+                        className="inline-flex items-center gap-1 font-bold text-sky-700 hover:text-sky-900 whitespace-nowrap disabled:opacity-50"
+                      >
+                        <Share2 className="h-3.5 w-3.5" />
+                        <span>{isSharingQr ? 'Membagikan...' : 'Bagikan / Simpan HP'}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleMobileFallback()}
+                      className="font-semibold text-slate-500 underline-offset-2 hover:text-slate-800 hover:underline whitespace-nowrap"
+                    >
+                      {showMobileFallbackPanel ? 'Tutup Bantuan HP' : 'Tidak Terunduh di HP?'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {downloadFeedbackMsg && (
+                <p
+                  className={`rounded-xl border px-3 py-2 text-[11px] font-semibold ${
+                    downloadState === 'error'
+                      ? 'border-amber-200 bg-amber-50 text-amber-900'
+                      : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  }`}
+                >
+                  {downloadFeedbackMsg}
+                </p>
+              )}
+
+              {showMobileFallbackPanel && !isPaid && !isExpired && (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-black text-slate-900">
+                        Simpan Manual di HP (iOS Safari / WebView)
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-slate-600">
+                        Tekan lama gambar QRIS HD di bawah lalu pilih <strong>Simpan ke Foto</strong>, atau gunakan tombol Bagikan.
+                      </p>
+                    </div>
+                  </div>
+                  {(hdQrCache?.orderId === order.orderId ? hdQrCache.dataUrl : qrDataUrl) && (
+                    <div className="flex flex-col items-center gap-2 rounded-xl border border-slate-200 bg-white p-3">
+                      <img
+                        src={hdQrCache?.orderId === order.orderId ? hdQrCache.dataUrl : qrDataUrl}
+                        alt={`QRIS HD ${order.orderId}`}
+                        className="h-44 w-44 rounded-lg object-contain"
+                      />
+                      <p className="font-mono text-[10px] text-slate-500 break-all text-center">
+                        {expectedFilename}
+                      </p>
+                      {supportsShareFile && (
+                        <button
+                          type="button"
+                          onClick={() => void handleShareQris()}
+                          disabled={isSharingQr}
+                          className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl bg-sky-600 px-3.5 py-2 text-xs font-bold text-white transition hover:bg-sky-700 disabled:opacity-50"
+                        >
+                          <Share2 className="h-3.5 w-3.5" />
+                          <span>{isSharingQr ? 'Membuka Menu Bagikan...' : 'Bagikan / Simpan ke Galeri'}</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

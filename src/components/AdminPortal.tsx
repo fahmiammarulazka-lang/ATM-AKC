@@ -62,6 +62,7 @@ import {
   Save,
   RotateCcw,
   Activity,
+  Lightbulb,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -84,6 +85,7 @@ import {
   AdminTierNotificationEventType,
 } from '../types/bank';
 import { AdminDiamondFamilyTab } from './AdminDiamondFamilyTab';
+import { AdminSuggestionsTab } from './AdminSuggestionsTab';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
 import {
   MAX_DIAMOND_PACKAGE_AMOUNT,
@@ -202,6 +204,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     connectedDevicesCount,
     bugReports,
     bugRewardConfig,
+    suggestions,
     adminUpdateBugRewardConfig,
     adminUpdateBugReport,
     adminDeleteBugReport,
@@ -334,6 +337,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     | 'app_updates'
     | 'global_chat'
     | 'bug_reports'
+    | 'suggestions'
     | 'finance'
     | 'verification'
     | 'features'
@@ -1498,6 +1502,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         >
           <Bug className="w-4 h-4" />
           <span>🐛 Laporan Bug ({bugReports.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('suggestions')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'suggestions'
+              ? 'bg-gradient-to-r from-indigo-500 to-teal-500 text-white font-black shadow-lg shadow-indigo-500/30'
+              : 'text-indigo-300 hover:text-white hover:bg-indigo-950/60 border border-indigo-400/50'
+          }`}
+        >
+          <Lightbulb className="w-4 h-4" />
+          <span>💡 Saran &amp; Hadiah ({suggestions.length})</span>
         </button>
 
         <button
@@ -3042,6 +3058,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           </div>
         </div>
       )}
+
+      {/* ================= ADMIN TAB: SARAN & IDE FITUR + PROGRAM HADIAH SARAN ================= */}
+      {activeAdminTab === 'suggestions' && <AdminSuggestionsTab />}
 
       {/* ================= ADMIN TAB: LAPORAN BUG MASUK & PROGRAM HADIAH BUG TERVERIFIKASI ================= */}
       {activeAdminTab === 'bug_reports' && (

@@ -316,6 +316,11 @@ export interface BankAccount {
   // Jeda sementara Spin Roda oleh Admin dari Peringatan Deteksi Otomatis
   spinPausedUntil?: string;
   spinPauseReason?: string;
+  // Tanda terima baca permanen per akun (sinkron Cloud & anti-rollback agar Pop-up Unban & Peringatan tampil tepat sekali)
+  dismissedPopupIds?: string[];
+  dismissedWarningMap?: Record<string, number>;
+  // Kontak nasabah tersimpan untuk Chat Privat (sinkron Cloud per akun)
+  savedChatContacts?: PrivateChatContact[];
 }
 
 export interface DebtHistoryEntry {
@@ -446,12 +451,49 @@ export interface GlobalChatMessage {
   id: string;
   senderName: string;
   senderRole: 'admin' | 'customer';
+  senderAccountId?: string;
   senderAccount?: string;
+  senderUserId16?: string;
+  senderCardTier?: CardTier;
   isVerified?: boolean;
   title: string;
   text: string;
   timestamp: string;
+  createdAtMs?: number;
   isPinned?: boolean;
+  isOfficialAnnouncement?: boolean;
+  replyToId?: string;
+  replyToSender?: string;
+  replyToPreview?: string;
+}
+
+export interface GlobalChatConfig {
+  adminOnlyLock: boolean;
+  cooldownMs: number;
+  lockedBy?: string;
+  updatedAtMs: number;
+}
+
+export interface PrivateChatContact {
+  id: string;
+  targetAccountId: string;
+  targetAccountNumber: string;
+  targetUserId16?: string;
+  customName?: string;
+  registeredName: string;
+  cardTier?: CardTier;
+  addedAt: string;
+}
+
+export interface PrivateChatGroup {
+  id: string;
+  name: string;
+  iconKey: string;
+  accentColor: string;
+  creatorAccountId: string;
+  memberAccountIds: string[];
+  createdAt: string;
+  updatedAtMs: number;
 }
 
 export type NotificationCategory10Key =
@@ -559,6 +601,68 @@ export interface BugReportRecord {
   rejectionReason?: string;
   adminReply?: string;
   reward?: BugReportReward;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type SuggestionStatus =
+  | 'baru'
+  | 'ditinjau'
+  | 'diterima'
+  | 'dikerjakan'
+  | 'dirilis'
+  | 'ditolak';
+
+export type SuggestionPriority = 'ringan' | 'sedang' | 'penting' | 'kritis';
+
+export interface SuggestionReward {
+  given: boolean;
+  cashAmount: number;
+  coinAmount: number;
+  diamondAmount: number;
+  goldGrams?: number;
+  voucherAmount: number;
+  pointsAmount: number;
+  familySlotAmount?: number;
+  adminRewardMessage?: string;
+  awardedAt?: string;
+  awardedBy?: string;
+}
+
+export interface SuggestionRewardProgramConfig {
+  enabled: boolean;
+  cashAmount: number;
+  coinAmount: number;
+  diamondAmount: number;
+  goldGrams: number;
+  voucherAmount: number;
+  pointsAmount: number;
+  familySlotAmount: number;
+  defaultRewardMessage: string;
+  autoRewardTriggerStatuses?: SuggestionStatus[];
+  updatedAt?: string;
+  updatedAtMs?: number;
+}
+
+export interface SuggestionRecord {
+  id: string;
+  reporterAccountId?: string;
+  reporterName: string;
+  reporterAccountNumber?: string;
+  reporterUserId16?: string;
+  reporterEmail?: string;
+  title: string;
+  category: string;
+  priority: SuggestionPriority;
+  explanation: string;
+  photoDataUrl?: string;
+  photoFileName?: string;
+  status: SuggestionStatus;
+  isAcceptedByAdmin?: boolean;
+  acceptedAt?: string;
+  rejectionReason?: string;
+  adminReply?: string;
+  reward?: SuggestionReward;
   createdAt: string;
   updatedAt?: string;
 }
@@ -887,19 +991,32 @@ export interface AppNotification {
 
 export interface ChatMessage {
   id: string;
+  senderAccountId?: string;
   senderAccount: string;
   senderName: string;
+  recipientAccountId?: string;
   recipientAccount: string;
   receiverAccount?: string;
   recipientName: string;
+  groupId?: string;
   text: string;
   timestamp: string;
+  createdAtMs?: number;
+  replyToId?: string;
+  replyToSender?: string;
+  replyToPreview?: string;
+  deleted?: boolean;
   transferAttachment?: {
     amount: number;
     referenceNo: string;
     note?: string;
     isRequest?: boolean;
     status?: 'pending' | 'paid';
+    targetAccountNumber?: string;
+    targetName?: string;
+    paidByAccountId?: string;
+    paidByName?: string;
+    paidAt?: string;
   };
 }
 
@@ -2236,7 +2353,8 @@ export type AdminDeletableCollectionKey =
   | 'devRoles'
   | 'accounts'
   | 'families'
-  | 'banPresets';
+  | 'banPresets'
+  | 'suggestions';
 
 export type DeletedAdminItemIdsMap = Partial<Record<AdminDeletableCollectionKey, string[]>>;
 

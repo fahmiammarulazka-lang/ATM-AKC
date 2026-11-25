@@ -922,7 +922,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           }`}
         >
           <MessageSquare className="w-4 h-4 text-cyan-400" />
-          <span>Chat Antar Nomor (PayChat)</span>
+          <span>Chat Global &amp; Priv</span>
         </button>
 
         <button

@@ -11,6 +11,15 @@
 import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import confetti from 'canvas-confetti';
 import {
+  type AccountDismissedReceipts,
+  loadAllAccountDismissedReceipts,
+  saveAllAccountDismissedReceipts,
+  sanitizeDismissedPopupIds,
+  sanitizeDismissedWarningMap,
+  mergeDismissedPopupIds,
+  mergeDismissedWarningMaps,
+} from '../utils/dismissedReceiptStorage';
+import {
   auth,
   authPersistenceReady,
   onAuthStateChanged,
@@ -215,6 +224,14 @@ import {
   CustomerPresenceRecord,
   CustomerPresenceRecentAction,
   CustomerPresenceStatus,
+  GlobalChatConfig,
+  PrivateChatContact,
+  PrivateChatGroup,
+  SuggestionStatus,
+  SuggestionPriority,
+  SuggestionReward,
+  SuggestionRewardProgramConfig,
+  SuggestionRecord,
 } from '../types/bank';
 import {
   AUTO_DETECTOR_69_RULES,
@@ -243,6 +260,13 @@ import {
   isBugStatusAutoRewardTrigger,
   normalizeBugReportStatus,
 } from '../data/bugRewardCatalog';
+import {
+  DEFAULT_SUGGESTION_REWARD_CONFIG,
+  DEFAULT_SUGGESTION_AUTO_REWARD_STATUSES,
+  getSuggestionStatusMeta,
+  isSuggestionStatusAutoRewardTrigger,
+  normalizeSuggestionStatus,
+} from '../data/suggestionRewardCatalog';
 import {
   DEFAULT_SUPPORT_FAQS_50,
   DEFAULT_SUPPORT_FAQS_350,
@@ -389,14 +413,24 @@ interface ApplyLoanInput {
 
 interface SendChatInput {
   recipientAccount: string;
+  recipientAccountId?: string;
   recipientName: string;
+  groupId?: string;
   text: string;
+  replyToId?: string;
+  replyToSender?: string;
+  replyToPreview?: string;
   transferAttachment?: {
     amount: number;
     referenceNo: string;
     note?: string;
     isRequest?: boolean;
     status?: 'pending' | 'paid';
+    targetAccountNumber?: string;
+    targetName?: string;
+    paidByAccountId?: string;
+    paidByName?: string;
+    paidAt?: string;
   };
 }
 
@@ -519,19 +553,63 @@ interface BankContextType {
   dismissWebsitePopup: (id: string) => void;
   dismissAllWebsitePopups: () => void;
 
-  // Global Chat ("Pesan dari Admin" tampil di Semua HP secara Real-Time — HANYA Admin lewat Panel Admin)
+  // Global Chat & Priv (Ruang Chat Global terbuka + moderasi Admin, serta Chat Privat 1-on-1 & Grup Privat)
   globalChats: GlobalChatMessage[];
+  globalChatConfig: GlobalChatConfig;
   sendGlobalChatMessage: (input: {
     text: string;
     asAdmin?: boolean;
     senderName?: string;
     showPopupOnAllPhones?: boolean;
+    replyToId?: string;
+    replyToSender?: string;
+    replyToPreview?: string;
   }) => Promise<{ success: boolean; message: string }>;
+  togglePinGlobalChatMessage: (id: string) => Promise<{ success: boolean; message: string }>;
+  toggleGlobalChatAdminLock: (
+    adminOnlyLock: boolean,
+    cooldownMs?: number
+  ) => Promise<{ success: boolean; message: string }>;
   deleteGlobalChatMessage: (id: string) => Promise<void>;
   clearGlobalChatMessages: () => Promise<void>;
   isGlobalChatModalOpen: boolean;
   setIsGlobalChatModalOpen: (open: boolean) => void;
   connectedDevicesCount: number;
+
+  // Chat Privat (Kontak Nasabah 3 Kolom + Grup Privat + Unread Counter)
+  privateChatGroups: PrivateChatGroup[];
+  chatLastReadMap: Record<string, number>;
+  markChatRoomRead: (roomKey: string) => void;
+  totalChatUnreadCount: number;
+  globalChatUnreadCount: number;
+  privateChatUnreadCount: number;
+  addPrivateChatContact: (input: {
+    customName?: string;
+    userId?: string;
+    accountNumber?: string;
+  }) => { success: boolean; message: string; contact?: PrivateChatContact };
+  removePrivateChatContact: (targetAccountId: string) => { success: boolean; message: string };
+  markChatRequestPaid: (messageId: string, paidByName?: string) => Promise<void>;
+  createPrivateChatGroup: (input: {
+    name: string;
+    iconKey?: string;
+    accentColor?: string;
+    memberAccountIds: string[];
+  }) => Promise<{ success: boolean; message: string; group?: PrivateChatGroup }>;
+  addMemberToPrivateGroup: (
+    groupId: string,
+    memberAccountId: string
+  ) => Promise<{ success: boolean; message: string }>;
+  renamePrivateChatGroup: (
+    groupId: string,
+    newName: string
+  ) => Promise<{ success: boolean; message: string }>;
+  removeMemberFromPrivateGroup: (
+    groupId: string,
+    memberAccountId: string
+  ) => Promise<{ success: boolean; message: string }>;
+  leavePrivateChatGroup: (groupId: string) => Promise<{ success: boolean; message: string }>;
+  deletePrivateChatGroup: (groupId: string) => Promise<{ success: boolean; message: string }>;
 
   // Lapor Bug (Di paling bawah aplikasi, wajib penjelasan & opsional foto bebas, tampil di Panel Admin)
   bugReports: BugReportRecord[];
@@ -558,6 +636,35 @@ interface BankContextType {
   bugRewardConfig: BugRewardProgramConfig;
   adminUpdateBugRewardConfig: (
     partial: Partial<BugRewardProgramConfig>
+  ) => { success: boolean; message: string };
+
+  // Saran & Ide Fitur + Program Hadiah Saran (Tombol di paling bawah sebelah Lapor Bug)
+  suggestions: SuggestionRecord[];
+  isSuggestionModalOpen: boolean;
+  setIsSuggestionModalOpen: (open: boolean) => void;
+  submitSuggestion: (input: {
+    title: string;
+    category?: string;
+    priority?: SuggestionPriority;
+    explanation: string;
+    photoDataUrl?: string;
+    photoFileName?: string;
+  }) => Promise<{ success: boolean; message: string; suggestion?: SuggestionRecord }>;
+  adminUpdateSuggestion: (
+    id: string,
+    status: SuggestionStatus,
+    adminReply?: string,
+    reward?: SuggestionReward,
+    options?: {
+      acceptAndDisburse?: boolean;
+      rejectionReason?: string;
+    }
+  ) => Promise<{ success: boolean; message: string }>;
+  adminDeleteSuggestion: (id: string) => Promise<void>;
+  adminClearSuggestions: () => Promise<void>;
+  suggestionRewardConfig: SuggestionRewardProgramConfig;
+  adminUpdateSuggestionRewardConfig: (
+    partial: Partial<SuggestionRewardProgramConfig>
   ) => { success: boolean; message: string };
 
   // Kontrol Tampil/Sembunyi Tab & Fitur Navbar/Toko (Real-Time dari Panel Admin)
@@ -3191,7 +3298,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(null);
   const [websitePopups, setWebsitePopups] = useState<WebsiteSystemPopupNotification[]>([]);
-  const [dismissedPopupIds, setDismissedPopupIds] = useState<string[]>([]);
+  const [dismissedReceiptsByAccount, setDismissedReceiptsByAccount] = useState<
+    Record<string, AccountDismissedReceipts>
+  >(() => loadAllAccountDismissedReceipts());
+  const dismissedReceiptsByAccountRef = useRef<Record<string, AccountDismissedReceipts>>(
+    dismissedReceiptsByAccount
+  );
+  dismissedReceiptsByAccountRef.current = dismissedReceiptsByAccount;
   const [globalChats, setGlobalChats] = useState<GlobalChatMessage[]>([
     {
       id: 'gchat-welcome-1',
@@ -3199,14 +3312,51 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       senderRole: 'admin',
       senderAccount: '9999999999',
       isVerified: true,
-      title: 'Pesan dari Admin',
-      text: 'Selamat datang di Bank Nusantara! Pesan Chat Global hanya dapat dikirim resmi oleh Admin melalui Panel Admin.',
+      title: 'Pengumuman Resmi Admin',
+      text: 'Selamat datang di Chat Global & Priv Bank Nusantara! Semua nasabah kini bisa saling menyapa di Chat Global, serta menambahkan nasabah atau membuat grup tertutup di tab Chat Privat.',
       timestamp: new Date().toISOString(),
+      createdAtMs: Date.now(),
       isPinned: true,
+      isOfficialAnnouncement: true,
     },
   ]);
+  const [globalChatConfig, setGlobalChatConfig] = useState<GlobalChatConfig>({
+    adminOnlyLock: false,
+    cooldownMs: 2500,
+    updatedAtMs: Date.now(),
+  });
+  const globalChatConfigRef = useRef<GlobalChatConfig>(globalChatConfig);
+  globalChatConfigRef.current = globalChatConfig;
+
+  const [privateChatGroups, setPrivateChatGroups] = useState<PrivateChatGroup[]>([]);
+  const privateChatGroupsRef = useRef<PrivateChatGroup[]>(privateChatGroups);
+  privateChatGroupsRef.current = privateChatGroups;
+
+  const [chatLastReadMapByAccount, setChatLastReadMapByAccount] = useState<
+    Record<string, Record<string, number>>
+  >(() => {
+    try {
+      const raw = localStorage.getItem('bank_nusantara_chat_last_read_v15');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch { /* empty */ }
+    return {};
+  });
+  const seenPrivateChatIdsRef = useRef<Set<string>>(new Set());
+  const globalChatLocalLastSentRef = useRef<number>(0);
 
   const [bugReports, setBugReports] = useState<BugReportRecord[]>([]);
+  const [suggestions, setSuggestions] = useState<SuggestionRecord[]>([]);
+  const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState<boolean>(false);
+  const [suggestionRewardConfig, setSuggestionRewardConfig] = useState<SuggestionRewardProgramConfig>(
+    DEFAULT_SUGGESTION_REWARD_CONFIG
+  );
+  const suggestionRewardConfigRef = useRef<SuggestionRewardProgramConfig>(suggestionRewardConfig);
+  suggestionRewardConfigRef.current = suggestionRewardConfig;
+  const seenSuggestionIdsRef = useRef<Set<string>>(new Set());
+
   const [appUpdates, setAppUpdates] = useState<AppUpdateRecord[]>(() =>
     mergeAutoDetectedAppUpdates([], INITIAL_APP_UPDATES).mergedUpdates
   );
@@ -3263,7 +3413,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [adminWarnings, setAdminWarnings] = useState<AdminSystemWarning[]>([]);
   const adminWarningsRef = useRef<AdminSystemWarning[]>(adminWarnings);
   adminWarningsRef.current = adminWarnings;
-  const [dismissedWarningMap, setDismissedWarningMap] = useState<Record<string, number>>({});
 
   const [bugRewardConfig, setBugRewardConfig] = useState<BugRewardProgramConfig>(
     DEFAULT_BUG_REWARD_CONFIG
@@ -3708,6 +3857,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       extraFamilySlots: Math.max(0, Math.floor(Number(a.extraFamilySlots) || 0)),
       accountUpdatedAtMs: Number(a.accountUpdatedAtMs) || 0,
       unbannedAtMs: Number(a.unbannedAtMs) || 0,
+      dismissedPopupIds: sanitizeDismissedPopupIds(a.dismissedPopupIds),
+      dismissedWarningMap: sanitizeDismissedWarningMap(a.dismissedWarningMap),
       status:
         a.status === 'banned' || a.cardStatus === 'banned' || a.banInfo?.isBanned
           ? ('banned' as const)
@@ -3729,6 +3880,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     ]);
     const map = new Map<string, BankAccount>();
 
+    const attachMergedDismissals = (
+      chosen: BankAccount,
+      other: BankAccount
+    ): BankAccount => ({
+      ...chosen,
+      dismissedPopupIds: mergeDismissedPopupIds(chosen.dismissedPopupIds, other.dismissedPopupIds),
+      dismissedWarningMap: mergeDismissedWarningMaps(
+        chosen.dismissedWarningMap,
+        other.dismissedWarningMap
+      ),
+    });
+
     const pickFresherAccount = (existing: BankAccount | undefined, incoming: BankAccount): BankAccount => {
       if (!existing) return incoming;
       const existingTs = Number(existing.accountUpdatedAtMs) || 0;
@@ -3746,37 +3909,40 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Proteksi Anti-Rollback Unban: jangan biarkan cache ban lama menimpa akun yang baru dibuka blokirnya
       if (!existingIsBanned && incomingIsBanned && existingUnbanTs > 0 && existingUnbanTs >= incomingTs) {
-        return existing;
+        return attachMergedDismissals(existing, incoming);
       }
       if (!incomingIsBanned && existingIsBanned && incomingUnbanTs > 0 && incomingUnbanTs >= existingTs) {
-        return incoming;
+        return attachMergedDismissals(incoming, existing);
       }
 
       if (existingTs > incomingTs) {
-        return existing;
+        return attachMergedDismissals(existing, incoming);
       }
       if (incomingTs > existingTs) {
-        return incoming;
+        return attachMergedDismissals(incoming, existing);
       }
       // Jika timestamp sama, pastikan status kartu 'active' yang sudah disetujui Admin TIDAK PERNAH tertimpa balik ke 'pending'
       const preferActiveCardStatus =
         existing.cardStatus === 'active' && incoming.cardStatus === 'pending'
           ? 'active'
           : incoming.cardStatus;
-      return {
-        ...incoming,
-        cardStatus: preferActiveCardStatus,
-        unbannedAtMs: Math.max(existingUnbanTs, incomingUnbanTs) || undefined,
-        tutorialApprovedByAdmin:
-          Boolean(existing.tutorialApprovedByAdmin) || Boolean(incoming.tutorialApprovedByAdmin),
-        hasCompletedTutorial:
-          Boolean(existing.hasCompletedTutorial) || Boolean(incoming.hasCompletedTutorial),
-        loginLockedUntil: incoming.loginLockedUntil || existing.loginLockedUntil,
-        loginLockReason: incoming.loginLockReason || existing.loginLockReason,
-        jobLevel: Math.max(existing.jobLevel || 1, incoming.jobLevel || 1),
-        diamonds: Math.max(existing.diamonds || 0, incoming.diamonds || 0),
-        extraFamilySlots: Math.max(existing.extraFamilySlots || 0, incoming.extraFamilySlots || 0),
-      };
+      return attachMergedDismissals(
+        {
+          ...incoming,
+          cardStatus: preferActiveCardStatus,
+          unbannedAtMs: Math.max(existingUnbanTs, incomingUnbanTs) || undefined,
+          tutorialApprovedByAdmin:
+            Boolean(existing.tutorialApprovedByAdmin) || Boolean(incoming.tutorialApprovedByAdmin),
+          hasCompletedTutorial:
+            Boolean(existing.hasCompletedTutorial) || Boolean(incoming.hasCompletedTutorial),
+          loginLockedUntil: incoming.loginLockedUntil || existing.loginLockedUntil,
+          loginLockReason: incoming.loginLockReason || existing.loginLockReason,
+          jobLevel: Math.max(existing.jobLevel || 1, incoming.jobLevel || 1),
+          diamonds: Math.max(existing.diamonds || 0, incoming.diamonds || 0),
+          extraFamilySlots: Math.max(existing.extraFamilySlots || 0, incoming.extraFamilySlots || 0),
+        },
+        existing
+      );
     };
 
     for (const list of fallbackLists) {
@@ -4676,10 +4842,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         filterListByAdminTombstones('globalChats', data.globalChats as GlobalChatMessage[])
       );
     }
+    if (data.globalChatConfig && typeof data.globalChatConfig === 'object') {
+      const incCfg = data.globalChatConfig as Partial<GlobalChatConfig>;
+      const nextCfg: GlobalChatConfig = {
+        adminOnlyLock: Boolean(incCfg.adminOnlyLock),
+        cooldownMs: Math.max(0, Number(incCfg.cooldownMs ?? 2500) || 2500),
+        lockedBy: incCfg.lockedBy ? String(incCfg.lockedBy) : undefined,
+        updatedAtMs: Number(incCfg.updatedAtMs) || Date.now(),
+      };
+      if (nextCfg.updatedAtMs >= (globalChatConfigRef.current?.updatedAtMs || 0)) {
+        globalChatConfigRef.current = nextCfg;
+        setGlobalChatConfig(nextCfg);
+      }
+    }
+    if (Array.isArray(data.privateChatGroups)) {
+      const incGroups = data.privateChatGroups as PrivateChatGroup[];
+      privateChatGroupsRef.current = incGroups;
+      setPrivateChatGroups(incGroups);
+    }
     if (Array.isArray(data.bugReports)) {
       setBugReports(
         filterListByAdminTombstones('bugReports', data.bugReports as BugReportRecord[])
       );
+    }
+    if (Array.isArray(data.suggestions)) {
+      setSuggestions(
+        filterListByAdminTombstones('suggestions', data.suggestions as SuggestionRecord[])
+      );
+    }
+    if (data.suggestionRewardConfig && typeof data.suggestionRewardConfig === 'object') {
+      const incSugCfg = data.suggestionRewardConfig as Partial<SuggestionRewardProgramConfig>;
+      const mergedSugCfg: SuggestionRewardProgramConfig = {
+        ...DEFAULT_SUGGESTION_REWARD_CONFIG,
+        ...incSugCfg,
+      };
+      suggestionRewardConfigRef.current = mergedSugCfg;
+      setSuggestionRewardConfig(mergedSugCfg);
     }
 
     window.setTimeout(() => {
@@ -4707,6 +4905,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     favorites?: FavoriteAccount[];
     notifications?: AppNotification[];
     chats?: ChatMessage[];
+    privateChatGroups?: PrivateChatGroup[];
+    globalChatConfig?: GlobalChatConfig;
     cardUpgrades?: CardUpgradeApplication[];
     pinResetRequests?: PinResetRequest[];
     redeemCodes?: RedeemCode[];
@@ -4719,6 +4919,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     uiVisibilityConfig?: UiVisibilityConfig;
     adminWarnings?: AdminSystemWarning[];
     bugRewardConfig?: BugRewardProgramConfig;
+    suggestions?: SuggestionRecord[];
+    suggestionRewardConfig?: SuggestionRewardProgramConfig;
     qrisOrders?: QrisPaymentOrder[];
     familyConfig?: FamilySystemConfig;
     families?: FamilyGroup[];
@@ -4936,10 +5138,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? { adminHelpRequests: overrides.adminHelpRequests }
         : {}),
       ...(overrides?.globalChats !== undefined
-        ? { globalChats: overrides.globalChats.slice(0, 100) }
+        ? { globalChats: overrides.globalChats.slice(0, 150) }
+        : {}),
+      ...(overrides?.globalChatConfig !== undefined
+        ? { globalChatConfig: overrides.globalChatConfig }
+        : {}),
+      ...(overrides?.privateChatGroups !== undefined
+        ? { privateChatGroups: overrides.privateChatGroups.slice(0, 120) }
         : {}),
       ...(overrides?.bugReports !== undefined
         ? { bugReports: overrides.bugReports.slice(0, 60) }
+        : {}),
+      ...(overrides?.suggestions !== undefined
+        ? { suggestions: overrides.suggestions.slice(0, 80) }
         : {}),
 
       // === KONFIGURASI GLOBAL KHUSUS ADMIN (DILINDUNGI HAK TULIS ADMIN + TOMBSTONE + REVISION) ===
@@ -4996,6 +5207,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         : {}),
       ...(hasAdminWritePrivilege && overrides?.bugRewardConfig !== undefined
         ? { bugRewardConfig: overrides.bugRewardConfig }
+        : {}),
+      ...(hasAdminWritePrivilege && overrides?.suggestionRewardConfig !== undefined
+        ? { suggestionRewardConfig: overrides.suggestionRewardConfig }
         : {}),
       ...(hasAdminWritePrivilege && overrides?.familyConfig !== undefined
         ? { familyConfig: overrides.familyConfig }
@@ -7063,6 +7277,58 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     (googleUser || adminUnlocked) && currentAccountId
       ? accounts.find((a) => a.id === currentAccountId) || null
       : null;
+
+  // Tanda terima baca efektif KHUSUS akun aktif (terpisah per akun, instan dari localStorage + sinkron Cloud)
+  const dismissedPopupIds: string[] = React.useMemo(() => {
+    if (!currentAccount) return [];
+    const localRec = dismissedReceiptsByAccount[currentAccount.id];
+    return mergeDismissedPopupIds(currentAccount.dismissedPopupIds, localRec?.popupIds);
+  }, [currentAccount, dismissedReceiptsByAccount]);
+
+  const dismissedWarningMap: Record<string, number> = React.useMemo(() => {
+    if (!currentAccount) return {};
+    const localRec = dismissedReceiptsByAccount[currentAccount.id];
+    return mergeDismissedWarningMaps(currentAccount.dismissedWarningMap, localRec?.warningMap);
+  }, [currentAccount, dismissedReceiptsByAccount]);
+
+  const dismissedPopupIdsRef = useRef<string[]>(dismissedPopupIds);
+  dismissedPopupIdsRef.current = dismissedPopupIds;
+  const dismissedWarningMapRef = useRef<Record<string, number>>(dismissedWarningMap);
+  dismissedWarningMapRef.current = dismissedWarningMap;
+
+  // Sinkronkan tanda terima baca yang datang dari Cloud ke cache lokal perangkat secara otomatis
+  useEffect(() => {
+    if (!currentAccount) return;
+    const mergedPopups = mergeDismissedPopupIds(
+      currentAccount.dismissedPopupIds,
+      dismissedReceiptsByAccountRef.current[currentAccount.id]?.popupIds
+    );
+    const mergedWarnings = mergeDismissedWarningMaps(
+      currentAccount.dismissedWarningMap,
+      dismissedReceiptsByAccountRef.current[currentAccount.id]?.warningMap
+    );
+    const existingLocal = dismissedReceiptsByAccountRef.current[currentAccount.id];
+    const popupsChanged =
+      !existingLocal ||
+      existingLocal.popupIds.length !== mergedPopups.length ||
+      mergedPopups.some((id, idx) => existingLocal.popupIds[idx] !== id);
+    const warningsChanged =
+      !existingLocal ||
+      Object.keys(existingLocal.warningMap).length !== Object.keys(mergedWarnings).length ||
+      Object.entries(mergedWarnings).some(([k, v]) => existingLocal.warningMap[k] !== v);
+    if (popupsChanged || warningsChanged) {
+      const nextMap: Record<string, AccountDismissedReceipts> = {
+        ...dismissedReceiptsByAccountRef.current,
+        [currentAccount.id]: {
+          popupIds: mergedPopups,
+          warningMap: mergedWarnings,
+        },
+      };
+      dismissedReceiptsByAccountRef.current = nextMap;
+      setDismissedReceiptsByAccount(nextMap);
+      saveAllAccountDismissedReceipts(nextMap);
+    }
+  }, [currentAccount?.id, currentAccount?.dismissedPopupIds, currentAccount?.dismissedWarningMap]);
 
   // ================= DAFTAR / MASUK BEBAS SEMUA EMAIL + GOOGLE OPSIONAL (REAL-TIME CLOUD) =================
   const loginOrRegisterWithEmail = async (input: {
@@ -9458,30 +9724,199 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => window.clearInterval(timer);
   }, []);
 
-  // Isolasi ketat Pop-up Unban: HANYA tampil di perangkat yang sedang login memegang akun tersebut (tidak ke semua nasabah!)
+  // Isolasi ketat & Sekali Muncul Permanen per Akun untuk Pop-up Unban, Pesan Admin, & Sistem
   const activeWebsitePopups = websitePopups.filter((p) => {
-    if (p.dismissed || dismissedPopupIds.includes(p.id)) return false;
+    if (!currentAccount) return false;
+    if (dismissedPopupIds.includes(p.id)) return false;
     if (p.type === 'unban' || p.privateAccountOnly) {
-      if (!currentAccount) return false;
+      if (p.dismissed) return false;
       const matchId = Boolean(p.accountId && currentAccount.id === p.accountId);
       const matchNumber = Boolean(
         p.accountNumber && currentAccount.accountNumber === p.accountNumber
       );
       return matchId || matchNumber;
     }
-    return true;
+    return !p.dismissed;
   });
 
+  const persistAccountDismissedReceipts = (
+    targetAccount: BankAccount,
+    addPopupIds: string[],
+    addWarningEntries?: Record<string, number>
+  ) => {
+    const accId = targetAccount.id;
+    const prevLocal = dismissedReceiptsByAccountRef.current[accId] || {
+      popupIds: [],
+      warningMap: {},
+    };
+    const nextPopupIds = mergeDismissedPopupIds(
+      mergeDismissedPopupIds(targetAccount.dismissedPopupIds, prevLocal.popupIds),
+      addPopupIds
+    );
+    const nextWarningMap = mergeDismissedWarningMaps(
+      mergeDismissedWarningMaps(targetAccount.dismissedWarningMap, prevLocal.warningMap),
+      addWarningEntries
+    );
+
+    const nextLocalAll: Record<string, AccountDismissedReceipts> = {
+      ...dismissedReceiptsByAccountRef.current,
+      [accId]: {
+        popupIds: nextPopupIds,
+        warningMap: nextWarningMap,
+      },
+    };
+    dismissedReceiptsByAccountRef.current = nextLocalAll;
+    setDismissedReceiptsByAccount(nextLocalAll);
+    saveAllAccountDismissedReceipts(nextLocalAll);
+
+    const nowMs = Date.now();
+    const basePool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const nextAccounts: BankAccount[] = basePool.map((acc) =>
+      acc.id === accId
+        ? {
+            ...acc,
+            dismissedPopupIds: nextPopupIds,
+            dismissedWarningMap: nextWarningMap,
+            accountUpdatedAtMs: nowMs,
+          }
+        : acc
+    );
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+
+    const targetUid =
+      targetAccount.firebaseUid ||
+      (firebaseUser &&
+      ((targetAccount.googleEmail &&
+        normalizeEmailKey(targetAccount.googleEmail) ===
+          normalizeEmailKey(firebaseUser.email || '')) ||
+        targetAccount.id === currentAccountIdRef.current)
+        ? firebaseUser.uid
+        : undefined);
+
+    void syncCloudUserProfile(
+      {
+        uid: targetUid,
+        email: targetAccount.googleEmail || targetAccount.email,
+        fallbackEmail: targetAccount.email,
+      },
+      {},
+      nextAccounts
+    );
+    flushMasterStateToCloud({ accounts: nextAccounts });
+  };
+
   const dismissWebsitePopup = (id: string) => {
-    setDismissedPopupIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-    setWebsitePopups((prev) => prev.map((p) => (p.id === id ? { ...p, dismissed: true } : p)));
+    const targetPopup = websitePopups.find((p) => p.id === id);
+    const activeAcc =
+      currentAccount || accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || null;
+
+    if (activeAcc) {
+      persistAccountDismissedReceipts(activeAcc, [id]);
+
+      // Tandai notifikasi terkait di Lonceng sebagai "Sudah Dibaca" tanpa menghapus riwayatnya
+      setNotifications((prev) =>
+        prev.map((n) => {
+          if (n.read) return n;
+          const sameRef = n.referenceId === id || n.id === id || n.id === `notif-gchat-${id}`;
+          const isMatchingUnbanBell =
+            targetPopup?.type === 'unban' &&
+            (!n.accountId || n.accountId === activeAcc.id) &&
+            /unban|terbuka|dibuka/i.test(`${n.title} ${n.message}`);
+          const isMatchingAdminChatBell =
+            targetPopup?.type === 'admin_chat' &&
+            Boolean(targetPopup.message) &&
+            n.message === targetPopup.message;
+          if (sameRef || isMatchingUnbanBell || isMatchingAdminChatBell) {
+            return { ...n, read: true };
+          }
+          return n;
+        })
+      );
+
+      // Catat konfirmasi Sudah Dibaca ke Live Monitor Admin
+      if (targetPopup) {
+        const popupLabel =
+          targetPopup.type === 'unban'
+            ? 'Notifikasi Akun Telah Di-Unban'
+            : targetPopup.type === 'admin_chat'
+            ? 'Pop-up Pesan Resmi Admin'
+            : targetPopup.title || 'Pop-up Sistem';
+        recordLiveActivity({
+          actorRole: 'nasabah',
+          category: 'auth_security',
+          accountId: activeAcc.id,
+          accountName: activeAcc.fullName,
+          accountNumber: activeAcc.accountNumber,
+          cardTier: activeAcc.cardTier,
+          actionTitle: `Sudah Dibaca: ${popupLabel}`,
+          description: `Nasabah ${activeAcc.fullName} menekan OK pada "${targetPopup.title || popupLabel}" (tersimpan permanen per akun & sinkron Cloud).`,
+        });
+      }
+    }
+
+    // Hanya tandai p.dismissed secara lokal bila pop-up bersifat privat milik akun ini agar Akun B di perangkat sama tetap menerima pop-up umum sekali
+    if (targetPopup && (targetPopup.type === 'unban' || targetPopup.privateAccountOnly)) {
+      setWebsitePopups((prev) => prev.map((p) => (p.id === id ? { ...p, dismissed: true } : p)));
+    }
     playAtmSound('beep');
   };
 
   const dismissAllWebsitePopups = () => {
-    const allIds = websitePopups.map((p) => p.id);
-    setDismissedPopupIds((prev) => Array.from(new Set([...prev, ...allIds])));
-    setWebsitePopups((prev) => prev.map((p) => ({ ...p, dismissed: true })));
+    const visibleIds = activeWebsitePopups.map((p) => p.id);
+    if (visibleIds.length === 0) return;
+    const activeAcc =
+      currentAccount || accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || null;
+
+    if (activeAcc) {
+      persistAccountDismissedReceipts(activeAcc, visibleIds);
+
+      const visibleSet = new Set(visibleIds);
+      const hasUnban = activeWebsitePopups.some((p) => p.type === 'unban');
+      const adminChatMessages = new Set(
+        activeWebsitePopups.filter((p) => p.type === 'admin_chat').map((p) => p.message)
+      );
+
+      setNotifications((prev) =>
+        prev.map((n) => {
+          if (n.read) return n;
+          const sameRef =
+            (n.referenceId && visibleSet.has(n.referenceId)) || visibleSet.has(n.id);
+          const isUnbanMatch =
+            hasUnban &&
+            (!n.accountId || n.accountId === activeAcc.id) &&
+            /unban|terbuka|dibuka/i.test(`${n.title} ${n.message}`);
+          const isAdminChatMatch = adminChatMessages.has(n.message);
+          if (sameRef || isUnbanMatch || isAdminChatMatch) {
+            return { ...n, read: true };
+          }
+          return n;
+        })
+      );
+
+      recordLiveActivity({
+        actorRole: 'nasabah',
+        category: 'auth_security',
+        accountId: activeAcc.id,
+        accountName: activeAcc.fullName,
+        accountNumber: activeAcc.accountNumber,
+        cardTier: activeAcc.cardTier,
+        actionTitle: `Sudah Dibaca: ${visibleIds.length} Pop-up Sistem`,
+        description: `Nasabah ${activeAcc.fullName} menutup seluruh ${visibleIds.length} pop-up notifikasi aktif sekaligus (tersimpan permanen per akun & sinkron Cloud).`,
+      });
+    }
+
+    const privateIds = new Set(
+      activeWebsitePopups
+        .filter((p) => p.type === 'unban' || p.privateAccountOnly)
+        .map((p) => p.id)
+    );
+    if (privateIds.size > 0) {
+      setWebsitePopups((prev) =>
+        prev.map((p) => (privateIds.has(p.id) ? { ...p, dismissed: true } : p))
+      );
+    }
     playAtmSound('beep');
   };
 
@@ -9903,34 +10338,73 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
       }
 
-      if (!isAlreadySeen && triggerAlert) {
-        const alertTitle = newMsg.senderRole === 'admin' ? 'Pesan dari Admin' : `Chat Global: ${newMsg.senderName}`;
-        triggerMobileAndNativeNotification(
-          alertTitle,
-          newMsg.text,
-          newMsg.senderRole === 'admin' ? 'admin_chat' : 'info'
-        );
-        const appNotif: AppNotification = {
-          id: `notif-gchat-${newMsg.id}`,
-          title: `${alertTitle} 💬`,
-          message: newMsg.text,
-          type: 'info',
-          timestamp: newMsg.timestamp || new Date().toISOString(),
-          read: false,
-        };
-        setNotifications((prev) => {
-          if (prev.some((n) => n.id === appNotif.id)) return prev;
-          return [appNotif, ...prev];
-        });
-        playAtmSound('success');
+      if (!isAlreadySeen && triggerAlert && newMsg.senderRole === 'admin') {
+        const alertTitle = 'Pesan dari Admin';
+        if (popup || newMsg.isOfficialAnnouncement) {
+          triggerMobileAndNativeNotification(alertTitle, newMsg.text, 'admin_chat');
+          const appNotif: AppNotification = {
+            id: `notif-gchat-${newMsg.id}`,
+            title: `${alertTitle} 💬`,
+            message: newMsg.text,
+            type: 'info',
+            timestamp: newMsg.timestamp || new Date().toISOString(),
+            read: false,
+          };
+          setNotifications((prev) => {
+            if (prev.some((n) => n.id === appNotif.id)) return prev;
+            return [appNotif, ...prev];
+          });
+          playAtmSound('success');
+        }
+      }
+    };
+
+    const mergeIncomingPrivateMessages = (incomingList: ChatMessage[], playSoundOnNew: boolean) => {
+      if (!Array.isArray(incomingList) || incomingList.length === 0) return;
+      const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+      let shouldBeep = false;
+      setChats((prev) => {
+        const byId = new Map<string, ChatMessage>();
+        prev.forEach((m) => byId.set(m.id, m));
+        for (const inc of incomingList) {
+          if (!inc?.id) continue;
+          const existed = byId.has(inc.id) || seenPrivateChatIdsRef.current.has(inc.id);
+          seenPrivateChatIdsRef.current.add(inc.id);
+          byId.set(inc.id, inc);
+          if (!existed && playSoundOnNew && activeAcc) {
+            const isFromOther =
+              inc.senderAccountId
+                ? inc.senderAccountId !== activeAcc.id
+                : inc.senderAccount !== activeAcc.accountNumber;
+            if (isFromOther) {
+              if (inc.groupId) {
+                const grp = privateChatGroupsRef.current.find((g) => g.id === inc.groupId);
+                if (grp && grp.memberAccountIds.includes(activeAcc.id)) {
+                  shouldBeep = true;
+                }
+              } else if (
+                inc.recipientAccountId === activeAcc.id ||
+                inc.recipientAccount === activeAcc.accountNumber
+              ) {
+                shouldBeep = true;
+              }
+            }
+          }
+        }
+        return Array.from(byId.values())
+          .sort((a, b) => Date.parse(a.timestamp || '') - Date.parse(b.timestamp || ''))
+          .slice(-800);
+      });
+      if (shouldBeep) {
+        playAtmSound('beep');
       }
     };
 
     const handleIncomingPopup = (popup: WebsiteSystemPopupNotification, triggerAlert = true) => {
       if (!popup || !popup.id) return;
       const isPrivateUnban = popup.type === 'unban' || Boolean(popup.privateAccountOnly);
+      const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
       if (isPrivateUnban) {
-        const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
         const isRecipientDevice = Boolean(
           activeAcc &&
             ((popup.accountId && activeAcc.id === popup.accountId) ||
@@ -9941,6 +10415,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return;
         }
       }
+      const alreadyDismissedByActiveAcc = Boolean(
+        activeAcc &&
+          (dismissedPopupIdsRef.current.includes(popup.id) ||
+            (activeAcc.dismissedPopupIds || []).includes(popup.id) ||
+            (dismissedReceiptsByAccountRef.current[activeAcc.id]?.popupIds || []).includes(
+              popup.id
+            ))
+      );
       const isAlreadySeen = seenPopupIdsRef.current.has(popup.id);
       seenPopupIdsRef.current.add(popup.id);
 
@@ -9949,7 +10431,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return [popup, ...prev];
       });
 
-      if (!isAlreadySeen && triggerAlert) {
+      if (!isAlreadySeen && !alreadyDismissedByActiveAcc && triggerAlert) {
         triggerMobileAndNativeNotification(
           popup.type === 'admin_chat' ? 'Pesan dari Admin' : popup.title,
           popup.message,
@@ -10040,6 +10522,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (Array.isArray(data.bugReports)) {
           setBugReports(filterListByAdminTombstones('bugReports', data.bugReports));
+        }
+        if (data.globalChatConfig && typeof data.globalChatConfig === 'object') {
+          const incCfg = data.globalChatConfig as Partial<GlobalChatConfig>;
+          const nextCfg: GlobalChatConfig = {
+            adminOnlyLock: Boolean(incCfg.adminOnlyLock),
+            cooldownMs: Math.max(0, Number(incCfg.cooldownMs ?? 2500) || 2500),
+            lockedBy: incCfg.lockedBy ? String(incCfg.lockedBy) : undefined,
+            updatedAtMs: Number(incCfg.updatedAtMs) || Date.now(),
+          };
+          globalChatConfigRef.current = nextCfg;
+          setGlobalChatConfig(nextCfg);
+        }
+        if (Array.isArray(data.privateChatGroups)) {
+          privateChatGroupsRef.current = data.privateChatGroups as PrivateChatGroup[];
+          setPrivateChatGroups(data.privateChatGroups as PrivateChatGroup[]);
+        }
+        if (Array.isArray(data.privateChatMessages)) {
+          mergeIncomingPrivateMessages(data.privateChatMessages as ChatMessage[], !isInitial);
+        }
+        if (Array.isArray(data.suggestions)) {
+          setSuggestions(filterListByAdminTombstones('suggestions', data.suggestions as SuggestionRecord[]));
+        }
+        if (data.suggestionRewardConfig && typeof data.suggestionRewardConfig === 'object') {
+          const mergedSugCfg: SuggestionRewardProgramConfig = {
+            ...DEFAULT_SUGGESTION_REWARD_CONFIG,
+            ...(data.suggestionRewardConfig as Partial<SuggestionRewardProgramConfig>),
+          };
+          suggestionRewardConfigRef.current = mergedSugCfg;
+          setSuggestionRewardConfig(mergedSugCfg);
         }
 
         const srvTsMap: Record<string, number> =
@@ -10435,6 +10946,37 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 setBugReports(
                   filterListByAdminTombstones('bugReports', msg.payload.bugReports as BugReportRecord[])
                 );
+              }
+              if (msg.payload.globalChatConfig && typeof msg.payload.globalChatConfig === 'object') {
+                const incCfg = msg.payload.globalChatConfig as Partial<GlobalChatConfig>;
+                const nextCfg: GlobalChatConfig = {
+                  adminOnlyLock: Boolean(incCfg.adminOnlyLock),
+                  cooldownMs: Math.max(0, Number(incCfg.cooldownMs ?? 2500) || 2500),
+                  lockedBy: incCfg.lockedBy ? String(incCfg.lockedBy) : undefined,
+                  updatedAtMs: Number(incCfg.updatedAtMs) || Date.now(),
+                };
+                globalChatConfigRef.current = nextCfg;
+                setGlobalChatConfig(nextCfg);
+              }
+              if (Array.isArray(msg.payload.privateChatGroups)) {
+                privateChatGroupsRef.current = msg.payload.privateChatGroups as PrivateChatGroup[];
+                setPrivateChatGroups(msg.payload.privateChatGroups as PrivateChatGroup[]);
+              }
+              if (Array.isArray(msg.payload.privateChatMessages)) {
+                mergeIncomingPrivateMessages(msg.payload.privateChatMessages as ChatMessage[], false);
+              }
+              if (Array.isArray(msg.payload.suggestions)) {
+                setSuggestions(
+                  filterListByAdminTombstones('suggestions', msg.payload.suggestions as SuggestionRecord[])
+                );
+              }
+              if (msg.payload.suggestionRewardConfig && typeof msg.payload.suggestionRewardConfig === 'object') {
+                const mergedSugCfg: SuggestionRewardProgramConfig = {
+                  ...DEFAULT_SUGGESTION_REWARD_CONFIG,
+                  ...(msg.payload.suggestionRewardConfig as Partial<SuggestionRewardProgramConfig>),
+                };
+                suggestionRewardConfigRef.current = mergedSugCfg;
+                setSuggestionRewardConfig(mergedSugCfg);
               }
               const initTsMap: Record<string, number> =
                 msg.payload.configUpdatedAtMsMap && typeof msg.payload.configUpdatedAtMsMap === 'object'
@@ -10840,6 +11382,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               }
             } else if (msg.type === 'global_chat:new' && msg.payload?.message) {
               handleIncomingGlobalChat(msg.payload.message, msg.payload.popup, true);
+            } else if (msg.type === 'global_chat:updated' && msg.payload?.message) {
+              const updatedMsg: GlobalChatMessage = msg.payload.message;
+              setGlobalChats((prev) => prev.map((m) => (m.id === updatedMsg.id ? updatedMsg : m)));
+            } else if (msg.type === 'global_chat:config' && msg.payload?.globalChatConfig) {
+              const incCfg = msg.payload.globalChatConfig as GlobalChatConfig;
+              globalChatConfigRef.current = incCfg;
+              setGlobalChatConfig(incCfg);
             } else if (msg.type === 'global_chat:delete' && msg.payload?.id) {
               recordDeletedAdminItemIds('globalChats', [String(msg.payload.id)]);
               setGlobalChats((prev) => prev.filter((m) => m.id !== msg.payload.id));
@@ -10848,6 +11397,49 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 recordDeletedAdminItemIds('globalChats', prev.map((m) => m.id));
                 return [];
               });
+            } else if (msg.type === 'private_chat:new' && msg.payload?.message) {
+              mergeIncomingPrivateMessages([msg.payload.message as ChatMessage], true);
+            } else if (msg.type === 'private_chat:updated' && msg.payload?.message) {
+              const updatedPm: ChatMessage = msg.payload.message;
+              setChats((prev) => prev.map((m) => (m.id === updatedPm.id ? updatedPm : m)));
+            } else if (msg.type === 'private_group:upserted' && msg.payload?.group) {
+              const incGroup: PrivateChatGroup = msg.payload.group;
+              setPrivateChatGroups((prev) => {
+                const exists = prev.some((g) => g.id === incGroup.id);
+                const next = exists ? prev.map((g) => (g.id === incGroup.id ? incGroup : g)) : [incGroup, ...prev];
+                privateChatGroupsRef.current = next;
+                return next;
+              });
+            } else if (msg.type === 'private_group:deleted' && msg.payload?.id) {
+              const delId = String(msg.payload.id);
+              setPrivateChatGroups((prev) => {
+                const next = prev.filter((g) => g.id !== delId);
+                privateChatGroupsRef.current = next;
+                return next;
+              });
+              setChats((prev) => prev.filter((m) => m.groupId !== delId));
+            } else if (msg.type === 'suggestion:new' && msg.payload?.suggestion) {
+              const incSug: SuggestionRecord = msg.payload.suggestion;
+              seenSuggestionIdsRef.current.add(incSug.id);
+              setSuggestions((prev) => (prev.some((s) => s.id === incSug.id) ? prev : [incSug, ...prev]));
+            } else if (msg.type === 'suggestion:updated' && msg.payload?.suggestion) {
+              const updSug: SuggestionRecord = msg.payload.suggestion;
+              setSuggestions((prev) => prev.map((s) => (s.id === updSug.id ? updSug : s)));
+            } else if (msg.type === 'suggestion:deleted' && msg.payload?.id) {
+              recordDeletedAdminItemIds('suggestions', [String(msg.payload.id)]);
+              setSuggestions((prev) => prev.filter((s) => s.id !== msg.payload.id));
+            } else if (msg.type === 'suggestion:clear') {
+              setSuggestions((prev) => {
+                recordDeletedAdminItemIds('suggestions', prev.map((s) => s.id));
+                return [];
+              });
+            } else if (msg.type === 'suggestion_reward_config:updated' && msg.payload?.suggestionRewardConfig) {
+              const mergedSugCfg: SuggestionRewardProgramConfig = {
+                ...DEFAULT_SUGGESTION_REWARD_CONFIG,
+                ...(msg.payload.suggestionRewardConfig as Partial<SuggestionRewardProgramConfig>),
+              };
+              suggestionRewardConfigRef.current = mergedSugCfg;
+              setSuggestionRewardConfig(mergedSugCfg);
             } else if (msg.type === 'website_popup:new' && msg.payload?.popup) {
               handleIncomingPopup(msg.payload.popup, true);
             } else if (msg.type === 'push_alert:new' && msg.payload?.alert) {
@@ -10954,45 +11546,86 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
-  // Send Global Chat Message -> ONLY ADMIN VIA PANEL ADMIN CAN SEND ("Global chat hanya bisa dikirim oleh admin dan sahabat tidak bisa, hanya admin lewat panel admin")
+  // ==================== CHAT GLOBAL & PRIV (GLOBAL TERBUKA + PRIVAT 1-ON-1 & GRUP) ====================
   const sendGlobalChatMessage = async (input: {
     text: string;
     asAdmin?: boolean;
     senderName?: string;
     showPopupOnAllPhones?: boolean;
+    replyToId?: string;
+    replyToSender?: string;
+    replyToPreview?: string;
   }): Promise<{ success: boolean; message: string }> => {
-    if (input.asAdmin === false) {
-      return {
-        success: false,
-        message: 'Global Chat hanya bisa dikirim oleh Admin melalui Panel Admin! Sahabat/Nasabah tidak dapat mengirim pesan Global Chat.',
-      };
-    }
-
     const cleanText = input.text.trim();
     if (!cleanText) {
       return { success: false, message: 'Pesan Chat Global tidak boleh kosong!' };
     }
 
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    const isAdminSender = Boolean(
+      input.asAdmin === true ||
+        (input.asAdmin !== false &&
+          (adminUnlockedRef.current ||
+            activeAcc?.cardTier === 'admin' ||
+            activeAcc?.isOfficialAdminAccount ||
+            activeAcc?.id === 'acc-admin'))
+    );
+
+    if (!isAdminSender) {
+      if (globalChatConfigRef.current?.adminOnlyLock) {
+        return {
+          success: false,
+          message: 'Ruang Chat Global sedang dalam Mode Khusus Admin sementara.',
+        };
+      }
+      const cooldownMs = Math.max(0, Number(globalChatConfigRef.current?.cooldownMs ?? 2500) || 0);
+      const elapsed = Date.now() - globalChatLocalLastSentRef.current;
+      if (cooldownMs > 0 && elapsed < cooldownMs) {
+        const waitSec = Math.max(1, Math.ceil((cooldownMs - elapsed) / 1000));
+        return {
+          success: false,
+          message: `Anti-spam aktif: tunggu ${waitSec} detik sebelum mengirim pesan lagi.`,
+        };
+      }
+      globalChatLocalLastSentRef.current = Date.now();
+    }
+
     const msgId = `gchat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const senderName = input.senderName?.trim() || 'Admin Bank Nusantara';
+    const nowMs = Date.now();
+    const senderName =
+      input.senderName?.trim() ||
+      (isAdminSender
+        ? activeAcc?.fullName || 'Admin Bank Nusantara'
+        : activeAcc?.fullName || googleUser?.name || 'Nasabah Bank Nusantara');
 
     const newMsg: GlobalChatMessage = {
       id: msgId,
       senderName,
-      senderRole: 'admin',
-      senderAccount: '9999999999',
-      isVerified: true,
-      title: 'Pesan dari Admin',
+      senderRole: isAdminSender ? 'admin' : 'customer',
+      senderAccountId: activeAcc?.id,
+      senderAccount: activeAcc?.accountNumber || (isAdminSender ? '9999999999' : undefined),
+      senderUserId16: activeAcc?.userId16,
+      senderCardTier: activeAcc?.cardTier,
+      isVerified: isAdminSender ? true : Boolean(activeAcc?.isVerified),
+      title: isAdminSender ? 'Pesan dari Admin' : 'Chat Global Nasabah',
       text: cleanText,
-      timestamp: new Date().toISOString(),
-      isPinned: true,
+      timestamp: new Date(nowMs).toISOString(),
+      createdAtMs: nowMs,
+      isPinned: isAdminSender && Boolean(input.showPopupOnAllPhones),
+      isOfficialAnnouncement: isAdminSender && Boolean(input.showPopupOnAllPhones),
+      replyToId: input.replyToId,
+      replyToSender: input.replyToSender,
+      replyToPreview: input.replyToPreview,
     };
 
     seenChatIdsRef.current.add(msgId);
-    setGlobalChats((prev) => [newMsg, ...prev]);
+    const nextList = [newMsg, ...globalChats].slice(0, 300);
+    setGlobalChats(nextList);
+    flushMasterStateToCloud({ globalChats: nextList });
 
+    const shouldShowPopup = isAdminSender && input.showPopupOnAllPhones === true;
     const popupId = `popup-gchat-${msgId}`;
-    if (input.showPopupOnAllPhones !== false) {
+    if (shouldShowPopup) {
       const adminPopup: WebsiteSystemPopupNotification = {
         id: popupId,
         type: 'admin_chat',
@@ -11009,36 +11642,30 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setWebsitePopups((prev) => [adminPopup, ...prev]);
     }
 
-    playAtmSound('success');
+    playAtmSound(isAdminSender ? 'success' : 'beep');
 
     try {
-      await fetch('/api/global-chat', {
+      const resp = await fetch('/api/global-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: msgId,
-          senderName,
-          senderRole: 'admin',
-          senderAccount: newMsg.senderAccount,
-          isVerified: true,
-          title: 'Pesan dari Admin',
-          text: cleanText,
-          isPinned: true,
-          showPopupOnAllPhones: input.showPopupOnAllPhones ?? true,
+          ...newMsg,
+          showPopupOnAllPhones: shouldShowPopup,
         }),
       });
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => null);
+        if (errData?.message) {
+          setGlobalChats((prev) => prev.filter((m) => m.id !== msgId));
+          return { success: false, message: String(errData.message) };
+        }
+      }
     } catch {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(
           JSON.stringify({
             type: 'global_chat:send',
-            payload: {
-              id: msgId,
-              senderName,
-              senderRole: 'admin',
-              text: cleanText,
-              showPopupOnAllPhones: input.showPopupOnAllPhones ?? true,
-            },
+            payload: { ...newMsg, showPopupOnAllPhones: shouldShowPopup },
           })
         );
       }
@@ -11046,7 +11673,63 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return {
       success: true,
-      message: `Pesan dari Admin "${cleanText}" berhasil dikirim dari Panel Admin dan tampil di semua HP!`,
+      message: isAdminSender
+        ? `Pesan resmi Admin berhasil dikirim ke Chat Global!`
+        : 'Pesan terkirim ke ruang Chat Global!',
+    };
+  };
+
+  const togglePinGlobalChatMessage = async (
+    id: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const target = globalChats.find((m) => m.id === id);
+    if (!target) return { success: false, message: 'Pesan tidak ditemukan.' };
+    const nextPin = !target.isPinned;
+    const nextList = globalChats.map((m) => (m.id === id ? { ...m, isPinned: nextPin } : m));
+    setGlobalChats(nextList);
+    flushMasterStateToCloud({ globalChats: nextList });
+    try {
+      await fetch(`/api/global-chat/${encodeURIComponent(id)}/pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPinned: nextPin }),
+      });
+    } catch { /* empty */ }
+    return {
+      success: true,
+      message: nextPin ? 'Pesan disematkan di bagian atas Chat Global.' : 'Sematkan pesan dilepas.',
+    };
+  };
+
+  const toggleGlobalChatAdminLock = async (
+    adminOnlyLock: boolean,
+    cooldownMs?: number
+  ): Promise<{ success: boolean; message: string }> => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    const nextCfg: GlobalChatConfig = {
+      adminOnlyLock,
+      cooldownMs:
+        cooldownMs !== undefined
+          ? Math.max(0, Math.min(30000, cooldownMs))
+          : globalChatConfigRef.current?.cooldownMs ?? 2500,
+      lockedBy: activeAcc?.fullName || 'Admin Bank Nusantara',
+      updatedAtMs: Date.now(),
+    };
+    globalChatConfigRef.current = nextCfg;
+    setGlobalChatConfig(nextCfg);
+    flushMasterStateToCloud({ globalChatConfig: nextCfg });
+    try {
+      await fetch('/api/global-chat/lock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextCfg),
+      });
+    } catch { /* empty */ }
+    return {
+      success: true,
+      message: adminOnlyLock
+        ? 'Mode Khusus Admin aktif — sementara hanya Admin yang dapat mengirim pesan di Chat Global.'
+        : 'Chat Global dibuka kembali untuk semua nasabah.',
     };
   };
 
@@ -11068,6 +11751,380 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       await fetch('/api/global-chat/clear', { method: 'POST' });
     } catch { /* empty */ }
+  };
+
+  // ==================== CHAT PRIVAT: UNREAD COUNTER, KONTAK 3 KOLOM & GRUP PRIVAT ====================
+  const chatLastReadMap = React.useMemo<Record<string, number>>(() => {
+    if (!currentAccount) return {};
+    return chatLastReadMapByAccount[currentAccount.id] || {};
+  }, [chatLastReadMapByAccount, currentAccount]);
+
+  const markChatRoomRead = (roomKey: string) => {
+    if (!currentAccount || !roomKey) return;
+    const now = Date.now();
+    setChatLastReadMapByAccount((prev) => {
+      const nextForAcc = { ...(prev[currentAccount.id] || {}), [roomKey]: now };
+      const nextAll = { ...prev, [currentAccount.id]: nextForAcc };
+      try {
+        localStorage.setItem('bank_nusantara_chat_last_read_v15', JSON.stringify(nextAll));
+      } catch { /* empty */ }
+      return nextAll;
+    });
+  };
+
+  const globalChatUnreadCount = React.useMemo(() => {
+    if (!currentAccount) return 0;
+    const lastRead = chatLastReadMap['global'] || 0;
+    return globalChats.filter((m) => {
+      const ts = m.createdAtMs || Date.parse(m.timestamp || '') || 0;
+      const isMine =
+        (m.senderAccountId && m.senderAccountId === currentAccount.id) ||
+        (m.senderAccount && m.senderAccount === currentAccount.accountNumber);
+      return !isMine && ts > lastRead;
+    }).length;
+  }, [globalChats, chatLastReadMap, currentAccount]);
+
+  const privateChatUnreadCount = React.useMemo(() => {
+    if (!currentAccount) return 0;
+    let total = 0;
+    for (const msg of chats) {
+      if (msg.deleted) continue;
+      const ts = msg.createdAtMs || Date.parse(msg.timestamp || '') || 0;
+      const isMine =
+        (msg.senderAccountId && msg.senderAccountId === currentAccount.id) ||
+        msg.senderAccount === currentAccount.accountNumber;
+      if (isMine) continue;
+      if (msg.groupId) {
+        const grp = privateChatGroups.find((g) => g.id === msg.groupId);
+        if (!grp || !grp.memberAccountIds.includes(currentAccount.id)) continue;
+        const lastRead = chatLastReadMap[`group:${msg.groupId}`] || 0;
+        if (ts > lastRead) total += 1;
+      } else {
+        const isToMe =
+          msg.recipientAccountId === currentAccount.id ||
+          msg.recipientAccount === currentAccount.accountNumber;
+        if (!isToMe) continue;
+        const peerKey = msg.senderAccountId || msg.senderAccount;
+        const lastRead = chatLastReadMap[`dm:${peerKey}`] || chatLastReadMap[`dm:${msg.senderAccount}`] || 0;
+        if (ts > lastRead) total += 1;
+      }
+    }
+    return total;
+  }, [chats, privateChatGroups, chatLastReadMap, currentAccount]);
+
+  const totalChatUnreadCount = globalChatUnreadCount + privateChatUnreadCount;
+
+  const addPrivateChatContact = (input: {
+    customName?: string;
+    userId?: string;
+    accountNumber?: string;
+  }): { success: boolean; message: string; contact?: PrivateChatContact } => {
+    if (!currentAccount) {
+      return { success: false, message: 'Silakan masuk ke akun terlebih dahulu.' };
+    }
+    const cleanUid = String(input.userId || '').replace(/\D/g, '').trim();
+    const cleanAccNo = String(input.accountNumber || '').replace(/\D/g, '').trim();
+    const cleanCustomName = String(input.customName || '').trim().slice(0, 60);
+
+    if (!cleanUid && !cleanAccNo) {
+      return {
+        success: false,
+        message: 'Isi salah satu: User ID (16 digit) atau No. Rekening nasabah.',
+      };
+    }
+
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const byUid = cleanUid ? pool.find((a) => String(a.userId16 || '').replace(/\D/g, '') === cleanUid) : undefined;
+    const byAccNo = cleanAccNo
+      ? pool.find((a) => String(a.accountNumber || '').replace(/\D/g, '') === cleanAccNo)
+      : undefined;
+
+    if (cleanUid && cleanAccNo) {
+      if (!byUid || !byAccNo) {
+        return {
+          success: false,
+          message: 'User ID atau No. Rekening yang dimasukkan tidak ditemukan di database Bank Nusantara.',
+        };
+      }
+      if (byUid.id !== byAccNo.id) {
+        return {
+          success: false,
+          message: 'User ID dan No. Rekening merujuk ke dua akun berbeda. Cukup isi salah satu saja.',
+        };
+      }
+    }
+
+    const targetAcc = byUid || byAccNo;
+    if (!targetAcc) {
+      return {
+        success: false,
+        message: 'Nasabah dengan User ID / No. Rekening tersebut tidak ditemukan.',
+      };
+    }
+    if (targetAcc.id === currentAccount.id) {
+      return {
+        success: false,
+        message: 'Anda tidak dapat menambahkan akun Anda sendiri sebagai kontak chat privat.',
+      };
+    }
+
+    const existingContacts = Array.isArray(currentAccount.savedChatContacts)
+      ? currentAccount.savedChatContacts
+      : [];
+    const existingIdx = existingContacts.findIndex(
+      (c) =>
+        c.targetAccountId === targetAcc.id ||
+        c.targetAccountNumber === targetAcc.accountNumber
+    );
+
+    const nextContact: PrivateChatContact = {
+      id: existingIdx >= 0 ? existingContacts[existingIdx].id : `pcontact-${Date.now()}`,
+      targetAccountId: targetAcc.id,
+      targetAccountNumber: targetAcc.accountNumber,
+      targetUserId16: targetAcc.userId16,
+      customName: cleanCustomName || existingContacts[existingIdx]?.customName || undefined,
+      registeredName: targetAcc.fullName,
+      cardTier: targetAcc.cardTier,
+      addedAt: existingIdx >= 0 ? existingContacts[existingIdx].addedAt : new Date().toISOString(),
+    };
+
+    const nextContacts =
+      existingIdx >= 0
+        ? existingContacts.map((c, idx) => (idx === existingIdx ? nextContact : c))
+        : [nextContact, ...existingContacts];
+
+    const updatedAccounts = pool.map((a) =>
+      a.id === currentAccount.id
+        ? { ...a, savedChatContacts: nextContacts, accountUpdatedAtMs: Date.now() }
+        : a
+    );
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+    flushMasterStateToCloud({ accounts: updatedAccounts });
+    playAtmSound('success');
+
+    return {
+      success: true,
+      message:
+        existingIdx >= 0
+          ? `Kontak "${nextContact.customName || nextContact.registeredName}" diperbarui.`
+          : `Nasabah "${nextContact.customName || nextContact.registeredName}" berhasil ditambahkan ke Chat Privat!`,
+      contact: nextContact,
+    };
+  };
+
+  const removePrivateChatContact = (
+    targetAccountId: string
+  ): { success: boolean; message: string } => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const updatedAccounts = pool.map((a) => {
+      if (a.id !== currentAccount.id) return a;
+      const nextContacts = (a.savedChatContacts || []).filter(
+        (c) => c.targetAccountId !== targetAccountId && c.targetAccountNumber !== targetAccountId
+      );
+      return { ...a, savedChatContacts: nextContacts, accountUpdatedAtMs: Date.now() };
+    });
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+    flushMasterStateToCloud({ accounts: updatedAccounts });
+    return { success: true, message: 'Kontak nasabah dihapus dari daftar Chat Privat.' };
+  };
+
+  const markChatRequestPaid = async (messageId: string, paidByName?: string) => {
+    const paidAt = new Date().toISOString();
+    const payerId = currentAccount?.id;
+    const payerName = paidByName || currentAccount?.fullName || 'Nasabah';
+    const nextChats = chats.map((m) =>
+      m.id === messageId && m.transferAttachment
+        ? {
+            ...m,
+            transferAttachment: {
+              ...m.transferAttachment,
+              status: 'paid' as const,
+              paidByAccountId: payerId,
+              paidByName: payerName,
+              paidAt,
+            },
+          }
+        : m
+    );
+    setChats(nextChats);
+    flushMasterStateToCloud({ chats: nextChats });
+    try {
+      await fetch(`/api/private-chat/${encodeURIComponent(messageId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transferAttachment: {
+            status: 'paid',
+            paidByAccountId: payerId,
+            paidByName: payerName,
+            paidAt,
+          },
+        }),
+      });
+    } catch { /* empty */ }
+  };
+
+  const upsertGroupAndBroadcast = async (group: PrivateChatGroup) => {
+    setPrivateChatGroups((prev) => {
+      const exists = prev.some((g) => g.id === group.id);
+      const next = exists ? prev.map((g) => (g.id === group.id ? group : g)) : [group, ...prev];
+      privateChatGroupsRef.current = next;
+      flushMasterStateToCloud({ privateChatGroups: next });
+      return next;
+    });
+    try {
+      await fetch('/api/private-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(group),
+      });
+    } catch {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'private_group:upsert', payload: group }));
+      }
+    }
+  };
+
+  const createPrivateChatGroup = async (input: {
+    name: string;
+    iconKey?: string;
+    accentColor?: string;
+    memberAccountIds: string[];
+  }): Promise<{ success: boolean; message: string; group?: PrivateChatGroup }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const cleanName = input.name.trim().slice(0, 80);
+    if (!cleanName) return { success: false, message: 'Nama grup wajib diisi.' };
+    const members = Array.from(new Set([currentAccount.id, ...input.memberAccountIds.filter(Boolean)]));
+    if (members.length < 2) {
+      return { success: false, message: 'Pilih minimal 1 anggota lain untuk membuat grup privat.' };
+    }
+
+    const newGroup: PrivateChatGroup = {
+      id: `pgrp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      name: cleanName,
+      iconKey: input.iconKey || 'users',
+      accentColor: input.accentColor || 'indigo',
+      creatorAccountId: currentAccount.id,
+      memberAccountIds: members,
+      createdAt: new Date().toISOString(),
+      updatedAtMs: Date.now(),
+    };
+
+    await upsertGroupAndBroadcast(newGroup);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Grup Privat "${cleanName}" berhasil dibuat dengan ${members.length} anggota!`,
+      group: newGroup,
+    };
+  };
+
+  const addMemberToPrivateGroup = async (
+    groupId: string,
+    memberAccountId: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const grp = privateChatGroupsRef.current.find((g) => g.id === groupId);
+    if (!grp) return { success: false, message: 'Grup tidak ditemukan.' };
+    if (!grp.memberAccountIds.includes(currentAccount.id)) {
+      return { success: false, message: 'Anda bukan anggota grup ini.' };
+    }
+    if (grp.memberAccountIds.includes(memberAccountId)) {
+      return { success: false, message: 'Nasabah tersebut sudah tergabung di dalam grup ini.' };
+    }
+    const targetAcc = accountsRef.current.find((a) => a.id === memberAccountId);
+    if (!targetAcc) return { success: false, message: 'Akun nasabah tidak ditemukan.' };
+
+    const updatedGroup: PrivateChatGroup = {
+      ...grp,
+      memberAccountIds: [...grp.memberAccountIds, memberAccountId],
+      updatedAtMs: Date.now(),
+    };
+    await upsertGroupAndBroadcast(updatedGroup);
+    return { success: true, message: `${targetAcc.fullName} berhasil ditambahkan ke grup "${grp.name}".` };
+  };
+
+  const renamePrivateChatGroup = async (
+    groupId: string,
+    newName: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const cleanName = newName.trim().slice(0, 80);
+    if (!cleanName) return { success: false, message: 'Nama grup tidak boleh kosong.' };
+    const grp = privateChatGroupsRef.current.find((g) => g.id === groupId);
+    if (!grp) return { success: false, message: 'Grup tidak ditemukan.' };
+    if (!grp.memberAccountIds.includes(currentAccount.id)) {
+      return { success: false, message: 'Anda bukan anggota grup ini.' };
+    }
+    await upsertGroupAndBroadcast({ ...grp, name: cleanName, updatedAtMs: Date.now() });
+    return { success: true, message: `Nama grup diubah menjadi "${cleanName}".` };
+  };
+
+  const removeMemberFromPrivateGroup = async (
+    groupId: string,
+    memberAccountId: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const grp = privateChatGroupsRef.current.find((g) => g.id === groupId);
+    if (!grp) return { success: false, message: 'Grup tidak ditemukan.' };
+    if (grp.creatorAccountId !== currentAccount.id) {
+      return { success: false, message: 'Hanya pembuat grup yang dapat mengeluarkan anggota.' };
+    }
+    if (memberAccountId === grp.creatorAccountId) {
+      return { success: false, message: 'Pembuat grup tidak dapat mengeluarkan dirinya sendiri.' };
+    }
+    const updatedGroup: PrivateChatGroup = {
+      ...grp,
+      memberAccountIds: grp.memberAccountIds.filter((id) => id !== memberAccountId),
+      updatedAtMs: Date.now(),
+    };
+    await upsertGroupAndBroadcast(updatedGroup);
+    return { success: true, message: 'Anggota berhasil dikeluarkan dari grup.' };
+  };
+
+  const leavePrivateChatGroup = async (
+    groupId: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const grp = privateChatGroupsRef.current.find((g) => g.id === groupId);
+    if (!grp) return { success: false, message: 'Grup tidak ditemukan.' };
+    const remaining = grp.memberAccountIds.filter((id) => id !== currentAccount.id);
+    if (remaining.length === 0) {
+      return deletePrivateChatGroup(groupId);
+    }
+    const nextCreator =
+      grp.creatorAccountId === currentAccount.id ? remaining[0] : grp.creatorAccountId;
+    await upsertGroupAndBroadcast({
+      ...grp,
+      creatorAccountId: nextCreator,
+      memberAccountIds: remaining,
+      updatedAtMs: Date.now(),
+    });
+    return { success: true, message: `Anda telah keluar dari grup "${grp.name}".` };
+  };
+
+  const deletePrivateChatGroup = async (
+    groupId: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const grp = privateChatGroupsRef.current.find((g) => g.id === groupId);
+    if (!grp) return { success: false, message: 'Grup tidak ditemukan.' };
+    if (grp.creatorAccountId !== currentAccount.id && !adminUnlockedRef.current) {
+      return { success: false, message: 'Hanya pembuat grup yang dapat menghapus grup ini.' };
+    }
+    const nextGroups = privateChatGroupsRef.current.filter((g) => g.id !== groupId);
+    privateChatGroupsRef.current = nextGroups;
+    setPrivateChatGroups(nextGroups);
+    const nextChats = chats.filter((m) => m.groupId !== groupId);
+    setChats(nextChats);
+    flushMasterStateToCloud({ privateChatGroups: nextGroups, chats: nextChats });
+    try {
+      await fetch(`/api/private-groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' });
+    } catch { /* empty */ }
+    return { success: true, message: `Grup "${grp.name}" berhasil dihapus secara permanen.` };
   };
 
   // ================= LAPOR BUG HANDLERS (FOTO BEBAS OPSIONAL & PENJELASAN WAJIB) =================
@@ -11514,6 +12571,437 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
+  // ================= SARAN & IDE FITUR + PROGRAM HADIAH SARAN =================
+  const submitSuggestion = async (input: {
+    title: string;
+    category?: string;
+    priority?: SuggestionPriority;
+    explanation: string;
+    photoDataUrl?: string;
+    photoFileName?: string;
+  }): Promise<{ success: boolean; message: string; suggestion?: SuggestionRecord }> => {
+    const cleanTitle = input.title.trim();
+    const cleanExplanation = input.explanation.trim();
+    if (!cleanTitle || !cleanExplanation) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'Judul singkat dan penjelasan saran wajib diisi sebelum mengirim!',
+      };
+    }
+
+    const sugId = `sug-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const newSug: SuggestionRecord = {
+      id: sugId,
+      reporterAccountId: currentAccount?.id,
+      reporterName: currentAccount?.fullName || googleUser?.name || 'Nasabah Bank Nusantara',
+      reporterAccountNumber: currentAccount?.accountNumber,
+      reporterUserId16: currentAccount?.userId16,
+      reporterEmail: googleUser?.email || currentAccount?.email,
+      title: cleanTitle.slice(0, 140),
+      category: input.category?.trim() || 'Ide Fitur Baru',
+      priority: input.priority || 'sedang',
+      explanation: cleanExplanation.slice(0, 3000),
+      photoDataUrl: input.photoDataUrl || undefined,
+      photoFileName: input.photoFileName || undefined,
+      status: 'baru',
+      createdAt: new Date().toISOString(),
+    };
+
+    seenSuggestionIdsRef.current.add(sugId);
+    const nextSugs = [newSug, ...suggestions];
+    setSuggestions(nextSugs);
+    flushMasterStateToCloud({ suggestions: nextSugs });
+    playAtmSound('success');
+
+    try {
+      await fetch('/api/suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSug),
+      });
+    } catch {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'suggestion:send', payload: newSug }));
+      }
+    }
+
+    recordLiveActivity({
+      actorRole: 'nasabah',
+      category: 'auth_security',
+      accountId: newSug.reporterAccountId,
+      accountName: newSug.reporterName,
+      accountNumber: newSug.reporterAccountNumber,
+      cardTier: currentAccount?.cardTier,
+      actionTitle: `💡 Saran Baru: ${newSug.title}`,
+      description: `[${newSug.category}] ${cleanExplanation.slice(0, 160)}`,
+      screenLabel: 'Kotak Saran & Ide Fitur',
+    });
+
+    return {
+      success: true,
+      message: 'Terima kasih! Saran Anda berhasil dikirim dan langsung tampil di Panel Admin.',
+      suggestion: newSug,
+    };
+  };
+
+  const adminUpdateSuggestion = async (
+    id: string,
+    status: SuggestionStatus,
+    adminReply?: string,
+    reward?: SuggestionReward,
+    options?: {
+      acceptAndDisburse?: boolean;
+      rejectionReason?: string;
+    }
+  ): Promise<{ success: boolean; message: string }> => {
+    const existing = suggestions.find((s) => s.id === id);
+    const normalizedStatus = normalizeSuggestionStatus(status);
+    const effectiveStatus: SuggestionStatus = options?.acceptAndDisburse
+      ? isSuggestionStatusAutoRewardTrigger(normalizedStatus, suggestionRewardConfigRef.current)
+        ? normalizedStatus
+        : 'diterima'
+      : normalizedStatus;
+    const isRejected = effectiveStatus === 'ditolak';
+    const isAutoTrigger = isSuggestionStatusAutoRewardTrigger(
+      effectiveStatus,
+      suggestionRewardConfigRef.current
+    );
+    const isAcceptedNow = isAutoTrigger || Boolean(options?.acceptAndDisburse);
+
+    let finalReward: SuggestionReward | undefined = existing?.reward;
+    let rewardFeedback = '';
+    const alreadyRewarded = Boolean(existing?.reward?.given);
+    const cfg = suggestionRewardConfigRef.current;
+
+    const shouldGrantNow =
+      !isRejected &&
+      !alreadyRewarded &&
+      (Boolean(options?.acceptAndDisburse) ||
+        (isAutoTrigger && cfg.enabled) ||
+        Boolean(reward?.given));
+
+    if (shouldGrantNow) {
+      const cashAmt = Math.max(0, Math.floor(Number(reward?.cashAmount ?? cfg.cashAmount) || 0));
+      const coinAmt = Math.max(0, Math.floor(Number(reward?.coinAmount ?? cfg.coinAmount) || 0));
+      const diamondAmt = Math.max(0, Math.floor(Number(reward?.diamondAmount ?? cfg.diamondAmount) || 0));
+      const goldAmt = Math.max(0, Math.round((Number(reward?.goldGrams ?? cfg.goldGrams) || 0) * 100) / 100);
+      const voucherAmt = Math.max(0, Math.floor(Number(reward?.voucherAmount ?? cfg.voucherAmount) || 0));
+      const pointsAmt = Math.max(0, Math.floor(Number(reward?.pointsAmount ?? cfg.pointsAmount) || 0));
+      const familySlotAmt = Math.max(
+        0,
+        Math.floor(Number(reward?.familySlotAmount ?? cfg.familySlotAmount) || 0)
+      );
+
+      const hasAny =
+        cashAmt > 0 ||
+        coinAmt > 0 ||
+        diamondAmt > 0 ||
+        goldAmt > 0 ||
+        voucherAmt > 0 ||
+        pointsAmt > 0 ||
+        familySlotAmt > 0;
+
+      if (hasAny) {
+        const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+        const targetAcc = pool.find(
+          (a) =>
+            (existing?.reporterAccountId && a.id === existing.reporterAccountId) ||
+            (existing?.reporterAccountNumber && a.accountNumber === existing.reporterAccountNumber) ||
+            (existing?.reporterEmail &&
+              normalizeEmailKey(a.googleEmail || a.email || '') ===
+                normalizeEmailKey(existing.reporterEmail))
+        );
+
+        finalReward = {
+          given: true,
+          cashAmount: cashAmt,
+          coinAmount: coinAmt,
+          diamondAmount: diamondAmt,
+          goldGrams: goldAmt,
+          voucherAmount: voucherAmt,
+          pointsAmount: pointsAmt,
+          familySlotAmount: familySlotAmt,
+          adminRewardMessage:
+            reward?.adminRewardMessage?.trim() ||
+            cfg.defaultRewardMessage ||
+            'Terima kasih atas saran Anda! Hadiah Program Saran langsung masuk ke akun Anda.',
+          awardedAt: new Date().toISOString(),
+          awardedBy: 'Admin Bank Nusantara',
+        };
+
+        if (targetAcc) {
+          const stampMs = Date.now();
+          const isUnlim = targetAcc.cardTier === 'admin' || isUnlimitedNumber(targetAcc.balance);
+          const nextBal = isUnlim ? UNLIMITED_BALANCE : targetAcc.balance + cashAmt;
+          const updatedAccounts = pool.map((a) =>
+            a.id === targetAcc.id
+              ? normalizeAdminAccountAssets({
+                  ...a,
+                  balance: nextBal,
+                  spinCoins: (a.spinCoins || 0) + coinAmt,
+                  diamonds: (a.diamonds || 0) + diamondAmt,
+                  goldGrams: Math.round(((a.goldGrams || 0) + goldAmt) * 100) / 100,
+                  levelVouchers: (a.levelVouchers || 0) + voucherAmt,
+                  rewardPoints: (a.rewardPoints || 0) + pointsAmt,
+                  extraFamilySlots: (a.extraFamilySlots || 0) + familySlotAmt,
+                  accountUpdatedAtMs: stampMs,
+                })
+              : a
+          );
+          accountsRef.current = updatedAccounts;
+          latestServerAccountsRef.current = updatedAccounts;
+          setAccounts(updatedAccounts);
+
+          const rewardParts: string[] = [];
+          if (cashAmt > 0) rewardParts.push(formatRupiah(cashAmt));
+          if (coinAmt > 0) rewardParts.push(`${coinAmt.toLocaleString('id-ID')} Coin`);
+          if (diamondAmt > 0) rewardParts.push(`${diamondAmt.toLocaleString('id-ID')} Permata`);
+          if (goldAmt > 0) rewardParts.push(`${goldAmt.toLocaleString('id-ID')} gr Emas 24K`);
+          if (voucherAmt > 0) rewardParts.push(`${voucherAmt.toLocaleString('id-ID')} Voucher`);
+          if (pointsAmt > 0) rewardParts.push(`${pointsAmt.toLocaleString('id-ID')} Poin`);
+          if (familySlotAmt > 0) rewardParts.push(`${familySlotAmt.toLocaleString('id-ID')} Slot Keluarga`);
+          const rewardSummary = rewardParts.join(' + ');
+
+          const tx: Transaction = {
+            id: `tx-sug-reward-${stampMs}`,
+            accountId: targetAcc.id,
+            type: 'setor',
+            title: `Hadiah Program Saran Terpilih: ${rewardSummary}`,
+            amount: cashAmt,
+            coinAmount: coinAmt > 0 ? coinAmt : undefined,
+            balanceAfter: nextBal,
+            date: new Date().toISOString(),
+            timestamp: new Date().toISOString(),
+            referenceNo: `SUGRWD-${String(stampMs).slice(-6)}`,
+            status: 'berhasil',
+            note: finalReward.adminRewardMessage,
+          };
+          const nextTxs = [tx, ...transactions];
+          setTransactions(nextTxs);
+
+          const notif: AppNotification = {
+            id: `notif-sugrwd-${stampMs}`,
+            title: 'Hadiah Program Saran Diterima! 💡🎁',
+            message: `Saran "${existing?.title || 'Anda'}" diapresiasi Admin! Hadiah (${rewardSummary}) langsung masuk ke akun Anda.`,
+            type: 'success',
+            category: 'hadiah',
+            timestamp: new Date().toISOString(),
+            read: false,
+            accountId: targetAcc.id,
+            privateAccountOnly: true,
+          };
+          const nextNotifs = [notif, ...notifications];
+          setNotifications(nextNotifs);
+
+          const popup: WebsiteSystemPopupNotification = {
+            id: `popup-sugrwd-${id}-${stampMs}`,
+            type: 'verified',
+            title: 'Saran Anda Terpilih & Dapat Hadiah!',
+            subtitle: 'PROGRAM HADIAH SARAN BANK NUSANTARA',
+            message: `${finalReward.adminRewardMessage || ''} Hadiah langsung masuk: ${rewardSummary}.`,
+            accountId: targetAcc.id,
+            accountName: targetAcc.fullName,
+            accountNumber: targetAcc.accountNumber,
+            cardTier: targetAcc.cardTier,
+            timestamp: new Date().toISOString(),
+            dismissed: false,
+            privateAccountOnly: true,
+          };
+          const nextPopups = [popup, ...websitePopups].slice(0, 100);
+          setWebsitePopups(nextPopups);
+
+          const nextSugsWithReward = suggestions.map((s) =>
+            s.id === id
+              ? {
+                  ...s,
+                  status: effectiveStatus,
+                  isAcceptedByAdmin: true,
+                  acceptedAt: s.acceptedAt || new Date().toISOString(),
+                  adminReply: adminReply !== undefined ? adminReply : s.adminReply,
+                  reward: finalReward,
+                  updatedAt: new Date().toISOString(),
+                }
+              : s
+          );
+          setSuggestions(nextSugsWithReward);
+          flushMasterStateToCloud({
+            accounts: updatedAccounts,
+            transactions: nextTxs,
+            notifications: nextNotifs,
+            websitePopups: nextPopups,
+            suggestions: nextSugsWithReward,
+          });
+
+          try {
+            void fetch('/api/website-popup', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(popup),
+            });
+          } catch { /* empty */ }
+
+          recordLiveActivity({
+            actorRole: 'admin',
+            category: 'admin_action',
+            accountId: targetAcc.id,
+            accountName: targetAcc.fullName,
+            accountNumber: targetAcc.accountNumber,
+            cardTier: targetAcc.cardTier,
+            actionTitle: `🎁 Hadiah Saran Cair untuk ${targetAcc.fullName}`,
+            description: `Saran "${existing?.title || id}" -> ${rewardSummary}`,
+            amountRupiah: cashAmt > 0 ? cashAmt : undefined,
+            prizesSummary: rewardSummary,
+            screenLabel: 'Admin Panel • Saran & Hadiah',
+          });
+
+          rewardFeedback = ` Hadiah (${rewardSummary}) langsung cair ke akun ${targetAcc.fullName}!`;
+        }
+      }
+    }
+
+    const nextSugs = suggestions.map((s) =>
+      s.id === id
+        ? {
+            ...s,
+            status: effectiveStatus,
+            isAcceptedByAdmin: isRejected ? false : isAcceptedNow ? true : s.isAcceptedByAdmin,
+            acceptedAt: isAcceptedNow ? s.acceptedAt || new Date().toISOString() : s.acceptedAt,
+            rejectionReason: options?.rejectionReason ?? s.rejectionReason,
+            adminReply: adminReply !== undefined ? adminReply : s.adminReply,
+            reward: finalReward || s.reward,
+            updatedAt: new Date().toISOString(),
+          }
+        : s
+    );
+    setSuggestions(nextSugs);
+    flushMasterStateToCloud({ suggestions: nextSugs });
+
+    try {
+      await fetch(`/api/suggestions/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: effectiveStatus,
+          adminReply,
+          isAcceptedByAdmin: isRejected ? false : isAcceptedNow ? true : existing?.isAcceptedByAdmin,
+          acceptedAt: isAcceptedNow ? existing?.acceptedAt || new Date().toISOString() : existing?.acceptedAt,
+          rejectionReason: options?.rejectionReason,
+          reward: finalReward,
+        }),
+      });
+    } catch { /* empty */ }
+
+    const statusMeta = getSuggestionStatusMeta(effectiveStatus);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Status saran diperbarui ke "${statusMeta.label}".${rewardFeedback}`,
+    };
+  };
+
+  const adminDeleteSuggestion = async (id: string) => {
+    const nextTombstones = recordDeletedAdminItemIds('suggestions', [id]);
+    const nextList = suggestions.filter((s) => s.id !== id);
+    setSuggestions(nextList);
+    flushMasterStateToCloud({ suggestions: nextList, deletedAdminItemIds: nextTombstones });
+    try {
+      await fetch(`/api/suggestions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } catch { /* empty */ }
+  };
+
+  const adminClearSuggestions = async () => {
+    const nextTombstones = recordDeletedAdminItemIds(
+      'suggestions',
+      suggestions.map((s) => s.id)
+    );
+    setSuggestions([]);
+    flushMasterStateToCloud({ suggestions: [], deletedAdminItemIds: nextTombstones });
+    try {
+      await fetch('/api/suggestions/clear', { method: 'POST' });
+    } catch { /* empty */ }
+  };
+
+  const adminUpdateSuggestionRewardConfig = (
+    partial: Partial<SuggestionRewardProgramConfig>
+  ): { success: boolean; message: string } => {
+    const parseNonNegInt = (val: unknown, fallback: number) => {
+      if (val === undefined || val === null) return fallback;
+      const num = Number(val);
+      return Number.isFinite(num) ? Math.max(0, Math.floor(num)) : fallback;
+    };
+    const parseNonNegFloat2 = (val: unknown, fallback: number) => {
+      if (val === undefined || val === null) return fallback;
+      const num = Number(val);
+      return Number.isFinite(num) ? Math.max(0, Math.round(num * 100) / 100) : fallback;
+    };
+    const sanitizedTriggers = Array.isArray(partial.autoRewardTriggerStatuses)
+      ? Array.from(
+          new Set(
+            partial.autoRewardTriggerStatuses
+              .map((s) => normalizeSuggestionStatus(s))
+              .filter((s) => s !== 'ditolak')
+          )
+        )
+      : suggestionRewardConfigRef.current.autoRewardTriggerStatuses ||
+        DEFAULT_SUGGESTION_AUTO_REWARD_STATUSES;
+
+    const nowMs = Date.now();
+    const nextCfg: SuggestionRewardProgramConfig = {
+      ...suggestionRewardConfigRef.current,
+      ...partial,
+      enabled:
+        partial.enabled !== undefined
+          ? Boolean(partial.enabled)
+          : suggestionRewardConfigRef.current.enabled,
+      cashAmount: parseNonNegInt(partial.cashAmount, suggestionRewardConfigRef.current.cashAmount),
+      coinAmount: parseNonNegInt(partial.coinAmount, suggestionRewardConfigRef.current.coinAmount),
+      diamondAmount: parseNonNegInt(
+        partial.diamondAmount,
+        suggestionRewardConfigRef.current.diamondAmount
+      ),
+      goldGrams: parseNonNegFloat2(partial.goldGrams, suggestionRewardConfigRef.current.goldGrams),
+      voucherAmount: parseNonNegInt(
+        partial.voucherAmount,
+        suggestionRewardConfigRef.current.voucherAmount
+      ),
+      pointsAmount: parseNonNegInt(
+        partial.pointsAmount,
+        suggestionRewardConfigRef.current.pointsAmount
+      ),
+      familySlotAmount: parseNonNegInt(
+        partial.familySlotAmount,
+        suggestionRewardConfigRef.current.familySlotAmount
+      ),
+      defaultRewardMessage: String(
+        partial.defaultRewardMessage !== undefined
+          ? partial.defaultRewardMessage
+          : suggestionRewardConfigRef.current.defaultRewardMessage ?? ''
+      ).slice(0, 300),
+      autoRewardTriggerStatuses: sanitizedTriggers,
+      updatedAt: new Date(nowMs).toISOString(),
+      updatedAtMs: nowMs,
+    };
+
+    suggestionRewardConfigRef.current = nextCfg;
+    setSuggestionRewardConfig(nextCfg);
+    flushMasterStateToCloud({ suggestionRewardConfig: nextCfg });
+    try {
+      void fetch('/api/suggestion-reward-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestionRewardConfig: nextCfg, updatedAtMs: nowMs }),
+      });
+    } catch { /* empty */ }
+    playAtmSound('success');
+    return {
+      success: true,
+      message: nextCfg.enabled
+        ? 'Program Hadiah Saran aktif & tersinkron real-time ke Cloud & semua perangkat!'
+        : 'Program Hadiah Saran dinonaktifkan & tersinkron ke Cloud.',
+    };
+  };
+
   const adminUpdateUiVisibility = (
     partial: Partial<Omit<UiVisibilityConfig, 'navTabs'>> & {
       navTabs?: Partial<UiVisibilityConfig['navTabs']>;
@@ -11632,8 +13120,49 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const dismissAdminWarning = (warningId: string, resendVersion?: number) => {
     const matched = adminWarningsRef.current.find((w) => w.id === warningId);
-    const ver = resendVersion ?? matched?.resendVersion ?? 1;
-    setDismissedWarningMap((prev) => ({ ...prev, [warningId]: ver }));
+    const activeAcc =
+      currentAccount || accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || null;
+    const prevVer = activeAcc
+      ? Math.max(
+          dismissedWarningMapRef.current[warningId] || 0,
+          activeAcc.dismissedWarningMap?.[warningId] || 0
+        )
+      : dismissedWarningMapRef.current[warningId] || 0;
+    const ver = Math.max(resendVersion ?? matched?.resendVersion ?? 1, prevVer, 1);
+
+    if (activeAcc) {
+      persistAccountDismissedReceipts(activeAcc, [], { [warningId]: ver });
+
+      // Tandai notifikasi lonceng peringatan terkait sebagai Sudah Dibaca (tetap tersimpan di riwayat Lonceng)
+      setNotifications((prev) =>
+        prev.map((n) => {
+          if (n.read) return n;
+          const sameRef = n.referenceId === warningId || n.id === warningId;
+          const sameTitle =
+            Boolean(matched?.title) &&
+            (n.title.includes(matched!.title) || n.message.includes(matched!.message));
+          if (sameRef || sameTitle) {
+            return { ...n, read: true };
+          }
+          return n;
+        })
+      );
+
+      // Catat konfirmasi Sudah Dibaca ke Live Monitor Admin
+      recordLiveActivity({
+        actorRole: 'nasabah',
+        category: 'auth_security',
+        accountId: activeAcc.id,
+        accountName: activeAcc.fullName,
+        accountNumber: activeAcc.accountNumber,
+        cardTier: activeAcc.cardTier,
+        actionTitle: `Sudah Dibaca: Peringatan "${matched?.title || warningId}"`,
+        description: `Nasabah ${activeAcc.fullName} menekan OK pada ${
+          matched?.displayMode === 'banner' ? 'Banner Peringatan' : 'Pop-up Peringatan'
+        } (Versi Kirim #${ver}, tersimpan permanen per akun & sinkron Cloud).`,
+      });
+    }
+    playAtmSound('beep');
   };
 
   const adminSaveWarning = (
@@ -15390,22 +16919,53 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   /**
-   * Nusantara PayChat
+   * Chat Global & Priv — Pengiriman Pesan Chat Privat 1-on-1 & Grup Privat (Real-Time + Cloud)
    */
   const sendChatMessage = (input: SendChatInput) => {
     if (!currentAccount) return;
+    const nowMs = Date.now();
+    const targetAcc = !input.groupId
+      ? accountsRef.current.find(
+          (a) =>
+            (input.recipientAccountId && a.id === input.recipientAccountId) ||
+            a.accountNumber === input.recipientAccount
+        )
+      : undefined;
+
     const newMsg: ChatMessage = {
-      id: `chat-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: `pchat-${nowMs}-${Math.floor(Math.random() * 1000)}`,
+      senderAccountId: currentAccount.id,
       senderAccount: currentAccount.accountNumber,
       senderName: currentAccount.fullName,
-      recipientAccount: input.recipientAccount,
+      recipientAccountId: input.groupId ? undefined : input.recipientAccountId || targetAcc?.id,
+      recipientAccount: input.groupId ? `group:${input.groupId}` : input.recipientAccount,
       recipientName: input.recipientName,
+      groupId: input.groupId,
       text: input.text,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date(nowMs).toISOString(),
+      createdAtMs: nowMs,
+      replyToId: input.replyToId,
+      replyToSender: input.replyToSender,
+      replyToPreview: input.replyToPreview,
       transferAttachment: input.transferAttachment,
     };
 
-    setChats((prev) => [...prev, newMsg]);
+    seenPrivateChatIdsRef.current.add(newMsg.id);
+    const nextChats = [...chats, newMsg].slice(-800);
+    setChats(nextChats);
+    flushMasterStateToCloud({ chats: nextChats });
+
+    try {
+      void fetch('/api/private-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newMsg),
+      });
+    } catch {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'private_chat:send', payload: newMsg }));
+      }
+    }
   };
 
   /**
@@ -33130,6 +34690,33 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminHandleAnomalyAction,
         adminToggleAccountSpinPause,
         adminSimulateSpin10x5xDetection,
+        globalChatConfig,
+        togglePinGlobalChatMessage,
+        toggleGlobalChatAdminLock,
+        privateChatGroups,
+        chatLastReadMap,
+        markChatRoomRead,
+        totalChatUnreadCount,
+        globalChatUnreadCount,
+        privateChatUnreadCount,
+        addPrivateChatContact,
+        removePrivateChatContact,
+        markChatRequestPaid,
+        createPrivateChatGroup,
+        addMemberToPrivateGroup,
+        renamePrivateChatGroup,
+        removeMemberFromPrivateGroup,
+        leavePrivateChatGroup,
+        deletePrivateChatGroup,
+        suggestions,
+        isSuggestionModalOpen,
+        setIsSuggestionModalOpen,
+        submitSuggestion,
+        adminUpdateSuggestion,
+        adminDeleteSuggestion,
+        adminClearSuggestions,
+        suggestionRewardConfig,
+        adminUpdateSuggestionRewardConfig,
       }}
     >
       {children}

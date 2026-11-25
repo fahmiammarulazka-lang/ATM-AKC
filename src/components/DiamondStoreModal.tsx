@@ -16,6 +16,7 @@ import {
   ChevronRight,
   SlidersHorizontal,
   RefreshCw,
+  Download,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -31,6 +32,7 @@ import {
 } from '../data/diamondCatalog';
 import { formatRupiah } from '../utils/bankUtils';
 import { QrisValidationError, requestCreateQrisPayment } from '../../buatQrisService';
+import { downloadPureQrisPng } from '../utils/qrisDownload';
 import { QrisPaymentOrder } from '../types/bank';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
 
@@ -94,6 +96,8 @@ export const DiamondStoreModal: React.FC = () => {
     showTopUpShortcut?: boolean;
     canRetryQris?: boolean;
   } | null>(null);
+  const [downloadingHistoryOrderId, setDownloadingHistoryOrderId] = useState<string | null>(null);
+  const [downloadedHistoryOrderId, setDownloadedHistoryOrderId] = useState<string | null>(null);
 
   // Use / Exchange state
   const [exchangeAmount, setExchangeAmount] = useState<string>('10');
@@ -394,6 +398,49 @@ export const DiamondStoreModal: React.FC = () => {
       });
     } finally {
       setIsCreatingQris(false);
+    }
+  };
+
+  const handleDownloadPendingHistoryQris = async (ord: QrisPaymentOrder) => {
+    if (ord.status !== 'PENDING' || !ord.qrisString || downloadingHistoryOrderId === ord.orderId) {
+      return;
+    }
+    setDownloadingHistoryOrderId(ord.orderId);
+    try {
+      const result = await downloadPureQrisPng({
+        orderId: ord.orderId,
+        totalAmount: ord.totalAmount,
+        qrisString: ord.qrisString,
+      });
+
+      if (result.success) {
+        setDownloadedHistoryOrderId(ord.orderId);
+        if (currentAccount) {
+          recordLiveActivity({
+            actorRole: 'nasabah',
+            category: 'transaction',
+            accountId: currentAccount.id,
+            accountName: currentAccount.fullName,
+            accountNumber: currentAccount.accountNumber,
+            cardTier: currentAccount.cardTier,
+            actionTitle: 'Unduh Gambar QRIS HD (Riwayat Pending)',
+            description: `Nasabah mengunduh file ${result.filename} (${formatRupiah(ord.totalAmount)}) dari tab Riwayat QRIS Pending.`,
+            amountRupiah: ord.totalAmount,
+          });
+        }
+        window.setTimeout(() => {
+          setDownloadedHistoryOrderId((prev) => (prev === ord.orderId ? null : prev));
+        }, 2000);
+        if (result.suggestFallbackPanel) {
+          setActiveQrisModalOrder(ord);
+        }
+      } else {
+        setActiveQrisModalOrder(ord);
+      }
+    } catch {
+      setActiveQrisModalOrder(ord);
+    } finally {
+      setDownloadingHistoryOrderId((prev) => (prev === ord.orderId ? null : prev));
     }
   };
 
@@ -1042,18 +1089,47 @@ export const DiamondStoreModal: React.FC = () => {
                         {ord.orderId} • {new Date(ord.createdAt).toLocaleString('id-ID')}
                       </p>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-black text-slate-900 tabular-nums">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-black text-slate-900 tabular-nums mr-1">
                         {formatRupiah(ord.totalAmount)}
                       </span>
                       {ord.status === 'PENDING' && (
-                        <button
-                          type="button"
-                          onClick={() => setActiveQrisModalOrder(ord)}
-                          className="rounded-xl bg-sky-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-sky-700"
-                        >
-                          Buka QRIS
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            disabled={!ord.qrisString || downloadingHistoryOrderId === ord.orderId}
+                            onClick={() => void handleDownloadPendingHistoryQris(ord)}
+                            className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[11px] font-black text-white shadow-sm transition whitespace-nowrap disabled:opacity-50 ${
+                              downloadedHistoryOrderId === ord.orderId
+                                ? 'bg-emerald-600'
+                                : 'bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500'
+                            }`}
+                          >
+                            {downloadingHistoryOrderId === ord.orderId ? (
+                              <>
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                <span>Menyiapkan...</span>
+                              </>
+                            ) : downloadedHistoryOrderId === ord.orderId ? (
+                              <>
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span>Tersimpan</span>
+                              </>
+                            ) : (
+                              <>
+                                <Download className="h-3.5 w-3.5" />
+                                <span>Unduh Qris</span>
+                              </>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActiveQrisModalOrder(ord)}
+                            className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 transition hover:bg-slate-100 whitespace-nowrap"
+                          >
+                            Buka QRIS
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

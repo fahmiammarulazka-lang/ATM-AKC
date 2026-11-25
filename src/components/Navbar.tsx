@@ -133,6 +133,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     adminTierPendingTasksCount,
     executeAdminTierNotificationQuickAction,
     dismissNotification,
+    totalChatUnreadCount,
   } = useBank();
 
   const activeMissionsCount = React.useMemo(
@@ -186,7 +187,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v14.38.48';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v15.39.49';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -1335,7 +1336,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* 8. PayChat */}
+            {/* 8. Chat Global & Priv */}
             {uiVisibilityConfig.navTabs.chat !== false && (
               <button
                 type="button"
@@ -1347,7 +1348,12 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }`}
               >
                 <MessageSquare className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span>PayChat</span>
+                <span>Chat Global &amp; Priv</span>
+                {totalChatUnreadCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono tabular-nums text-[10px] font-black">
+                    {totalChatUnreadCount > 99 ? '99+' : totalChatUnreadCount}
+                  </span>
+                )}
               </button>
             )}
 

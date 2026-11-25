@@ -79,7 +79,7 @@ export const UI_VISIBILITY_NAV_METADATA: Array<{
   { key: 'redeem', label: 'Kode Redeem', description: 'Penukaran kode hadiah dan voucher resmi.' },
   { key: 'jobs', label: 'Lowongan Kerja', description: 'Kerja klik harian, level karir, dan arena suit.' },
   { key: 'spin_wheel', label: 'Spin the Wheel', description: 'Roda keberuntungan koin dan hadiah jackpot.' },
-  { key: 'chat', label: 'PayChat', description: 'Chat antar rekening dan kirim saldo lewat chat.' },
+  { key: 'chat', label: 'Chat Global & Priv', description: 'Chat Global terbuka & Chat Privat 1-on-1 / Grup lengkap dengan transfer dana.' },
   { key: 'atm', label: 'Mesin ATM', description: 'Simulator mesin ATM fisik dan cetak struk.' },
   { key: 'guide', label: 'Panduan', description: 'Buku panduan informasi lengkap aplikasi.' },
   { key: 'updates', label: 'Update', description: 'Riwayat pembaruan dan catatan rilis aplikasi.' },

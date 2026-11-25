@@ -20,10 +20,12 @@ import {
   Check,
   RotateCcw,
   OctagonX,
+  Lightbulb,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { MINTOL_ADMIN_FEATURES_CATALOG } from '../data/empireAndMintolCatalog';
 import { AccountDeletion10StepModal } from './AccountDeletion10StepModal';
+import { SuggestionBoxModal } from './SuggestionBoxModal';
 import { stopAllCelebrationEffectsAndAudio } from '../data/celebrationEffectsCatalog';
 import { formatRupiah } from '../utils/bankUtils';
 import { DiamondIcon } from './DiamondIcon';
@@ -39,6 +41,7 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
     isBugReportModalOpen,
     setIsBugReportModalOpen,
     submitBugReport,
+    isSuggestionModalOpen,
     adminHelpRequests,
     isMintolModalOpen,
     setIsMintolModalOpen,
@@ -228,6 +231,7 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
 
   if (
     !isBugReportModalOpen &&
+    !isSuggestionModalOpen &&
     !isMintolModalOpen &&
     activePushBanners.length === 0 &&
     !showAdminForceClearPill
@@ -1075,6 +1079,8 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
         </div>
       )}
 
+      {/* MODAL KIRIM SARAN & IDE FITUR + PROGRAM HADIAH SARAN */}
+      <SuggestionBoxModal />
     </>
   );
 };
@@ -1090,6 +1096,9 @@ export const AllowNotificationFooterButton: React.FC = () => {
     currentAccount,
     setIsBugReportModalOpen,
     bugReports,
+    setIsSuggestionModalOpen,
+    suggestions,
+    suggestionRewardConfig,
     setIsMintolModalOpen,
     adminHelpRequests,
     notificationPermissionStatus,
@@ -1103,6 +1112,7 @@ export const AllowNotificationFooterButton: React.FC = () => {
   const [notifFeedback, setNotifFeedback] = useState<string>('');
   const [isDeleteAccountModalOpen, setIsDeleteAccountModalOpen] = useState<boolean>(false);
   const openBugCount = bugReports.filter((b) => b.status === 'baru').length;
+  const openSuggestionCount = suggestions.filter((s) => s.status === 'baru').length;
   const pendingMintolCount = adminHelpRequests.filter((r) => r.status === 'menunggu').length;
   const isBgActive = notificationsEnabled && notificationPermissionStatus === 'granted';
   const pendingDeletionReq = currentAccount
@@ -1127,6 +1137,24 @@ export const AllowNotificationFooterButton: React.FC = () => {
         {openBugCount > 0 && (
           <span className="ml-1 px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black">
             {openBugCount}
+          </span>
+        )}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => setIsSuggestionModalOpen(true)}
+        className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center gap-1.5 cursor-pointer bg-indigo-500/20 text-indigo-200 border border-indigo-400/50 hover:bg-indigo-500/30 shadow-sm whitespace-nowrap shrink-0"
+      >
+        <Lightbulb className="w-3.5 h-3.5 text-indigo-300" />
+        <span>
+          {suggestionRewardConfig.enabled
+            ? 'Kirim Saran & Ide Fitur (Ada Hadiah)'
+            : 'Kirim Saran & Ide Fitur'}
+        </span>
+        {openSuggestionCount > 0 && (
+          <span className="ml-1 px-1.5 py-0.5 rounded-full bg-indigo-500 text-white text-[10px] font-black">
+            {openSuggestionCount}
           </span>
         )}
       </button>

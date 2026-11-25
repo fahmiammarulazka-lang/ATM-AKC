@@ -25,12 +25,81 @@ export interface ServerGlobalChatMessage {
   id: string;
   senderName: string;
   senderRole: 'admin' | 'customer';
+  senderAccountId?: string;
   senderAccount?: string;
+  senderUserId16?: string;
+  senderCardTier?: string;
   isVerified?: boolean;
   title: string;
   text: string;
   timestamp: string;
+  createdAtMs?: number;
   isPinned?: boolean;
+  isOfficialAnnouncement?: boolean;
+  replyToId?: string;
+  replyToSender?: string;
+  replyToPreview?: string;
+}
+
+export interface ServerGlobalChatConfig {
+  adminOnlyLock: boolean;
+  cooldownMs: number;
+  lockedBy?: string;
+  updatedAtMs: number;
+}
+
+export interface ServerPrivateChatMessage {
+  id: string;
+  senderAccountId?: string;
+  senderAccount: string;
+  senderName: string;
+  recipientAccountId?: string;
+  recipientAccount: string;
+  receiverAccount?: string;
+  recipientName: string;
+  groupId?: string;
+  text: string;
+  timestamp: string;
+  createdAtMs?: number;
+  replyToId?: string;
+  replyToSender?: string;
+  replyToPreview?: string;
+  deleted?: boolean;
+  transferAttachment?: Record<string, unknown>;
+}
+
+export interface ServerPrivateChatGroup {
+  id: string;
+  name: string;
+  iconKey: string;
+  accentColor: string;
+  creatorAccountId: string;
+  memberAccountIds: string[];
+  createdAt: string;
+  updatedAtMs: number;
+}
+
+export interface ServerSuggestionRecord {
+  id: string;
+  reporterAccountId?: string;
+  reporterName: string;
+  reporterAccountNumber?: string;
+  reporterUserId16?: string;
+  reporterEmail?: string;
+  title: string;
+  category: string;
+  priority: string;
+  explanation: string;
+  photoDataUrl?: string;
+  photoFileName?: string;
+  status: string;
+  isAcceptedByAdmin?: boolean;
+  acceptedAt?: string;
+  rejectionReason?: string;
+  adminReply?: string;
+  reward?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ServerPopupNotification {
@@ -106,8 +175,13 @@ export interface ServerPushAlert {
 
 interface PersistedGlobalState {
   globalChats: ServerGlobalChatMessage[];
+  globalChatConfig: ServerGlobalChatConfig;
+  privateChatMessages: ServerPrivateChatMessage[];
+  privateChatGroups: ServerPrivateChatGroup[];
   websitePopups: ServerPopupNotification[];
   bugReports: ServerBugReport[];
+  suggestions: ServerSuggestionRecord[];
+  suggestionRewardConfig?: Record<string, unknown> | null;
   pushAlerts: ServerPushAlert[];
   giftEvents: unknown[];
   deletedGiftEventIds: string[];
@@ -138,12 +212,21 @@ const DEFAULT_STATE: PersistedGlobalState = {
       senderRole: 'admin',
       senderAccount: '9999999999',
       isVerified: true,
-      title: 'Pesan dari Admin',
-      text: 'Selamat datang di Bank Nusantara! Pesan Chat Global hanya dapat dikirim resmi oleh Admin melalui Panel Admin.',
+      title: 'Pengumuman Resmi Admin',
+      text: 'Selamat datang di Chat Global & Priv Bank Nusantara! Semua nasabah kini bisa saling menyapa di Chat Global, serta menambahkan nasabah atau membuat grup tertutup di tab Chat Privat.',
       timestamp: new Date().toISOString(),
+      createdAtMs: Date.now(),
       isPinned: true,
+      isOfficialAnnouncement: true,
     },
   ],
+  globalChatConfig: {
+    adminOnlyLock: false,
+    cooldownMs: 2500,
+    updatedAtMs: Date.now(),
+  },
+  privateChatMessages: [],
+  privateChatGroups: [],
   websitePopups: [],
   bugReports: [
     {
@@ -157,6 +240,8 @@ const DEFAULT_STATE: PersistedGlobalState = {
       createdAt: new Date(Date.now() - 1800 * 1000).toISOString(),
     },
   ],
+  suggestions: [],
+  suggestionRewardConfig: null,
   sharedBankData: {},
   userSnapshotsByScope: {},
   qrisOrders: {},
@@ -192,10 +277,26 @@ function loadPersistedState(): PersistedGlobalState {
       const parsed = JSON.parse(raw);
       return {
         globalChats: Array.isArray(parsed.globalChats)
-          ? parsed.globalChats.filter((c: ServerGlobalChatMessage) => c.senderRole === 'admin')
+          ? parsed.globalChats
           : DEFAULT_STATE.globalChats,
+        globalChatConfig:
+          parsed.globalChatConfig && typeof parsed.globalChatConfig === 'object'
+            ? {
+                adminOnlyLock: Boolean(parsed.globalChatConfig.adminOnlyLock),
+                cooldownMs: Math.max(0, Number(parsed.globalChatConfig.cooldownMs ?? 2500) || 2500),
+                lockedBy: parsed.globalChatConfig.lockedBy ? String(parsed.globalChatConfig.lockedBy) : undefined,
+                updatedAtMs: Number(parsed.globalChatConfig.updatedAtMs) || Date.now(),
+              }
+            : DEFAULT_STATE.globalChatConfig,
+        privateChatMessages: Array.isArray(parsed.privateChatMessages) ? parsed.privateChatMessages : [],
+        privateChatGroups: Array.isArray(parsed.privateChatGroups) ? parsed.privateChatGroups : [],
         websitePopups: Array.isArray(parsed.websitePopups) ? parsed.websitePopups : [],
         bugReports: Array.isArray(parsed.bugReports) ? parsed.bugReports : DEFAULT_STATE.bugReports,
+        suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+        suggestionRewardConfig:
+          parsed.suggestionRewardConfig && typeof parsed.suggestionRewardConfig === 'object'
+            ? parsed.suggestionRewardConfig
+            : null,
         pushAlerts: Array.isArray(parsed.pushAlerts) ? parsed.pushAlerts : [],
         giftEvents: Array.isArray(parsed.giftEvents) ? parsed.giftEvents : [],
         deletedGiftEventIds: Array.isArray(parsed.deletedGiftEventIds)
@@ -344,8 +445,13 @@ async function startServer() {
           type: 'init',
           payload: {
             globalChats: serverState.globalChats,
+            globalChatConfig: serverState.globalChatConfig,
+            privateChatMessages: serverState.privateChatMessages,
+            privateChatGroups: serverState.privateChatGroups,
             websitePopups: serverState.websitePopups,
             bugReports: serverState.bugReports,
+            suggestions: serverState.suggestions,
+            suggestionRewardConfig: serverState.suggestionRewardConfig || null,
             pushAlerts: serverState.pushAlerts,
             giftEvents: serverState.giftEvents,
             deletedGiftEventIds: serverState.deletedGiftEventIds,
@@ -382,10 +488,16 @@ async function startServer() {
         const msg = JSON.parse(raw.toString());
         if (msg.type === 'global_chat:send' && msg.payload) {
           handleNewGlobalChat(msg.payload);
+        } else if (msg.type === 'private_chat:send' && msg.payload) {
+          handleNewPrivateChatMessage(msg.payload);
+        } else if (msg.type === 'private_group:upsert' && msg.payload) {
+          handleUpsertPrivateGroup(msg.payload);
         } else if (msg.type === 'website_popup:send' && msg.payload) {
           handleNewPopup(msg.payload);
         } else if (msg.type === 'bug_report:send' && msg.payload) {
           handleNewBugReport(msg.payload);
+        } else if (msg.type === 'suggestion:send' && msg.payload) {
+          handleNewSuggestion(msg.payload);
         } else if (msg.type === 'push_alert:send' && msg.payload) {
           handleNewPushAlert(msg.payload);
         } else if (msg.type === 'gift_events:sync' && Array.isArray(msg.payload?.giftEvents)) {
@@ -664,44 +776,77 @@ async function startServer() {
     });
   });
 
-  // Global Chat ONLY allowed from Admin via Panel Admin ("Global chat hanya bisa dikirim oleh admin dan sahabat tidak bisa, hanya admin lewat panel admin")
+  // Track per-sender anti-spam cooldown for non-Admin Global Chat messages
+  const globalChatLastSentMs = new Map<string, number>();
+
+  // Global Chat terbuka untuk semua nasabah & Admin (Admin punya lencana khusus, anti-spam & mode khusus Admin opsional)
   function handleNewGlobalChat(input: {
     id?: string;
     senderName?: string;
     senderRole?: 'admin' | 'customer';
+    senderAccountId?: string;
     senderAccount?: string;
+    senderUserId16?: string;
+    senderCardTier?: string;
     isVerified?: boolean;
     title?: string;
     text: string;
     isPinned?: boolean;
+    isOfficialAnnouncement?: boolean;
+    replyToId?: string;
+    replyToSender?: string;
+    replyToPreview?: string;
     showPopupOnAllPhones?: boolean;
-  }) {
-    if (input.senderRole === 'customer') {
-      return null; // Sahabat / Nasabah tidak bisa mengirim Global Chat, hanya Admin lewat Panel Admin!
-    }
+  }): { message?: ServerGlobalChatMessage; popup?: ServerPopupNotification | null; error?: string } | null {
     const cleanText = String(input.text || '').trim();
-    if (!cleanText) return null;
+    if (!cleanText) return { error: 'Pesan Chat Global tidak boleh kosong.' };
+    const isAdminSender = input.senderRole === 'admin';
+
+    if (!isAdminSender) {
+      if (serverState.globalChatConfig?.adminOnlyLock) {
+        return { error: 'Ruang Chat Global sedang dalam Mode Khusus Admin sementara.' };
+      }
+      const cooldownMs = Math.max(0, Number(serverState.globalChatConfig?.cooldownMs ?? 2500) || 0);
+      const senderKey = String(input.senderAccountId || input.senderAccount || input.senderName || 'anon');
+      const lastSent = globalChatLastSentMs.get(senderKey) || 0;
+      const elapsed = Date.now() - lastSent;
+      if (cooldownMs > 0 && elapsed < cooldownMs) {
+        const waitSec = Math.max(1, Math.ceil((cooldownMs - elapsed) / 1000));
+        return { error: `Anti-spam aktif: tunggu ${waitSec} detik sebelum mengirim pesan lagi.` };
+      }
+      globalChatLastSentMs.set(senderKey, Date.now());
+    }
 
     const msgId = input.id || `gchat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const existing = serverState.globalChats.find((m) => m.id === msgId);
     if (existing) return { message: existing, popup: null };
 
+    const nowMs = Date.now();
     const newMsg: ServerGlobalChatMessage = {
       id: msgId,
-      senderName: input.senderName || 'Admin Bank Nusantara',
-      senderRole: 'admin',
-      senderAccount: input.senderAccount || '9999999999',
-      isVerified: true,
-      title: 'Pesan dari Admin',
-      text: cleanText,
-      timestamp: new Date().toISOString(),
-      isPinned: true,
+      senderName: String(input.senderName || (isAdminSender ? 'Admin Bank Nusantara' : 'Nasabah Bank Nusantara')).trim().slice(0, 80),
+      senderRole: isAdminSender ? 'admin' : 'customer',
+      senderAccountId: input.senderAccountId ? String(input.senderAccountId) : undefined,
+      senderAccount: input.senderAccount ? String(input.senderAccount) : isAdminSender ? '9999999999' : undefined,
+      senderUserId16: input.senderUserId16 ? String(input.senderUserId16) : undefined,
+      senderCardTier: input.senderCardTier ? String(input.senderCardTier) : undefined,
+      isVerified: isAdminSender ? true : Boolean(input.isVerified),
+      title: isAdminSender ? String(input.title || 'Pesan dari Admin') : 'Chat Global Nasabah',
+      text: cleanText.slice(0, 1000),
+      timestamp: new Date(nowMs).toISOString(),
+      createdAtMs: nowMs,
+      isPinned: isAdminSender ? Boolean(input.isPinned) : false,
+      isOfficialAnnouncement: isAdminSender ? Boolean(input.isOfficialAnnouncement ?? input.showPopupOnAllPhones) : false,
+      replyToId: input.replyToId ? String(input.replyToId) : undefined,
+      replyToSender: input.replyToSender ? String(input.replyToSender).slice(0, 80) : undefined,
+      replyToPreview: input.replyToPreview ? String(input.replyToPreview).slice(0, 140) : undefined,
     };
 
-    serverState.globalChats = [newMsg, ...serverState.globalChats].slice(0, 200);
+    serverState.globalChats = [newMsg, ...serverState.globalChats].slice(0, 300);
 
+    // Pop-up layar penuh HANYA muncul untuk pengumuman resmi Admin yang menandai showPopupOnAllPhones === true
     let createdPopup: ServerPopupNotification | null = null;
-    if (input.showPopupOnAllPhones !== false) {
+    if (isAdminSender && input.showPopupOnAllPhones === true) {
       createdPopup = {
         id: `popup-gchat-${msgId}`,
         type: 'admin_chat',
@@ -729,6 +874,114 @@ async function startServer() {
     });
 
     return { message: newMsg, popup: createdPopup };
+  }
+
+  function handleNewPrivateChatMessage(input: Partial<ServerPrivateChatMessage>) {
+    const cleanText = String(input.text || '').trim();
+    if (!cleanText && !input.transferAttachment) return null;
+    const msgId = input.id || `pchat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const existing = serverState.privateChatMessages.find((m) => m.id === msgId);
+    if (existing) return existing;
+
+    const nowMs = Date.now();
+    const newMsg: ServerPrivateChatMessage = {
+      id: msgId,
+      senderAccountId: input.senderAccountId ? String(input.senderAccountId) : undefined,
+      senderAccount: String(input.senderAccount || ''),
+      senderName: String(input.senderName || 'Nasabah').slice(0, 80),
+      recipientAccountId: input.recipientAccountId ? String(input.recipientAccountId) : undefined,
+      recipientAccount: String(input.recipientAccount || ''),
+      receiverAccount: input.receiverAccount ? String(input.receiverAccount) : undefined,
+      recipientName: String(input.recipientName || '').slice(0, 80),
+      groupId: input.groupId ? String(input.groupId) : undefined,
+      text: cleanText.slice(0, 1500),
+      timestamp: input.timestamp || new Date(nowMs).toISOString(),
+      createdAtMs: Number(input.createdAtMs) || nowMs,
+      replyToId: input.replyToId ? String(input.replyToId) : undefined,
+      replyToSender: input.replyToSender ? String(input.replyToSender).slice(0, 80) : undefined,
+      replyToPreview: input.replyToPreview ? String(input.replyToPreview).slice(0, 140) : undefined,
+      deleted: Boolean(input.deleted),
+      transferAttachment:
+        input.transferAttachment && typeof input.transferAttachment === 'object'
+          ? input.transferAttachment
+          : undefined,
+    };
+
+    serverState.privateChatMessages = [...serverState.privateChatMessages, newMsg].slice(-800);
+    savePersistedState();
+    broadcastToAll({
+      type: 'private_chat:new',
+      payload: { message: newMsg, lastUpdated: serverState.lastUpdated },
+    });
+    return newMsg;
+  }
+
+  function handleUpsertPrivateGroup(input: Partial<ServerPrivateChatGroup>) {
+    const cleanName = String(input.name || '').trim();
+    if (!cleanName || !input.creatorAccountId) return null;
+    const grpId = input.id || `pgrp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const memberIds = Array.from(
+      new Set(
+        (Array.isArray(input.memberAccountIds) ? input.memberAccountIds : [])
+          .map((x) => String(x || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const existing = serverState.privateChatGroups.find((g) => g.id === grpId);
+    const nextGroup: ServerPrivateChatGroup = {
+      id: grpId,
+      name: cleanName.slice(0, 80),
+      iconKey: String(input.iconKey || existing?.iconKey || 'users'),
+      accentColor: String(input.accentColor || existing?.accentColor || 'indigo'),
+      creatorAccountId: String(existing?.creatorAccountId || input.creatorAccountId),
+      memberAccountIds: memberIds,
+      createdAt: existing?.createdAt || input.createdAt || new Date().toISOString(),
+      updatedAtMs: Date.now(),
+    };
+
+    serverState.privateChatGroups = existing
+      ? serverState.privateChatGroups.map((g) => (g.id === grpId ? nextGroup : g))
+      : [nextGroup, ...serverState.privateChatGroups].slice(0, 200);
+    savePersistedState();
+    broadcastToAll({
+      type: 'private_group:upserted',
+      payload: { group: nextGroup, lastUpdated: serverState.lastUpdated },
+    });
+    return nextGroup;
+  }
+
+  function handleNewSuggestion(input: Partial<ServerSuggestionRecord>) {
+    const cleanTitle = String(input.title || '').trim();
+    const cleanExplanation = String(input.explanation || '').trim();
+    if (!cleanTitle || !cleanExplanation) return null;
+    const sugId = input.id || `sug-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const existing = serverState.suggestions.find((s) => s.id === sugId);
+    if (existing) return existing;
+
+    const newSug: ServerSuggestionRecord = {
+      id: sugId,
+      reporterAccountId: input.reporterAccountId ? String(input.reporterAccountId) : undefined,
+      reporterName: String(input.reporterName || 'Nasabah Bank Nusantara').trim(),
+      reporterAccountNumber: input.reporterAccountNumber ? String(input.reporterAccountNumber) : undefined,
+      reporterUserId16: input.reporterUserId16 ? String(input.reporterUserId16) : undefined,
+      reporterEmail: input.reporterEmail ? String(input.reporterEmail) : undefined,
+      title: cleanTitle.slice(0, 140),
+      category: String(input.category || 'Ide Fitur Baru'),
+      priority: String(input.priority || 'sedang'),
+      explanation: cleanExplanation.slice(0, 3000),
+      photoDataUrl: input.photoDataUrl ? String(input.photoDataUrl) : undefined,
+      photoFileName: input.photoFileName ? String(input.photoFileName) : undefined,
+      status: 'baru',
+      createdAt: input.createdAt || new Date().toISOString(),
+    };
+
+    serverState.suggestions = [newSug, ...serverState.suggestions].slice(0, 250);
+    savePersistedState();
+    broadcastToAll({
+      type: 'suggestion:new',
+      payload: { suggestion: newSug, lastUpdated: serverState.lastUpdated },
+    });
+    return newSug;
   }
 
   function handleNewPopup(popupInput: ServerPopupNotification) {
@@ -830,8 +1083,13 @@ async function startServer() {
   app.get('/api/global-chat', (_req, res) => {
     res.json({
       globalChats: serverState.globalChats,
+      globalChatConfig: serverState.globalChatConfig,
+      privateChatMessages: serverState.privateChatMessages,
+      privateChatGroups: serverState.privateChatGroups,
       websitePopups: serverState.websitePopups,
       bugReports: serverState.bugReports,
+      suggestions: serverState.suggestions,
+      suggestionRewardConfig: serverState.suggestionRewardConfig || null,
       pushAlerts: serverState.pushAlerts,
       giftEvents: serverState.giftEvents,
       deletedGiftEventIds: serverState.deletedGiftEventIds,
@@ -1390,10 +1648,10 @@ async function startServer() {
 
   app.post('/api/global-chat', (req, res) => {
     const result = handleNewGlobalChat(req.body || {});
-    if (!result) {
+    if (!result || result.error || !result.message) {
       res.status(400).json({
         success: false,
-        message: 'Global Chat hanya bisa dikirim oleh Admin melalui Panel Admin!',
+        message: result?.error || 'Gagal mengirim pesan Chat Global.',
       });
       return;
     }
@@ -1401,9 +1659,52 @@ async function startServer() {
       success: true,
       ...result,
       globalChats: serverState.globalChats,
+      globalChatConfig: serverState.globalChatConfig,
       websitePopups: serverState.websitePopups,
       connectedDevices: Math.max(1, clients.size),
     });
+  });
+
+  app.post('/api/global-chat/:id/pin', (req, res) => {
+    const targetId = String(req.params.id || '');
+    const desiredPin = typeof req.body?.isPinned === 'boolean' ? req.body.isPinned : undefined;
+    let updatedMsg: ServerGlobalChatMessage | null = null;
+    serverState.globalChats = serverState.globalChats.map((m) => {
+      if (m.id === targetId) {
+        const nextPin = desiredPin !== undefined ? desiredPin : !m.isPinned;
+        updatedMsg = { ...m, isPinned: nextPin };
+        return updatedMsg;
+      }
+      return m;
+    });
+    savePersistedState();
+    if (updatedMsg) {
+      broadcastToAll({
+        type: 'global_chat:updated',
+        payload: { message: updatedMsg, lastUpdated: serverState.lastUpdated },
+      });
+    }
+    res.json({ success: Boolean(updatedMsg), message: updatedMsg, globalChats: serverState.globalChats });
+  });
+
+  app.post('/api/global-chat/lock', (req, res) => {
+    const nextLocked = Boolean(req.body?.adminOnlyLock);
+    const nextCooldown =
+      req.body?.cooldownMs !== undefined
+        ? Math.max(0, Math.min(30000, Number(req.body.cooldownMs) || 2500))
+        : serverState.globalChatConfig?.cooldownMs ?? 2500;
+    serverState.globalChatConfig = {
+      adminOnlyLock: nextLocked,
+      cooldownMs: nextCooldown,
+      lockedBy: req.body?.lockedBy ? String(req.body.lockedBy) : undefined,
+      updatedAtMs: Date.now(),
+    };
+    savePersistedState();
+    broadcastToAll({
+      type: 'global_chat:config',
+      payload: { globalChatConfig: serverState.globalChatConfig, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, globalChatConfig: serverState.globalChatConfig });
   });
 
   app.delete('/api/global-chat/:id', (req, res) => {
@@ -1439,6 +1740,231 @@ async function startServer() {
       },
     });
     res.json({ success: true, globalChats: [] });
+  });
+
+  // ==================== PRIVATE CHAT & GROUPS API ====================
+  app.get('/api/chat-hub', (_req, res) => {
+    res.json({
+      success: true,
+      globalChats: serverState.globalChats,
+      globalChatConfig: serverState.globalChatConfig,
+      privateChatMessages: serverState.privateChatMessages,
+      privateChatGroups: serverState.privateChatGroups,
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/private-chat', (req, res) => {
+    const created = handleNewPrivateChatMessage(req.body || {});
+    if (!created) {
+      res.status(400).json({ success: false, message: 'Isi pesan chat privat tidak boleh kosong.' });
+      return;
+    }
+    res.json({ success: true, message: created, privateChatMessages: serverState.privateChatMessages });
+  });
+
+  app.patch('/api/private-chat/:id', (req, res) => {
+    const targetId = String(req.params.id || '');
+    let updatedMsg: ServerPrivateChatMessage | null = null;
+    serverState.privateChatMessages = serverState.privateChatMessages.map((m) => {
+      if (m.id === targetId) {
+        const nextAttachment =
+          req.body?.transferAttachment && typeof req.body.transferAttachment === 'object'
+            ? { ...(m.transferAttachment || {}), ...(req.body.transferAttachment as Record<string, unknown>) }
+            : m.transferAttachment;
+        updatedMsg = {
+          ...m,
+          ...(typeof req.body?.deleted === 'boolean' ? { deleted: req.body.deleted } : {}),
+          ...(nextAttachment ? { transferAttachment: nextAttachment } : {}),
+        };
+        return updatedMsg;
+      }
+      return m;
+    });
+    savePersistedState();
+    if (updatedMsg) {
+      broadcastToAll({
+        type: 'private_chat:updated',
+        payload: { message: updatedMsg, lastUpdated: serverState.lastUpdated },
+      });
+    }
+    res.json({ success: Boolean(updatedMsg), message: updatedMsg });
+  });
+
+  app.post('/api/private-groups', (req, res) => {
+    const group = handleUpsertPrivateGroup(req.body || {});
+    if (!group) {
+      res.status(400).json({ success: false, message: 'Nama grup dan pembuat grup wajib diisi.' });
+      return;
+    }
+    res.json({ success: true, group, privateChatGroups: serverState.privateChatGroups });
+  });
+
+  app.delete('/api/private-groups/:id', (req, res) => {
+    const targetId = String(req.params.id || '');
+    serverState.privateChatGroups = serverState.privateChatGroups.filter((g) => g.id !== targetId);
+    serverState.privateChatMessages = serverState.privateChatMessages.filter((m) => m.groupId !== targetId);
+    savePersistedState();
+    broadcastToAll({
+      type: 'private_group:deleted',
+      payload: { id: targetId, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, id: targetId, privateChatGroups: serverState.privateChatGroups });
+  });
+
+  // ==================== SUGGESTIONS & REWARD PROGRAM API (SARAN) ====================
+  app.get('/api/suggestions', (_req, res) => {
+    res.json({
+      success: true,
+      suggestions: serverState.suggestions,
+      suggestionRewardConfig: serverState.suggestionRewardConfig || null,
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/suggestions', (req, res) => {
+    const created = handleNewSuggestion(req.body || {});
+    if (!created) {
+      res.status(400).json({ success: false, message: 'Judul dan penjelasan saran wajib diisi!' });
+      return;
+    }
+    res.json({ success: true, suggestion: created, suggestions: serverState.suggestions });
+  });
+
+  app.patch('/api/suggestions/:id', (req, res) => {
+    const targetId = String(req.params.id || '');
+    const { status, adminReply, reward, isAcceptedByAdmin, acceptedAt, rejectionReason } = req.body || {};
+    let updatedSug: ServerSuggestionRecord | null = null;
+    serverState.suggestions = serverState.suggestions.map((s) => {
+      if (s.id === targetId) {
+        const alreadyRewarded = Boolean(s.reward && (s.reward as Record<string, unknown>).given);
+        const nextReward = alreadyRewarded
+          ? s.reward
+          : reward && typeof reward === 'object'
+          ? (reward as Record<string, unknown>)
+          : s.reward;
+        updatedSug = {
+          ...s,
+          status: status ? String(status) : s.status,
+          adminReply: adminReply !== undefined ? String(adminReply) : s.adminReply,
+          isAcceptedByAdmin:
+            typeof isAcceptedByAdmin === 'boolean' ? isAcceptedByAdmin : s.isAcceptedByAdmin,
+          acceptedAt: acceptedAt !== undefined ? String(acceptedAt) : s.acceptedAt,
+          rejectionReason: rejectionReason !== undefined ? String(rejectionReason) : s.rejectionReason,
+          ...(nextReward ? { reward: nextReward } : {}),
+          updatedAt: new Date().toISOString(),
+        };
+        return updatedSug;
+      }
+      return s;
+    });
+    savePersistedState();
+    if (updatedSug) {
+      broadcastToAll({
+        type: 'suggestion:updated',
+        payload: { suggestion: updatedSug, lastUpdated: serverState.lastUpdated },
+      });
+    }
+    res.json({ success: Boolean(updatedSug), suggestion: updatedSug, suggestions: serverState.suggestions });
+  });
+
+  app.delete('/api/suggestions/:id', (req, res) => {
+    const targetId = String(req.params.id || '');
+    recordServerTombstones('suggestions', [targetId]);
+    serverState.suggestions = serverState.suggestions.filter((s) => s.id !== targetId);
+    savePersistedState();
+    broadcastToAll({
+      type: 'suggestion:deleted',
+      payload: {
+        id: targetId,
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
+    });
+    res.json({ success: true, suggestions: serverState.suggestions });
+  });
+
+  app.post('/api/suggestions/clear', (_req, res) => {
+    recordServerTombstones(
+      'suggestions',
+      serverState.suggestions.map((s) => s.id)
+    );
+    serverState.suggestions = [];
+    savePersistedState();
+    broadcastToAll({
+      type: 'suggestion:clear',
+      payload: {
+        deletedAdminItemIds: serverState.deletedAdminItemIds,
+        lastUpdated: serverState.lastUpdated,
+      },
+    });
+    res.json({ success: true, suggestions: [] });
+  });
+
+  app.get('/api/suggestion-reward-config', (_req, res) => {
+    res.json({
+      success: true,
+      suggestionRewardConfig: serverState.suggestionRewardConfig || null,
+      updatedAtMs: serverState.configUpdatedAtMsMap?.suggestionRewardConfig || 0,
+      lastUpdated: serverState.lastUpdated,
+    });
+  });
+
+  app.post('/api/suggestion-reward-config', (req, res) => {
+    const incoming = (req.body?.suggestionRewardConfig || req.body || {}) as Record<string, unknown>;
+    const incomingTs = Number(req.body?.updatedAtMs ?? incoming.updatedAtMs) || 0;
+    const currentTs = Number(serverState.configUpdatedAtMsMap?.suggestionRewardConfig) || 0;
+    if (incomingTs > 0 && currentTs > 0 && incomingTs < currentTs) {
+      res.json({
+        success: true,
+        ignoredStale: true,
+        suggestionRewardConfig: serverState.suggestionRewardConfig,
+        updatedAtMs: currentTs,
+        lastUpdated: serverState.lastUpdated,
+      });
+      return;
+    }
+    const nextTs = incomingTs > 0 ? incomingTs : Math.max(Date.now(), currentTs + 1);
+    serverState.suggestionRewardConfig = {
+      ...incoming,
+      enabled: Boolean(incoming.enabled),
+      cashAmount: Math.max(0, Math.floor(Number(incoming.cashAmount ?? 0) || 0)),
+      coinAmount: Math.max(0, Math.floor(Number(incoming.coinAmount ?? 0) || 0)),
+      diamondAmount: Math.max(0, Math.floor(Number(incoming.diamondAmount ?? 0) || 0)),
+      goldGrams: Math.max(0, Math.round((Number(incoming.goldGrams ?? 0) || 0) * 100) / 100),
+      voucherAmount: Math.max(0, Math.floor(Number(incoming.voucherAmount ?? 0) || 0)),
+      pointsAmount: Math.max(0, Math.floor(Number(incoming.pointsAmount ?? 0) || 0)),
+      familySlotAmount: Math.max(0, Math.floor(Number(incoming.familySlotAmount ?? 0) || 0)),
+      defaultRewardMessage: String(incoming.defaultRewardMessage ?? '').slice(0, 300),
+      autoRewardTriggerStatuses: Array.isArray(incoming.autoRewardTriggerStatuses)
+        ? incoming.autoRewardTriggerStatuses.map((s) => String(s))
+        : ['diterima', 'dirilis'],
+      updatedAtMs: nextTs,
+      updatedAt: new Date(nextTs).toISOString(),
+    };
+    serverState.configUpdatedAtMsMap = {
+      ...(serverState.configUpdatedAtMsMap || {}),
+      suggestionRewardConfig: nextTs,
+    };
+    serverState.adminConfigs = {
+      ...(serverState.adminConfigs || {}),
+      suggestionRewardConfig: serverState.suggestionRewardConfig,
+    };
+    savePersistedState();
+    broadcastToAll({
+      type: 'suggestion_reward_config:updated',
+      payload: {
+        suggestionRewardConfig: serverState.suggestionRewardConfig,
+        updatedAtMs: nextTs,
+        lastUpdated: serverState.lastUpdated,
+      },
+    });
+    res.json({
+      success: true,
+      suggestionRewardConfig: serverState.suggestionRewardConfig,
+      updatedAtMs: nextTs,
+      lastUpdated: serverState.lastUpdated,
+    });
   });
 
   app.post('/api/website-popup', (req, res) => {
