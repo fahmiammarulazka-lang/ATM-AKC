@@ -204,6 +204,12 @@ import {
   AdminTierNotificationEventType,
   AdminTierNotificationQuickAction,
   AdminTierNotificationConfig,
+  LiveActivityActorRole,
+  LiveActivityCategory,
+  AutoDetectorRuleKey,
+  LiveSystemActivityLog,
+  AutoDetectedAnomalyAlert,
+  LiveActivityDetectorConfig,
 } from '../types/bank';
 import {
   DEFAULT_DIAMOND_SYSTEM_CONFIG,
@@ -2133,6 +2139,43 @@ interface BankContextType {
     message: string;
     adminTargetTab?: string;
   }) => { success: boolean; message: string };
+  dismissNotification: (id: string) => void;
+
+  // Live Monitor Aktivitas Nasabah & Admin Real-Time + Pendeteksi Otomatis (Spin 10x sebanyak 5x, dll.)
+  liveActivityLogs: LiveSystemActivityLog[];
+  autoDetectedAnomalies: AutoDetectedAnomalyAlert[];
+  liveActivityDetectorConfig: LiveActivityDetectorConfig;
+  accountSpinCounters: Record<
+    string,
+    {
+      spin1xCount: number;
+      spin10xCountInWindow: number;
+      totalSpinsInWindow: number;
+      lastSpinAt?: string;
+    }
+  >;
+  recordLiveActivity: (entry: Omit<LiveSystemActivityLog, 'id' | 'timestamp'>) => void;
+  clearLiveActivityLogs: () => void;
+  adminUpdateLiveActivityDetectorConfig: (
+    partial: Partial<LiveActivityDetectorConfig>
+  ) => { success: boolean; message: string };
+  adminHandleAnomalyAction: (
+    anomalyId: string,
+    action:
+      | 'pause_spin'
+      | 'unpause_spin'
+      | 'freeze_account'
+      | 'unfreeze_account'
+      | 'ignore'
+      | 'resolve'
+  ) => { success: boolean; message: string };
+  adminToggleAccountSpinPause: (
+    accountId: string,
+    pauseMinutes?: number
+  ) => { success: boolean; message: string };
+  adminSimulateSpin10x5xDetection: (
+    accountId?: string
+  ) => { success: boolean; message: string };
 }
 
 const BankContext = createContext<BankContextType | undefined>(undefined);
@@ -2505,7 +2548,26 @@ export const DEFAULT_ADMIN_TIER_NOTIFICATION_CONFIG: AdminTierNotificationConfig
     account_deletion: true,
     card_upgrade: true,
     high_value_tx: true,
+    anomaly_detector: true,
     admin_broadcast: true,
+  },
+};
+
+export const DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG: LiveActivityDetectorConfig = {
+  enabled: true,
+  soundAlertEnabled: true,
+  spin10xThresholdCount: 5,
+  spin10xWindowMinutes: 5,
+  rapidTxThresholdCount: 5,
+  rapidTxWindowMinutes: 3,
+  repeatedPinFailThreshold: 3,
+  largeAssetMutationThresholdRupiah: 25_000_000,
+  pauseSpinDefaultMinutes: 10,
+  rulesEnabled: {
+    spin_10x_streak: true,
+    rapid_tx_topup: true,
+    repeated_pin_fail: true,
+    large_asset_mutation: true,
   },
 };
 
@@ -3088,6 +3150,71 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     adminTierNotificationConfig
   );
   adminTierNotificationConfigRef.current = adminTierNotificationConfig;
+
+  const [liveActivityDetectorConfig, setLiveActivityDetectorConfig] =
+    useState<LiveActivityDetectorConfig>(DEFAULT_LIVE_ACTIVITY_DETECTOR_CONFIG);
+  const liveActivityDetectorConfigRef = useRef<LiveActivityDetectorConfig>(
+    liveActivityDetectorConfig
+  );
+  liveActivityDetectorConfigRef.current = liveActivityDetectorConfig;
+
+  const [liveActivityLogs, setLiveActivityLogs] = useState<LiveSystemActivityLog[]>(() => [
+    {
+      id: 'act-init-admin-1',
+      timestamp: new Date(Date.now() - 120_000).toISOString(),
+      actorRole: 'admin',
+      category: 'admin_action',
+      accountId: 'acc-admin',
+      accountName: 'Admin Utama Bank Nusantara',
+      accountNumber: '9999999999',
+      cardTier: 'admin',
+      actionTitle: 'Mengaktifkan Sistem Live Monitor & Pendeteksi Otomatis v14.36.44',
+      description:
+        'Pemantauan real-time seluruh aktivitas nasabah & admin aktif dengan aturan deteksi Spin 10x sebanyak 5x (50 putaran) dalam 5 menit.',
+    },
+    {
+      id: 'act-init-cust-1',
+      timestamp: new Date(Date.now() - 60_000).toISOString(),
+      actorRole: 'nasabah',
+      category: 'auth_security',
+      accountId: INITIAL_ACCOUNTS[0]?.id || 'acc-1',
+      accountName: INITIAL_ACCOUNTS[0]?.fullName || 'Budi Santoso',
+      accountNumber: INITIAL_ACCOUNTS[0]?.accountNumber || '1029384756',
+      cardTier: INITIAL_ACCOUNTS[0]?.cardTier || 'platinum',
+      actionTitle: 'Sesi Perbankan Aktif & Sinkronisasi Cloud',
+      description: 'Nasabah terhubung ke layanan M-Banking Bank Nusantara secara real-time.',
+    },
+  ]);
+
+  const [autoDetectedAnomalies, setAutoDetectedAnomalies] = useState<AutoDetectedAnomalyAlert[]>(
+    []
+  );
+  const spinEventsByAccountRef = useRef<
+    Record<
+      string,
+      Array<{
+        ts: number;
+        spinCount: 1 | 3 | 5 | 7 | 10;
+        wonAmount: number;
+        prizesText: string;
+      }>
+    >
+  >({});
+  const spin1xTotalByAccountRef = useRef<Record<string, number>>({});
+  const rapidTxEventsByAccountRef = useRef<
+    Record<string, Array<{ ts: number; amount: number; title: string }>>
+  >({});
+  const [accountSpinCounters, setAccountSpinCounters] = useState<
+    Record<
+      string,
+      {
+        spin1xCount: number;
+        spin10xCountInWindow: number;
+        totalSpinsInWindow: number;
+        lastSpinAt?: string;
+      }
+    >
+  >({});
 
   const [sultanEmpireConfig, setSultanEmpireConfig] = useState<SultanEmpireAdminConfig>(
     INITIAL_SULTAN_EMPIRE_CONFIG
@@ -10929,6 +11056,69 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setNotifications((prev) => [newNotif, ...prev].slice(0, 180));
 
+    // Otomatis catat ke Live Monitor Aktivitas Real-Time
+    if (input.eventType !== 'anomaly_detector') {
+      const targetAcc = input.accountId
+        ? accountsRef.current.find((a) => a.id === input.accountId)
+        : accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+      const isAdminBroadcast = input.eventType === 'admin_broadcast';
+      const isPinLockEvent = input.eventType === 'pin_lock_1day';
+      const resolvedAccId = targetAcc?.id || input.accountId || 'acc-system';
+      const resolvedAccName =
+        targetAcc?.fullName || (isAdminBroadcast ? 'Admin Nusantara' : 'Nasabah');
+      const resolvedAccNum = targetAcc?.accountNumber || '0000000000';
+      const resolvedTier: CardTier =
+        targetAcc?.cardTier || (isAdminBroadcast ? 'admin' : 'regular');
+
+      const liveEntry: LiveSystemActivityLog = {
+        id: `live-adm-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+        timestamp: new Date().toISOString(),
+        actorRole: isAdminBroadcast ? 'admin' : 'nasabah',
+        category:
+          input.eventType === 'qris_topup' || input.eventType === 'high_value_tx'
+            ? 'transaction'
+            : isPinLockEvent
+            ? 'auth_security'
+            : isAdminBroadcast
+            ? 'admin_action'
+            : 'auth_security',
+        accountId: resolvedAccId,
+        accountName: resolvedAccName,
+        accountNumber: resolvedAccNum,
+        cardTier: resolvedTier,
+        actionTitle: input.title.replace(/^👑\s*(\[ADMIN ALERT\]\s*)?/i, ''),
+        description: input.message,
+        isAnomalyDetected: isPinLockEvent,
+        anomalyRuleKey: isPinLockEvent ? 'repeated_pin_fail' : undefined,
+      };
+      setLiveActivityLogs((prev) => [liveEntry, ...prev].slice(0, 500));
+
+      if (
+        isPinLockEvent &&
+        liveActivityDetectorConfigRef.current.enabled &&
+        liveActivityDetectorConfigRef.current.rulesEnabled.repeated_pin_fail !== false
+      ) {
+        const pinAnomaly: AutoDetectedAnomalyAlert = {
+          id: `anom-pin-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          ruleKey: 'repeated_pin_fail',
+          accountId: resolvedAccId,
+          accountName: resolvedAccName,
+          accountNumber: resolvedAccNum,
+          cardTier: resolvedTier,
+          title: `🚨 DETEKSI OTOMATIS: ${resolvedAccName} Salah PIN Berulang & Terkunci`,
+          detailSummary: input.message,
+          occurrenceCount: 5,
+          thresholdCount: liveActivityDetectorConfigRef.current.repeatedPinFailThreshold || 3,
+          windowMinutes: 5,
+          totalRewardOrAmount: 0,
+          rewardBreakdownText: '5x Salah PIN Beruntun • Akun Terkunci Proteksi 24 Jam',
+          detectedAt: new Date().toISOString(),
+          status: 'active',
+        };
+        setAutoDetectedAnomalies((prev) => [pinAnomaly, ...prev].slice(0, 100));
+      }
+    }
+
     const currAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
     const isCurrAdminRecipient = Boolean(
       currAcc &&
@@ -11192,6 +11382,449 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const markAllNotificationsAsRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
+
+  const dismissNotification = (id: string) => {
+    setNotifications((prev) => {
+      const next = prev.filter((n) => n.id !== id);
+      flushMasterStateToCloud({ notifications: next });
+      return next;
+    });
+  };
+
+  // ================= LIVE MONITOR AKTIVITAS & PENDETEKSI OTOMATIS REAL-TIME =================
+  const recordLiveActivity = (entry: Omit<LiveSystemActivityLog, 'id' | 'timestamp'>) => {
+    const newEntry: LiveSystemActivityLog = {
+      ...entry,
+      id: `act-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      timestamp: new Date().toISOString(),
+    };
+    setLiveActivityLogs((prev) => [newEntry, ...prev].slice(0, 500));
+  };
+
+  const clearLiveActivityLogs = () => {
+    setLiveActivityLogs([]);
+    playAtmSound('beep');
+  };
+
+  const adminUpdateLiveActivityDetectorConfig = (
+    partial: Partial<LiveActivityDetectorConfig>
+  ): { success: boolean; message: string } => {
+    const prev = liveActivityDetectorConfigRef.current;
+    const nextCfg: LiveActivityDetectorConfig = {
+      ...prev,
+      ...partial,
+      spin10xThresholdCount: Math.max(
+        1,
+        Math.min(50, Math.round(Number(partial.spin10xThresholdCount ?? prev.spin10xThresholdCount) || 5))
+      ),
+      spin10xWindowMinutes: Math.max(
+        1,
+        Math.min(120, Math.round(Number(partial.spin10xWindowMinutes ?? prev.spin10xWindowMinutes) || 5))
+      ),
+      rapidTxThresholdCount: Math.max(
+        2,
+        Math.min(50, Math.round(Number(partial.rapidTxThresholdCount ?? prev.rapidTxThresholdCount) || 5))
+      ),
+      rapidTxWindowMinutes: Math.max(
+        1,
+        Math.min(60, Math.round(Number(partial.rapidTxWindowMinutes ?? prev.rapidTxWindowMinutes) || 3))
+      ),
+      repeatedPinFailThreshold: Math.max(
+        2,
+        Math.min(10, Math.round(Number(partial.repeatedPinFailThreshold ?? prev.repeatedPinFailThreshold) || 3))
+      ),
+      largeAssetMutationThresholdRupiah: Math.max(
+        100_000,
+        Math.round(
+          Number(partial.largeAssetMutationThresholdRupiah ?? prev.largeAssetMutationThresholdRupiah) ||
+            25_000_000
+        )
+      ),
+      pauseSpinDefaultMinutes: Math.max(
+        1,
+        Math.min(1440, Math.round(Number(partial.pauseSpinDefaultMinutes ?? prev.pauseSpinDefaultMinutes) || 10))
+      ),
+      rulesEnabled: {
+        ...prev.rulesEnabled,
+        ...(partial.rulesEnabled || {}),
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    liveActivityDetectorConfigRef.current = nextCfg;
+    setLiveActivityDetectorConfig(nextCfg);
+    recordLiveActivity({
+      actorRole: 'admin',
+      category: 'admin_action',
+      accountId: currentAccount?.id || 'acc-admin',
+      accountName: currentAccount?.fullName || 'Admin Bank Nusantara',
+      accountNumber: currentAccount?.accountNumber,
+      cardTier: currentAccount?.cardTier || 'admin',
+      actionTitle: 'Mengubah Konfigurasi Pendeteksi Otomatis Real-Time',
+      description: `Batas Spin 10x: ${nextCfg.spin10xThresholdCount}x dalam ${nextCfg.spin10xWindowMinutes} menit • Transaksi Cepat: ${nextCfg.rapidTxThresholdCount}x/${nextCfg.rapidTxWindowMinutes}m • Mutasi Besar: ${formatRupiah(nextCfg.largeAssetMutationThresholdRupiah)}.`,
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Konfigurasi Pendeteksi Otomatis disimpan (Deteksi Spin 10x sebanyak ${nextCfg.spin10xThresholdCount}x dalam ${nextCfg.spin10xWindowMinutes} menit)!`,
+    };
+  };
+
+  const adminToggleAccountSpinPause = (
+    accountId: string,
+    pauseMinutes?: number
+  ): { success: boolean; message: string } => {
+    const target = accountsRef.current.find((a) => a.id === accountId);
+    if (!target) {
+      return { success: false, message: 'Akun nasabah tidak ditemukan.' };
+    }
+    const nowMs = Date.now();
+    const isCurrentlyPaused =
+      Boolean(target.spinPausedUntil) && new Date(target.spinPausedUntil!).getTime() > nowMs;
+    const mins = pauseMinutes ?? (liveActivityDetectorConfigRef.current.pauseSpinDefaultMinutes || 10);
+    const nextPausedUntil = isCurrentlyPaused
+      ? undefined
+      : new Date(nowMs + mins * 60_000).toISOString();
+
+    const nextAccounts = accountsRef.current.map((a) =>
+      a.id === accountId
+        ? {
+            ...a,
+            spinPausedUntil: nextPausedUntil,
+            spinPauseReason: isCurrentlyPaused
+              ? undefined
+              : `Dijeda sementara ${mins} menit oleh Admin setelah deteksi Spin 10x beruntun.`,
+            accountUpdatedAtMs: nowMs,
+          }
+        : a
+    );
+    accountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    flushMasterStateToCloud({ accounts: nextAccounts });
+
+    recordLiveActivity({
+      actorRole: 'admin',
+      category: 'admin_action',
+      accountId: target.id,
+      accountName: target.fullName,
+      accountNumber: target.accountNumber,
+      cardTier: target.cardTier,
+      actionTitle: isCurrentlyPaused
+        ? `Membuka Jeda Spin Roda: ${target.fullName}`
+        : `Menjeda Sementara Spin Roda (${mins} Menit): ${target.fullName}`,
+      description: isCurrentlyPaused
+        ? `Admin mengaktifkan kembali akses Spin the Wheel untuk akun ${target.fullName} (${target.accountNumber}).`
+        : `Admin menjeda fitur Spin the Wheel akun ${target.fullName} (${target.accountNumber}) selama ${mins} menit.`,
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: isCurrentlyPaused
+        ? `Jeda Spin Roda untuk akun ${target.fullName} telah dicabut. Nasabah dapat memutar kembali.`
+        : `Fitur Spin Roda untuk akun ${target.fullName} berhasil dijeda selama ${mins} menit!`,
+    };
+  };
+
+  const adminHandleAnomalyAction = (
+    anomalyId: string,
+    action:
+      | 'pause_spin'
+      | 'unpause_spin'
+      | 'freeze_account'
+      | 'unfreeze_account'
+      | 'ignore'
+      | 'resolve'
+  ): { success: boolean; message: string } => {
+    const alertItem = autoDetectedAnomalies.find((a) => a.id === anomalyId);
+    if (!alertItem) {
+      return { success: false, message: 'Data peringatan deteksi otomatis tidak ditemukan.' };
+    }
+    const target = accountsRef.current.find((a) => a.id === alertItem.accountId);
+    let actionLabel = 'Ditandai Selesai oleh Admin';
+    let feedbackMsg = 'Peringatan deteksi otomatis telah ditandai selesai.';
+
+    if (action === 'pause_spin' || action === 'unpause_spin') {
+      const res = adminToggleAccountSpinPause(alertItem.accountId);
+      actionLabel =
+        action === 'pause_spin'
+          ? `Spin Dijeda ${liveActivityDetectorConfigRef.current.pauseSpinDefaultMinutes || 10} Menit`
+          : 'Jeda Spin Dicabut';
+      feedbackMsg = res.message;
+    } else if (action === 'freeze_account' || action === 'unfreeze_account') {
+      if (target) {
+        const nextStatus: CardStatus =
+          target.cardStatus === 'frozen' ? 'active' : 'frozen';
+        const nextAccounts = accountsRef.current.map((a) =>
+          a.id === target.id
+            ? { ...a, cardStatus: nextStatus, accountUpdatedAtMs: Date.now() }
+            : a
+        );
+        accountsRef.current = nextAccounts;
+        setAccounts(nextAccounts);
+        flushMasterStateToCloud({ accounts: nextAccounts });
+        actionLabel =
+          nextStatus === 'frozen' ? 'Kartu Dibekukan Sementara' : 'Bekukan Kartu Dicabut';
+        feedbackMsg =
+          nextStatus === 'frozen'
+            ? `Kartu nasabah ${target.fullName} (${target.accountNumber}) berhasil dibekukan sementara!`
+            : `Kartu nasabah ${target.fullName} (${target.accountNumber}) telah diaktifkan kembali!`;
+        recordLiveActivity({
+          actorRole: 'admin',
+          category: 'admin_action',
+          accountId: target.id,
+          accountName: target.fullName,
+          accountNumber: target.accountNumber,
+          cardTier: target.cardTier,
+          actionTitle: `${actionLabel}: ${target.fullName}`,
+          description: feedbackMsg,
+        });
+      }
+    } else if (action === 'ignore') {
+      actionLabel = 'Diabaikan oleh Admin';
+      feedbackMsg = `Peringatan deteksi untuk ${alertItem.accountName} diabaikan.`;
+    }
+
+    setAutoDetectedAnomalies((prev) =>
+      prev.map((item) =>
+        item.id === anomalyId
+          ? {
+              ...item,
+              status: action === 'ignore' ? 'ignored' : 'resolved',
+              actionTakenLabel: actionLabel,
+            }
+          : item
+      )
+    );
+    playAtmSound('beep');
+    return { success: true, message: feedbackMsg };
+  };
+
+  const triggerSpin10xStreakAnomalyAlert = (params: {
+    account: BankAccount;
+    streakCount: number;
+    thresholdCount: number;
+    windowMinutes: number;
+    totalRewardAmount: number;
+    rewardBreakdownText: string;
+  }) => {
+    const {
+      account,
+      streakCount,
+      thresholdCount,
+      windowMinutes,
+      totalRewardAmount,
+      rewardBreakdownText,
+    } = params;
+    const alertId = `anom-spin10x-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const newAlert: AutoDetectedAnomalyAlert = {
+      id: alertId,
+      ruleKey: 'spin_10x_streak',
+      accountId: account.id,
+      accountName: account.fullName,
+      accountNumber: account.accountNumber,
+      cardTier: account.cardTier,
+      title: `Deteksi Otomatis: Spin 10x Sebanyak ${streakCount}x (${streakCount * 10} Putaran)!`,
+      detailSummary: `Nasabah "${account.fullName}" (Rek: ${account.accountNumber}) melakukan Spin 10x sebanyak ${streakCount} kali (batas: ${thresholdCount}x) dalam ${windowMinutes} menit terakhir dengan total hadiah ${formatRupiah(totalRewardAmount)}.`,
+      occurrenceCount: streakCount,
+      thresholdCount,
+      windowMinutes,
+      totalRewardOrAmount: totalRewardAmount,
+      rewardBreakdownText,
+      detectedAt: new Date().toISOString(),
+      status: 'active',
+    };
+    setAutoDetectedAnomalies((prev) => [newAlert, ...prev].slice(0, 100));
+
+    recordLiveActivity({
+      actorRole: 'auto_detector',
+      category: 'auto_detector',
+      accountId: account.id,
+      accountName: account.fullName,
+      accountNumber: account.accountNumber,
+      cardTier: account.cardTier,
+      actionTitle: `🚨 DETEKSI OTOMATIS: Spin 10x Sebanyak ${streakCount}x (${streakCount * 10} Putaran)`,
+      description: `Nasabah ${account.fullName} (${account.accountNumber}) mencapai ${streakCount}/${thresholdCount} kali Spin 10x dalam ${windowMinutes} menit. Total hadiah diperoleh: ${formatRupiah(totalRewardAmount)} (${rewardBreakdownText}).`,
+      amountRupiah: totalRewardAmount,
+      spinCountType: 10,
+      spin10xStreakCount: streakCount,
+      spin10xThreshold: thresholdCount,
+      prizesSummary: rewardBreakdownText,
+      isAnomalyDetected: true,
+      anomalyRuleKey: 'spin_10x_streak',
+    });
+
+    if (liveActivityDetectorConfigRef.current.soundAlertEnabled) {
+      playAtmSound('alert');
+    }
+
+    emitAdminTierNotification({
+      eventType: 'anomaly_detector',
+      title: `👑 DETEKSI OTOMATIS: ${account.fullName} Spin 10x Sebanyak ${streakCount}x!`,
+      message: `Rekening ${account.accountNumber} (${account.fullName}) melakukan Spin 10x sebanyak ${streakCount} kali (${streakCount * 10} putaran) dalam ${windowMinutes} menit terakhir. Total hadiah: ${formatRupiah(totalRewardAmount)}.`,
+      adminTargetTab: 'live_monitor',
+      accountId: account.id,
+      referenceId: alertId,
+      quickAction: {
+        actionType: 'pause_spin',
+        targetId: account.id,
+        label: `Jeda Spin ${liveActivityDetectorConfigRef.current.pauseSpinDefaultMinutes || 10} Menit`,
+        adminTab: 'live_monitor',
+      },
+    });
+  };
+
+  const adminSimulateSpin10x5xDetection = (
+    accountId?: string
+  ): { success: boolean; message: string } => {
+    const target =
+      (accountId ? accountsRef.current.find((a) => a.id === accountId) : undefined) ||
+      accountsRef.current.find((a) => a.cardTier !== 'admin') ||
+      currentAccount ||
+      accountsRef.current[0];
+    if (!target) {
+      return { success: false, message: 'Tidak ada akun nasabah untuk disimulasikan.' };
+    }
+    const cfg = liveActivityDetectorConfigRef.current;
+    const threshold = cfg.spin10xThresholdCount || 5;
+    const winMins = cfg.spin10xWindowMinutes || 5;
+    const nowMs = Date.now();
+    const simEvents = Array.from({ length: threshold }, (_, idx) => ({
+      ts: nowMs - (threshold - 1 - idx) * 8000,
+      spinCount: 10 as const,
+      wonAmount: 1_250_000 + idx * 250_000,
+      prizesText: 'Rp 500rb, Rp 250rb, Rp 500rb (+7 hadiah lainnya)',
+    }));
+    spinEventsByAccountRef.current[target.id] = simEvents;
+    const totalSimWon = simEvents.reduce((sum, e) => sum + e.wonAmount, 0);
+
+    setAccountSpinCounters((prev) => ({
+      ...prev,
+      [target.id]: {
+        spin1xCount: spin1xTotalByAccountRef.current[target.id] || 0,
+        spin10xCountInWindow: threshold,
+        totalSpinsInWindow: threshold * 10,
+        lastSpinAt: new Date(nowMs).toISOString(),
+      },
+    }));
+
+    triggerSpin10xStreakAnomalyAlert({
+      account: target,
+      streakCount: threshold,
+      thresholdCount: threshold,
+      windowMinutes: winMins,
+      totalRewardAmount: totalSimWon,
+      rewardBreakdownText: `${threshold}x Putaran Spin 10x (${threshold * 10} Hadiah Roda) • Total ${formatRupiah(totalSimWon)}`,
+    });
+
+    return {
+      success: true,
+      message: `Simulasi Deteksi Otomatis (${target.fullName} Spin 10x sebanyak ${threshold}x) berhasil dipicu! Periksa Bar Peringatan di atas Panel Admin & Lonceng Notifikasi Admin Tier.`,
+    };
+  };
+
+  // Pantau transaksi baru secara otomatis untuk dicatat ke Live Monitor & dievaluasi oleh Pendeteksi Otomatis
+  const seenLiveTxIdsRef = useRef<Set<string>>(
+    new Set(INITIAL_TRANSACTIONS.map((t) => t.id))
+  );
+  useEffect(() => {
+    if (!transactions || transactions.length === 0) return;
+    const latestTx = transactions[0];
+    if (!latestTx || seenLiveTxIdsRef.current.has(latestTx.id)) return;
+    seenLiveTxIdsRef.current.add(latestTx.id);
+    // Skip spinwin tx here because spinTheWheel logs spin events with detailed spin counters directly
+    if (latestTx.id.startsWith('tx-spinwin-')) return;
+
+    const ownerAcc = accountsRef.current.find((a) => a.id === latestTx.accountId);
+    const accName = ownerAcc?.fullName || 'Nasabah Bank Nusantara';
+    const accNum = ownerAcc?.accountNumber || '-';
+    const accTier = ownerAcc?.cardTier || 'regular';
+
+    recordLiveActivity({
+      actorRole: 'nasabah',
+      category: 'transaction',
+      accountId: latestTx.accountId,
+      accountName: accName,
+      accountNumber: accNum,
+      cardTier: accTier,
+      actionTitle: latestTx.title,
+      description: `${latestTx.description} • Nominal: ${formatRupiah(latestTx.amount)}`,
+      amountRupiah: latestTx.amount,
+    });
+
+    const cfg = liveActivityDetectorConfigRef.current;
+    if (!cfg.enabled || !ownerAcc) return;
+
+    // 1. Deteksi Transaksi / Top-Up Berulang Cepat
+    if (cfg.rulesEnabled.rapid_tx_topup !== false) {
+      const nowMs = Date.now();
+      const winMs = (cfg.rapidTxWindowMinutes || 3) * 60_000;
+      const prevList = (rapidTxEventsByAccountRef.current[ownerAcc.id] || []).filter(
+        (item) => nowMs - item.ts <= winMs
+      );
+      const nextList = [
+        ...prevList,
+        { ts: nowMs, amount: latestTx.amount, title: latestTx.title },
+      ];
+      rapidTxEventsByAccountRef.current[ownerAcc.id] = nextList;
+
+      if (nextList.length >= (cfg.rapidTxThresholdCount || 5)) {
+        const totalAmt = nextList.reduce((s, e) => s + e.amount, 0);
+        const alertId = `anom-rapidtx-${Date.now()}`;
+        const newAlert: AutoDetectedAnomalyAlert = {
+          id: alertId,
+          ruleKey: 'rapid_tx_topup',
+          accountId: ownerAcc.id,
+          accountName: ownerAcc.fullName,
+          accountNumber: ownerAcc.accountNumber,
+          cardTier: ownerAcc.cardTier,
+          title: `Deteksi Otomatis: Transaksi/Top-Up Beruntun Cepat (${nextList.length}x dalam ${cfg.rapidTxWindowMinutes} Menit)`,
+          detailSummary: `Nasabah "${ownerAcc.fullName}" (${ownerAcc.accountNumber}) melakukan ${nextList.length} transaksi beruntun dalam ${cfg.rapidTxWindowMinutes} menit terakhir dengan total nilai ${formatRupiah(totalAmt)}.`,
+          occurrenceCount: nextList.length,
+          thresholdCount: cfg.rapidTxThresholdCount || 5,
+          windowMinutes: cfg.rapidTxWindowMinutes || 3,
+          totalRewardOrAmount: totalAmt,
+          rewardBreakdownText: nextList.map((x) => x.title).slice(-5).join(' • '),
+          detectedAt: new Date().toISOString(),
+          status: 'active',
+        };
+        setAutoDetectedAnomalies((prev) => [newAlert, ...prev].slice(0, 100));
+        emitAdminTierNotification({
+          eventType: 'anomaly_detector',
+          title: `👑 DETEKSI OTOMATIS: Transaksi Cepat ${nextList.length}x (${ownerAcc.fullName})`,
+          message: newAlert.detailSummary,
+          adminTargetTab: 'live_monitor',
+          accountId: ownerAcc.id,
+          referenceId: alertId,
+        });
+      }
+    }
+
+    // 2. Deteksi Perubahan Saldo / Mutasi Aset Bernilai Besar
+    if (
+      cfg.rulesEnabled.large_asset_mutation !== false &&
+      latestTx.amount >= (cfg.largeAssetMutationThresholdRupiah || 25_000_000) &&
+      !isUnlimitedNumber(latestTx.amount)
+    ) {
+      const alertId = `anom-largetx-${Date.now()}`;
+      const newAlert: AutoDetectedAnomalyAlert = {
+        id: alertId,
+        ruleKey: 'large_asset_mutation',
+        accountId: ownerAcc.id,
+        accountName: ownerAcc.fullName,
+        accountNumber: ownerAcc.accountNumber,
+        cardTier: ownerAcc.cardTier,
+        title: `Deteksi Otomatis: Mutasi Saldo/Aset Besar (${formatRupiah(latestTx.amount)})`,
+        detailSummary: `Tercatat transaksi bernilai besar "${latestTx.title}" sebesar ${formatRupiah(latestTx.amount)} pada rekening ${ownerAcc.fullName} (${ownerAcc.accountNumber}).`,
+        occurrenceCount: 1,
+        thresholdCount: 1,
+        windowMinutes: 1,
+        totalRewardOrAmount: latestTx.amount,
+        rewardBreakdownText: latestTx.title,
+        detectedAt: new Date().toISOString(),
+        status: 'active',
+      };
+      setAutoDetectedAnomalies((prev) => [newAlert, ...prev].slice(0, 100));
+    }
+  }, [transactions]);
 
   // ================= ADMIN FEATURE CONFIGURATOR =================
   const getFeatureConfig = (featureId: string) => {
@@ -22138,6 +22771,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         message: 'Kartu Anda sedang tidak aktif / diblokir sehingga tidak dapat memutar Spin the Wheel.',
       };
     }
+    if (
+      currentAccount.spinPausedUntil &&
+      new Date(currentAccount.spinPausedUntil).getTime() > Date.now()
+    ) {
+      const remMins = Math.max(
+        1,
+        Math.ceil((new Date(currentAccount.spinPausedUntil).getTime() - Date.now()) / 60_000)
+      );
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Fitur Spin the Wheel pada akun Anda sedang dijeda sementara oleh Administrator (${remMins} menit tersisa).`,
+      };
+    }
 
     const currentCoins = currentAccount.spinCoins || 0;
     const isAdminCard =
@@ -22268,6 +22915,95 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     recordMissionActivities(currentAccount.id, [
       { metricKey: 'spin_count', delta: Math.max(1, spinCount) },
     ]);
+
+    // Catat ke Live Monitor Aktivitas Real-Time & Evaluasi Pendeteksi Otomatis (Spin 10x sebanyak 5x)
+    const nowSpinMs = Date.now();
+    const detectorCfg = liveActivityDetectorConfigRef.current;
+    const windowMs = (detectorCfg.spin10xWindowMinutes || 5) * 60_000;
+    const threshold10x = detectorCfg.spin10xThresholdCount || 5;
+
+    if (spinCount === 1) {
+      spin1xTotalByAccountRef.current[currentAccount.id] =
+        (spin1xTotalByAccountRef.current[currentAccount.id] || 0) + 1;
+    }
+
+    const prevSpinEvents = (spinEventsByAccountRef.current[currentAccount.id] || []).filter(
+      (ev) => nowSpinMs - ev.ts <= windowMs
+    );
+    const prizesJoined = results.map((r) => r.segment.label).join(', ');
+    const nextSpinEvents = [
+      ...prevSpinEvents,
+      {
+        ts: nowSpinMs,
+        spinCount,
+        wonAmount: totalWonAmount,
+        prizesText: prizesJoined,
+      },
+    ];
+    spinEventsByAccountRef.current[currentAccount.id] = nextSpinEvents;
+
+    const spin10xEventsInWindow = nextSpinEvents.filter((ev) => ev.spinCount === 10);
+    const spin10xStreakCount = spin10xEventsInWindow.length;
+    const spin1xTotalCount = spin1xTotalByAccountRef.current[currentAccount.id] || 0;
+    const totalSpinsInWindow = nextSpinEvents.reduce((s, ev) => s + ev.spinCount, 0);
+
+    setAccountSpinCounters((prev) => ({
+      ...prev,
+      [currentAccount.id]: {
+        spin1xCount: spin1xTotalCount,
+        spin10xCountInWindow: spin10xStreakCount,
+        totalSpinsInWindow,
+        lastSpinAt: new Date(nowSpinMs).toISOString(),
+      },
+    }));
+
+    const reachedSpin10xAnomaly =
+      spinCount === 10 &&
+      detectorCfg.enabled &&
+      detectorCfg.rulesEnabled.spin_10x_streak !== false &&
+      spin10xStreakCount >= threshold10x &&
+      spin10xStreakCount % threshold10x === 0;
+
+    recordLiveActivity({
+      actorRole: 'nasabah',
+      category: 'spin_game',
+      accountId: currentAccount.id,
+      accountName: currentAccount.fullName,
+      accountNumber: currentAccount.accountNumber,
+      cardTier: currentAccount.cardTier,
+      actionTitle:
+        spinCount === 10
+          ? `Memutar Spin 10x Beruntun (${spin10xStreakCount}/${threshold10x} dalam ${detectorCfg.spin10xWindowMinutes}m)`
+          : `Memutar Spin Roda ${spinCount}x (Total Spin 1x: ${spin1xTotalCount}x)`,
+      description: `Putaran ${spinCount}x (${spendLabel}) • Menang +${formatRupiah(
+        totalWonAmount
+      )} • Hadiah: ${prizesJoined}`,
+      amountRupiah: totalWonAmount,
+      spinCountType: spinCount,
+      spin1xTotalCount,
+      spin10xStreakCount,
+      spin10xThreshold: threshold10x,
+      prizesSummary: prizesJoined,
+      isAnomalyDetected: reachedSpin10xAnomaly,
+      anomalyRuleKey: reachedSpin10xAnomaly ? 'spin_10x_streak' : undefined,
+    });
+
+    if (reachedSpin10xAnomaly) {
+      const recentThresholdBatch = spin10xEventsInWindow.slice(-threshold10x);
+      const batchTotalReward = recentThresholdBatch.reduce((s, ev) => s + ev.wonAmount, 0);
+      const batchBreakdown = recentThresholdBatch
+        .map((ev, i) => `Putaran 10x #${i + 1}: +${formatRupiah(ev.wonAmount)}`)
+        .join(' | ');
+
+      triggerSpin10xStreakAnomalyAlert({
+        account: currentAccount,
+        streakCount: spin10xStreakCount,
+        thresholdCount: threshold10x,
+        windowMinutes: detectorCfg.spin10xWindowMinutes || 5,
+        totalRewardAmount: batchTotalReward,
+        rewardBreakdownText: batchBreakdown,
+      });
+    }
 
     return {
       success: true,
@@ -29992,6 +30728,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       res = adminApprovePinReset(targetId);
     } else if (actionType === 'approve_card_upgrade') {
       res = adminApproveUpgrade(targetId);
+    } else if (actionType === 'pause_spin') {
+      res = adminToggleAccountSpinPause(targetId);
+    } else if (actionType === 'freeze_account') {
+      res = adminQuickToggleFreezeAccount(targetId);
     }
 
     if (res.success) {
@@ -30511,6 +31251,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         executeAdminTierNotificationQuickAction,
         adminUpdateAdminTierNotificationConfig,
         adminSendAdminTierBroadcast,
+        dismissNotification,
+        liveActivityLogs,
+        autoDetectedAnomalies,
+        liveActivityDetectorConfig,
+        accountSpinCounters,
+        recordLiveActivity,
+        clearLiveActivityLogs,
+        adminUpdateLiveActivityDetectorConfig,
+        adminHandleAnomalyAction,
+        adminToggleAccountSpinPause,
+        adminSimulateSpin10x5xDetection,
       }}
     >
       {children}

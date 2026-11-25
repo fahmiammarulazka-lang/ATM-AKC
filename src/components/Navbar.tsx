@@ -36,6 +36,7 @@ import {
   Users,
   Target,
   Trophy,
+  X,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
@@ -131,6 +132,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     unreadAdminTierNotificationCount,
     adminTierPendingTasksCount,
     executeAdminTierNotificationQuickAction,
+    dismissNotification,
   } = useBank();
 
   const activeMissionsCount = React.useMemo(
@@ -184,7 +186,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v14.35.43';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v14.36.44';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -705,12 +707,26 @@ export const Navbar: React.FC<NavbarProps> = ({
                               <span className="px-1.5 py-0.2 rounded bg-amber-400/20 border border-amber-300/50 text-amber-300 text-[9px] font-black uppercase">
                                 👑 ADMIN ALERT
                               </span>
-                              <span className="text-[9px] text-slate-400 font-mono tabular-nums">
-                                {new Date(n.timestamp).toLocaleTimeString('id-ID', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[9px] text-slate-400 font-mono tabular-nums">
+                                  {new Date(n.timestamp).toLocaleTimeString('id-ID', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    dismissNotification(n.id);
+                                  }}
+                                  className="p-0.5 rounded-md bg-slate-900/90 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-400 text-slate-300 hover:text-rose-200 transition cursor-pointer"
+                                  title="Tutup / Hapus Notifikasi Ini"
+                                  aria-label="Hapus Notifikasi"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
                             </div>
                             <div className="font-black text-white text-[11px] leading-snug">
                               {n.title}
@@ -998,12 +1014,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                               <div className="font-bold text-white text-[11px] truncate">
                                 <DiamondText text={n.title} tone="bright" />
                               </div>
-                              <span className="text-[9px] text-slate-500 font-mono tabular-nums shrink-0">
-                                {new Date(n.timestamp).toLocaleTimeString('id-ID', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[9px] text-slate-500 font-mono tabular-nums">
+                                  {new Date(n.timestamp).toLocaleTimeString('id-ID', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                                {isCurrentAccountAdminTierRecipient && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      dismissNotification(n.id);
+                                    }}
+                                    className="p-0.5 rounded-md bg-slate-900/90 hover:bg-rose-500/20 border border-slate-700 hover:border-rose-400 text-slate-300 hover:text-rose-200 transition cursor-pointer"
+                                    title="Hapus Notifikasi (Khusus Tier ADMIN)"
+                                    aria-label="Hapus Notifikasi"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                             <div className="text-[11px] text-slate-300 mt-1 leading-relaxed">
                               <DiamondText text={n.message} tone="bright" />

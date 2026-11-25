@@ -38,6 +38,7 @@ import {
   Loader2,
   Eye,
   EyeOff,
+  X,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CardVisualizer } from './CardVisualizer';
@@ -162,6 +163,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
   }>({ mode: 'reguler', key: 0 });
   const [showCardPinModal, setShowCardPinModal] = useState<boolean>(false);
   const [pendingTierSwitch, setPendingTierSwitch] = useState<CardTier | null>(null);
+  const [isAdminCommandBoxDismissed, setIsAdminCommandBoxDismissed] = useState<boolean>(false);
 
   // --- Loan Tab State ---
   const [selectedLoanType, setSelectedLoanType] = useState<LoanType>('menengah');
@@ -362,7 +364,24 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       {/* KOTAK PUSAT KOMANDO NOTIFIKASI KHUSUS KARTU TIER ADMIN & AKUN OA ADMIN (OTOMATIS DISEMBUNYIKAN PADA KARTU BIASA) */}
       {isCurrentAccountAdminTierRecipient &&
         adminTierNotificationConfig.enabled &&
-        adminTierNotificationConfig.showDashboardCommandBox && (
+        adminTierNotificationConfig.showDashboardCommandBox &&
+        (isAdminCommandBoxDismissed ? (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl bg-slate-950/90 border border-amber-400/50 text-xs">
+            <div className="flex items-center gap-2 text-amber-200 font-bold">
+              <Crown className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                👑 ADMIN ALERT • {adminTierPendingTasksCount} Antrean Aktif • {unreadAdminTierNotificationCount} Alert Baru
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsAdminCommandBoxDismissed(false)}
+              className="px-3 py-1 rounded-xl bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/50 text-amber-200 font-black text-[11px] cursor-pointer"
+            >
+              Tampilkan Kotak Komando
+            </button>
+          </div>
+        ) : (
           <div className="rounded-3xl bg-gradient-to-br from-amber-950/90 via-slate-950 to-yellow-950/80 border-2 border-amber-400/70 shadow-2xl shadow-amber-500/15 p-4 sm:p-5 space-y-3.5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-500/30 pb-3">
               <div className="flex items-start sm:items-center gap-3">
@@ -399,6 +418,15 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
                 >
                   <Zap className="w-3.5 h-3.5" />
                   <span>Buka Panel Admin</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsAdminCommandBoxDismissed(true)}
+                  title="Tutup Kotak Pusat Komando ADMIN ALERT"
+                  aria-label="Tutup Kotak Pusat Komando"
+                  className="p-1.5 rounded-xl bg-slate-900/90 hover:bg-rose-500/25 border border-amber-400/50 hover:border-rose-400 text-amber-200 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -563,7 +591,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               </div>
             )}
           </div>
-        )}
+        ))}
 
       {/* TOP USER WELCOME & QUICK STATS */}
       <div

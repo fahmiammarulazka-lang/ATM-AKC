@@ -350,10 +350,15 @@ export const GlobalChatAndNotificationLayer: React.FC = () => {
                     e.stopPropagation();
                     dismissPushBanner(banner.id);
                   }}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 shrink-0 cursor-pointer"
+                  title="Tutup banner notifikasi"
+                  className={`p-1.5 rounded-xl border transition-colors shrink-0 cursor-pointer flex items-center justify-center ${
+                    isAdminAlertBanner
+                      ? 'bg-slate-950/90 hover:bg-rose-500/30 border-amber-400/60 hover:border-rose-400 text-amber-200 hover:text-white'
+                      : 'bg-slate-950/80 hover:bg-slate-800 border-slate-700 text-slate-200 hover:text-white'
+                  }`}
                   aria-label="Tutup notifikasi"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
             );

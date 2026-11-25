@@ -3081,6 +3081,37 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v14-36-44',
+    version: 'v14.36.44',
+    releaseType: 'feature_and_bug',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v14.36.44 (Format S+D): Live Monitor Aktivitas Nasabah & Admin Real-Time, Pendeteksi Otomatis Spin 10x 5x, Bar Pemberitahuan Sistem Sticky di Paling Atas Layar & Tanda Silang (X) Khusus Kartu Tier ADMIN',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 19:00 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 19:00 WIB',
+    description:
+      'Pembaruan v14.36.44 menerapkan kenaikan versi ganda Format S + D (+1 Penambahan Fitur Baru pada segmen S dan +1 Perbaikan/Penyempurnaan pada segmen D dari v14.35.43 -> v14.36.44): menghadirkan Tab & Widget Live Monitor Aktivitas Nasabah maupun Admin secara real-time di Panel Admin, Mesin Pendeteksi Otomatis untuk pola seperti Nasabah Spin 10x sebanyak 5 kali lengkap dengan notifikasi suara dan bar peringatan aksi cepat di bagian atas Panel Admin, pemindahan Pemberitahuan Sistem menjadi Sticky Bar yang menempel di bagian paling atas layar dan atas Panel Admin, serta tombol Tanda Silang (X) penutup khusus pemegang Kartu Tier ADMIN.',
+    highlights: [
+      'Aturan Kenaikan Versi Otomatis Format S + D (v14.35.43 -> v14.36.44): Setiap update otomatis menaikkan nomor versi sesuai jenis perubahan; apabila terdapat gabungan Penambahan Fitur Baru (Format S) dan Perbaikan Bug (Format D), kedua segmen S dan D bertambah +1 bersamaan.',
+      'Live Monitor Aktivitas Nasabah & Admin Real-Time di Panel Admin: Tersedia pada tab khusus Live Monitor Aktivitas dan widget ringkas di tab Ringkasan untuk memantau hingga 500 aktivitas terbaru (Spin 1x & Spin 10x beserta counter live per nasabah, transfer, top-up QRIS, tarik tunai, login, salah PIN, buat kartu, laporan bug, dan seluruh tindakan Admin) dengan 6 filter kategori, pencarian, ekspor, serta klik baris untuk melihat detail akun.',
+      'Pendeteksi Otomatis Real-Time (Spin 10x Sebanyak 5x & Anomali Transaksi): Mendeteksi otomatis saat nasabah menekan Spin 10x sebanyak 5 kali dalam rentang 5 menit (batas sensitivitas dapat diatur Admin), klaim/transaksi beruntun cepat, salah PIN berulang, dan mutasi aset besar; otomatis mengirim notifikasi Kartu Tier ADMIN berbunyi khusus dan menampilkan Bar Peringatan Deteksi Otomatis di atas Panel Admin lengkap dengan tombol Pantau Akun, Jeda Spin, Bekukan Sementara, dan Abaikan.',
+      'Pemberitahuan Sistem Pindah ke Paling Atas Layar & Atas Panel Admin (Sticky Top Bar): Seluruh Pemberitahuan Sistem (termasuk mode yang sebelumnya Pop-up) kini ditampilkan rapi sebagai bar pemberitahuan yang menempel (sticky) di bagian paling atas layar agar selalu terlihat jelas.',
+      'Tombol Tanda Silang (X) Eksklusif Kartu Tier ADMIN: Hanya akun dengan Kartu Tier ADMIN dan Akun OA Admin yang memiliki tanda silang (X) penutup pada Pemberitahuan Sistem (termasuk yang berstatus Permanen), Kotak Pusat Komando Dashboard, item Lonceng Notifikasi, dan Banner Toast atas; menutup pemberitahuan di layar Admin sendiri sementara di layar nasabah lain tetap tampil.',
+    ],
+    changes: [
+      'Aturan Kenaikan Versi Otomatis Format S + D (v14.35.43 -> v14.36.44): Setiap update otomatis menaikkan nomor versi sesuai jenis perubahan; apabila terdapat gabungan Penambahan Fitur Baru (Format S) dan Perbaikan Bug (Format D), kedua segmen S dan D bertambah +1 bersamaan.',
+      'Live Monitor Aktivitas Nasabah & Admin Real-Time di Panel Admin: Tersedia pada tab khusus Live Monitor Aktivitas dan widget ringkas di tab Ringkasan untuk memantau hingga 500 aktivitas terbaru (Spin 1x & Spin 10x beserta counter live per nasabah, transfer, top-up QRIS, tarik tunai, login, salah PIN, buat kartu, laporan bug, dan seluruh tindakan Admin) dengan 6 filter kategori, pencarian, ekspor, serta klik baris untuk melihat detail akun.',
+      'Pendeteksi Otomatis Real-Time (Spin 10x Sebanyak 5x & Anomali Transaksi): Mendeteksi otomatis saat nasabah menekan Spin 10x sebanyak 5 kali dalam rentang 5 menit (batas sensitivitas dapat diatur Admin), klaim/transaksi beruntun cepat, salah PIN berulang, dan mutasi aset besar; otomatis mengirim notifikasi Kartu Tier ADMIN berbunyi khusus dan menampilkan Bar Peringatan Deteksi Otomatis di atas Panel Admin lengkap dengan tombol Pantau Akun, Jeda Spin, Bekukan Sementara, dan Abaikan.',
+      'Pemberitahuan Sistem Pindah ke Paling Atas Layar & Atas Panel Admin (Sticky Top Bar): Seluruh Pemberitahuan Sistem (termasuk mode yang sebelumnya Pop-up) kini ditampilkan rapi sebagai bar pemberitahuan yang menempel (sticky) di bagian paling atas layar agar selalu terlihat jelas.',
+      'Tombol Tanda Silang (X) Eksklusif Kartu Tier ADMIN: Hanya akun dengan Kartu Tier ADMIN dan Akun OA Admin yang memiliki tanda silang (X) penutup pada Pemberitahuan Sistem (termasuk yang berstatus Permanen), Kotak Pusat Komando Dashboard, item Lonceng Notifikasi, dan Banner Toast atas; menutup pemberitahuan di layar Admin sendiri sementara di layar nasabah lain tetap tampil.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-25T12:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v14-35-43',
     version: 'v14.35.43',
     releaseType: 'major',
@@ -3107,8 +3138,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Top-Up Diamond Mulai dari 11 Diamond (Harga Mulai Rp 1.000): Paket #1 kini dimulai dari 11 Diamond seharga Rp 1.000 hingga 250 paket (11.099 Diamond) dengan validasi server QRIS yang tersinkronisasi penuh.',
       'Misi Harian & 7-Hari, Leaderboard Multi-Aset, Navbar HP Lengkap & Sensor Privasi Nomor/ID: Dilengkapi tab Misi Harian, halaman Leaderboard 3 kategori, tampilan Uang + Koin + Diamond + Top-Up di Navbar HP, serta tombol Sensor Nomor & ID privasi penuh (****).',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-25T11:00:00.000Z',
     isAutoDetected: true,

@@ -16,12 +16,12 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v14.35.43';
+export const STRUCTURED_BASE_VERSION = 'v14.36.44';
 
 export interface StructuredVersion {
   p: number; // AAA: Major (fitur besar / penambahan > 3 fitur sekaligus)
-  w: number; // SSS: Minor (penambahan fitur baru, 0..999)
-  g: number; // DDD: Patch (perbaikan bug, optimalisasi kecil, keamanan, 0..999)
+  w: number; // SSS: Minor / Format S (penambahan fitur baru, 0..999)
+  g: number; // DDD: Patch / Format D (perbaikan bug, optimalisasi kecil, keamanan, 0..999)
 }
 
 export interface ActiveAppBuildInfo {
@@ -51,7 +51,7 @@ export function getActiveAppBuildInfo(): ActiveAppBuildInfo {
   const buildId =
     typeof __APP_BUILD_ID__ !== 'undefined' && __APP_BUILD_ID__
       ? __APP_BUILD_ID__
-      : 'BLD-20261120-1230';
+      : 'BLD-20261125-1900';
   const buildIso =
     typeof __APP_BUILD_ISO__ !== 'undefined' && __APP_BUILD_ISO__
       ? __APP_BUILD_ISO__
@@ -59,7 +59,7 @@ export function getActiveAppBuildInfo(): ActiveAppBuildInfo {
   const buildDateWib =
     typeof __APP_BUILD_DATE_WIB__ !== 'undefined' && __APP_BUILD_DATE_WIB__
       ? __APP_BUILD_DATE_WIB__
-      : 'Jumat, 20 November 2026 • Pukul 12:30 WIB';
+      : 'Rabu, 25 November 2026 • Pukul 19:00 WIB';
   const catalogVersion =
     typeof __APP_CATALOG_RELEASE_VERSION__ !== 'undefined' && __APP_CATALOG_RELEASE_VERSION__
       ? __APP_CATALOG_RELEASE_VERSION__
@@ -126,12 +126,13 @@ export function compareStructuredVersions(a: StructuredVersion, b: StructuredVer
 }
 
 /**
- * Menormalkan tipe rilis historis ('bug' -> 'minor', 'small_bug' -> 'patch') ke standar vAAA.SSS.DDD
+ * Menormalkan tipe rilis historis ('bug' -> 'minor', 'small_bug' -> 'patch', 'feature_and_bug' -> 'feature_and_bug') ke standar vAAA.SSS.DDD
  */
 export function normalizeReleaseType(
   releaseType?: AppUpdateReleaseType
-): 'major' | 'minor' | 'patch' {
+): 'major' | 'minor' | 'patch' | 'feature_and_bug' {
   if (releaseType === 'major') return 'major';
+  if (releaseType === 'feature_and_bug') return 'feature_and_bug';
   if (releaseType === 'minor' || releaseType === 'bug') return 'minor';
   return 'patch';
 }
@@ -139,19 +140,32 @@ export function normalizeReleaseType(
 /**
  * Menaikkan versi 3-segmen sesuai tipe rilis vAAA.SSS.DDD:
  * - major (+AAA): Pembaruan fitur baru yang besar atau penambahan > 3 fitur sekaligus (melanjutkan SSS.DDD tanpa reset)
- * - minor (+SSS): Penambahan fitur baru (99 -> 100 -> ... -> 999, rollover ke AAA hanya jika > 999)
- * - patch (+DDD): Perbaikan bug / optimalisasi kecil / keamanan (99 -> 100 -> ... -> 999, rollover ke SSS hanya jika > 999)
+ * - minor (+SSS / Format S): Penambahan fitur baru (99 -> 100 -> ... -> 999, rollover ke AAA hanya jika > 999)
+ * - patch (+DDD / Format D): Perbaikan bug / optimalisasi kecil / keamanan (99 -> 100 -> ... -> 999, rollover ke SSS hanya jika > 999)
+ * - feature_and_bug (+SSS & +DDD / Format S + D): Jika ada 2 update sekaligus (1 penambahan fitur baru + 1 perbaikan bug), kedua segmen S dan D naik +1 bersamaan!
  */
 export function bumpStructuredVersion(
   baseVersionStr: string | undefined,
   releaseType: AppUpdateReleaseType
 ): string {
-  const base = parseStructuredVersion(baseVersionStr) || { p: 13, w: 34, g: 0 };
+  const base = parseStructuredVersion(baseVersionStr) || { p: 14, w: 35, g: 43 };
   let { p, w, g } = base;
   const kind = normalizeReleaseType(releaseType);
 
   if (kind === 'major') {
     p = Math.min(999, p + 1);
+  } else if (kind === 'feature_and_bug') {
+    // Format S + D: Tambah +1 ke SSS (Fitur) dan +1 ke DDD (Bug) sekaligus
+    g += 1;
+    if (g > 999) {
+      g = 0;
+      w += 1;
+    }
+    w += 1;
+    if (w > 999) {
+      w = 0;
+      p = Math.min(999, p + 1);
+    }
   } else if (kind === 'minor') {
     w += 1;
     if (w > 999) {
@@ -190,8 +204,9 @@ export function getLatestStructuredVersion(records: AppUpdateRecord[]): string {
 }
 
 /**
- * Validasi lunak kenaikan versi di Panel Admin (Format vAAA.SS.DD):
- * - Memberi peringatan jika format bukan vAAA.SS.DD, versi sama/mundur, atau lompat lebih dari +1
+ * Validasi lunak kenaikan versi di Panel Admin (Format vAAA.SSS.DDD):
+ * - Memberi peringatan jika format bukan vAAA.SSS.DDD, versi sama/mundur, atau lompat lebih dari +1
+ * - Mengenali kenaikan tunggal (+AAA, +SSS, +DDD) maupun kenaikan gabungan Format S + D (+SSS & +DDD)
  * - Tetap mengizinkan Admin menyimpan apabila dikehendaki
  */
 export function validateVersionJump(
@@ -199,7 +214,7 @@ export function validateVersionJump(
   candidateVersionStr: string
 ): VersionJumpValidationResult {
   const normalized = normalizeVersionInput(candidateVersionStr);
-  const currentParsed = parseStructuredVersion(currentVersionStr) || { p: 12, w: 32, g: 97 };
+  const currentParsed = parseStructuredVersion(currentVersionStr) || { p: 14, w: 35, g: 43 };
   const currentFormatted = formatStructuredVersion(currentParsed);
 
   const candidateParsed = parseStructuredVersion(candidateVersionStr);
@@ -210,13 +225,14 @@ export function validateVersionJump(
       normalizedVersion: normalized,
       matchedReleaseType: null,
       warningMessage:
-        'Format versi disarankan mengikuti pola vAAA.SSS.DDD dengan angka 00–999 untuk SSS & DDD (contoh: v13.34.00 atau v13.100.00). Anda tetap bisa menyimpan jika memang disengaja.',
+        'Format versi disarankan mengikuti pola vAAA.SSS.DDD dengan angka 00–999 untuk SSS & DDD (contoh: v14.36.44). Anda tetap bisa menyimpan jika memang disengaja.',
     };
   }
 
   const nextMajor = bumpStructuredVersion(currentFormatted, 'major');
   const nextMinor = bumpStructuredVersion(currentFormatted, 'minor');
   const nextPatch = bumpStructuredVersion(currentFormatted, 'patch');
+  const nextFeatureAndBug = bumpStructuredVersion(currentFormatted, 'feature_and_bug');
 
   if (normalized === nextMajor) {
     return {
@@ -224,6 +240,15 @@ export function validateVersionJump(
       hasWarning: false,
       normalizedVersion: normalized,
       matchedReleaseType: 'major',
+      warningMessage: null,
+    };
+  }
+  if (normalized === nextFeatureAndBug) {
+    return {
+      isValidFormat: true,
+      hasWarning: false,
+      normalizedVersion: normalized,
+      matchedReleaseType: 'feature_and_bug',
       warningMessage: null,
     };
   }
@@ -253,7 +278,7 @@ export function validateVersionJump(
       hasWarning: true,
       normalizedVersion: normalized,
       matchedReleaseType: null,
-      warningMessage: `Nomor versi ${normalized} sama dengan versi aktif ${currentFormatted}. Pilih salah satu tombol Major (+AAA), Minor (+SSS), atau Patch (+DDD) untuk kenaikan bertahap (+1).`,
+      warningMessage: `Nomor versi ${normalized} sama dengan versi aktif ${currentFormatted}. Pilih salah satu tombol Major (+AAA), Minor (+SSS), Patch (+DDD), atau Gabungan Fitur + Bug (Format S + D) untuk kenaikan bertahap.`,
     };
   }
   if (cmp < 0) {

@@ -312,6 +312,9 @@ export interface BankAccount {
   lastDebtPenaltyAt?: string; // Timestamp terakhir bunga denda diterapkan (jika diaktifkan Admin)
   // Sensor privasi Nomor & ID (Default false / nonaktif, tersinkron permanen per akun ke Cloud)
   hideSensitiveNumbers?: boolean;
+  // Jeda sementara Spin Roda oleh Admin dari Peringatan Deteksi Otomatis
+  spinPausedUntil?: string;
+  spinPauseReason?: string;
 }
 
 export interface DebtHistoryEntry {
@@ -556,7 +559,13 @@ export interface BugReportRecord {
   updatedAt?: string;
 }
 
-export type AppUpdateReleaseType = 'major' | 'minor' | 'patch' | 'bug' | 'small_bug';
+export type AppUpdateReleaseType =
+  | 'major'
+  | 'minor'
+  | 'patch'
+  | 'feature_and_bug'
+  | 'bug'
+  | 'small_bug';
 export type AppUpdateVisibilityMode = 'auto' | 'public' | 'admin_only';
 
 export interface AppUpdateRecord {
@@ -2089,6 +2098,7 @@ export type AdminTierNotificationEventType =
   | 'account_deletion'
   | 'card_upgrade'
   | 'high_value_tx'
+  | 'anomaly_detector'
   | 'admin_broadcast';
 
 export type AdminTierQuickActionType =
@@ -2097,6 +2107,8 @@ export type AdminTierQuickActionType =
   | 'reset_pin_lock'
   | 'approve_pin_reset'
   | 'approve_card_upgrade'
+  | 'pause_spin'
+  | 'freeze_account'
   | 'open_admin_tab';
 
 export interface AdminTierNotificationQuickAction {
@@ -2121,4 +2133,72 @@ export interface AdminTierNotificationConfig {
   updatedAt?: string;
 }
 
+// ==================== LIVE MONITOR AKTIVITAS NASABAH & ADMIN + PENDETEKSI OTOMATIS REAL-TIME ====================
+export type LiveActivityActorRole = 'nasabah' | 'admin' | 'auto_detector';
 
+export type LiveActivityCategory =
+  | 'spin_game'
+  | 'transaction'
+  | 'auth_security'
+  | 'admin_action'
+  | 'auto_detector';
+
+export type AutoDetectorRuleKey =
+  | 'spin_10x_streak'
+  | 'rapid_tx_topup'
+  | 'repeated_pin_fail'
+  | 'large_asset_mutation';
+
+export interface LiveSystemActivityLog {
+  id: string;
+  timestamp: string;
+  actorRole: LiveActivityActorRole;
+  category: LiveActivityCategory;
+  accountId?: string;
+  accountName: string;
+  accountNumber?: string;
+  cardTier?: CardTier;
+  actionTitle: string;
+  description: string;
+  amountRupiah?: number;
+  spinCountType?: 1 | 3 | 5 | 7 | 10;
+  spin1xTotalCount?: number;
+  spin10xStreakCount?: number;
+  spin10xThreshold?: number;
+  prizesSummary?: string;
+  isAnomalyDetected?: boolean;
+  anomalyRuleKey?: AutoDetectorRuleKey;
+}
+
+export interface AutoDetectedAnomalyAlert {
+  id: string;
+  ruleKey: AutoDetectorRuleKey;
+  accountId: string;
+  accountName: string;
+  accountNumber: string;
+  cardTier: CardTier;
+  title: string;
+  detailSummary: string;
+  occurrenceCount: number;
+  thresholdCount: number;
+  windowMinutes: number;
+  totalRewardOrAmount: number;
+  rewardBreakdownText: string;
+  detectedAt: string;
+  status: 'active' | 'ignored' | 'resolved';
+  actionTakenLabel?: string;
+}
+
+export interface LiveActivityDetectorConfig {
+  enabled: boolean;
+  soundAlertEnabled: boolean;
+  spin10xThresholdCount: number;
+  spin10xWindowMinutes: number;
+  rapidTxThresholdCount: number;
+  rapidTxWindowMinutes: number;
+  repeatedPinFailThreshold: number;
+  largeAssetMutationThresholdRupiah: number;
+  pauseSpinDefaultMinutes: number;
+  rulesEnabled: Record<AutoDetectorRuleKey, boolean>;
+  updatedAt?: string;
+}

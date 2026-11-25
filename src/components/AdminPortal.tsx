@@ -61,6 +61,7 @@ import {
   Cloud,
   Save,
   RotateCcw,
+  Activity,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -136,6 +137,10 @@ import { AdminDebtManagementTab } from './AdminDebtManagementTab';
 import { AdminHelpCenterPanel } from './AdminHelpCenterPanel';
 import { AdminRedeemCodePanel } from './AdminRedeemCodePanel';
 import { AdminMissionsTab, AdminLeaderboardTab } from './AdminMissionsLeaderboardTab';
+import {
+  AdminTopAutoDetectorAndSystemWarningBar,
+  AdminLiveMonitorTabView,
+} from './AdminLiveMonitorPanel';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -302,9 +307,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     unreadAdminTierNotificationCount,
     adminTierPendingTasksCount,
     executeAdminTierNotificationQuickAction,
+    liveActivityLogs,
+    autoDetectedAnomalies,
   } = useBank();
 
+  const [liveMonitorFocusAccountId, setLiveMonitorFocusAccountId] = useState<string | null>(null);
+
   const [activeAdminTab, setActiveAdminTab] = useState<
+    | 'live_monitor'
     | 'super_tools'
     | 'missions_admin'
     | 'leaderboard_admin'
@@ -569,6 +579,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   const nextMajorPreview = bumpStructuredVersion(latestStructuredVersion, 'major');
   const nextMinorPreview = bumpStructuredVersion(latestStructuredVersion, 'minor');
   const nextPatchPreview = bumpStructuredVersion(latestStructuredVersion, 'patch');
+  const nextFeatureAndBugPreview = bumpStructuredVersion(
+    latestStructuredVersion,
+    'feature_and_bug'
+  );
 
   const adminUpdateCounts = React.useMemo(() => {
     let pubCount = 0;
@@ -865,6 +879,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
+      {/* PEMBERITAHUAN SISTEM DI ATAS PANEL ADMIN + DETEKSI OTOMATIS (SPIN 10X SEBANYAK 5X) & WIDGET LIVE MONITOR */}
+      <AdminTopAutoDetectorAndSystemWarningBar
+        onOpenLiveMonitorTab={(focusAccountId) => {
+          if (focusAccountId) {
+            setLiveMonitorFocusAccountId(focusAccountId);
+          }
+          setActiveAdminTab('live_monitor');
+        }}
+        onOpenWarningsStudio={() => setActiveAdminTab('super_tools')}
+      />
+
       {/* Admin Header Banner */}
       <div className="bg-gradient-to-r from-red-950 via-slate-900 to-indigo-950 rounded-3xl p-6 border border-red-800/40 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
         <div>
@@ -1114,6 +1139,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     { key: 'account_deletion', label: 'Permohonan Hapus Akun' },
                     { key: 'card_upgrade', label: 'Permohonan Upgrade Kartu' },
                     { key: 'high_value_tx', label: 'Transaksi Bernilai Besar' },
+                    { key: 'anomaly_detector', label: 'Deteksi Otomatis (Spin 10x 5x)' },
                     { key: 'admin_broadcast', label: 'Broadcast Sesama Tier ADMIN' },
                   ] as Array<{ key: AdminTierNotificationEventType; label: string }>
                 ).map((tr) => {
@@ -1224,6 +1250,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
 
       {/* Admin Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-800 pb-2 text-xs font-semibold overflow-x-auto">
+        <button
+          onClick={() => setActiveAdminTab('live_monitor')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'live_monitor'
+              ? 'bg-gradient-to-r from-rose-500 via-amber-400 to-cyan-400 text-slate-950 font-black shadow-lg shadow-rose-500/30'
+              : 'text-cyan-300 hover:text-white hover:bg-cyan-950/60 border-2 border-cyan-400/70'
+          }`}
+        >
+          <Activity className="w-4 h-4" />
+          <span>
+            📡 Live Monitor Aktivitas &amp; Deteksi Otomatis ({liveActivityLogs.length})
+          </span>
+          {autoDetectedAnomalies.some((a) => a.status === 'active') && (
+            <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse">
+              {autoDetectedAnomalies.filter((a) => a.status === 'active').length} Alert
+            </span>
+          )}
+        </button>
+
         <button
           onClick={() => setActiveAdminTab('accounts')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1578,6 +1623,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <span>Brankas & SOP 100x</span>
         </button>
       </div>
+
+      {/* ================= ADMIN TAB: LIVE MONITOR AKTIVITAS NASABAH & ADMIN + PENDETEKSI OTOMATIS ================= */}
+      {activeAdminTab === 'live_monitor' && (
+        <AdminLiveMonitorTabView initialFocusAccountId={liveMonitorFocusAccountId} />
+      )}
 
       {/* ================= ADMIN TAB: PUSAT BANTUAN (50+ FAQ & CONTACT US WA/EMAIL) ================= */}
       {activeAdminTab === 'help_center' && <AdminHelpCenterPanel />}
@@ -2314,7 +2364,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -2354,13 +2404,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     }`}
                   >
                     <span className="block text-[10px] font-bold text-cyan-300">
-                      Minor (+SS)
+                      Format S / Minor (+SSS)
                     </span>
                     <span className="block font-mono tabular-nums text-xs font-black text-white mt-0.5">
                       {nextMinorPreview}
                     </span>
                     <span className="block text-[10px] text-slate-400 mt-0.5">
-                      Penambahan fitur baru
+                      Penambahan fitur baru (+1 S)
                     </span>
                   </button>
 
@@ -2379,13 +2429,37 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     }`}
                   >
                     <span className="block text-[10px] font-bold text-amber-300">
-                      Patch (+DD)
+                      Format D / Patch (+DDD)
                     </span>
                     <span className="block font-mono tabular-nums text-xs font-black text-white mt-0.5">
                       {nextPatchPreview}
                     </span>
                     <span className="block text-[10px] text-slate-400 mt-0.5">
-                      Perbaikan bug &amp; keamanan
+                      Perbaikan bug &amp; keamanan (+1 D)
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewUpdateReleaseType('feature_and_bug');
+                      setHasManuallyEditedVersion(false);
+                      setNewUpdateVersion(nextFeatureAndBugPreview);
+                    }}
+                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                      newUpdateReleaseType === 'feature_and_bug' && !hasManuallyEditedVersion
+                        ? 'bg-gradient-to-br from-cyan-500/25 via-amber-500/25 to-emerald-500/25 border-amber-300 text-white shadow-md'
+                        : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-amber-400/60'
+                    }`}
+                  >
+                    <span className="block text-[10px] font-black text-amber-200">
+                      Format S + D (+SSS &amp; +DDD)
+                    </span>
+                    <span className="block font-mono tabular-nums text-xs font-black text-white mt-0.5">
+                      {nextFeatureAndBugPreview}
+                    </span>
+                    <span className="block text-[10px] text-slate-300 mt-0.5">
+                      2 Update: +1 Fitur (S) &amp; +1 Bug (D)
                     </span>
                   </button>
                 </div>
