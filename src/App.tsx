@@ -489,8 +489,8 @@ function BankAppContent() {
       <DiamondStoreModal />
       <BuatQrisPaymentModal />
 
-      {/* Bar Pemberitahuan Sistem Sticky di Paling Atas Layar (di atas Navbar & di atas Panel Admin) */}
-      <AdminWarningOverlay />
+      {/* Bar Pemberitahuan Sistem Sticky & Pop-up Tengah (tidak pernah menghalangi layar Panel Admin) */}
+      <AdminWarningOverlay isInsideAdminPanel={activeView === 'admin'} />
 
       {/* Top Navbar (Includes Tab Kotak Hutang di kiri logo, Transfer & Emas 24K, serta indikator Update BARU) */}
       <Navbar

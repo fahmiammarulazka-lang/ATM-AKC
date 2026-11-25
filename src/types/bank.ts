@@ -271,6 +271,7 @@ export interface BankAccount {
   diamonds?: number; // Default 0 diamond (1 Diamond = Rp 200 via BuatQRIS)
   extraFamilySlots?: number; // Default 0 (total slot keluarga = defaultMaxFamilies + extraFamilySlots)
   accountUpdatedAtMs?: number; // Timestamp mutasi otoritatif agar jobLevel/diamonds/saldo tidak tertimpa sync lama
+  unbannedAtMs?: number; // Timestamp otoritatif pembukaan blokir (anti-rollback cache ban lama)
   // Kerajaan Bisnis & Bursa Sultan (Fitur Baru di sebelah Spin the Wheel)
   empireBusinesses?: Record<string, number>; // businessId -> jumlah unit dimiliki
   empireTradingHoldings?: Record<string, number>; // assetId -> jumlah unit dimiliki
@@ -432,6 +433,9 @@ export interface WebsiteSystemPopupNotification {
   accountId?: string;
   accountName?: string;
   accountNumber?: string;
+  targetUid?: string;
+  targetEmail?: string;
+  privateAccountOnly?: boolean;
   cardTier?: CardTier;
   senderName?: string;
   timestamp: string;
@@ -874,6 +878,8 @@ export interface AppNotification {
   actionUrl?: string;
   // Notifikasi Khusus Kartu Tier ADMIN & Akun OA Admin
   isAdminTierOnly?: boolean;
+  // Notifikasi Privat Khusus Pemegang Akun Tertentu (contoh: Unban hanya muncul di perangkat pemegang akun tsb)
+  privateAccountOnly?: boolean;
   adminEventType?: AdminTierNotificationEventType;
   adminQuickAction?: AdminTierNotificationQuickAction;
   adminTargetTab?: string;
@@ -1800,7 +1806,7 @@ export interface UiVisibilityConfig {
   updatedAt?: string;
 }
 
-// ==================== SISTEM PERINGATAN ADMIN (MANUAL + 25 PRESET) ====================
+// ==================== SISTEM PERINGATAN ADMIN (MANUAL + 80 TEMPLATE DESAIN UNIK) ====================
 export type AdminWarningIconKey =
   | 'wrench'
   | 'alert-triangle'
@@ -1817,17 +1823,77 @@ export type AdminWarningIconKey =
   | 'ban'
   | 'check-circle'
   | 'bug'
-  | 'zap';
+  | 'zap'
+  | 'crown'
+  | 'gem'
+  | 'flame'
+  | 'rocket'
+  | 'shield-check'
+  | 'credit-card'
+  | 'calendar'
+  | 'radio'
+  | 'award'
+  | 'receipt'
+  | 'scale'
+  | 'heart-handshake';
 
-export type AdminWarningColorTheme = 'amber' | 'rose' | 'sky' | 'emerald' | 'indigo' | 'slate';
+export type AdminWarningColorTheme =
+  | 'amber'
+  | 'rose'
+  | 'sky'
+  | 'emerald'
+  | 'indigo'
+  | 'slate'
+  | 'gold_sultan'
+  | 'crimson_alert'
+  | 'cyber_cyan'
+  | 'royal_violet'
+  | 'festive_teal'
+  | 'obsidian_luxe';
 
 export type AdminWarningCategory =
   | 'perbaikan'
-  | 'update'
-  | 'keamanan'
   | 'jaringan'
+  | 'keamanan'
   | 'promo'
-  | 'pengumuman';
+  | 'vip_sultan'
+  | 'update'
+  | 'pengumuman'
+  | 'individu';
+
+export type AdminWarningVisualStyle =
+  | 'royal_gold'
+  | 'cyber_terminal'
+  | 'emergency_siren'
+  | 'vault_shield'
+  | 'festive_celebration'
+  | 'neon_pulse'
+  | 'executive_glass'
+  | 'split_banner'
+  | 'hologram_vip'
+  | 'radar_network'
+  | 'official_decree'
+  | 'individual_formal';
+
+export type AdminWarningBgPattern =
+  | 'none'
+  | 'diagonal_stripes'
+  | 'dot_matrix'
+  | 'circuit_grid'
+  | 'radial_spotlight'
+  | 'gold_shimmer'
+  | 'hazard_chevron'
+  | 'starburst_confetti'
+  | 'wave_mesh'
+  | 'security_grid';
+
+export type AdminWarningAnimationStyle =
+  | 'smooth_zoom'
+  | 'slide_drop'
+  | 'pulse_glow'
+  | 'shimmer_border'
+  | 'float_gentle'
+  | 'urgent_shake';
 
 export type AdminWarningDisplayMode = 'popup' | 'banner';
 export type AdminWarningTargetMode = 'all' | 'tiers' | 'accounts';
@@ -1842,6 +1908,16 @@ export interface AdminSystemWarning {
   isPermanent: boolean;
   showPermanentLabel: boolean;
   dismissible: boolean;
+  lockScreen?: boolean;
+  templateId?: string;
+  visualStyle?: AdminWarningVisualStyle;
+  bgPattern?: AdminWarningBgPattern;
+  animationStyle?: AdminWarningAnimationStyle;
+  badgeText?: string;
+  estimatedDurationText?: string;
+  referenceCode?: string;
+  ctaLabel?: string;
+  showOfficialStamp?: boolean;
   targetMode: AdminWarningTargetMode;
   targetTiers: CardTier[];
   targetAccountIds: string[];
@@ -1853,16 +1929,27 @@ export interface AdminSystemWarning {
 
 export interface AdminSystemWarningPreset {
   id: string;
+  code: number;
   category: AdminWarningCategory;
   name: string;
+  designTag: string;
   title: string;
   message: string;
   iconKey: AdminWarningIconKey;
   colorTheme: AdminWarningColorTheme;
+  visualStyle: AdminWarningVisualStyle;
+  bgPattern: AdminWarningBgPattern;
+  animationStyle: AdminWarningAnimationStyle;
+  badgeText: string;
+  estimatedDurationText?: string;
+  referenceCode?: string;
+  ctaLabel?: string;
+  showOfficialStamp: boolean;
   suggestedDisplayMode: AdminWarningDisplayMode;
   suggestedPermanent: boolean;
   suggestedShowPermanentLabel: boolean;
   suggestedDismissible: boolean;
+  suggestedLockScreen: boolean;
 }
 
 export type QrisOrderStatus = 'PENDING' | 'LUNAS' | 'EXPIRED';

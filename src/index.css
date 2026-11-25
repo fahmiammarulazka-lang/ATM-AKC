@@ -180,14 +180,104 @@
   animation: topBadgeGoldSheen 3.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
+/* Warning Studio 6 GPU-Composited Animations */
+@keyframes bnWarnZoomIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.93) translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.bn-warn-zoom {
+  animation: bnWarnZoomIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes bnWarnSlideDrop {
+  0% {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.bn-warn-drop {
+  animation: bnWarnSlideDrop 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes bnWarnPulseGlow {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 12px rgba(251, 191, 36, 0.22));
+  }
+  50% {
+    transform: scale(1.008);
+    filter: drop-shadow(0 0 24px rgba(251, 191, 36, 0.42));
+  }
+}
+.bn-warn-glow {
+  animation: bnWarnZoomIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both, bnWarnPulseGlow 3.2s ease-in-out 0.25s infinite;
+}
+
+@keyframes bnWarnFloatGentle {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+.bn-warn-float {
+  animation: bnWarnZoomIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both, bnWarnFloatGentle 3.8s ease-in-out 0.25s infinite;
+}
+
+@keyframes bnWarnUrgentShake {
+  0% { opacity: 0; transform: scale(0.95); }
+  25% { opacity: 1; transform: translateX(-4px) scale(1); }
+  50% { transform: translateX(4px); }
+  75% { transform: translateX(-2px); }
+  100% { transform: translateX(0); }
+}
+.bn-warn-shake {
+  animation: bnWarnUrgentShake 0.36s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.bn-warn-shimmer {
+  position: relative;
+  overflow: hidden;
+  animation: bnWarnZoomIn 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.bn-warn-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 42%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14), transparent);
+  pointer-events: none;
+  animation: topBadgeGoldSheen 3.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .suit-streak-red-fade,
   .suit-streak-five-sparkle {
     animation-duration: 0.4s;
   }
-  .top-badge-gold-shimmer::after {
+  .top-badge-gold-shimmer::after,
+  .bn-warn-shimmer::after {
     animation: none;
     opacity: 0;
+  }
+  .bn-warn-zoom,
+  .bn-warn-drop,
+  .bn-warn-glow,
+  .bn-warn-float,
+  .bn-warn-shake,
+  .bn-warn-shimmer {
+    animation: none;
   }
 }
 

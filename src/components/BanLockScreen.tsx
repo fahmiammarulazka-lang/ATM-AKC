@@ -130,7 +130,7 @@ export const BanLockScreen: React.FC<{ previewState?: BanLockPreviewProps }> = (
   const effectiveExpiresAt = isPreview ? cfg.expiresAt : activeBanLockState.expiresAt || cfg.expiresAt;
 
   useEffect(() => {
-    if (cfg.durationType !== 'custom') return;
+    if (cfg.durationType !== 'custom' && !effectiveExpiresAt) return;
     const t = window.setInterval(() => setTick((v) => v + 1), 1000);
     return () => window.clearInterval(t);
   }, [cfg.durationType, effectiveExpiresAt]);
@@ -344,7 +344,7 @@ export const BanLockScreen: React.FC<{ previewState?: BanLockPreviewProps }> = (
   };
 
   const countdown =
-    cfg.durationType === 'custom' && cfg.showCountdown
+    (cfg.durationType === 'custom' || Boolean(effectiveExpiresAt)) && cfg.showCountdown !== false
       ? formatCountdown(effectiveExpiresAt, cfg.durationMinutes)
       : null;
 

@@ -16,6 +16,7 @@ import {
 import { useBank } from '../context/BankContext';
 import { formatRupiah } from '../utils/bankUtils';
 import {
+  QrisValidationError,
   requestCheckQrisPaymentStatus,
   requestCreateQrisPayment,
 } from '../../buatQrisService';
@@ -45,6 +46,8 @@ export const BuatQrisPaymentModal: React.FC = () => {
     updateQrisOrderStatus,
     fulfillPaidQrisOrder,
     currentAccount,
+    diamondConfig,
+    recordLiveActivity,
   } = useBank();
 
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
@@ -206,6 +209,8 @@ export const BuatQrisPaymentModal: React.FC = () => {
         description: getOrderItemLabel(order),
         useUniqueCode: true,
         expiryMinutes: 10,
+        clientBaseDiamondPriceRupiah: diamondConfig.baseDiamondPriceRupiah,
+        clientDiamondDiscountPercent: diamondConfig.diamondDiscountPercent,
       });
 
       if (res.success) {
@@ -230,12 +235,32 @@ export const BuatQrisPaymentModal: React.FC = () => {
         };
         registerQrisOrder(freshOrder);
         setActiveQrisModalOrder(freshOrder);
-        setLastCheckNote('QRIS baru berhasil dibuat. Silakan scan dan bayar sesuai nominal tepat.');
+        setLastCheckNote(
+          res.configNotice ||
+            'QRIS baru berhasil dibuat. Silakan scan dan bayar sesuai nominal tepat.'
+        );
       } else {
-        setLastCheckNote('Gagal membuat ulang tagihan QRIS.');
+        setLastCheckNote(res.configNotice || 'Gagal membuat ulang tagihan QRIS. Silakan coba lagi.');
       }
-    } catch {
-      setLastCheckNote('Gagal menghubungi server pembayaran QRIS saat membuat ulang tagihan.');
+    } catch (err) {
+      const errMsg =
+        err instanceof QrisValidationError
+          ? err.message
+          : err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Gagal membuat ulang tagihan QRIS. Silakan tekan tombol Buat Ulang QRIS.';
+      setLastCheckNote(errMsg);
+      recordLiveActivity({
+        actorRole: 'nasabah',
+        category: 'transaction',
+        accountId: currentAccount.id,
+        accountName: currentAccount.fullName,
+        accountNumber: currentAccount.accountNumber,
+        cardTier: currentAccount.cardTier,
+        actionTitle: 'Gagal Buat Ulang Tagihan QRIS',
+        description: `Gagal buat ulang QRIS (${order.orderId}): ${errMsg}`,
+        amountRupiah: order.baseAmount,
+      });
     } finally {
       setIsRegenerating(false);
     }
@@ -280,6 +305,13 @@ export const BuatQrisPaymentModal: React.FC = () => {
                   <DiamondText text={paidSuccessBanner} />
                 </p>
               </div>
+            </div>
+          )}
+
+          {order.configNotice && !isPaid && (
+            <div className="flex items-start gap-2.5 rounded-2xl border border-sky-200 bg-sky-50 px-3.5 py-2.5 text-[11px] font-semibold text-sky-900">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-sky-600" />
+              <span>{order.configNotice}</span>
             </div>
           )}
 

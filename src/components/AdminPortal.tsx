@@ -949,7 +949,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             )}
           </div>
           <span className="text-[10px] text-amber-200 font-mono block mt-0.5">
-            25 Preset • Pop-up &amp; Banner
+            80 Template • Pop-up &amp; Banner
           </span>
         </div>
 
@@ -1300,7 +1300,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         >
           <BellRing className="w-4 h-4" />
           <span>
-            🚨 Studio Peringatan &amp; Pemberitahuan (25 Preset + Manual)
+            🚨 Studio Peringatan &amp; Pemberitahuan (80 Template + Manual)
           </span>
           <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black">
             {adminWarnings.filter((w) => w.isActive).length}/{adminWarnings.length}

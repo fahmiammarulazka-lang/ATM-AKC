@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   SlidersHorizontal,
+  RefreshCw,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -29,7 +30,7 @@ import {
   getEffectiveDiamondPurchaseLimits,
 } from '../data/diamondCatalog';
 import { formatRupiah } from '../utils/bankUtils';
-import { requestCreateQrisPayment } from '../../buatQrisService';
+import { QrisValidationError, requestCreateQrisPayment } from '../../buatQrisService';
 import { QrisPaymentOrder } from '../types/bank';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
 
@@ -61,6 +62,7 @@ export const DiamondStoreModal: React.FC = () => {
     setActiveQrisModalOrder,
     exchangeDiamondsToCashOrCoins,
     upgradeJobLevelWithDiamonds,
+    recordLiveActivity,
   } = useBank();
 
   const visibleStoreTabs = useMemo(() => {
@@ -82,10 +84,15 @@ export const DiamondStoreModal: React.FC = () => {
   const [lastEditedMode, setLastEditedMode] = useState<'diamonds' | 'rupiah'>('diamonds');
   const [clampNotice, setClampNotice] = useState<string>('');
   const [isCreatingQris, setIsCreatingQris] = useState<boolean>(false);
+  const [lastFailedQrisAttempt, setLastFailedQrisAttempt] = useState<{
+    diamonds: number;
+    label: string;
+  } | null>(null);
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error';
     text: string;
     showTopUpShortcut?: boolean;
+    canRetryQris?: boolean;
   } | null>(null);
 
   // Use / Exchange state
@@ -282,6 +289,7 @@ export const DiamondStoreModal: React.FC = () => {
     }
     setIsCreatingQris(true);
     setFeedback(null);
+    setLastFailedQrisAttempt(null);
     try {
       const orderId = `BN-DIA-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
       const res = await requestCreateQrisPayment({
@@ -294,12 +302,29 @@ export const DiamondStoreModal: React.FC = () => {
         description: label,
         useUniqueCode: true,
         expiryMinutes: 10,
+        clientBaseDiamondPriceRupiah: diamondConfig.baseDiamondPriceRupiah,
+        clientDiamondDiscountPercent: diamondConfig.diamondDiscountPercent,
       });
 
       if (!res.success) {
+        const failReason =
+          res.configNotice || 'Gagal membuat tagihan QRIS Nusantara. Silakan tekan Coba Lagi.';
+        setLastFailedQrisAttempt({ diamonds, label });
         setFeedback({
           type: 'error',
-          text: 'Gagal membuat tagihan QRIS Nusantara. Silakan coba lagi.',
+          text: failReason,
+          canRetryQris: true,
+        });
+        recordLiveActivity({
+          actorRole: 'nasabah',
+          category: 'transaction',
+          accountId: currentAccount.id,
+          accountName: currentAccount.fullName,
+          accountNumber: currentAccount.accountNumber,
+          cardTier: currentAccount.cardTier,
+          actionTitle: 'Gagal Buat Tagihan Top-Up QRIS',
+          description: `Gagal membuat QRIS untuk ${label} (${formatRupiah(pricing.finalPrice)}): ${failReason}`,
+          amountRupiah: pricing.finalPrice,
         });
         return;
       }
@@ -317,18 +342,55 @@ export const DiamondStoreModal: React.FC = () => {
         discountPercentApplied: pricing.discountPercent,
         modeUsed: res.modeUsed,
         configReady: res.configReady,
+        configNotice: res.configNotice,
         status: 'PENDING',
         qrisString: res.qrisString,
         createdAt: res.createdAt || new Date().toISOString(),
         expiresAt: res.expiresAt,
       };
 
+      if (res.configNotice) {
+        recordLiveActivity({
+          actorRole: 'nasabah',
+          category: 'transaction',
+          accountId: currentAccount.id,
+          accountName: currentAccount.fullName,
+          accountNumber: currentAccount.accountNumber,
+          cardTier: currentAccount.cardTier,
+          actionTitle: 'Top-Up QRIS (Fallback EMVCo Lokal)',
+          description: `Tagihan ${label} (${formatRupiah(res.totalAmount)}) dibuat otomatis dengan mode QRIS EMVCo lokal.`,
+          amountRupiah: res.totalAmount,
+        });
+      }
+
       registerQrisOrder(newOrder);
       setActiveQrisModalOrder(newOrder);
-    } catch {
+    } catch (err) {
+      const specificReason =
+        err instanceof QrisValidationError
+          ? err.message
+          : err instanceof Error && err.message.trim()
+          ? err.message.trim()
+          : 'Permintaan Top-Up QRIS belum berhasil diproses. Silakan tekan Coba Lagi.';
+      setLastFailedQrisAttempt({ diamonds, label });
       setFeedback({
         type: 'error',
-        text: 'Terjadi gangguan koneksi saat membuat QRIS. Coba lagi.',
+        text: specificReason,
+        canRetryQris: true,
+      });
+      recordLiveActivity({
+        actorRole: 'nasabah',
+        category: 'transaction',
+        accountId: currentAccount.id,
+        accountName: currentAccount.fullName,
+        accountNumber: currentAccount.accountNumber,
+        cardTier: currentAccount.cardTier,
+        actionTitle:
+          err instanceof QrisValidationError
+            ? 'Validasi Top-Up QRIS Ditolak'
+            : 'Gagal Membuat Top-Up QRIS',
+        description: `Gagal Top-Up ${label} (${formatRupiah(pricing.finalPrice)}): ${specificReason}`,
+        amountRupiah: pricing.finalPrice,
       });
     } finally {
       setIsCreatingQris(false);
@@ -467,18 +529,36 @@ export const DiamondStoreModal: React.FC = () => {
               }`}
             >
               <DiamondText text={feedback.text} />
-              {feedback.showTopUpShortcut && activeTab !== 'topup' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveTab('topup');
-                    setFeedback(null);
-                  }}
-                  className="inline-flex items-center gap-1 rounded-xl bg-cyan-600 px-3 py-1.5 text-[11px] font-black text-white shadow-sm transition hover:bg-cyan-700"
-                >
-                  Top-Up <DiamondIcon tone="bright" className="h-3.5 w-3.5" /> Sekarang
-                </button>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {feedback.canRetryQris && lastFailedQrisAttempt && (
+                  <button
+                    type="button"
+                    disabled={isCreatingQris}
+                    onClick={() =>
+                      void startQrisCheckout(
+                        lastFailedQrisAttempt.diamonds,
+                        lastFailedQrisAttempt.label
+                      )
+                    }
+                    className="inline-flex items-center gap-1 rounded-xl bg-rose-600 px-3 py-1.5 text-[11px] font-black text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isCreatingQris ? 'animate-spin' : ''}`} />
+                    Coba Lagi
+                  </button>
+                )}
+                {feedback.showTopUpShortcut && activeTab !== 'topup' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('topup');
+                      setFeedback(null);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-xl bg-cyan-600 px-3 py-1.5 text-[11px] font-black text-white shadow-sm transition hover:bg-cyan-700"
+                  >
+                    Top-Up <DiamondIcon tone="bright" className="h-3.5 w-3.5" /> Sekarang
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

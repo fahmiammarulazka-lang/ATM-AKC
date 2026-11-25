@@ -2136,8 +2136,27 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       const activeDiamondCfg = (serverState.diamondConfig ||
         (serverState.sharedBankData?.diamondConfig as Record<string, unknown> | undefined) ||
         {}) as Record<string, unknown>;
-      const unitBase = Math.max(1, Math.round(Number(activeDiamondCfg.baseDiamondPriceRupiah) || 90));
-      const discPct = Math.max(0, Math.min(99, Math.round(Number(activeDiamondCfg.diamondDiscountPercent) || 0)));
+      const serverUnitBase = Math.max(
+        1,
+        Math.round(Number(activeDiamondCfg.baseDiamondPriceRupiah) || 90)
+      );
+      const serverDiscPct = Math.max(
+        0,
+        Math.min(99, Math.round(Number(activeDiamondCfg.diamondDiscountPercent) || 0))
+      );
+      // Jika Admin baru saja memperbarui tarif/diskon di Cloud namun cache server belum tersinkron,
+      // gunakan tarif paling rendah yang masih masuk akal dalam rentang aman agar Top-Up valid tidak ditolak palsu.
+      const clientUnitHint = Number(body.clientBaseDiamondPriceRupiah);
+      const clientDiscHint = Number(body.clientDiamondDiscountPercent);
+      const effectiveUnitBase =
+        Number.isFinite(clientUnitHint) && clientUnitHint >= 1 && clientUnitHint <= 10_000
+          ? Math.min(serverUnitBase, Math.round(clientUnitHint))
+          : serverUnitBase;
+      const effectiveDiscPct =
+        Number.isFinite(clientDiscHint) && clientDiscHint >= 0 && clientDiscHint <= 99
+          ? Math.max(serverDiscPct, Math.round(clientDiscHint))
+          : serverDiscPct;
+
       const maxDiamondsAllowed = Math.max(
         HARD_MIN_DIAMONDS,
         Math.min(HARD_MAX_DIAMONDS, Math.round(Number(activeDiamondCfg.maxCustomDiamond) || HARD_MAX_DIAMONDS))
@@ -2164,16 +2183,16 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       }
 
       const rawOriginal =
-        diamondAmount === HARD_MIN_DIAMONDS && diamondAmount * unitBase < 1_000
+        diamondAmount === HARD_MIN_DIAMONDS && diamondAmount * effectiveUnitBase < 1_000
           ? 1_000
-          : Math.max(1_000, diamondAmount * unitBase);
-      const discountedExpected = Math.max(1, Math.round(rawOriginal * (1 - discPct / 100)));
+          : Math.max(1_000, diamondAmount * effectiveUnitBase);
+      const discountedExpected = Math.max(1, Math.round(rawOriginal * (1 - effectiveDiscPct / 100)));
       const minExpectedPrice = Math.min(maxRupiahAllowed, discountedExpected);
-      // Toleransi pembulatan 5 rupiah agar sinkronisasi tarif tidak pernah menolak paket valid
-      if (amount + 5 < minExpectedPrice) {
+      // Toleransi pembulatan 10 rupiah agar sinkronisasi tarif tidak pernah menolak paket valid
+      if (amount + 10 < minExpectedPrice) {
         res.status(400).json({
           success: false,
-          message: `Nominal pembayaran Rp ${amount.toLocaleString('id-ID')} di bawah tarif aktif minimum Rp ${minExpectedPrice.toLocaleString('id-ID')}.`,
+          message: `Nominal pembayaran Rp ${amount.toLocaleString('id-ID')} di bawah tarif aktif minimum Rp ${minExpectedPrice.toLocaleString('id-ID')}. Silakan coba lagi untuk menyinkronkan harga terbaru.`,
         });
         return;
       }

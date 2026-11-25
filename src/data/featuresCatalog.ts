@@ -3081,6 +3081,64 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v14-38-48',
+    version: 'v14.38.48',
+    releaseType: 'patch',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v14.38.48 (Format D — Perbaikan Bug Kritis): Perbaikan Unban Instan & Pembersihan Cache Cloud, Auto-Unban Banned Trial Real-Time, Isolasi Notifikasi Unban Khusus Perangkat Pemilik Akun, & Perbaikan Error Top-Up QRIS Nusantara',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 23:00 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 23:00 WIB',
+    description:
+      'Pembaruan perbaikan bug v14.38.48 (Format D dari v14.38.47 -> v14.38.48) memperbaiki tombol Unban & Mass Unban agar langsung membuka blokir secara instan di Laptop, Cloud, dan HP nasabah sembari memaksa pembersihan sisa cache ban lama, memastikan Banned Trial otomatis terbuka tepat saat timer mencapai 00:00:00 maupun ketika aplikasi dibuka kembali setelah waktu berakhir, mengisolasi penuh pop-up dan notifikasi lonceng Unban agar HANYA muncul pada perangkat yang sedang memegang akun tersebut, serta mengatasi error palsu "kesalahan jaringan" pada Top-Up QRIS Nusantara dengan sinkronisasi tarif otomatis, fallback QRIS EMVCo lokal, pesan alasan spesifik + tombol Coba Lagi, dan pencatatan lengkap ke Audit Ban serta Live Monitor.',
+    highlights: [
+      'Unban Instan & Paksa Bersihkan Cache Ban Lama (Anti-Rollback): Membuka blokir dari Panel Admin atau Studio Banned kini langsung memperbarui status aktif dan membersihkan seluruh field ban lama di Laptop, Cloud, dan HP nasabah tanpa tersangkut cache lama.',
+      'Auto-Unban Banned Trial Tepat Waktu (Aktif & Saat Aplikasi Ditutup): Begitu hitung mundur Banned Trial mencapai 00:00:00, akun langsung terbuka otomatis tanpa perlu refresh; jika HP sempat ditutup, sistem otomatis mendeteksi waktu berakhir dan langsung mengaktifkan akun kembali.',
+      'Isolasi Penuh Notifikasi Unban Khusus Perangkat Pemilik Akun: Pop-up "Kartu Anda Telah Dibuka" dan notifikasi lonceng Unban kini HANYA muncul di perangkat yang sedang login akun terkait—sama sekali tidak tampil pada nasabah lain maupun layar Admin.',
+      'Perbaikan Top-Up QRIS Nusantara & Pesan Error Spesifik: Sinkronisasi tarif Diamond otomatis antara klien dan server, fallback QRIS dinamis EMVCo (CRC16-CCITT) lokal otomatis saat server lambat/terganggu, alasan error validasi yang jelas lengkap dengan tombol Coba Lagi, serta pencatatan ke Audit Ban & Live Monitor.',
+    ],
+    changes: [
+      'Unban Instan & Paksa Bersihkan Cache Ban Lama (Anti-Rollback): Membuka blokir dari Panel Admin atau Studio Banned kini langsung memperbarui status aktif dan membersihkan seluruh field ban lama di Laptop, Cloud, dan HP nasabah tanpa tersangkut cache lama.',
+      'Auto-Unban Banned Trial Tepat Waktu (Aktif & Saat Aplikasi Ditutup): Begitu hitung mundur Banned Trial mencapai 00:00:00, akun langsung terbuka otomatis tanpa perlu refresh; jika HP sempat ditutup, sistem otomatis mendeteksi waktu berakhir dan langsung mengaktifkan akun kembali.',
+      'Isolasi Penuh Notifikasi Unban Khusus Perangkat Pemilik Akun: Pop-up "Kartu Anda Telah Dibuka" dan notifikasi lonceng Unban kini HANYA muncul di perangkat yang sedang login akun terkait—sama sekali tidak tampil pada nasabah lain maupun layar Admin.',
+      'Perbaikan Top-Up QRIS Nusantara & Pesan Error Spesifik: Sinkronisasi tarif Diamond otomatis antara klien dan server, fallback QRIS dinamis EMVCo (CRC16-CCITT) lokal otomatis saat server lambat/terganggu, alasan error validasi yang jelas lengkap dengan tombol Coba Lagi, serta pencatatan ke Audit Ban & Live Monitor.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-25T16:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
+    id: 'upd-v14-38-47',
+    version: 'v14.38.47',
+    releaseType: 'feature_and_bug',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v14.38.47 (Format S+D): Upgrade 80 Template Peringatan Berdesain Khusus & Kontrol Kunci Layar Pop-up Tengah (Bebas Blokir Panel Admin)',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 22:00 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 22:00 WIB',
+    description:
+      'Pembaruan v14.38.47 menerapkan kenaikan versi gabungan Format S + D (v14.37.46 -> v14.38.47): memperbaiki Pop-up Tengah dengan opsi eksplisit Kunci Total Layar (mengunci klik belakang, gulir halaman, dan tombol ESC) atau Tetap Bisa Klik Belakang (modal mengambang non-blocking), menjamin Pop-up Tengah tidak pernah menghalangi layar Panel Admin, serta meningkatkan Studio Peringatan menjadi 80 Template berdesain khas (25 preset lama yang ditingkatkan + 55 template baru) lengkap dengan 12 gaya kartu, 10 pola latar, 12 tema warna, 6 animasi, 28 ikon, stempel resmi Bank Nusantara, fitur Favorit, Live Preview interaktif, dan tombol Coba Tampilan Penuh yang tersinkron real-time antara Laptop & HP.',
+    highlights: [
+      'Kontrol Penguncian Pop-up Tengah (Kunci Total Layar vs Tetap Bisa Klik Belakang): Admin bebas memilih apakah Pop-up Tengah mengunci penuh klik belakang, gulir halaman, & tombol ESC nasabah atau tampil mengambang sehingga nasabah tetap bisa beraktivitas di belakangnya.',
+      'Perlindungan Layar Panel Admin: Pop-up Tengah yang dikirim ke nasabah tidak pernah lagi menutupi atau memblokir layar Panel Admin, sehingga Admin dapat mengelola & menguji peringatan dengan leluasa.',
+      'Upgrade 80 Template Peringatan Berdesain Khusus (25 Lama + 55 Baru): Tiap template memiliki gaya desain kartu (12 gaya), pola latar halus (10 pola), palet warna (12 tema), animasi masuk (6 animasi GPU), ikon bercahaya (28 ikon), kotak estimasi waktu & nomor referensi, serta stempel resmi BANK NUSANTARA • RESMI.',
+      'Studio Peringatan Pro dengan Pencarian, 8 Kategori, Favorit, Kustomisasi Manual & Uji Tampilan Penuh: Dilengkapi kartu preview visual, tombol Favorit tersimpan, Live Preview 100% identik layar nasabah, tombol Coba Tampilan Penuh, dan sinkronisasi real-time penuh Laptop <-> Cloud <-> HP.',
+    ],
+    changes: [
+      'Kontrol Penguncian Pop-up Tengah (Kunci Total Layar vs Tetap Bisa Klik Belakang): Admin bebas memilih apakah Pop-up Tengah mengunci penuh klik belakang, gulir halaman, & tombol ESC nasabah atau tampil mengambang sehingga nasabah tetap bisa beraktivitas di belakangnya.',
+      'Perlindungan Layar Panel Admin: Pop-up Tengah yang dikirim ke nasabah tidak pernah lagi menutupi atau memblokir layar Panel Admin, sehingga Admin dapat mengelola & menguji peringatan dengan leluasa.',
+      'Upgrade 80 Template Peringatan Berdesain Khusus (25 Lama + 55 Baru): Tiap template memiliki gaya desain kartu (12 gaya), pola latar halus (10 pola), palet warna (12 tema), animasi masuk (6 animasi GPU), ikon bercahaya (28 ikon), kotak estimasi waktu & nomor referensi, serta stempel resmi BANK NUSANTARA • RESMI.',
+      'Studio Peringatan Pro dengan Pencarian, 8 Kategori, Favorit, Kustomisasi Manual & Uji Tampilan Penuh: Dilengkapi kartu preview visual, tombol Favorit tersimpan, Live Preview 100% identik layar nasabah, tombol Coba Tampilan Penuh, dan sinkronisasi real-time penuh Laptop <-> Cloud <-> HP.',
+    ],
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-25T15:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v14-37-46',
     version: 'v14.37.46',
     releaseType: 'patch',
@@ -3103,8 +3161,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Penguncian Otoritas Tier Kartu di Level Sistem + Deteksi Otomatis: Fungsi ganti kartu langsung di level kode sistem dikunci mati; segala percobaan memicu penggantian jenis kartu di luar Panel Admin otomatis ditolak, dicatat ke Live Monitor Aktivitas, dan memicu peringatan Deteksi Otomatis ke Kartu Tier ADMIN.',
       'Jalur Resmi & Menu Login Tetap Utuh: Perubahan jenis/tier kartu hanya bisa dilakukan melalui Panel Admin resmi atau persetujuan Admin atas permohonan Upgrade Kartu; menu Ganti Akun di Navbar atas (pindah login pakai PIN Kartu) tetap aktif normal dan teks Panduan Informasi telah diperbarui.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-25T14:00:00.000Z',
     isAutoDetected: true,

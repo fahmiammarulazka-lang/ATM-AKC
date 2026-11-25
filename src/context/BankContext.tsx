@@ -2638,6 +2638,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const activeCloudEmailRef = useRef<string | null>(null);
   activeCloudEmailRef.current = activeCloudEmail;
   const [cloudUserStatus, setCloudUserStatus] = useState<CloudUserRecord | null>(null);
+  const cloudUserStatusRef = useRef<CloudUserRecord | null>(null);
+  cloudUserStatusRef.current = cloudUserStatus;
   const [lobbyCreatedGuestAccountId, setLobbyCreatedGuestAccountId] = useState<string | null>(null);
   const [lobbyCreatedRegularAccountId, setLobbyCreatedRegularAccountId] = useState<string | null>(
     null
@@ -3705,6 +3707,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       rewardPoints: Math.max(0, Math.floor(Number(a.rewardPoints) || 0)),
       extraFamilySlots: Math.max(0, Math.floor(Number(a.extraFamilySlots) || 0)),
       accountUpdatedAtMs: Number(a.accountUpdatedAtMs) || 0,
+      unbannedAtMs: Number(a.unbannedAtMs) || 0,
       status:
         a.status === 'banned' || a.cardStatus === 'banned' || a.banInfo?.isBanned
           ? ('banned' as const)
@@ -3730,6 +3733,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!existing) return incoming;
       const existingTs = Number(existing.accountUpdatedAtMs) || 0;
       const incomingTs = Number(incoming.accountUpdatedAtMs) || 0;
+      const existingUnbanTs = Number(existing.unbannedAtMs) || 0;
+      const incomingUnbanTs = Number(incoming.unbannedAtMs) || 0;
+      const existingIsBanned =
+        existing.status === 'banned' ||
+        existing.cardStatus === 'banned' ||
+        Boolean(existing.banInfo?.isBanned);
+      const incomingIsBanned =
+        incoming.status === 'banned' ||
+        incoming.cardStatus === 'banned' ||
+        Boolean(incoming.banInfo?.isBanned);
+
+      // Proteksi Anti-Rollback Unban: jangan biarkan cache ban lama menimpa akun yang baru dibuka blokirnya
+      if (!existingIsBanned && incomingIsBanned && existingUnbanTs > 0 && existingUnbanTs >= incomingTs) {
+        return existing;
+      }
+      if (!incomingIsBanned && existingIsBanned && incomingUnbanTs > 0 && incomingUnbanTs >= existingTs) {
+        return incoming;
+      }
+
       if (existingTs > incomingTs) {
         return existing;
       }
@@ -3744,6 +3766,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return {
         ...incoming,
         cardStatus: preferActiveCardStatus,
+        unbannedAtMs: Math.max(existingUnbanTs, incomingUnbanTs) || undefined,
         tutorialApprovedByAdmin:
           Boolean(existing.tutorialApprovedByAdmin) || Boolean(incoming.tutorialApprovedByAdmin),
         hasCompletedTutorial:
@@ -5243,11 +5266,62 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     contextUid?: string,
     contextEmail?: string
   ) => {
+    const nowMs = Date.now();
+    const cleanTargetEmail = normalizeEmailKey(contextEmail || uData.email || '');
+    const uDataUpdatedMs =
+      Number(uData.updatedAtMs) ||
+      (uData.updatedAt ? Date.parse(String(uData.updatedAt)) || 0 : 0);
+
+    // Cek apakah status ban di Cloud sebenarnya sudah kedaluwarsa (Trial habis saat HP ditutup)
+    // atau sudah dikalahkan oleh Unban yang lebih baru di rekening lokal/server
+    const cloudBanExpiresMs = uData.banExpiresAt ? Date.parse(String(uData.banExpiresAt)) : NaN;
+    const isCloudTrialAlreadyExpired =
+      uData.status === 'banned' && Number.isFinite(cloudBanExpiresMs) && nowMs >= cloudBanExpiresMs;
+
+    const matchingLocalUnbannedAcc = accountsRef.current.find((acc) => {
+      const accGoogle = acc.googleEmail ? normalizeEmailKey(acc.googleEmail) : '';
+      const accEmail = acc.email ? normalizeEmailKey(acc.email) : '';
+      const isLinked =
+        (contextUid && acc.firebaseUid === contextUid) ||
+        (uData.lastAccountId && acc.id === uData.lastAccountId) ||
+        (cleanTargetEmail && (accGoogle === cleanTargetEmail || accEmail === cleanTargetEmail));
+      return (
+        Boolean(isLinked) &&
+        acc.status === 'active' &&
+        acc.cardStatus === 'active' &&
+        !acc.banInfo?.isBanned &&
+        Number(acc.unbannedAtMs || 0) > 0 &&
+        Number(acc.unbannedAtMs || 0) >= uDataUpdatedMs
+      );
+    });
+
+    const forceCleanStaleCloudBan = Boolean(
+      uData.status === 'banned' && (isCloudTrialAlreadyExpired || matchingLocalUnbannedAcc)
+    );
+    const effectiveCloudStatus: 'active' | 'banned' = forceCleanStaleCloudBan
+      ? 'active'
+      : uData.status === 'banned'
+      ? 'banned'
+      : 'active';
+
     const normalizedSavedAccounts = toArraySafe<BankAccount>(uData.savedAccounts);
     const normalizedUserRecord: CloudUserRecord = {
       ...uData,
+      status: effectiveCloudStatus,
+      ...(forceCleanStaleCloudBan
+        ? {
+            banReason: '',
+            bannedAt: '',
+            banExpiresAt: '',
+            banDurationLabel: '',
+            banCustomConfig: undefined,
+            updatedAt: new Date(nowMs).toISOString(),
+            updatedAtMs: nowMs,
+          }
+        : {}),
       ...(normalizedSavedAccounts.length > 0 ? { savedAccounts: normalizedSavedAccounts } : {}),
     };
+    cloudUserStatusRef.current = normalizedUserRecord;
     setCloudUserStatus(normalizedUserRecord);
 
     // Dual-Vault Recovery: Jika dokumen profil email/UID memiliki savedAccounts, gabungkan langsung ke daftar accounts agar tidak pernah hilang
@@ -5274,20 +5348,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Isolasi Multi-Perangkat: JANGAN pernah memaksa perpindahan currentAccountId dari lastAccountId perangkat lain!
 
-    if (uData.status === 'banned') {
+    if (effectiveCloudStatus === 'banned') {
       setActiveGiftModal(null);
       setIsMintolModalOpen(false);
       setIsBugReportModalOpen(false);
       setIsGlobalChatModalOpen(false);
     }
 
-    const cleanTargetEmail = normalizeEmailKey(contextEmail || uData.email || '');
     setAccounts((prev) => {
       const baseList =
         normalizedSavedAccounts.length > 0
           ? unionMergeAccountsList(prev, [normalizedSavedAccounts], deletedAccountIdsRef.current)
           : prev;
-      return baseList.map((acc) => {
+      const updatedList = baseList.map((acc) => {
         const accGoogle = acc.googleEmail ? normalizeEmailKey(acc.googleEmail) : '';
         const accEmail = acc.email ? normalizeEmailKey(acc.email) : '';
         const isLinked =
@@ -5301,27 +5374,34 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ? uData.failedPinAttempts
             : acc.failedPinAttempts || 0;
 
-        if (uData.status === 'banned') {
+        if (effectiveCloudStatus === 'banned') {
           const resolvedCustomCfg = uData.banCustomConfig || acc.banInfo?.customConfig;
           const rawReason =
             uData.banReason !== undefined ? uData.banReason : acc.banReason ?? acc.banInfo?.reason ?? '';
+          const resolvedExpiresAt = uData.banExpiresAt || acc.banInfo?.expiresAt || acc.banInfo?.bannedUntil;
+          const resolvedDurationType: 'custom' | 'permanent' = resolvedExpiresAt
+            ? 'custom'
+            : acc.banInfo?.durationType || 'permanent';
           return {
             ...acc,
             firebaseUid: acc.firebaseUid || contextUid,
-            status: 'banned',
+            status: 'banned' as const,
             banReason: rawReason,
-            cardStatus: 'banned',
+            cardStatus: 'banned' as const,
             failedPinAttempts: nextFailedAttempts,
             banInfo: {
               ...(acc.banInfo || {
-                durationType: uData.banExpiresAt ? 'custom' : 'permanent',
+                durationType: resolvedDurationType,
                 durationLabel: uData.banDurationLabel || 'PERMANEN',
                 bannedAt: uData.bannedAt || new Date().toISOString(),
-                expiresAt: uData.banExpiresAt,
+                expiresAt: resolvedExpiresAt,
+                bannedUntil: resolvedExpiresAt,
               }),
               isBanned: true,
+              durationType: resolvedDurationType,
               reason: rawReason,
-              expiresAt: uData.banExpiresAt ?? acc.banInfo?.expiresAt,
+              expiresAt: resolvedExpiresAt,
+              bannedUntil: resolvedExpiresAt,
               durationLabel: uData.banDurationLabel || acc.banInfo?.durationLabel || 'PERMANEN',
               appealStatus: uData.appealStatus || acc.banInfo?.appealStatus || 'none',
               appealNote: uData.appealNote ?? acc.banInfo?.appealNote,
@@ -5333,15 +5413,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             },
           };
         }
-        if (acc.status === 'banned' || acc.cardStatus === 'banned') {
+        if (acc.status === 'banned' || acc.cardStatus === 'banned' || acc.banInfo?.isBanned) {
+          const stamp = Math.max(nowMs, uDataUpdatedMs);
           return {
             ...acc,
             firebaseUid: acc.firebaseUid || contextUid,
-            status: 'active',
+            status: 'active' as const,
             banReason: '',
-            cardStatus: 'active',
+            cardStatus: 'active' as const,
             failedPinAttempts: nextFailedAttempts,
             banInfo: undefined,
+            scheduledBanConfig: undefined,
+            isDebtAutoBanned: false,
+            accountUpdatedAtMs: Math.max(acc.accountUpdatedAtMs || 0, stamp),
+            unbannedAtMs: Math.max(acc.unbannedAtMs || 0, stamp),
           };
         }
         return {
@@ -5353,6 +5438,29 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             uData.loginLockReason !== undefined ? uData.loginLockReason : acc.loginLockReason,
         };
       });
+      accountsRef.current = updatedList;
+      latestServerAccountsRef.current = updatedList;
+
+      if (forceCleanStaleCloudBan) {
+        void syncCloudUserProfile(
+          {
+            uid: contextUid || uData.uid,
+            email: cleanTargetEmail || uData.email,
+            fallbackEmail: uData.email,
+          },
+          {
+            status: 'active',
+            banReason: '',
+            bannedAt: '',
+            banExpiresAt: '',
+            banDurationLabel: '',
+            banCustomConfig: null,
+            failedPinAttempts: 0,
+          },
+          updatedList
+        );
+      }
+      return updatedList;
     });
   };
 
@@ -8877,7 +8985,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // ================= REAL-TIME BAN LOCK STATE & UNIFIED APPEALS (WA / EMAIL / IN-APP) =================
   const computeActiveBanLockState = () => {
     const targetAcc = linkedUserAccount || currentAccount;
-    const cloudBanned = cloudUserStatus?.status === 'banned';
+    const nowMs = Date.now();
+    const cloudUpdatedMs =
+      Number(cloudUserStatus?.updatedAtMs) ||
+      (cloudUserStatus?.updatedAt ? Date.parse(String(cloudUserStatus.updatedAt)) || 0 : 0);
+
+    // Jika rekening lokal sudah resmi dibuka blokirnya lebih baru dari cache cloudUserStatus, jangan biarkan cache lama mengunci layar!
+    const targetUnbannedNewer = Boolean(
+      targetAcc &&
+        targetAcc.status === 'active' &&
+        targetAcc.cardStatus === 'active' &&
+        !targetAcc.banInfo?.isBanned &&
+        Number(targetAcc.unbannedAtMs || 0) > 0 &&
+        Number(targetAcc.unbannedAtMs || 0) >= cloudUpdatedMs
+    );
+
+    const rawCloudBanned = cloudUserStatus?.status === 'banned' && !targetUnbannedNewer;
     const accountBanned =
       Boolean(targetAcc) &&
       (targetAcc?.status === 'banned' ||
@@ -8889,7 +9012,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...(banSupportConfig.defaultTemplateConfig || {}),
     };
 
-    const isBanned = Boolean(cloudBanned || accountBanned);
+    const rawExpiresAt =
+      targetAcc?.banInfo?.expiresAt ||
+      targetAcc?.banInfo?.bannedUntil ||
+      targetAcc?.banInfo?.customConfig?.expiresAt ||
+      (rawCloudBanned ? cloudUserStatus?.banExpiresAt : undefined);
+
+    const parsedExpiresMs = rawExpiresAt ? Date.parse(String(rawExpiresAt)) : NaN;
+    const isTrialAlreadyExpired =
+      Boolean(rawExpiresAt) && Number.isFinite(parsedExpiresMs) && nowMs >= parsedExpiresMs;
+
+    const isBanned = Boolean((rawCloudBanned || accountBanned) && !isTrialAlreadyExpired);
     if (!isBanned) {
       return {
         isBanned: false,
@@ -8904,6 +9037,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       ...baseTemplate,
       ...(cloudUserStatus?.banCustomConfig || {}),
       ...(targetAcc?.banInfo?.customConfig || {}),
+      ...(rawExpiresAt ? { durationType: 'custom' as const, expiresAt: rawExpiresAt } : {}),
     };
 
     const rawReason =
@@ -8942,8 +9076,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         cloudUserStatus?.banDurationLabel ||
         customCfg.durationLabel ||
         'Diblokir Real-Time',
-      expiresAt:
-        targetAcc?.banInfo?.expiresAt || cloudUserStatus?.banExpiresAt,
+      expiresAt: rawExpiresAt,
       appealStatus,
       appealNote: targetAcc?.banInfo?.appealNote || cloudUserStatus?.appealNote,
       appealCategory:
@@ -9325,9 +9458,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => window.clearInterval(timer);
   }, []);
 
-  const activeWebsitePopups = websitePopups.filter(
-    (p) => !p.dismissed && !dismissedPopupIds.includes(p.id)
-  );
+  // Isolasi ketat Pop-up Unban: HANYA tampil di perangkat yang sedang login memegang akun tersebut (tidak ke semua nasabah!)
+  const activeWebsitePopups = websitePopups.filter((p) => {
+    if (p.dismissed || dismissedPopupIds.includes(p.id)) return false;
+    if (p.type === 'unban' || p.privateAccountOnly) {
+      if (!currentAccount) return false;
+      const matchId = Boolean(p.accountId && currentAccount.id === p.accountId);
+      const matchNumber = Boolean(
+        p.accountNumber && currentAccount.accountNumber === p.accountNumber
+      );
+      return matchId || matchNumber;
+    }
+    return true;
+  });
 
   const dismissWebsitePopup = (id: string) => {
     setDismissedPopupIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
@@ -9785,6 +9928,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const handleIncomingPopup = (popup: WebsiteSystemPopupNotification, triggerAlert = true) => {
       if (!popup || !popup.id) return;
+      const isPrivateUnban = popup.type === 'unban' || Boolean(popup.privateAccountOnly);
+      if (isPrivateUnban) {
+        const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+        const isRecipientDevice = Boolean(
+          activeAcc &&
+            ((popup.accountId && activeAcc.id === popup.accountId) ||
+              (popup.accountNumber && activeAcc.accountNumber === popup.accountNumber))
+        );
+        if (!isRecipientDevice) {
+          seenPopupIdsRef.current.add(popup.id);
+          return;
+        }
+      }
       const isAlreadySeen = seenPopupIdsRef.current.has(popup.id);
       seenPopupIdsRef.current.add(popup.id);
 
@@ -10157,6 +10313,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           incomingAlerts.forEach((incomingAlert) => {
             if (!incomingAlert || !incomingAlert.id) return;
             if (isInitial) {
+              seenPushIdsRef.current.add(incomingAlert.id);
+              return;
+            }
+            // Isolasi notifikasi privat (seperti Unban): jangan tampilkan di perangkat yang tidak memegang akun target
+            if (
+              incomingAlert.privateAccountOnly &&
+              incomingAlert.accountId &&
+              incomingAlert.accountId !== currentAccountIdRef.current
+            ) {
               seenPushIdsRef.current.add(incomingAlert.id);
               return;
             }
@@ -10689,6 +10854,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const incomingAlert = msg.payload.alert as AppNotification;
               if (incomingAlert.id && !seenPushIdsRef.current.has(incomingAlert.id)) {
                 seenPushIdsRef.current.add(incomingAlert.id);
+                // Isolasi notifikasi privat (contoh: Unban): hanya masuk ke perangkat pemegang akun tersebut
+                if (
+                  incomingAlert.privateAccountOnly &&
+                  incomingAlert.accountId &&
+                  incomingAlert.accountId !== currentAccountIdRef.current
+                ) {
+                  return;
+                }
                 const resolvedMeta = inferNotificationMeta(incomingAlert.title, incomingAlert.message, {
                   category: incomingAlert.category,
                   targetView: incomingAlert.targetView,
@@ -11485,6 +11658,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isPermanent: Boolean(input.isPermanent),
       showPermanentLabel: Boolean(input.showPermanentLabel),
       dismissible: input.dismissible !== false,
+      lockScreen:
+        input.lockScreen !== undefined
+          ? Boolean(input.lockScreen)
+          : input.dismissible === false,
+      templateId: input.templateId || undefined,
+      visualStyle: input.visualStyle || 'executive_glass',
+      bgPattern: input.bgPattern || 'radial_spotlight',
+      animationStyle: input.animationStyle || 'smooth_zoom',
+      badgeText: input.badgeText ? String(input.badgeText).trim() : undefined,
+      estimatedDurationText: input.estimatedDurationText
+        ? String(input.estimatedDurationText).trim()
+        : undefined,
+      referenceCode: input.referenceCode ? String(input.referenceCode).trim() : undefined,
+      ctaLabel: input.ctaLabel ? String(input.ctaLabel).trim() : undefined,
+      showOfficialStamp: input.showOfficialStamp !== false,
       targetMode: input.targetMode || 'all',
       targetTiers: Array.isArray(input.targetTiers) ? input.targetTiers : [],
       targetAccountIds: Array.isArray(input.targetAccountIds) ? input.targetAccountIds : [],
@@ -11653,10 +11841,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const visibleNotifications = React.useMemo(
     () =>
-      isCurrentAccountAdminTierRecipient
-        ? notifications
-        : notifications.filter((n) => !n.isAdminTierOnly),
-    [notifications, isCurrentAccountAdminTierRecipient]
+      notifications.filter((n) => {
+        if (n.isAdminTierOnly && !isCurrentAccountAdminTierRecipient) return false;
+        // Notifikasi privat (seperti Unban): mutlak hanya tampil di lonceng pemegang akun tersebut
+        if (n.privateAccountOnly && n.accountId) {
+          return Boolean(currentAccount && currentAccount.id === n.accountId);
+        }
+        return true;
+      }),
+    [notifications, isCurrentAccountAdminTierRecipient, currentAccount]
   );
 
   const adminTierNotifications = React.useMemo(
@@ -11905,6 +12098,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       accountId?: string;
       referenceId?: string;
       skipServerBroadcast?: boolean;
+      privateAccountOnly?: boolean;
     }
   ) => {
     const resolvedMeta = inferNotificationMeta(title, message, meta);
@@ -11915,6 +12109,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const notifId = `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     seenPushIdsRef.current.add(notifId);
 
+    const isPrivateForOtherDevice = Boolean(
+      meta?.privateAccountOnly &&
+        meta?.accountId &&
+        currentAccountIdRef.current !== meta.accountId
+    );
+
     const newNotif: AppNotification = {
       id: notifId,
       title,
@@ -11923,15 +12123,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       category: resolvedMeta.category,
       targetView: resolvedMeta.targetView,
       targetDashboardTab: resolvedMeta.targetDashboardTab,
-      accountId: resolvedMeta.accountId,
+      accountId: resolvedMeta.accountId || meta?.accountId,
       referenceId: resolvedMeta.referenceId,
+      privateAccountOnly: meta?.privateAccountOnly,
       timestamp: new Date().toISOString(),
       read: false,
     };
-    setNotifications((prev) => [newNotif, ...prev].slice(0, 180));
 
-    // Also show top mobile push banner & background Service Worker / native browser notification!
-    triggerMobileAndNativeNotification(title, message, type, resolvedMeta);
+    // Jika notifikasi privat (seperti Unban) ditujukan ke akun lain (misal Admin meng-unban nasabah),
+    // JANGAN simpan ke lonceng atau bunyikan push banner di perangkat Admin; kirim ke perangkat target via WS saja!
+    if (!isPrivateForOtherDevice) {
+      setNotifications((prev) => [newNotif, ...prev].slice(0, 180));
+      triggerMobileAndNativeNotification(title, message, type, resolvedMeta);
+    }
 
     // Broadcast real-time push alert across WebSocket server if connected
     if (!meta?.skipServerBroadcast) {
@@ -16362,19 +16566,56 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         flushMasterStateToCloud({ accounts: activatedAccounts });
       }
 
-      // 2. Cek apakah ada Banned Trial / Sementara (termasuk Auto-Ban Hutang 1 Hari) yang waktunya sudah habis
+      // 2. Cek apakah ada Banned Trial / Sementara (termasuk Auto-Ban Hutang 1 Hari & cache cloudUserStatus) yang waktunya sudah habis
       const latestAccounts = readyScheduledList.length > 0 ? accountsRef.current : currentAccounts;
-      const expiredList = latestAccounts.filter(
-        (acc) =>
-          (acc.cardStatus === 'banned' || acc.status === 'banned') &&
-          acc.banInfo?.durationType === 'custom' &&
-          acc.banInfo?.expiresAt &&
-          now >= new Date(acc.banInfo.expiresAt).getTime()
+      const liveCloudStatus = cloudUserStatusRef.current;
+
+      const getAccBanExpiryMs = (acc: BankAccount): number | null => {
+        const rawExp =
+          acc.banInfo?.expiresAt ||
+          acc.banInfo?.bannedUntil ||
+          acc.banInfo?.customConfig?.expiresAt;
+        if (rawExp) {
+          const parsed = Date.parse(String(rawExp));
+          if (Number.isFinite(parsed)) return parsed;
+        }
+        // Cek juga jika profil cloudUserStatus milik akun ini memiliki banExpiresAt
+        if (liveCloudStatus?.status === 'banned' && liveCloudStatus.banExpiresAt) {
+          const accGoogle = acc.googleEmail ? normalizeEmailKey(acc.googleEmail) : '';
+          const accEmail = acc.email ? normalizeEmailKey(acc.email) : '';
+          const cloudEm = liveCloudStatus.email ? normalizeEmailKey(liveCloudStatus.email) : '';
+          const isSameCloudUser =
+            (acc.firebaseUid && liveCloudStatus.uid && acc.firebaseUid === liveCloudStatus.uid) ||
+            (liveCloudStatus.lastAccountId && liveCloudStatus.lastAccountId === acc.id) ||
+            (cloudEm && (accGoogle === cloudEm || accEmail === cloudEm));
+          if (isSameCloudUser) {
+            const parsedCloud = Date.parse(String(liveCloudStatus.banExpiresAt));
+            if (Number.isFinite(parsedCloud)) return parsedCloud;
+          }
+        }
+        return null;
+      };
+
+      const expiredList = latestAccounts.filter((acc) => {
+        const isAccBanned =
+          acc.cardStatus === 'banned' || acc.status === 'banned' || Boolean(acc.banInfo?.isBanned);
+        if (!isAccBanned) return false;
+        const expMs = getAccBanExpiryMs(acc);
+        return expMs !== null && now >= expMs;
+      });
+
+      // Kasus khusus: cloudUserStatus masih 'banned' dengan banExpiresAt sudah habis, walau rekening belum ada di expiredList
+      const cloudStandaloneExpired = Boolean(
+        liveCloudStatus &&
+          liveCloudStatus.status === 'banned' &&
+          liveCloudStatus.banExpiresAt &&
+          Number.isFinite(Date.parse(String(liveCloudStatus.banExpiresAt))) &&
+          now >= Date.parse(String(liveCloudStatus.banExpiresAt))
       );
 
       let workingListAfterUnban = latestAccounts;
 
-      if (expiredList.length > 0) {
+      if (expiredList.length > 0 || cloudStandaloneExpired) {
         const defaultTermHours = Math.max(1, sultanEmpireConfig.debtDefaultTermHours || 24);
         const renewedDueIso = new Date(now + defaultTermHours * 3600 * 1000).toISOString();
         const nowIsoStr = new Date(now).toISOString();
@@ -16401,8 +16642,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             banReason: '',
             cardStatus: 'active' as const,
             banInfo: undefined,
+            scheduledBanConfig: undefined,
             failedPinAttempts: 0,
             isDebtAutoBanned: false,
+            accountUpdatedAtMs: now,
+            unbannedAtMs: now,
             ...(stillHasDebt
               ? {
                   debtDueAt: renewedDueIso,
@@ -16412,7 +16656,64 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           };
         });
         workingListAfterUnban = nextAccounts;
+        // Perbarui ref secara sinkron sebelum sinkronisasi Cloud agar tidak mengunggah data ban lama!
+        accountsRef.current = nextAccounts;
+        latestServerAccountsRef.current = nextAccounts;
         setAccounts(nextAccounts);
+
+        const shouldClearLocalCloudStatus =
+          cloudStandaloneExpired ||
+          Boolean(
+            liveCloudStatus &&
+              expiredList.some((exp) => {
+                const cloudEm = liveCloudStatus.email ? normalizeEmailKey(liveCloudStatus.email) : '';
+                const expGoogle = exp.googleEmail ? normalizeEmailKey(exp.googleEmail) : '';
+                const expEmail = exp.email ? normalizeEmailKey(exp.email) : '';
+                return (
+                  (exp.firebaseUid && liveCloudStatus.uid === exp.firebaseUid) ||
+                  (liveCloudStatus.lastAccountId && liveCloudStatus.lastAccountId === exp.id) ||
+                  (cloudEm && (expGoogle === cloudEm || expEmail === cloudEm)) ||
+                  exp.id === currentAccountIdRef.current
+                );
+              })
+          );
+
+        if (shouldClearLocalCloudStatus && liveCloudStatus) {
+          const cleanedCloud: CloudUserRecord = {
+            ...liveCloudStatus,
+            status: 'active',
+            banReason: '',
+            bannedAt: '',
+            banExpiresAt: '',
+            banDurationLabel: '',
+            banCustomConfig: undefined,
+            failedPinAttempts: 0,
+            updatedAt: nowIsoStr,
+            updatedAtMs: now,
+          };
+          cloudUserStatusRef.current = cleanedCloud;
+          setCloudUserStatus(cleanedCloud);
+          if (cloudStandaloneExpired && expiredList.length === 0) {
+            void syncCloudUserProfile(
+              {
+                uid: liveCloudStatus.uid,
+                email: liveCloudStatus.email,
+                fallbackEmail: liveCloudStatus.email,
+              },
+              {
+                status: 'active',
+                banReason: '',
+                bannedAt: '',
+                banExpiresAt: '',
+                banDurationLabel: '',
+                banCustomConfig: null,
+                failedPinAttempts: 0,
+              },
+              nextAccounts
+            );
+          }
+        }
+
         expiredList.forEach((exp) => {
           void syncCloudUserProfile(
             {
@@ -16423,28 +16724,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             {
               status: 'active',
               banReason: '',
+              bannedAt: '',
               banExpiresAt: '',
               banDurationLabel: '',
+              banCustomConfig: null,
               failedPinAttempts: 0,
-            }
+            },
+            nextAccounts
           );
-          if (
-            cloudUserStatus &&
-            ((exp.firebaseUid && cloudUserStatus.uid === exp.firebaseUid) ||
-              (exp.googleEmail && normalizeEmailKey(exp.googleEmail) === normalizeEmailKey(cloudUserStatus.email || '')))
-          ) {
-            setCloudUserStatus((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    status: 'active',
-                    banReason: '',
-                    banExpiresAt: '',
-                    banDurationLabel: '',
-                  }
-                : prev
-            );
-          }
           appendBanAuditLog({
             action: 'auto_unban',
             targetAccountId: exp.id,
@@ -16457,14 +16744,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               : 'Waktu Banned Trial selesai — Otomatis Unban Real-Time',
             caseId: exp.banInfo?.customConfig?.caseId,
           });
+          recordLiveActivity({
+            actorRole: 'auto_detector',
+            category: 'auth_security',
+            accountId: exp.id,
+            accountName: exp.fullName,
+            accountNumber: exp.accountNumber,
+            cardTier: exp.cardTier,
+            actionTitle: `Auto-Unban Trial Selesai: ${exp.fullName}`,
+            description: `Durasi Banned Trial (${exp.banInfo?.durationLabel || 'Sementara'}) telah berakhir. Blokir dibuka otomatis & cache Cloud dibersihkan.`,
+          });
         });
-        flushMasterStateToCloud({ accounts: nextAccounts });
 
         const newPopups: WebsiteSystemPopupNotification[] = expiredList.map((unbannedAcc) => {
           const prevDurationLabel = unbannedAcc.banInfo?.durationLabel || '1 Hari (24 Jam)';
           const hasRemainingDebt = (unbannedAcc.debtAmount || 0) > 0;
           return {
-            id: `sys-unban-auto-${Date.now()}-${unbannedAcc.id}`,
+            id: `sys-unban-auto-${now}-${unbannedAcc.id}`,
             type: 'unban',
             title: '🔓 KARTU ANDA TELAH TERBUKA KEMBALI!',
             subtitle: 'NOTIFIKASI RESMI DARI SISTEM WEBSITE BANK NUSANTARA',
@@ -16476,27 +16772,51 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             accountId: unbannedAcc.id,
             accountName: unbannedAcc.fullName,
             accountNumber: unbannedAcc.accountNumber,
+            targetUid: unbannedAcc.firebaseUid,
+            targetEmail: unbannedAcc.googleEmail || unbannedAcc.email,
+            privateAccountOnly: true,
             cardTier: unbannedAcc.cardTier,
-            timestamp: new Date().toISOString(),
+            timestamp: nowIsoStr,
             dismissed: false,
           };
         });
 
-        setWebsitePopups((prev) => [...newPopups, ...prev]);
+        if (newPopups.length > 0) {
+          setWebsitePopups((prev) => {
+            const merged = [...newPopups, ...prev].slice(0, 60);
+            flushMasterStateToCloud({ accounts: nextAccounts, websitePopups: merged });
+            return merged;
+          });
+        } else {
+          flushMasterStateToCloud({ accounts: nextAccounts });
+        }
 
+        // Isolasi notifikasi Unban: hanya berbunyi & tampil pada perangkat yang sedang memegang akun tersebut!
+        const isCurrentDeviceAffected = expiredList.some(
+          (exp) => exp.id === currentAccountIdRef.current
+        );
         expiredList.forEach((unbannedAcc) => {
           const prevDurationLabel = unbannedAcc.banInfo?.durationLabel || 'Sementara';
           addNotification(
             '🔓 Sistem Website: Kartu Anda Telah Terbuka!',
             `Durasi Banned (${prevDurationLabel}) untuk kartu ${unbannedAcc.fullName} (${unbannedAcc.accountNumber}) telah selesai. Kartu Anda kini kembali TERBUKA & AKTIF!`,
-            'success'
+            'success',
+            {
+              category: 'keamanan',
+              targetView: 'dashboard',
+              targetDashboardTab: 'ringkasan',
+              accountId: unbannedAcc.id,
+              privateAccountOnly: true,
+            }
           );
         });
 
-        try {
-          confetti({ particleCount: 75, spread: 65, origin: { y: 0.6 } });
-        } catch { /* empty */ }
-        playAtmSound('success');
+        if (isCurrentDeviceAffected) {
+          try {
+            confetti({ particleCount: 75, spread: 65, origin: { y: 0.6 } });
+          } catch { /* empty */ }
+          playAtmSound('success');
+        }
       }
     };
 
@@ -16602,6 +16922,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         banReason: cleanReason,
         cardStatus: 'banned' as const,
         scheduledBanConfig: undefined,
+        accountUpdatedAtMs: now,
         banInfo: {
           isBanned: true,
           reason: cleanReason || undefined,
@@ -16610,6 +16931,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           durationLabel: computed.durationLabel,
           bannedAt: bannedAtVal,
           expiresAt,
+          bannedUntil: expiresAt,
           appealStatus: input.isUpdateExisting ? acc.banInfo?.appealStatus || 'none' : 'none',
           appealNote: input.isUpdateExisting ? acc.banInfo?.appealNote : undefined,
           appealCategory: input.isUpdateExisting ? acc.banInfo?.appealCategory : undefined,
@@ -16623,6 +16945,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     });
 
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
     flushMasterStateToCloud({ accounts: nextAccounts });
 
@@ -16647,11 +16971,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           {
             status: 'banned',
             banReason: cleanReason,
+            bannedAt: updated?.banInfo?.bannedAt || nowIso,
             banExpiresAt: expiresAt || '',
             banDurationLabel: computed.durationLabel,
             banCustomConfig: updated?.banInfo?.customConfig,
             ...(input.isUpdateExisting ? {} : { appealStatus: 'none', appealCount: 0 }),
-          }
+          },
+          nextAccounts
         );
 
         appendBanAuditLog({
@@ -17218,13 +17544,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const adminUnbanCard = (accountId: string) => {
-    const target = accounts.find((a) => a.id === accountId);
+    const currentPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const target = currentPool.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Kartu nasabah tidak ditemukan!' };
 
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const prevDurationLabel = target.banInfo?.durationLabel || 'Banned';
     const prevCaseId = target.banInfo?.customConfig?.caseId;
 
-    const nextAccounts: BankAccount[] = accounts.map((acc) =>
+    const nextAccounts: BankAccount[] = currentPool.map((acc) =>
       acc.id === accountId
         ? {
             ...acc,
@@ -17234,13 +17563,58 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             banInfo: undefined,
             scheduledBanConfig: undefined,
             failedPinAttempts: 0,
+            isDebtAutoBanned: false,
+            accountUpdatedAtMs: nowMs,
+            unbannedAtMs: nowMs,
           }
         : acc
     );
+    // Perbarui ref secara sinkron agar sync Cloud & merge lintas perangkat langsung membawa status aktif terbaru
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
 
+    // Bersihkan juga state cloudUserStatus lokal jika cocok dengan akun yang baru di-unban
+    const liveCloud = cloudUserStatusRef.current;
+    const targetGoogleEm = target.googleEmail ? normalizeEmailKey(target.googleEmail) : '';
+    const targetEm = target.email ? normalizeEmailKey(target.email) : '';
+    if (
+      liveCloud &&
+      ((target.firebaseUid && liveCloud.uid === target.firebaseUid) ||
+        (liveCloud.lastAccountId && liveCloud.lastAccountId === target.id) ||
+        (liveCloud.email &&
+          (normalizeEmailKey(liveCloud.email) === targetGoogleEm ||
+            normalizeEmailKey(liveCloud.email) === targetEm)) ||
+        target.id === currentAccountIdRef.current)
+    ) {
+      const cleanedCloud: CloudUserRecord = {
+        ...liveCloud,
+        status: 'active',
+        banReason: '',
+        bannedAt: '',
+        banExpiresAt: '',
+        banDurationLabel: '',
+        banCustomConfig: undefined,
+        appealStatus: 'approved',
+        failedPinAttempts: 0,
+        updatedAt: nowIso,
+        updatedAtMs: nowMs,
+      };
+      cloudUserStatusRef.current = cleanedCloud;
+      setCloudUserStatus(cleanedCloud);
+    }
+
+    const targetUid =
+      target.firebaseUid ||
+      (firebaseUser &&
+      ((target.googleEmail &&
+        normalizeEmailKey(target.googleEmail) === normalizeEmailKey(firebaseUser.email || '')) ||
+        target.id === currentAccountId)
+        ? firebaseUser.uid
+        : undefined);
+
     const unbanPopup: WebsiteSystemPopupNotification = {
-      id: `sys-unban-manual-${Date.now()}-${target.id}`,
+      id: `sys-unban-manual-${nowMs}-${target.id}`,
       type: 'unban',
       title: '🔓 KARTU ANDA TELAH DIBUKA KEMBALI!',
       subtitle: 'NOTIFIKASI RESMI DARI SISTEM WEBSITE BANK NUSANTARA',
@@ -17248,21 +17622,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       accountId: target.id,
       accountName: target.fullName,
       accountNumber: target.accountNumber,
+      targetUid,
+      targetEmail: target.googleEmail || target.email,
+      privateAccountOnly: true,
       cardTier: target.cardTier,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       dismissed: false,
     };
-    const nextPopups = [unbanPopup, ...websitePopups];
+    const nextPopups = [unbanPopup, ...websitePopups].slice(0, 60);
     setWebsitePopups(nextPopups);
     flushMasterStateToCloud({ accounts: nextAccounts, websitePopups: nextPopups });
 
-    const targetUid =
-      target.firebaseUid ||
-      (firebaseUser &&
-      ((target.googleEmail && normalizeEmailKey(target.googleEmail) === normalizeEmailKey(firebaseUser.email || '')) ||
-        target.id === currentAccountId)
-        ? firebaseUser.uid
-        : undefined);
+    // Paksa bersihkan seluruh field ban lama di Cloud (users & users_by_email) + sertakan nextAccounts yang sudah bersih!
     void syncCloudUserProfile(
       {
         uid: targetUid,
@@ -17272,11 +17643,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       {
         status: 'active',
         banReason: '',
+        bannedAt: '',
         banExpiresAt: '',
         banDurationLabel: '',
+        banCustomConfig: null,
         appealStatus: 'approved',
         failedPinAttempts: 0,
-      }
+      },
+      nextAccounts
     );
 
     appendBanAuditLog({
@@ -17286,38 +17660,95 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       targetAccountNumber: target.accountNumber,
       targetEmail: target.googleEmail || target.email,
       durationLabel: prevDurationLabel,
-      reasonSummary: 'Dibuka Banned (Unban) oleh Admin',
+      reasonSummary: 'Dibuka Banned (Unban) oleh Admin + Pembersihan Cache Cloud',
       caseId: prevCaseId,
     });
 
+    recordLiveActivity({
+      actorRole: 'admin',
+      category: 'admin_action',
+      accountId: target.id,
+      accountName: target.fullName,
+      accountNumber: target.accountNumber,
+      cardTier: target.cardTier,
+      actionTitle: `Unban Kartu Instan: ${target.fullName}`,
+      description: `Admin membuka status Banned (${prevDurationLabel}) kartu ${target.fullName} (${target.accountNumber}) dan membersihkan sisa cache ban di Cloud & HP.`,
+    });
+
+    // Notifikasi Unban bersifat privat: HANYA tampil di perangkat pemegang akun target (bukan di layar Admin/nasabah lain)
     addNotification(
       '🔓 Sistem Website: Banned Kartu Telah Dibuka!',
-      `Status BANNED pada kartu ${target.fullName} (${target.accountNumber}) telah dibuka. Kartu kini kembali AKTIF.`,
+      `Status BANNED pada kartu ${target.fullName} (${target.accountNumber}) telah dibuka oleh Admin. Kartu Anda kini kembali AKTIF.`,
       'success',
       {
         category: 'keamanan',
         targetView: 'dashboard',
         targetDashboardTab: 'ringkasan',
         accountId: target.id,
+        privateAccountOnly: true,
       }
     );
-    try {
-      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
-    } catch { /* empty */ }
+
+    if (currentAccountIdRef.current === target.id) {
+      try {
+        confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      } catch { /* empty */ }
+    }
     playAtmSound('success');
     return {
       success: true,
-      message: `Status Banned pada kartu ${target.fullName} (${target.accountNumber}) berhasil dibuka & disinkronkan real-time!`,
+      message: `Status Banned pada kartu ${target.fullName} (${target.accountNumber}) berhasil dibuka instan & dibersihkan di Laptop, Cloud, serta HP nasabah!`,
     };
   };
 
   const adminUnbanAllCards = () => {
-    const bannedList = accounts.filter((a) => a.cardStatus === 'banned' || a.status === 'banned');
+    const currentPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const bannedList = currentPool.filter(
+      (a) => a.cardStatus === 'banned' || a.status === 'banned' || Boolean(a.banInfo?.isBanned)
+    );
     if (bannedList.length === 0) {
+      // Tetap bersihkan sisa cloudUserStatus lokal jika kebetulan nyangkut tanpa kartu banned
+      if (cloudUserStatusRef.current?.status === 'banned') {
+        const nowMs = Date.now();
+        const cleaned = {
+          ...cloudUserStatusRef.current,
+          status: 'active' as const,
+          banReason: '',
+          bannedAt: '',
+          banExpiresAt: '',
+          banDurationLabel: '',
+          banCustomConfig: undefined,
+          updatedAt: new Date(nowMs).toISOString(),
+          updatedAtMs: nowMs,
+        };
+        cloudUserStatusRef.current = cleaned;
+        setCloudUserStatus(cleaned);
+        void syncCloudUserProfile(
+          { uid: cleaned.uid, email: cleaned.email, fallbackEmail: cleaned.email },
+          {
+            status: 'active',
+            banReason: '',
+            bannedAt: '',
+            banExpiresAt: '',
+            banDurationLabel: '',
+            banCustomConfig: null,
+            failedPinAttempts: 0,
+          },
+          currentPool
+        );
+        return {
+          success: true,
+          message: 'Sisa cache status Banned di Cloud berhasil dibersihkan!',
+          count: 1,
+        };
+      }
       return { success: false, message: 'Tidak ada kartu yang sedang di-banned saat ini.', count: 0 };
     }
-    const nextAccounts: BankAccount[] = accounts.map((acc) =>
-      acc.cardStatus === 'banned' || acc.status === 'banned'
+
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const nextAccounts: BankAccount[] = currentPool.map((acc) =>
+      acc.cardStatus === 'banned' || acc.status === 'banned' || Boolean(acc.banInfo?.isBanned)
         ? {
             ...acc,
             status: 'active' as const,
@@ -17326,12 +17757,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             banInfo: undefined,
             scheduledBanConfig: undefined,
             failedPinAttempts: 0,
+            isDebtAutoBanned: false,
+            accountUpdatedAtMs: nowMs,
+            unbannedAtMs: nowMs,
           }
         : acc
     );
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
+
+    if (cloudUserStatusRef.current?.status === 'banned') {
+      const cleanedCloud: CloudUserRecord = {
+        ...cloudUserStatusRef.current,
+        status: 'active',
+        banReason: '',
+        bannedAt: '',
+        banExpiresAt: '',
+        banDurationLabel: '',
+        banCustomConfig: undefined,
+        appealStatus: 'approved',
+        failedPinAttempts: 0,
+        updatedAt: nowIso,
+        updatedAtMs: nowMs,
+      };
+      cloudUserStatusRef.current = cleanedCloud;
+      setCloudUserStatus(cleanedCloud);
+    }
+
     const newPopups: WebsiteSystemPopupNotification[] = bannedList.map((acc) => ({
-      id: `sys-unban-all-${Date.now()}-${acc.id}`,
+      id: `sys-unban-all-${nowMs}-${acc.id}`,
       type: 'unban',
       title: '🔓 KARTU ANDA TELAH DIBUKA KEMBALI!',
       subtitle: 'NOTIFIKASI RESMI DARI SISTEM WEBSITE BANK NUSANTARA',
@@ -17339,13 +17794,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       accountId: acc.id,
       accountName: acc.fullName,
       accountNumber: acc.accountNumber,
+      targetUid: acc.firebaseUid,
+      targetEmail: acc.googleEmail || acc.email,
+      privateAccountOnly: true,
       cardTier: acc.cardTier,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       dismissed: false,
     }));
-    const nextPopups = [...newPopups, ...websitePopups];
+    const nextPopups = [...newPopups, ...websitePopups].slice(0, 60);
     setWebsitePopups(nextPopups);
     flushMasterStateToCloud({ accounts: nextAccounts, websitePopups: nextPopups });
+
     bannedList.forEach((acc) => {
       void syncCloudUserProfile(
         {
@@ -17356,11 +17815,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         {
           status: 'active',
           banReason: '',
+          bannedAt: '',
           banExpiresAt: '',
           banDurationLabel: '',
+          banCustomConfig: null,
           appealStatus: 'approved',
           failedPinAttempts: 0,
-        }
+        },
+        nextAccounts
       );
       appendBanAuditLog({
         action: 'unban',
@@ -17369,14 +17831,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         targetAccountNumber: acc.accountNumber,
         targetEmail: acc.googleEmail || acc.email,
         durationLabel: acc.banInfo?.durationLabel || 'Banned',
-        reasonSummary: 'Mass Unban oleh Admin',
+        reasonSummary: 'Mass Unban oleh Admin + Pembersihan Cache Cloud',
         caseId: acc.banInfo?.customConfig?.caseId,
       });
+      recordLiveActivity({
+        actorRole: 'admin',
+        category: 'admin_action',
+        accountId: acc.id,
+        accountName: acc.fullName,
+        accountNumber: acc.accountNumber,
+        cardTier: acc.cardTier,
+        actionTitle: `Mass Unban Kartu: ${acc.fullName}`,
+        description: `Admin membuka status Banned kartu ${acc.fullName} (${acc.accountNumber}) secara serentak.`,
+      });
+      addNotification(
+        '🔓 Sistem Website: Banned Kartu Telah Dibuka!',
+        `Status BANNED pada kartu ${acc.fullName} (${acc.accountNumber}) telah dibuka oleh Admin. Kartu Anda kini kembali AKTIF.`,
+        'success',
+        {
+          category: 'keamanan',
+          targetView: 'dashboard',
+          targetDashboardTab: 'ringkasan',
+          accountId: acc.id,
+          privateAccountOnly: true,
+        }
+      );
     });
     playAtmSound('success');
     return {
       success: true,
-      message: `Seluruh ${bannedList.length} kartu yang di-banned berhasil dibuka kembali!`,
+      message: `Seluruh ${bannedList.length} kartu yang di-banned berhasil dibuka kembali & dibersihkan di Cloud serta HP!`,
       count: bannedList.length,
     };
   };
