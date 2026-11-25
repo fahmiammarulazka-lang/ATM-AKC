@@ -16230,8 +16230,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   /**
-   * GANTI JENIS KARTU TANPA HARUS MEMBUAT KARTU BARU
-   * Cukup memasukkan Kode Admin (159357)
+   * KUNCI KEAMANAN PERMANEN (v14.37.46):
+   * Fitur ganti jenis kartu langsung dari M-Banking telah dinonaktifkan permanen.
+   * Jenis/tier kartu HANYA dapat diubah melalui Panel Admin resmi atau persetujuan Upgrade Kartu oleh Admin.
+   * Setiap upaya memicu fungsi ini dari luar Panel Admin otomatis ditolak, dicatat ke Live Monitor,
+   * dan memicu peringatan Deteksi Otomatis (protected_feature_bypass).
    */
   const switchCardWithAdminCode = (input: {
     adminCode: string;
@@ -16239,97 +16242,41 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     targetCardTier?: CardTier;
     regenerateCardDigits?: boolean;
   }) => {
-    if (input.adminCode.trim() !== '159357') {
-      playAtmSound('alert');
-      return {
-        success: false,
-        message: 'Kode Admin salah! Masukkan 6 digit Kode Admin resmi.',
-      };
+    const actor = currentAccount || accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    const requestedTierLabel = input.targetCardTier
+      ? CARD_TIER_CONFIGS[input.targetCardTier]?.nameIndo || input.targetCardTier
+      : 'Kartu Lain';
+
+    if (actor) {
+      recordLiveActivity({
+        actorRole: 'nasabah',
+        category: 'auth_security',
+        accountId: actor.id,
+        accountName: actor.fullName,
+        accountNumber: actor.accountNumber,
+        cardTier: actor.cardTier,
+        actionTitle: 'Percobaan Ganti Jenis Kartu Tanpa Panel Admin Diblokir',
+        description: `Sistem menolak percobaan mengganti jenis kartu langsung ke "${requestedTierLabel}" di luar Panel Admin.`,
+        isAnomalyDetected: true,
+        anomalyRuleKey: 'protected_feature_bypass',
+      });
+
+      trigger69AutoDetectorAlert({
+        ruleKey: 'protected_feature_bypass',
+        account: actor,
+        occurrenceCount: 1,
+        thresholdOverride: 1,
+        windowOverride: 5,
+        titleOverride: 'Deteksi Keamanan: Percobaan Ganti Jenis Kartu di Luar Panel Admin',
+        detailSummary: `Akun "${actor.fullName}" (Rek: ${actor.accountNumber}) mencoba memicu fungsi ganti kartu langsung ke "${requestedTierLabel}" tanpa melalui Panel Admin resmi. Aksi otomatis diblokir sistem!`,
+      });
     }
 
-    // 1. Jika ingin pindah/ganti ke akun kartu lain yang sudah terdaftar
-    if (input.targetAccountId) {
-      const targetAcc = accounts.find((a) => a.id === input.targetAccountId);
-      if (!targetAcc) {
-        return { success: false, message: 'Kartu tujuan tidak ditemukan!' };
-      }
-      setCurrentAccountIdState(targetAcc.id);
-
-      // Jika sekaligus ingin mengubah jenis kartu pada akun tersebut
-      if (input.targetCardTier && input.targetCardTier !== targetAcc.cardTier) {
-        const nextAccounts = accounts.map((acc) =>
-          acc.id === targetAcc.id
-            ? applyTierTransitionAssets(
-                {
-                  ...acc,
-                  cardNumber: input.regenerateCardDigits ? generateRandomCardNumber() : acc.cardNumber,
-                },
-                input.targetCardTier!
-              )
-            : acc
-        );
-        accountsRef.current = nextAccounts;
-        latestServerAccountsRef.current = nextAccounts;
-        setAccounts(nextAccounts);
-        void flushMasterStateToCloud({ accounts: nextAccounts });
-      }
-
-      addNotification(
-        'Berhasil Ganti Kartu! 💳',
-        `Kartu aktif berhasil diganti ke kartu milik ${targetAcc.fullName} (${targetAcc.accountNumber}).`,
-        'success'
-      );
-      playAtmSound('success');
-      return {
-        success: true,
-        message: `Berhasil pindah ke kartu ${targetAcc.fullName} (${targetAcc.accountNumber})!`,
-      };
-    }
-
-    // 2. Jika ingin mengganti kartu saat ini ke jenis kartu lain (Biasa / Emas / Premium / Platinum / Admin ∞) tanpa membuat kartu dari awal
-    if (!currentAccount) {
-      return { success: false, message: 'Tidak ada kartu aktif!' };
-    }
-
-    const nextTier = input.targetCardTier || currentAccount.cardTier;
-    const nextCardNumber = input.regenerateCardDigits ? generateRandomCardNumber() : currentAccount.cardNumber;
-    const nextCvv = input.regenerateCardDigits ? generateRandomCVV() : currentAccount.cvv;
-    const tierCfg = CARD_TIER_CONFIGS[nextTier];
-
-    const nextAccounts = accounts.map((acc) =>
-      acc.id === currentAccount.id
-        ? applyTierTransitionAssets(
-            {
-              ...acc,
-              cardNumber: nextCardNumber,
-              cvv: nextCvv,
-              cardStatus:
-                acc.cardStatus === 'pending' || acc.cardStatus === 'rejected'
-                  ? 'active'
-                  : acc.cardStatus,
-            },
-            nextTier
-          )
-        : acc
-    );
-    accountsRef.current = nextAccounts;
-    latestServerAccountsRef.current = nextAccounts;
-    setAccounts(nextAccounts);
-    void flushMasterStateToCloud({ accounts: nextAccounts });
-
-    addNotification(
-      'Kartu Berhasil Diganti via Kode Admin! ✨',
-      `Kartu Anda telah langsung diganti menjadi ${tierCfg.nameIndo} (Limit Tarik: ${formatRupiah(tierCfg.dailyWithdrawalLimit)}/hari) menggunakan Kode Admin tanpa perlu membuat kartu baru.`,
-      'success'
-    );
-    try {
-      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
-    } catch { /* empty */ }
-    playAtmSound('success');
-
+    playAtmSound('alert');
     return {
-      success: true,
-      message: `Kartu berhasil diganti ke ${tierCfg.nameIndo} menggunakan Kode Admin tanpa perlu membuat kartu baru!`,
+      success: false,
+      message:
+        'Fitur ganti jenis kartu langsung di M-Banking telah dinonaktifkan permanen demi keamanan. Perubahan jenis kartu hanya dapat dilakukan melalui Panel Admin atau persetujuan Upgrade Kartu.',
     };
   };
 

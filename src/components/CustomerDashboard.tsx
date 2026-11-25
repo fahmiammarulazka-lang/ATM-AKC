@@ -44,7 +44,6 @@ import { useBank } from '../context/BankContext';
 import { CardVisualizer } from './CardVisualizer';
 import { NusantaraChat } from './NusantaraChat';
 import { PinPromptModal } from './PinPromptModal';
-import { AdminPinModal } from './AdminPinModal';
 import { DigitalBankingFeatures } from './DigitalBankingFeatures';
 import { DiamondText } from './DiamondIcon';
 import { JobVacancyView } from './JobVacancyView';
@@ -60,7 +59,7 @@ import {
   CARD_TIER_CONFIGS,
   LOAN_TIER_CONFIGS,
 } from '../utils/bankUtils';
-import { CardTier, DevRoleConfig, LoanType, TransferBebasAssetMode } from '../types/bank';
+import { DevRoleConfig, LoanType, TransferBebasAssetMode } from '../types/bank';
 import { getDevBadgeColorStyle } from '../data/devRolesCatalog';
 import { SmartProtectionBanner } from './SecurityCommandCenter';
 import {
@@ -103,7 +102,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     applyLoan,
     payLoanInstallment,
     toggleCardFreezeWithPin,
-    switchCardWithAdminCode,
     updatePhone,
     changePin,
     addScheduledPayment,
@@ -187,7 +185,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     key: number;
   }>({ mode: 'reguler', key: 0 });
   const [showCardPinModal, setShowCardPinModal] = useState<boolean>(false);
-  const [pendingTierSwitch, setPendingTierSwitch] = useState<CardTier | null>(null);
   const [isAdminCommandBoxDismissed, setIsAdminCommandBoxDismissed] = useState<boolean>(false);
 
   // --- Loan Tab State ---
@@ -1144,115 +1141,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
               </div>
             </div>
 
-            {/* Card Tier Specifications (Section 1) */}
-            <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-400" />
-                  <span>Keterangan Jenis Kartu Anda ({tierConfig.nameIndo})</span>
-                </h3>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tierConfig.badgeColor}`}>
-                  Warna: {tierConfig.colorName}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60">
-                  <span className="text-[10px] text-slate-400 uppercase block">Batas Tarik Harian</span>
-                  <span className="font-mono font-bold text-amber-300 text-sm">
-                    {formatRupiah(tierConfig.dailyWithdrawalLimit)}
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60">
-                  <span className="text-[10px] text-slate-400 uppercase block">Biaya Bulanan</span>
-                  <span className="font-mono font-bold text-white text-sm">
-                    {formatRupiah(tierConfig.monthlyFee)}
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60">
-                  <span className="text-[10px] text-slate-400 uppercase block">Masa Berlaku</span>
-                  <span className="font-mono font-bold text-blue-300 text-sm">
-                    {tierConfig.validityYears} Tahun
-                  </span>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60">
-                  <span className="text-[10px] text-slate-400 uppercase block">Cocok Untuk</span>
-                  <span className="font-semibold text-emerald-300 text-xs">
-                    {tierConfig.idealFor}
-                  </span>
-                </div>
-              </div>
-
-              {/* Compare & Direct Switch with Admin Code */}
-              <div className="pt-2">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2">
-                  <span className="text-xs text-slate-300 font-semibold">
-                    Ganti Kartu ke Kartu Lain Tanpa Membuat Kartu Baru:
-                  </span>
-                  <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
-                    Cukup Masukkan Kode Admin (Bukan Kode Kartu)
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 text-[11px]">
-                  {Object.values(CARD_TIER_CONFIGS).map((c, idx) => {
-                    const isCurrent = c.tier === currentAccount.cardTier;
-                    const isAdminTier = c.tier === 'admin';
-                    return (
-                      <div
-                        key={c.tier}
-                        className={`p-3 rounded-xl border transition-all flex flex-col justify-between ${
-                          isCurrent
-                            ? 'border-amber-400 bg-amber-500/10'
-                            : isAdminTier
-                            ? 'border-fuchsia-500/60 bg-purple-950/40 hover:border-fuchsia-400'
-                            : 'border-slate-800 bg-slate-950/60 hover:border-amber-500/40'
-                        }`}
-                      >
-                        <div>
-                          <div className="flex items-center justify-between gap-1">
-                            <span className="font-bold text-white block">
-                              Kartu #{idx + 1}: {c.nameIndo}
-                            </span>
-                            {isAdminTier && (
-                              <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-fuchsia-500 text-slate-950">
-                                ∞ INFINITY
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-slate-400 block text-[10px] mt-0.5">
-                            Tarik: {formatRupiah(c.dailyWithdrawalLimit)}/hr
-                          </span>
-                          <span className="text-slate-400 block text-[10px]">
-                            Biaya: {formatRupiah(c.monthlyFee)}/bln
-                          </span>
-                          <span className="text-amber-300 block text-[10px] mt-1 font-semibold">
-                            {c.idealFor}
-                          </span>
-                        </div>
-                        {isCurrent ? (
-                          <span className="mt-2 py-1 text-center rounded-lg bg-amber-500/20 text-amber-300 font-bold text-[10px]">
-                            ✓ Kartu Aktif Saat Ini
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setPendingTierSwitch(c.tier)}
-                            className={`mt-2 py-1.5 px-2 rounded-lg font-bold text-[10px] cursor-pointer transition-all ${
-                              isAdminTier
-                                ? 'bg-gradient-to-r from-fuchsia-500 to-purple-500 hover:from-fuchsia-400 text-white'
-                                : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
-                            }`}
-                          >
-                            Ganti ke Kartu Ini (Kode Admin)
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
             {/* Quick Favorites Payees */}
             <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-3">
               <div className="flex items-center justify-between">
@@ -2186,26 +2074,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           setShowCardPinModal(false);
         }}
         onCancel={() => setShowCardPinModal(false)}
-      />
-
-      {/* ADMIN CODE MODAL FOR DIRECT CARD TIER SWITCH */}
-      <AdminPinModal
-        isOpen={Boolean(pendingTierSwitch)}
-        title="Masukkan Kode Admin untuk Ganti Kartu"
-        subtitle="GANTI KARTU TANPA BUAT KARTU BARU"
-        description={`Untuk mengganti kartu Anda menjadi ${
-          pendingTierSwitch ? CARD_TIER_CONFIGS[pendingTierSwitch].nameIndo : ''
-        } tanpa harus membuat kartu baru, cukup masukkan 6 digit Kode Admin (Bukan Kode Kartu).`}
-        onSuccess={() => {
-          if (pendingTierSwitch) {
-            switchCardWithAdminCode({
-              adminCode: '159357',
-              targetCardTier: pendingTierSwitch,
-            });
-            setPendingTierSwitch(null);
-          }
-        }}
-        onCancel={() => setPendingTierSwitch(null)}
       />
     </div>
   );

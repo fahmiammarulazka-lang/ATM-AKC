@@ -4,7 +4,7 @@
  * 1. BANNED Card Visual Overlay ("BANNED" stamp + "Tinjauan Alasan" + Custom/Permanent Duration rules)
  *    - If Permanent: Cannot be appealed/reviewed anymore ("Tidak dapat ditinjau lagi"), but can still be unbanned in Admin Panel.
  *    - If Custom: Shows duration/expiry and allows submitting "Tinjauan Alasan" appeal to Admin Panel.
- * 2. Switch Card to Another Card Without Creating a New Card ("Ganti Kartu ke Kartu Lain Cukup Memasukkan Kode Admin, Bukan Kode Kartu")
+ * 2. Perubahan jenis/tier kartu dikunci penuh hanya melalui Panel Admin atau persetujuan Upgrade Kartu resmi.
  */
 import React, { useState, useEffect } from 'react';
 import {
@@ -23,13 +23,11 @@ import {
   ShieldAlert,
   Clock,
   Send,
-  Layers,
   X,
 } from 'lucide-react';
-import { BankAccount, CardTier } from '../types/bank';
+import { BankAccount } from '../types/bank';
 import {
   CARD_TIER_CONFIGS,
-  formatRupiah,
   formatBanRemainingTime,
   formatAccountNumberDisplay,
   maskCardNumberFull,
@@ -52,11 +50,8 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({
   disablePrivacyMask = false,
 }) => {
   const {
-    accounts,
     toggleCardFreezeWithPin,
     regenerateAccountNumberWithPin,
-    switchCardWithAdminCode,
-    loginToCardWithPin,
     submitCardBanAppeal,
   } = useBank();
 
@@ -69,15 +64,8 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({
   // Card PIN prompt state (for freeze/unfreeze)
   const [pinPromptAction, setPinPromptAction] = useState<'freeze' | 'unfreeze' | null>(null);
 
-  // Admin Code prompt state (for switching card or regenerating account number without card PIN)
+  // Admin Code prompt state (for regenerating account number without card PIN)
   const [showAdminCodeForRegen, setShowAdminCodeForRegen] = useState(false);
-  const [showSwitchCardModal, setShowSwitchCardModal] = useState(false);
-  const [switchMode, setSwitchMode] = useState<'tier' | 'account'>('tier');
-  const [selectedSwitchTier, setSelectedSwitchTier] = useState<CardTier>(account.cardTier);
-  const [selectedSwitchAccountId, setSelectedSwitchAccountId] = useState<string>(account.id);
-  const [regenerateDigitsOnSwitch, setRegenerateDigitsOnSwitch] = useState<boolean>(false);
-  const [showAdminPinForSwitch, setShowAdminPinForSwitch] = useState<boolean>(false);
-  const [showOldCardPinForSwitch, setShowOldCardPinForSwitch] = useState<boolean>(false);
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
 
   // Ban appeal state (only for custom duration ban)
@@ -106,9 +94,6 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({
       ? formatBanRemainingTime(banInfo.expiresAt)
       : null;
 
-  const selectedTargetSwitchAccount =
-    accounts.find((a) => a.id === selectedSwitchAccountId) || account;
-
   const isPrivacyMasked = !disablePrivacyMask && Boolean(account.hideSensitiveNumbers);
 
   const displayCardNumber = isPrivacyMasked
@@ -128,29 +113,6 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({
       toggleCardFreezeWithPin(account.id, account.pin);
     }
     setPinPromptAction(null);
-  };
-
-  const handleExecuteSwitchWithAdminCode = () => {
-    setShowAdminPinForSwitch(false);
-    const res = switchCardWithAdminCode({
-      adminCode: '159357',
-      targetCardTier: selectedSwitchTier,
-      regenerateCardDigits: regenerateDigitsOnSwitch,
-    });
-    setFeedbackNotice(res.message);
-    setShowSwitchCardModal(false);
-    setTimeout(() => setFeedbackNotice(null), 5000);
-  };
-
-  const handleExecuteSwitchWithOldCardPin = () => {
-    setShowOldCardPinForSwitch(false);
-    const res = loginToCardWithPin({
-      targetAccountId: selectedTargetSwitchAccount.id,
-      cardPin: selectedTargetSwitchAccount.pin,
-    });
-    setFeedbackNotice(res.message);
-    setShowSwitchCardModal(false);
-    setTimeout(() => setFeedbackNotice(null), 5000);
   };
 
   const handleBanAppealSubmit = (e: React.FormEvent) => {
@@ -570,19 +532,6 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({
           )}
         </button>
 
-        {/* Ganti Kartu ke Kartu Lain Tanpa Membuat Kartu Baru (Pakai Kode Admin!) */}
-        <button
-          onClick={() => {
-            setSelectedSwitchTier(account.cardTier);
-            setSelectedSwitchAccountId(account.id);
-            setShowSwitchCardModal(true);
-          }}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-yellow-600/20 hover:from-amber-500/30 border border-amber-400/60 text-amber-300 text-xs font-bold transition-all cursor-pointer shadow-sm"
-        >
-          <Layers className="w-3.5 h-3.5 text-amber-400" />
-          <span>Ganti Kartu Lain (Kode Admin)</span>
-        </button>
-
         {/* Lock/Unlock Card */}
         {!isBanned && (
           <button
@@ -649,195 +598,6 @@ export const CardVisualizer: React.FC<CardVisualizerProps> = ({
           </button>
         </div>
       </div>
-
-      {/* =========================================================================
-          MODAL: GANTI KARTU KE KARTU LAIN TANPA HARUS MEMBUAT KARTU BARU
-          ("Cukup memasukkan kode admin, bukan kode kartu, tapi kode admin")
-         ========================================================================= */}
-      {showSwitchCardModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border-2 border-amber-500/50 text-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 text-xs">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <Layers className="w-5 h-5 text-amber-400" />
-                <div>
-                  <h3 className="font-bold text-sm sm:text-base text-white">
-                    Ganti Kartu Tanpa Membuat Kartu Baru
-                  </h3>
-                  <p className="text-[10px] text-amber-300 font-mono">
-                    OTORISASI MENGGUNAKAN KODE ADMIN (BUKAN KODE KARTU)
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowSwitchCardModal(false)}
-                className="p-1 text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setSwitchMode('tier')}
-                className={`py-2 px-3 rounded-xl font-bold border cursor-pointer ${
-                  switchMode === 'tier'
-                    ? 'bg-amber-500 text-slate-950 border-amber-400'
-                    : 'bg-slate-950 text-slate-400 border-slate-800'
-                }`}
-              >
-                💳 Ganti Jenis Kartu Ini
-              </button>
-              <button
-                type="button"
-                onClick={() => setSwitchMode('account')}
-                className={`py-2 px-3 rounded-xl font-bold border cursor-pointer ${
-                  switchMode === 'account'
-                    ? 'bg-amber-500 text-slate-950 border-amber-400'
-                    : 'bg-slate-950 text-slate-400 border-slate-800'
-                }`}
-              >
-                🔄 Pindah ke Kartu Lain
-              </button>
-            </div>
-
-            {switchMode === 'tier' ? (
-              <div className="space-y-3">
-                <label className="text-slate-300 font-semibold block">
-                  Pilih Jenis Kartu Tujuan (Langsung Berganti Tanpa Buat Kartu Baru):
-                </label>
-                <div className="space-y-2">
-                  {Object.values(CARD_TIER_CONFIGS).map((cfg) => (
-                    <div
-                      key={cfg.tier}
-                      onClick={() => setSelectedSwitchTier(cfg.tier)}
-                      className={`p-3 rounded-2xl border cursor-pointer flex items-center justify-between transition-all ${
-                        selectedSwitchTier === cfg.tier
-                          ? 'border-amber-400 bg-amber-500/15'
-                          : 'border-slate-800 bg-slate-950 hover:border-slate-700'
-                      }`}
-                    >
-                      <div>
-                        <span className="font-bold text-white block">{cfg.nameIndo}</span>
-                        <span className="text-[11px] text-slate-400">
-                          Limit Tarik: {formatRupiah(cfg.dailyWithdrawalLimit)}/hr • Biaya: {formatRupiah(cfg.monthlyFee)}/bln
-                        </span>
-                      </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${cfg.badgeColor}`}>
-                        {cfg.colorName}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                <label className="flex items-center gap-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={regenerateDigitsOnSwitch}
-                    onChange={(e) => setRegenerateDigitsOnSwitch(e.target.checked)}
-                    className="w-4 h-4 accent-amber-400"
-                  />
-                  <span className="text-[11px] text-slate-300">
-                    Sekaligus terbitkan 16 digit nomor kartu & CVV baru
-                  </span>
-                </label>
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                <label className="text-slate-300 font-semibold block">
-                  Pilih Kartu Lama / Kartu Lain yang Ingin Di-Login:
-                </label>
-                {accounts.map((acc) => (
-                  <div
-                    key={acc.id}
-                    onClick={() => setSelectedSwitchAccountId(acc.id)}
-                    className={`p-3 rounded-2xl border cursor-pointer flex items-center justify-between ${
-                      selectedSwitchAccountId === acc.id
-                        ? 'border-blue-400 bg-blue-500/15'
-                        : 'border-slate-800 bg-slate-950 hover:border-slate-700'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-white">{acc.fullName}</span>
-                        {acc.isVerified && (
-                          <VerifiedBadge size="xs" label={acc.verifiedLabel} />
-                        )}
-                      </div>
-                      <span className="font-mono text-[11px] text-amber-300">
-                        Rek: {acc.accountNumber} • Kartu: {acc.cardTier.toUpperCase()}
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                      {acc.cardStatus.toUpperCase()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {switchMode === 'tier' ? (
-              <>
-                <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-500/40 text-rose-200 text-[11px] flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>
-                    Untuk mengubah jenis tier kartu saat ini tanpa membuat kartu baru, cukup masukkan <strong>Kode Admin</strong>.
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowAdminPinForSwitch(true)}
-                  className="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 text-slate-950 font-black rounded-xl cursor-pointer shadow-lg"
-                >
-                  Masukkan Kode Admin & Ubah Jenis Kartu ➔
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="p-3 rounded-xl bg-blue-950/50 border border-blue-500/40 text-blue-200 text-[11px] flex items-center gap-2">
-                  <KeyRound className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>
-                    Untuk login/beralih dari kartu baru ke <strong>Kartu Lama</strong> Anda, wajib menggunakan <strong>PIN Kartu Lama</strong> tersebut (bukan PIN Admin). Jika lupa PIN, klik tombol <strong>Lupa PIN?</strong> pada layar berikutnya.
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowOldCardPinForSwitch(true)}
-                  className="w-full py-3 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black rounded-xl cursor-pointer shadow-lg"
-                >
-                  Masukkan PIN Kartu Lama ({selectedTargetSwitchAccount.fullName.split(' ')[0]}) ➔
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Old Card PIN Modal for Switching to Old Card */}
-      <PinPromptModal
-        isOpen={showOldCardPinForSwitch}
-        title="Login ke Kartu Lama (PIN Kartu Lama)"
-        description={`Masukkan 6 digit PIN Kartu ${selectedTargetSwitchAccount.fullName} (Bukan PIN Admin) untuk login ke kartu lama Anda. Jika lupa PIN, klik tombol "Lupa PIN?".`}
-        targetAccountId={selectedTargetSwitchAccount.id}
-        targetAccountName={selectedTargetSwitchAccount.fullName}
-        cardNumberSnippet={selectedTargetSwitchAccount.cardNumber}
-        expectedPin={selectedTargetSwitchAccount.pin}
-        onSuccess={handleExecuteSwitchWithOldCardPin}
-        onCancel={() => setShowOldCardPinForSwitch(false)}
-      />
-
-      {/* Admin Code Modal for Switching Card */}
-      <AdminPinModal
-        isOpen={showAdminPinForSwitch}
-        title="Masukkan Kode Admin untuk Ganti Kartu"
-        subtitle="GANTI KARTU TANPA BUAT KARTU BARU"
-        description="Untuk mengganti kartu ke kartu yang lain tanpa harus membuat kartu baru, cukup masukkan 6 digit Kode Admin (Bukan Kode Kartu)."
-        onSuccess={handleExecuteSwitchWithAdminCode}
-        onCancel={() => setShowAdminPinForSwitch(false)}
-      />
 
       {/* Admin Code Modal for Regenerating Account Number */}
       <AdminPinModal

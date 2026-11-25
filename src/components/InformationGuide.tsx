@@ -1631,9 +1631,9 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
                 </div>
 
                 <div className="p-4 rounded-2xl bg-amber-950/20 border border-amber-500/30 space-y-2">
-                  <h4 className="font-bold text-amber-300 text-sm">Alur Otorisasi Admin:</h4>
+                  <h4 className="font-bold text-amber-300 text-sm">Alur Otorisasi Admin (Kebijakan Keamanan Tier Kartu):</h4>
                   <p className="text-slate-300 leading-relaxed">
-                    Setelah nasabah menekan &quot;Kirim Permohonan Upgrade&quot; pada dashboard, permohonan masuk ke tab <strong>Persetujuan Upgrade Kartu</strong> di Panel Admin. Admin akan memeriksa histori saldo dan kelayakan nasabah. Jika disetujui, tier kartu dan tampilan kartu visual berubah seketika, dan nasabah memperoleh limit penarikan harian yang baru.
+                    Setelah nasabah menekan &quot;Kirim Permohonan Upgrade&quot; pada dashboard, permohonan masuk ke tab <strong>Persetujuan Upgrade Kartu</strong> di Panel Admin. Admin akan memeriksa histori saldo dan kelayakan nasabah. Jika disetujui, tier kartu dan tampilan kartu visual berubah seketika, dan nasabah memperoleh limit penarikan harian yang baru. Demi keamanan, penggantian jenis kartu langsung dari M-Banking telah dihapus permanen — perubahan jenis kartu hanya bisa diproses oleh <strong>Admin di Panel Admin</strong> atau melalui <strong>persetujuan Upgrade Kartu</strong>.
                   </p>
                 </div>
               </div>
@@ -2194,10 +2194,10 @@ export const InformationGuide: React.FC<InformationGuideProps> = ({
 
                 <div className="p-5 rounded-2xl bg-slate-950 border border-amber-500/40 space-y-2">
                   <h3 className="font-black text-amber-300 text-sm">
-                    2. Cara Login / Pindah ke Kartu Lain (PIN Kartu 6 Digit)
+                    2. Cara Login / Pindah ke Akun Kartu Lain (PIN Kartu 6 Digit)
                   </h3>
                   <p className="text-slate-300 leading-relaxed">
-                    Apabila Anda ingin masuk atau beralih ke kartu lain (baik dari layar awal setelah menekan <strong>Masuk</strong> maupun dari menu Ganti Kartu di pojok kanan atas Navbar), sistem mewajibkan Anda memasukkan <strong>6 digit PIN Kartu</strong> tersebut. Jika Anda lupa PIN kartu tersebut, tersedia tombol <strong>&quot;Lupa PIN?&quot;</strong> yang akan mengirimkan permohonan tinjauan ke Admin.
+                    Apabila Anda ingin masuk atau berpindah sesi login ke rekening/kartu lain yang sudah terdaftar (baik dari layar awal setelah menekan <strong>Masuk</strong> maupun dari menu <strong>Ganti Akun</strong> di pojok kanan atas Navbar), sistem mewajibkan Anda memasukkan <strong>6 digit PIN Kartu</strong> tersebut. Menu ini khusus untuk pindah login akun, bukan mengubah jenis/tier kartu (perubahan jenis kartu hanya dapat dilakukan melalui Panel Admin atau persetujuan Upgrade Kartu oleh Admin). Jika lupa PIN, tersedia tombol <strong>&quot;Lupa PIN?&quot;</strong> untuk tinjauan Admin.
                   </p>
                 </div>
 

@@ -3081,6 +3081,35 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v14-37-46',
+    version: 'v14.37.46',
+    releaseType: 'patch',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v14.37.46 (Format D — Pengamanan & Pembersihan): Penghapusan Fitur Ganti Kartu Langsung di M-Banking & Penguncian Otoritas Tier Kartu Khusus Admin',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 21:00 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 21:00 WIB',
+    description:
+      'Pembaruan pengamanan v14.37.46 (Format D dari v14.37.45 -> v14.37.46) menghapus total kotak "Keterangan Jenis Kartu Anda & Ganti Kartu ke Kartu Lain Tanpa Membuat Kartu Baru" di Dashboard M-Banking serta tombol "Ganti Kartu Lain (Kode Admin)" di bawah visual kartu ATM untuk seluruh akun, mengunci mati fungsi ganti kartu langsung di level sistem dengan pencatatan otomatis ke Live Monitor & Deteksi Otomatis, serta menegaskan bahwa perubahan jenis kartu hanya dapat dilakukan melalui Panel Admin resmi atau persetujuan Upgrade Kartu oleh Admin.',
+    highlights: [
+      'Penghapusan Total Kotak Ganti Kartu di Dashboard M-Banking: Kotak "Keterangan Jenis Kartu Anda" beserta tombol "Ganti Kartu ke Kartu Lain Tanpa Membuat Kartu Baru" dihapus bersih untuk seluruh akun (termasuk Kartu Tier ADMIN) tanpa kotak pengganti agar tampilan lebih ringkas dan aman.',
+      'Penghapusan Tombol & Modal Ganti Kartu di Bawah Kartu ATM: Tombol "Ganti Kartu Lain (Kode Admin)" beserta seluruh modal pergantian jenis kartu langsung di bawah visual kartu ATM telah dihapus permanen.',
+      'Penguncian Otoritas Tier Kartu di Level Sistem + Deteksi Otomatis: Fungsi ganti kartu langsung di level kode sistem dikunci mati; segala percobaan memicu penggantian jenis kartu di luar Panel Admin otomatis ditolak, dicatat ke Live Monitor Aktivitas, dan memicu peringatan Deteksi Otomatis ke Kartu Tier ADMIN.',
+      'Jalur Resmi & Menu Login Tetap Utuh: Perubahan jenis/tier kartu hanya bisa dilakukan melalui Panel Admin resmi atau persetujuan Admin atas permohonan Upgrade Kartu; menu Ganti Akun di Navbar atas (pindah login pakai PIN Kartu) tetap aktif normal dan teks Panduan Informasi telah diperbarui.',
+    ],
+    changes: [
+      'Penghapusan Total Kotak Ganti Kartu di Dashboard M-Banking: Kotak "Keterangan Jenis Kartu Anda" beserta tombol "Ganti Kartu ke Kartu Lain Tanpa Membuat Kartu Baru" dihapus bersih untuk seluruh akun (termasuk Kartu Tier ADMIN) tanpa kotak pengganti agar tampilan lebih ringkas dan aman.',
+      'Penghapusan Tombol & Modal Ganti Kartu di Bawah Kartu ATM: Tombol "Ganti Kartu Lain (Kode Admin)" beserta seluruh modal pergantian jenis kartu langsung di bawah visual kartu ATM telah dihapus permanen.',
+      'Penguncian Otoritas Tier Kartu di Level Sistem + Deteksi Otomatis: Fungsi ganti kartu langsung di level kode sistem dikunci mati; segala percobaan memicu penggantian jenis kartu di luar Panel Admin otomatis ditolak, dicatat ke Live Monitor Aktivitas, dan memicu peringatan Deteksi Otomatis ke Kartu Tier ADMIN.',
+      'Jalur Resmi & Menu Login Tetap Utuh: Perubahan jenis/tier kartu hanya bisa dilakukan melalui Panel Admin resmi atau persetujuan Admin atas permohonan Upgrade Kartu; menu Ganti Akun di Navbar atas (pindah login pakai PIN Kartu) tetap aktif normal dan teks Panduan Informasi telah diperbarui.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-25T14:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v14-37-45',
     version: 'v14.37.45',
     releaseType: 'feature_and_bug',
@@ -3103,8 +3132,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Ekspansi 69 Jenis Deteksi Otomatis (10 Kategori Fitur): Mencakup Spin & Gacha, Transaksi Saldo, QRIS & Top-Up, Keamanan PIN, Kartu & Akun, Karir & Bisnis Sultan, Emas & Transfer Bebas, Misi & Redeem, Bug & Mintol, serta Aktivitas Admin, Manipulasi Sistem & Anomali Perangkat lengkap dengan filter pencarian, sakelar ON/OFF per jenis, tombol Aktifkan Semua/Matikan Semua/Reset Default, dan pengaturan batas & jendela waktu per aturan.',
       'Tab Khusus Studio Peringatan & Pemberitahuan Nasabah: Mode Pop-up Tengah (modal tengah layar) dan Banner Atas tampil terpisah sesuai pilihan atau bersamaan, dilengkapi pratinjau visual, tukar mode 1-klik, dan tombol tutup eksklusif bagi Kartu Tier ADMIN.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-25T13:30:00.000Z',
     isAutoDetected: true,

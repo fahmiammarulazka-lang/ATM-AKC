@@ -3,7 +3,6 @@
  * Used for:
  * 1. Entering the Admin Panel
  * 2. Authorizing features configured with PIN Admin
- * 3. Switching cards ("Ganti Kartu ke Kartu Lain Tanpa Membuat Kartu Baru — Cukup Masukkan Kode Admin, Bukan Kode Kartu")
  */
 import React, { useState } from 'react';
 import { ShieldAlert, X } from 'lucide-react';
