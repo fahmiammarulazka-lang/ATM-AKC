@@ -62,24 +62,36 @@ function normalizeBuatQrisUrl(raw: string): string {
 
 export function getBuatQrisConfig(): BuatQrisConfig {
   const secretKey =
-    readServerEnv('BUATQRIS_SECRET_KEY') || readServerEnv('BUATQRIS_API_KEY');
+    readServerEnv('QRIS_SECRET_KEY') ||
+    readServerEnv('QRIS_API_KEY') ||
+    readServerEnv('BUATQRIS_SECRET_KEY') ||
+    readServerEnv('BUATQRIS_API_KEY');
   const accountId =
-    readServerEnv('BUATQRIS_ACCOUNT_ID') || readServerEnv('BUATQRIS_MERCHANT_ID');
+    readServerEnv('QRIS_ACCOUNT_ID') ||
+    readServerEnv('QRIS_MERCHANT_ID') ||
+    readServerEnv('BUATQRIS_ACCOUNT_ID') ||
+    readServerEnv('BUATQRIS_MERCHANT_ID');
   const webhookSecret =
-    readServerEnv('BUATQRIS_WEBHOOK_SECRET') || secretKey;
+    readServerEnv('QRIS_WEBHOOK_SECRET') ||
+    readServerEnv('BUATQRIS_WEBHOOK_SECRET') ||
+    secretKey;
 
   return {
     BUATQRIS_URL_SITE: normalizeBuatQrisUrl(
-      readServerEnv('BUATQRIS_URL_SITE', 'https://app.buatqris.site')
+      readServerEnv('QRIS_GATEWAY_URL') ||
+        readServerEnv('BUATQRIS_URL_SITE', 'https://app.buatqris.site')
     ),
-    BUATQRIS_LOGIN_ID: readServerEnv('BUATQRIS_LOGIN_ID', ''),
+    BUATQRIS_LOGIN_ID:
+      readServerEnv('QRIS_LOGIN_ID') || readServerEnv('BUATQRIS_LOGIN_ID', ''),
     ACCOUNT_ID: accountId,
     SECRET_KEY: secretKey,
-    WEBHOOK_URL: readServerEnv('BUATQRIS_WEBHOOK_URL', ''),
+    WEBHOOK_URL:
+      readServerEnv('QRIS_WEBHOOK_URL') || readServerEnv('BUATQRIS_WEBHOOK_URL', ''),
     BUATQRIS_API_KEY: secretKey,
     MERCHANT_ID: accountId,
     WEBHOOK_SECRET: webhookSecret,
-    STATIC_QRIS_STRING: readServerEnv('BUATQRIS_STATIC_QRIS_STRING', ''),
+    STATIC_QRIS_STRING:
+      readServerEnv('QRIS_STATIC_STRING') || readServerEnv('BUATQRIS_STATIC_QRIS_STRING', ''),
     DEFAULT_MODE: 'hybrid',
     DEFAULT_EXPIRY_MINUTES: 10, // 10 menit sesuai konfigurasi
     USE_UNIQUE_CODE_3_DIGIT: true, // Otomatis dihitung masuk total pembayaran
@@ -359,7 +371,6 @@ export async function createBuatQrisInvoiceServer(
             uniqueCode,
             totalAmount,
             qrisString: qrisString || generateDynamicEmvcoQris(cfg.STATIC_QRIS_STRING, totalAmount),
-            ...(qrisImageUrl ? { qrisImageUrl } : {}),
             createdAt: now.toISOString(),
             expiresAt,
           };
@@ -382,9 +393,6 @@ export async function createBuatQrisInvoiceServer(
     externalInvoiceId: input.orderId,
     modeUsed: 'emvco',
     configReady: hasStaticQris || hasApiCreds,
-    configNotice: !hasStaticQris && !hasApiCreds
-      ? 'Mode EMVCo aktif — isi BUATQRIS_ACCOUNT_ID dan BUATQRIS_SECRET_KEY di Settings → Secrets server untuk menyambungkan mutasi live buatqris.site.'
-      : undefined,
     baseAmount,
     uniqueCode,
     totalAmount,
@@ -483,13 +491,13 @@ export interface ClientCreateQrisRequest {
 export async function requestCreateQrisPayment(
   payload: ClientCreateQrisRequest
 ): Promise<CreateBuatQrisResult> {
-  const resp = await fetch('/api/buatqris/create', {
+  const resp = await fetch('/api/qris/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   if (!resp.ok) {
-    let errMsg = 'Gagal membuat tagihan QRIS BuatQRIS. Silakan coba lagi.';
+    let errMsg = 'Gagal membuat tagihan QRIS Nusantara. Silakan coba lagi.';
     try {
       const errData = (await resp.json()) as { message?: string };
       if (errData?.message) errMsg = errData.message;
@@ -510,7 +518,7 @@ export async function requestCheckQrisPaymentStatus(
   providerReference?: string;
   configReady?: boolean;
 }> {
-  const resp = await fetch(`/api/buatqris/status/${encodeURIComponent(orderId)}`, {
+  const resp = await fetch(`/api/qris/status/${encodeURIComponent(orderId)}`, {
     method: 'GET',
     headers: { Accept: 'application/json' },
   });

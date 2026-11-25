@@ -382,7 +382,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Money, Coin & Diamond (+ Top-Up BuatQRIS) Indicator Bar — Rapi sejajar di Baris 1 */}
+          {/* Money, Coin & Diamond (+ Top-Up QRIS Nusantara) Indicator Bar — Rapi sejajar di Baris 1 */}
           {currentAccount && (
             <>
               <div className="hidden md:flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-slate-900 border border-slate-700/80 whitespace-nowrap shrink-0 font-mono text-[11px] tabular-nums">
@@ -415,7 +415,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   uiVisibilityConfig.showDiamondTopUpButton !== false) && (
                   <div
                     className="flex items-center gap-1 text-cyan-300 font-bold"
-                    title="Saldo Permata & Top-Up BuatQRIS"
+                    title="Saldo Permata & Top-Up QRIS Nusantara"
                   >
                     {uiVisibilityConfig.showDiamondBalance !== false && (
                       <>
@@ -430,8 +430,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                         className="relative ml-0.5 flex h-5 w-5 items-center justify-center rounded-md bg-cyan-500 text-slate-950 hover:bg-cyan-400 transition active:scale-90 cursor-pointer"
                         title={
                           diamondConfig.diamondDiscountPercent > 0
-                            ? `Top-Up (Diskon ${diamondConfig.diamondDiscountPercent}% via BuatQRIS)`
-                            : 'Top-Up (250 Paket + Custom via BuatQRIS)'
+                            ? `Top-Up (Diskon ${diamondConfig.diamondDiscountPercent}% via QRIS Nusantara)`
+                            : 'Top-Up (250 Paket + Custom via QRIS Nusantara)'
                         }
                         aria-label="Top-Up"
                       >
@@ -460,7 +460,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       type="button"
                       onClick={() => setIsDiamondStoreOpen(true)}
                       className="flex h-4 w-4 items-center justify-center rounded bg-cyan-500 text-slate-950 cursor-pointer"
-                      title="Top-Up via BuatQRIS"
+                      title="Top-Up via QRIS Nusantara"
                       aria-label="Top-Up"
                     >
                       <Plus className="w-3 h-3 stroke-[3]" />

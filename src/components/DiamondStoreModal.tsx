@@ -274,7 +274,7 @@ export const DiamondStoreModal: React.FC = () => {
       if (!res.success) {
         setFeedback({
           type: 'error',
-          text: res.configNotice || 'Gagal membuat tagihan QRIS melalui BuatQRIS.',
+          text: 'Gagal membuat tagihan QRIS Nusantara. Silakan coba lagi.',
         });
         return;
       }
@@ -292,10 +292,8 @@ export const DiamondStoreModal: React.FC = () => {
         discountPercentApplied: pricing.discountPercent,
         modeUsed: res.modeUsed,
         configReady: res.configReady,
-        configNotice: res.configNotice,
         status: 'PENDING',
         qrisString: res.qrisString,
-        qrisImageUrl: res.qrisImageUrl,
         createdAt: res.createdAt || new Date().toISOString(),
         expiresAt: res.expiresAt,
       };
@@ -343,7 +341,7 @@ export const DiamondStoreModal: React.FC = () => {
                   {diamondConfig.baseDiamondPriceRupiah.toLocaleString('id-ID')}/
                 </span>
                 <DiamondIcon tone="bright" className="h-3.5 w-3.5" />
-                <span>via BuatQRIS</span>
+                <span>via QRIS Nusantara</span>
               </p>
             </div>
           </div>
@@ -897,7 +895,7 @@ export const DiamondStoreModal: React.FC = () => {
             <div className="space-y-2.5">
               {accountOrders.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 py-10 text-center text-xs font-semibold text-slate-500">
-                  Belum ada riwayat transaksi BuatQRIS untuk rekening ini.
+                  Belum ada riwayat transaksi QRIS untuk rekening ini.
                 </div>
               ) : (
                 accountOrders.map((ord) => (
@@ -914,7 +912,7 @@ export const DiamondStoreModal: React.FC = () => {
                               <DiamondIcon className="h-3.5 w-3.5" />
                             </>
                           ) : (
-                            'Pembayaran BuatQRIS'
+                            'Pembayaran QRIS Nusantara'
                           )}
                         </span>
                         <span

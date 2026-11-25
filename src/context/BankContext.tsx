@@ -41,6 +41,8 @@ import {
   forceSyncVaultNow,
   saveFastBootSnapshot,
   readFastBootSnapshot,
+  clearFastBootSnapshot,
+  getOrCreatePersistentDeviceId,
   saveGiftAndSealRegistryIdb,
   readGiftAndSealRegistryIdb,
   saveActiveBootSession,
@@ -81,6 +83,7 @@ import {
   linkCurrentSessionToGoogleZeroLoss,
   requireGoogleReauthentication,
   registerActiveDeviceSession,
+  subscribeActiveDevices,
   appendSecurityAuditLog,
   type AtomicMergeSummary,
 } from '../services/authIdentityService';
@@ -2362,7 +2365,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
-  // Helper Write-Through Instan ke IndexedDB (Zero localStorage) agar refresh mendadak tidak pernah kehilangan sesi / kartu baru
+  // Sanitizer teks legacy agar tidak ada label vendor QRIS lama di riwayat, notifikasi, atau changelog
+  const sanitizeQrisBrandText = (value?: string): string => {
+    if (!value || typeof value !== 'string') return value || '';
+    return value
+      .replace(/buatqris\.site/gi, 'QRIS Nusantara')
+      .replace(/buat\s*qris/gi, 'QRIS Nusantara');
+  };
+
+  const sanitizeAppUpdateRecord = (u: AppUpdateRecord): AppUpdateRecord => ({
+    ...u,
+    title: sanitizeQrisBrandText(u.title),
+    description: sanitizeQrisBrandText(u.description),
+    highlights: Array.isArray(u.highlights) ? u.highlights.map(sanitizeQrisBrandText) : u.highlights,
+    changes: Array.isArray(u.changes) ? u.changes.map(sanitizeQrisBrandText) : u.changes,
+  });
+
+  // Helper Write-Through Instan ke IndexedDB (Zero localStorage) terikat ketat pada deviceId perangkat ini
   const persistActiveSessionToIdb = (params: {
     authMode: 'google' | 'oa_account' | 'guest' | 'standard_account';
     firebaseUid?: string;
@@ -2385,26 +2404,31 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ((a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
             (a.email && normalizeEmailKey(a.email) === cleanEmail)))
     );
-    const snapshot: FastBootSessionSnapshot = {
-      authMode: params.authMode,
-      firebaseUid: params.firebaseUid,
-      email: cleanEmail,
-      emailKey: params.emailKey || (cleanEmail ? emailToFirestoreDocId(cleanEmail) : undefined),
-      name: params.name,
-      picture: params.picture,
-      activeAccountId: params.activeAccountId,
-      isPinVerified: params.isPinVerified,
-      hasCompletedOnboarding: params.hasCompletedOnboarding,
-      accountBackups: relatedBackups,
-      savedAtMs: Date.now(),
-    };
-    void saveActiveBootSession(snapshot);
-    if (pool.length > 0) {
+    const nowMs = Date.now();
+    void getOrCreatePersistentDeviceId().then((deviceId) => {
+      const snapshot: FastBootSessionSnapshot = {
+        authMode: params.authMode,
+        firebaseUid: params.firebaseUid,
+        email: cleanEmail,
+        emailKey: params.emailKey || (cleanEmail ? emailToFirestoreDocId(cleanEmail) : undefined),
+        name: params.name,
+        picture: params.picture,
+        activeAccountId: params.activeAccountId,
+        isPinVerified: params.isPinVerified,
+        hasCompletedOnboarding: params.hasCompletedOnboarding,
+        accountBackups: relatedBackups,
+        deviceId,
+        verifiedAtMs: params.isPinVerified ? nowMs : undefined,
+        savedAtMs: nowMs,
+      };
+      void saveActiveBootSession(snapshot);
+    });
+    if (pool.length > 0 && params.isPinVerified) {
       void saveFastBootSnapshot({
         accounts: pool,
         deletedAccountIds: deletedAccountIdsRef.current,
         currentAccountId: params.activeAccountId,
-        cachedAtMs: Date.now(),
+        cachedAtMs: nowMs,
       });
     }
   };
@@ -2598,7 +2622,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return 'default';
   });
 
-  const [currentAccountId, setCurrentAccountIdState] = useState<string>('acc-admin');
+  const [currentAccountId, setCurrentAccountIdState] = useState<string>('');
   const [userRole, setUserRoleState] = useState<'customer' | 'admin'>('customer');
   const [adminUnlocked, setAdminUnlockedState] = useState<boolean>(false);
 
@@ -3028,12 +3052,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (Array.isArray(data.transactions)) {
       setTransactions(
-        (data.transactions as Transaction[]).filter(
-          (t) =>
-            isNotBotAccountId(t.accountId) &&
-            isNotBotAccountNum(t.senderAccount) &&
-            isNotBotAccountNum(t.recipientAccount)
-        )
+        (data.transactions as Transaction[])
+          .filter(
+            (t) =>
+              isNotBotAccountId(t.accountId) &&
+              isNotBotAccountNum(t.senderAccount) &&
+              isNotBotAccountNum(t.recipientAccount)
+          )
+          .map((t) => ({
+            ...t,
+            title: sanitizeQrisBrandText(t.title),
+            note: t.note ? sanitizeQrisBrandText(t.note) : t.note,
+          }))
       );
     }
     if (Array.isArray(data.loans)) {
@@ -3050,7 +3080,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
     }
     if (Array.isArray(data.notifications)) {
-      setNotifications(data.notifications as AppNotification[]);
+      setNotifications(
+        (data.notifications as AppNotification[]).map((n) => ({
+          ...n,
+          title: sanitizeQrisBrandText(n.title),
+          message: sanitizeQrisBrandText(n.message),
+        }))
+      );
     }
     if (Array.isArray(data.chats)) {
       setChats(
@@ -3409,23 +3445,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (Array.isArray(data.budgetAlertHistory)) setBudgetAlertHistory(data.budgetAlertHistory as string[]);
     if (Array.isArray(data.appUpdates) && data.appUpdates.length > 0) {
       const mergedRes = mergeAutoDetectedAppUpdates(
-        data.appUpdates as AppUpdateRecord[],
+        (data.appUpdates as AppUpdateRecord[]).map(sanitizeAppUpdateRecord),
         INITIAL_APP_UPDATES
       );
-      setAppUpdates(mergedRes.mergedUpdates);
+      const cleanedMerged = mergedRes.mergedUpdates.map(sanitizeAppUpdateRecord);
+      setAppUpdates(cleanedMerged);
       if (mergedRes.didChange && !hasSyncedAutoBuildRef.current) {
         hasSyncedAutoBuildRef.current = true;
         window.setTimeout(() => {
-          flushMasterStateToCloud({ appUpdates: mergedRes.mergedUpdates });
-          syncUpdatesToServer(mergedRes.mergedUpdates);
+          flushMasterStateToCloud({ appUpdates: cleanedMerged });
+          syncUpdatesToServer(cleanedMerged);
         }, 400);
       }
     } else if (!hasSyncedAutoBuildRef.current) {
       const mergedRes = mergeAutoDetectedAppUpdates([], INITIAL_APP_UPDATES);
-      setAppUpdates(mergedRes.mergedUpdates);
+      const cleanedMerged = mergedRes.mergedUpdates.map(sanitizeAppUpdateRecord);
+      setAppUpdates(cleanedMerged);
       hasSyncedAutoBuildRef.current = true;
       window.setTimeout(() => {
-        flushMasterStateToCloud({ appUpdates: mergedRes.mergedUpdates });
+        flushMasterStateToCloud({ appUpdates: cleanedMerged });
       }, 600);
     }
     if (Array.isArray(data.devRoles) && data.devRoles.length > 0) {
@@ -3787,11 +3825,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }));
     }
 
-    if (uData.lastAccountId) {
-      setCurrentAccountIdState((prev) =>
-        prev === uData.lastAccountId ? prev : uData.lastAccountId!
-      );
-    }
+    // Isolasi Multi-Perangkat: JANGAN pernah memaksa perpindahan currentAccountId dari lastAccountId perangkat lain!
 
     if (uData.status === 'banned') {
       setActiveGiftModal(null);
@@ -4015,17 +4049,32 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
 
-      // 1. Cek Fast-Boot Cache + Active Session Envelope di IndexedDB (< 50ms, tanpa jaringan)
-      const [cachedBoot, savedSession] = await fastCachePromise;
+      // 1. Cek Fast-Boot Cache + Active Session Envelope + Identitas Perangkat Lokal (deviceId)
+      const [[cachedBoot, savedSession], currentDeviceId] = await Promise.all([
+        fastCachePromise,
+        getOrCreatePersistentDeviceId(),
+      ]);
       if (!active) return;
 
+      // Sesi lokal hanya sah untuk auto-masuk saat refresh jika terikat kuat ke deviceId perangkat INI dan sudah verifikasi PIN
+      const isValidLocalDeviceSession = Boolean(
+        savedSession &&
+          savedSession.activeAccountId &&
+          savedSession.isPinVerified === true &&
+          savedSession.hasCompletedOnboarding === true &&
+          savedSession.deviceId &&
+          savedSession.deviceId === currentDeviceId
+      );
+
       let workingAccounts: BankAccount[] = accountsRef.current;
-      const sessionBackups = Array.isArray(savedSession?.accountBackups)
-        ? (savedSession!.accountBackups as BankAccount[])
-        : [];
-      const cachedAccountsList = Array.isArray(cachedBoot?.accounts)
-        ? (cachedBoot!.accounts as BankAccount[])
-        : [];
+      const sessionBackups =
+        isValidLocalDeviceSession && Array.isArray(savedSession?.accountBackups)
+          ? (savedSession!.accountBackups as BankAccount[])
+          : [];
+      const cachedAccountsList =
+        isValidLocalDeviceSession && Array.isArray(cachedBoot?.accounts)
+          ? (cachedBoot!.accounts as BankAccount[])
+          : [];
 
       if ((cachedAccountsList.length > 0 || sessionBackups.length > 0) && !hasCloudAccountsArrived) {
         const cachedDelIds = Array.isArray(cachedBoot?.deletedAccountIds)
@@ -4082,9 +4131,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
 
       // =========================================================================
-      // MODE A: Sesi Anonymous Vault (signInAnonymously)
+      // MODE A: Sesi Anonymous Vault (signInAnonymously) — WAJIB segel deviceId lokal
       // =========================================================================
       if (fbUser && fbUser.isAnonymous && active) {
+        if (!isValidLocalDeviceSession) {
+          // Perangkat baru / tanpa sesi lokal sah -> jangan pernah auto-login ke akun Guest/OA perangkat lain
+          setGoogleUser(null);
+          setActiveCloudEmail(null);
+          setCurrentAccountIdState('');
+          hasFirestoreHydratedRef.current = true;
+          finishAuthCheck();
+          hydrateFullMasterInBackground();
+          return;
+        }
         void registerActiveDeviceSession(fbUser.uid, 'anonymous');
 
         const applyGuestMatch = (accs: BankAccount[]): BankAccount | null => {
@@ -4123,7 +4182,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return matchedGuest;
         };
 
-        // Jika akun Guest / OA ditemukan di IndexedDB -> LANGSUNG MASUK DASHBOARD lalu sinkron latar belakang!
+        // Jika akun Guest / OA ditemukan di IndexedDB perangkat INI -> masuk Dashboard lalu sinkron latar belakang
         const instantGuest = applyGuestMatch(workingAccounts);
         if (instantGuest) {
           updateSyncTelemetry({
@@ -4228,7 +4287,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         attachGoogleRealtimeListener(fbUser.uid, cleanEmail);
 
         const isSavedSessionForThisGoogle = Boolean(
-          savedSession &&
+          isValidLocalDeviceSession &&
+            savedSession &&
             savedSession.authMode === 'google' &&
             ((savedSession.firebaseUid && savedSession.firebaseUid === fbUser.uid) ||
               (savedSession.email && normalizeEmailKey(savedSession.email) === cleanEmail))
@@ -4238,7 +4298,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           accs: BankAccount[],
           userDoc: CloudUserRecord | null
         ): BankAccount | null => {
-          // Prioritaskan kartu terakhir yang aktif di sesi perangkat ini (untuk multi-kartu Reguler + OA)
           const sessionLastAccId = isSavedSessionForThisGoogle ? savedSession?.activeAccountId : undefined;
           const cloudLastAccId = userDoc?.lastAccountId;
 
@@ -4249,7 +4308,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           if (sessionLastAccId) {
             const bySession = accs.find((a) => a.id === sessionLastAccId && a.id !== 'acc-admin');
-            if (bySession && (isOwnedByUser(bySession) || isSavedSessionForThisGoogle)) {
+            if (bySession && isOwnedByUser(bySession)) {
               return bySession;
             }
           }
@@ -4260,10 +4319,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const byOwner = accs.find((a) => isOwnedByUser(a));
           if (byOwner) return byOwner;
 
-          if (cloudLastAccId) {
-            const byPrefFallback = accs.find((a) => a.id === cloudLastAccId && a.id !== 'acc-admin');
-            if (byPrefFallback) return byPrefFallback;
-          }
           return null;
         };
 
@@ -4285,12 +4340,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setCloudAccountVerificationState('confirmed_has_accounts');
           }
 
+          // Isolasi Perangkat Ketat: Hanya izinkan masuk langsung (isPinVerified=true) jika perangkat INI sudah terverifikasi sebelumnya.
+          // Jika perangkat baru/HP ke-2 mendeteksi sesi Google tanpa segel deviceId lokal, WAJIB verifikasi PIN 6 digit (atau keluar akun)!
+          const isLocallyVerifiedOnThisDevice = Boolean(
+            keepVerifiedFromIdb && isSavedSessionForThisGoogle && savedSession?.isPinVerified
+          );
+
           setGoogleUser((prev) => {
-            // Sesi Google sudah terautentikasi via Firebase Auth -> langsung masuk Dashboard tanpa minta PIN ulang
             const hasAccountReady = Boolean(
               matchedAccount ||
                 userDoc?.hasCompletedOnboarding ||
-                (keepVerifiedFromIdb && isSavedSessionForThisGoogle && savedSession?.hasCompletedOnboarding)
+                (isLocallyVerifiedOnThisDevice && savedSession?.hasCompletedOnboarding)
             );
             return {
               email: cleanEmail,
@@ -4301,7 +4361,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               emailKey: emailDocId,
               loggedInAt: prev?.loggedInAt || new Date().toISOString(),
               hasCompletedOnboarding: hasAccountReady,
-              isPinVerified: hasAccountReady,
+              isPinVerified: hasAccountReady && isLocallyVerifiedOnThisDevice,
             };
           });
 
@@ -4469,18 +4529,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const finalMatched = applyMatchedGoogleSession(cloudAccountsLoaded, initialUserData, true);
         if (finalMatched) {
           setCloudAccountVerificationState('confirmed_has_accounts');
-          persistActiveSessionToIdb({
-            authMode: 'google',
-            firebaseUid: fbUser.uid,
-            email: cleanEmail,
-            emailKey: emailDocId,
-            name: finalMatched.fullName || cleanName,
-            picture: fbUser.photoURL || savedSession?.picture,
-            activeAccountId: finalMatched.id,
-            isPinVerified: true,
-            hasCompletedOnboarding: true,
-            accountsPool: cloudAccountsLoaded,
-          });
+          if (isSavedSessionForThisGoogle && savedSession?.isPinVerified) {
+            persistActiveSessionToIdb({
+              authMode: 'google',
+              firebaseUid: fbUser.uid,
+              email: cleanEmail,
+              emailKey: emailDocId,
+              name: finalMatched.fullName || cleanName,
+              picture: fbUser.photoURL || savedSession?.picture,
+              activeAccountId: finalMatched.id,
+              isPinVerified: true,
+              hasCompletedOnboarding: true,
+              accountsPool: cloudAccountsLoaded,
+            });
+          }
         } else if (cloudRespondedCleanly && (typeof navigator === 'undefined' || navigator.onLine)) {
           // Hanya izinkan form Buat Kartu jika Cloud benar-benar merespons dan mengonfirmasi 0 kartu!
           setCloudAccountVerificationState('confirmed_zero_accounts');
@@ -4496,10 +4558,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
 
       // =========================================================================
-      // MODE C: Tanpa Sesi Firebase Google (Cek Sesi Aktif OA Murni / Guest / Login Ke Akun di IndexedDB)
+      // MODE C: Tanpa Sesi Firebase Google (Cek Sesi Aktif Terikat deviceId di IndexedDB)
       // =========================================================================
       if (
         active &&
+        isValidLocalDeviceSession &&
         savedSession &&
         (savedSession.authMode === 'oa_account' ||
           savedSession.authMode === 'guest' ||
@@ -4613,6 +4676,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => unsub();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCloudEmail]);
+
+  // Penjaga Revokasi Perangkat Real-Time: jika perangkat ini dicabut dari perangkat lain, langsung keluar ke halaman Login
+  useEffect(() => {
+    const activeUid = firebaseUser?.uid || googleUser?.firebaseUid;
+    if (!activeUid || !googleUser) return;
+    let cancelled = false;
+    let unsub: (() => void) | null = null;
+    void getOrCreatePersistentDeviceId().then((myDeviceId) => {
+      if (cancelled || !myDeviceId) return;
+      unsub = subscribeActiveDevices(activeUid, (devices) => {
+        const selfRecord = devices.find((d) => d.deviceId === myDeviceId);
+        if (selfRecord?.revoked) {
+          void clearActiveBootSession();
+          void clearFastBootSnapshot();
+          setCurrentAccountIdState('');
+          setActiveCloudEmail(null);
+          setGoogleUser(null);
+          setCloudUserStatus(null);
+          setFirebaseUser(null);
+          void signOut(auth).catch(() => {});
+        }
+      });
+    });
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firebaseUser?.uid, googleUser?.firebaseUid]);
 
   // Real-time Multi-Device Firebase Realtime Database Listener (HP <-> Laptop tanpa refresh)
   useEffect(() => {
@@ -5257,7 +5349,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const transactionsRef = useRef<Transaction[]>(transactions);
   transactionsRef.current = transactions;
 
-  const currentAccount = accounts.find((a) => a.id === currentAccountId) || accounts[0] || null;
+  const currentAccount =
+    (googleUser || adminUnlocked) && currentAccountId
+      ? accounts.find((a) => a.id === currentAccountId) || null
+      : null;
 
   // ================= DAFTAR / MASUK BEBAS SEMUA EMAIL + GOOGLE OPSIONAL (REAL-TIME CLOUD) =================
   const loginOrRegisterWithEmail = async (input: {
@@ -5604,7 +5699,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           (a.googleEmail && normalizeEmailKey(a.googleEmail) === cleanEmail) ||
           (a.email && normalizeEmailKey(a.email) === cleanEmail)
       ) ||
-      latestAccounts.find((a) => a.id === preferredAccId && a.id !== 'acc-admin') ||
       null;
 
     if (linkedCard) {
@@ -5614,15 +5708,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setCloudAccountVerificationState('confirmed_zero_accounts');
     }
 
-    if (latestAccounts.length > 0) {
-      void saveFastBootSnapshot({
-        accounts: latestAccounts,
-        deletedAccountIds: deletedAccountIdsRef.current,
-        currentAccountId: linkedCard?.id,
-        cachedAtMs: Date.now(),
-      });
-    }
-
+    // Jika akun Google sudah memiliki kartu, tetap wajib verifikasi PIN 6 digit sebelum membuka Dashboard
     setGoogleUser({
       email: cleanEmail,
       name: linkedCard?.fullName || cleanName,
@@ -5632,23 +5718,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       emailKey: emailDocId,
       loggedInAt: nowIso,
       hasCompletedOnboarding: Boolean(linkedCard),
-      isPinVerified: Boolean(linkedCard),
+      isPinVerified: false,
     });
-
-    if (linkedCard) {
-      persistActiveSessionToIdb({
-        authMode: 'google',
-        firebaseUid: fbUser.uid,
-        email: cleanEmail,
-        emailKey: emailDocId,
-        name: linkedCard.fullName || cleanName,
-        picture: fbUser.photoURL || undefined,
-        activeAccountId: linkedCard.id,
-        isPinVerified: true,
-        hasCompletedOnboarding: true,
-        accountsPool: latestAccounts,
-      });
-    }
 
     playAtmSound('success');
     return {
@@ -5714,8 +5785,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logoutGoogle = () => {
-    // Bersihkan cache sesi aktif di IndexedDB saat Logout secara sadar (data Cloud tetap 100% aman)
+    // Bersihkan total 100% cache sesi & snapshot lokal perangkat saat Keluar Akun (data Cloud tetap 100% aman)
     void clearActiveBootSession();
+    void clearFastBootSnapshot();
+    setCurrentAccountIdState('');
     setCloudAccountVerificationState('verifying');
     setActiveCloudEmail(null);
     setGoogleUser(null);
@@ -6639,17 +6712,6 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             seenIds.add(a.id);
             matched.push(a);
           }
-        }
-      }
-    }
-
-    if (matched.length === 0 && cloudUserStatus?.lastAccountId) {
-      const byPreferred = combinedPool.find((a) => a.id === cloudUserStatus.lastAccountId);
-      if (byPreferred && !seenIds.has(byPreferred.id) && byPreferred.id !== 'acc-admin') {
-        const gEmail = byPreferred.googleEmail ? normalizeEmailKey(byPreferred.googleEmail) : '';
-        const aEmail = byPreferred.email ? normalizeEmailKey(byPreferred.email) : '';
-        if (!cleanEmail || !gEmail || gEmail === cleanEmail || aEmail === cleanEmail) {
-          matched.push(byPreferred);
         }
       }
     }
@@ -17341,21 +17403,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         id: `tx-qris-dia-${Date.now()}`,
         accountId: targetAcc.id,
         type: 'setor',
-        title: `💎 Top-Up ${creditDiamonds.toLocaleString('id-ID')} Diamond via BuatQRIS`,
+        title: `💎 Top-Up ${creditDiamonds.toLocaleString('id-ID')} Diamond via QRIS Nusantara`,
         amount: existing.totalAmount,
         balanceAfter: targetAcc.balance,
         date: nowIso,
         timestamp: nowIso,
         referenceNo: existing.orderId,
         status: 'berhasil',
-        note: `Pembayaran QRIS LUNAS (${formatRupiah(existing.totalAmount)}). +${creditDiamonds.toLocaleString('id-ID')} Diamond langsung masuk ke akun Anda.`,
+        note: `Pembayaran QRIS Nusantara LUNAS (${formatRupiah(existing.totalAmount)}). +${creditDiamonds.toLocaleString('id-ID')} Diamond langsung masuk ke akun Anda.`,
       };
       const nextTxs = [tx, ...transactions];
       setTransactions(nextTxs);
 
       const notif: AppNotification = {
         id: `notif-qris-${Date.now()}`,
-        title: '💎 Pembayaran BuatQRIS LUNAS!',
+        title: '💎 Pembayaran QRIS Nusantara LUNAS!',
         message: `Top-Up ${creditDiamonds.toLocaleString('id-ID')} Diamond (Order ${existing.orderId}) sebesar ${formatRupiah(
           existing.totalAmount
         )} telah LUNAS dan langsung ditambahkan ke akun Anda!`,

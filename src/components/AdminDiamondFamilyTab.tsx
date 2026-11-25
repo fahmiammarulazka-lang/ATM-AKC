@@ -20,8 +20,7 @@ import { formatRupiah } from '../utils/bankUtils';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
 import { AdminWarningStudioSection } from './AdminWarningStudioSection';
 
-interface BuatQrisStatusInfo {
-  siteUrl: string;
+interface QrisGatewayStatusInfo {
   hasLoginId: boolean;
   hasAccountId: boolean;
   hasSecretKey: boolean;
@@ -31,7 +30,6 @@ interface BuatQrisStatusInfo {
   hasWebhookSecret: boolean;
   hasStaticQris: boolean;
   activeMode: 'api' | 'emvco';
-  webhookEndpoints?: string[];
 }
 
 export const AdminDiamondFamilyTab: React.FC = () => {
@@ -54,15 +52,15 @@ export const AdminDiamondFamilyTab: React.FC = () => {
   const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || 'acc-admin');
   const [diamondAdjustVal, setDiamondAdjustVal] = useState<number>(500);
   const [feedback, setFeedback] = useState<string>('');
-  const [qrisConfigStatus, setQrisConfigStatus] = useState<BuatQrisStatusInfo | null>(null);
+  const [qrisConfigStatus, setQrisConfigStatus] = useState<QrisGatewayStatusInfo | null>(null);
   const [loadingStatus, setLoadingStatus] = useState<boolean>(false);
 
   const fetchQrisStatus = async () => {
     setLoadingStatus(true);
     try {
-      const resp = await fetch('/api/buatqris/config-status');
+      const resp = await fetch('/api/qris/config-status');
       if (resp.ok) {
-        const data = (await resp.json()) as BuatQrisStatusInfo;
+        const data = (await resp.json()) as QrisGatewayStatusInfo;
         setQrisConfigStatus(data);
       }
     } catch {
@@ -100,7 +98,7 @@ export const AdminDiamondFamilyTab: React.FC = () => {
               <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold uppercase tracking-widest text-cyan-400">
                 <span>KONTROL PENUH</span>
                 <DiamondIcon tone="bright" className="h-3 w-3" />
-                <span>&amp; BUATQRIS (250 PAKET + CUSTOM)</span>
+                <span>&amp; QRIS (250 PAKET + CUSTOM)</span>
               </span>
               <h2 className="flex flex-wrap items-center gap-1.5 text-lg font-black text-white">
                 <span>Pengaturan Fitur</span>
@@ -446,25 +444,19 @@ export const AdminDiamondFamilyTab: React.FC = () => {
       {/* SECTION 1C: STUDIO PERINGATAN SISTEM NASABAH (25 PRESET + MANUAL) */}
       <AdminWarningStudioSection />
 
-      {/* SECTION 2: MONITOR INTEGRASI BUATQRIS (HYBRID API + EMVCo) & RIWAYAT ORDER */}
-      <div className="rounded-3xl border-2 border-sky-500/50 bg-slate-900/95 p-6 shadow-xl space-y-4">
+      {/* SECTION 2: MONITOR INTEGRASI QRIS & RIWAYAT ORDER */}
+      <div className="rounded-3xl border-2 border-sky-500/50 bg-slate-900/95 p-4 sm:p-6 shadow-xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-500/20 text-sky-300 border border-sky-400/40">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-sky-500/20 text-sky-300 border border-sky-400/40">
               <QrCode className="h-5 w-5" />
             </div>
-            <div>
+            <div className="min-w-0">
               <h3 className="text-base font-black text-white">
-                Status Koneksi BuatQRIS &amp; Monitor Transaksi ({qrisOrders.length})
+                Status Koneksi QRIS &amp; Monitor Transaksi ({qrisOrders.length})
               </h3>
               <p className="text-[11px] text-slate-400">
-                Simpan <code className="font-mono text-sky-300">BUATQRIS_LOGIN_ID</code>,{' '}
-                <code className="font-mono text-sky-300">BUATQRIS_ACCOUNT_ID</code>,{' '}
-                <code className="font-mono text-sky-300">BUATQRIS_SECRET_KEY</code>, dan{' '}
-                <code className="font-mono text-sky-300">BUATQRIS_WEBHOOK_URL</code> secara aman di{' '}
-                <strong>Settings → Secrets</strong> server. Webhook aktif di{' '}
-                <code className="font-mono text-emerald-300">POST /</code> &amp;{' '}
-                <code className="font-mono text-emerald-300">POST /api/buatqris/webhook</code>.
+                Pantau kesiapan layanan pembayaran QRIS Nusantara dan riwayat transaksi nasabah secara real-time.
               </p>
             </div>
           </div>
@@ -472,7 +464,7 @@ export const AdminDiamondFamilyTab: React.FC = () => {
             type="button"
             onClick={() => void fetchQrisStatus()}
             disabled={loadingStatus}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 px-3 py-2 font-bold text-sky-300 hover:bg-slate-700 cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 px-3 py-2 font-bold text-sky-300 hover:bg-slate-700 cursor-pointer shrink-0"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loadingStatus ? 'animate-spin' : ''}`} />
             Refresh Status
@@ -483,34 +475,36 @@ export const AdminDiamondFamilyTab: React.FC = () => {
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
               <span className="text-[10px] text-slate-400 block">Mode Aktif</span>
-              <span className="font-black text-sky-300 uppercase">{qrisConfigStatus.activeMode}</span>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">Account ID</span>
-              <span className={qrisConfigStatus.hasAccountId ? 'font-bold text-emerald-400' : 'font-bold text-amber-400'}>
-                {qrisConfigStatus.hasAccountId ? 'Terhubung' : 'Belum Diisi'}
+              <span className="font-black text-sky-300 uppercase">
+                {qrisConfigStatus.activeMode === 'api' ? 'QRIS LIVE' : 'QRIS DINAMIS'}
               </span>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">ID Login</span>
+              <span className="text-[10px] text-slate-400 block">Akun Gateway</span>
+              <span className={qrisConfigStatus.hasAccountId ? 'font-bold text-emerald-400' : 'font-bold text-amber-400'}>
+                {qrisConfigStatus.hasAccountId ? 'Aktif' : 'Standby'}
+              </span>
+            </div>
+            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+              <span className="text-[10px] text-slate-400 block">Otentikasi</span>
               <span className={qrisConfigStatus.hasLoginId ? 'font-bold text-emerald-400' : 'font-bold text-slate-400'}>
                 {qrisConfigStatus.hasLoginId ? 'Terhubung' : 'Opsional'}
               </span>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">Secret Key</span>
+              <span className="text-[10px] text-slate-400 block">Kunci Server</span>
               <span className={qrisConfigStatus.hasSecretKey ? 'font-bold text-emerald-400' : 'font-bold text-amber-400'}>
-                {qrisConfigStatus.hasSecretKey ? 'Aktif (Server)' : 'Fallback EMVCo'}
+                {qrisConfigStatus.hasSecretKey ? 'Aktif' : 'Fallback EMVCo'}
               </span>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">Webhook URL</span>
+              <span className="text-[10px] text-slate-400 block">Sinkronisasi</span>
               <span className={qrisConfigStatus.hasWebhookUrl ? 'font-bold text-emerald-400' : 'font-bold text-sky-300'}>
-                {qrisConfigStatus.hasWebhookUrl ? 'Terdaftar' : 'Dual Route Siap'}
+                {qrisConfigStatus.hasWebhookUrl ? 'Otomatis Aktif' : 'Siap Terima'}
               </span>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">Static EMVCo</span>
+              <span className="text-[10px] text-slate-400 block">QRIS Dinamis</span>
               <span className={qrisConfigStatus.hasStaticQris ? 'font-bold text-emerald-400' : 'font-bold text-slate-400'}>
                 {qrisConfigStatus.hasStaticQris ? 'Siap' : 'Default'}
               </span>
@@ -521,7 +515,7 @@ export const AdminDiamondFamilyTab: React.FC = () => {
         <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
           {qrisOrders.length === 0 ? (
             <p className="rounded-xl border border-dashed border-slate-800 py-6 text-center text-slate-500">
-              Belum ada transaksi BuatQRIS yang dibuat nasabah.
+              Belum ada transaksi QRIS yang dibuat nasabah.
             </p>
           ) : (
             qrisOrders.slice(0, 30).map((ord) => (

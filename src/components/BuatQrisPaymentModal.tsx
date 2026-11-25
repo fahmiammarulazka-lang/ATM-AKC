@@ -62,7 +62,7 @@ export const BuatQrisPaymentModal: React.FC = () => {
 
   const order = activeQrisModalOrder;
 
-  // Render crisp QR code from qrisString or use qrisImageUrl from BuatQRIS API
+  // Render crisp local QR code directly from qrisString (base64 data URI, zero external URL)
   useEffect(() => {
     if (!order) {
       setQrDataUrl('');
@@ -78,11 +78,6 @@ export const BuatQrisPaymentModal: React.FC = () => {
         : null
     );
     setQrRenderError('');
-
-    if (order.qrisImageUrl) {
-      setQrDataUrl(order.qrisImageUrl);
-      return;
-    }
 
     if (order.qrisString) {
       let active = true;
@@ -107,7 +102,7 @@ export const BuatQrisPaymentModal: React.FC = () => {
     } else {
       setQrDataUrl('');
     }
-  }, [order?.orderId, order?.qrisString, order?.qrisImageUrl, order?.status]);
+  }, [order?.orderId, order?.qrisString, order?.status]);
 
   // Countdown timer (10 minutes)
   useEffect(() => {
@@ -131,7 +126,7 @@ export const BuatQrisPaymentModal: React.FC = () => {
     return () => window.clearInterval(interval);
   }, [order?.orderId, order?.expiresAt, order?.status]);
 
-  // Auto-polling every 3 seconds strictly against BuatQRIS status endpoint
+  // Auto-polling every 3 seconds against QRIS status endpoint
   const runStatusCheck = async (silent = true) => {
     if (!order || order.status !== 'PENDING' || hasFulfilledRef.current) return;
     if (!silent) setIsCheckingNow(true);
@@ -148,7 +143,7 @@ export const BuatQrisPaymentModal: React.FC = () => {
           result.message ||
             `Pembayaran LUNAS! +${(order.diamondAmount || 0).toLocaleString('id-ID')} 💎 ditambahkan ke saldo Anda.`
         );
-        setLastCheckNote('Status LUNAS diterima langsung dari BuatQRIS.');
+        setLastCheckNote('Status LUNAS terverifikasi otomatis oleh sistem QRIS Nusantara.');
         if (autoCloseTimerRef.current) window.clearTimeout(autoCloseTimerRef.current);
         autoCloseTimerRef.current = window.setTimeout(() => {
           setActiveQrisModalOrder(null);
@@ -158,11 +153,11 @@ export const BuatQrisPaymentModal: React.FC = () => {
         setLastCheckNote('Tagihan QRIS kedaluwarsa. Silakan buat ulang QRIS.');
       } else {
         setLastCheckNote(
-          `Menunggu konfirmasi live BuatQRIS (${new Date().toLocaleTimeString('id-ID')})...`
+          `Menunggu konfirmasi pembayaran QRIS (${new Date().toLocaleTimeString('id-ID')})...`
         );
       }
     } catch {
-      setLastCheckNote('Sedang menghubungi server BuatQRIS untuk sinkronisasi status...');
+      setLastCheckNote('Sedang menghubungi server QRIS Nusantara untuk sinkronisasi status...');
     } finally {
       if (!silent) setIsCheckingNow(false);
     }
@@ -230,7 +225,6 @@ export const BuatQrisPaymentModal: React.FC = () => {
           configNotice: res.configNotice,
           status: 'PENDING',
           qrisString: res.qrisString,
-          qrisImageUrl: res.qrisImageUrl,
           createdAt: res.createdAt || new Date().toISOString(),
           expiresAt: res.expiresAt,
         };
@@ -241,7 +235,7 @@ export const BuatQrisPaymentModal: React.FC = () => {
         setLastCheckNote('Gagal membuat ulang tagihan QRIS.');
       }
     } catch {
-      setLastCheckNote('Gagal menghubungi server BuatQRIS saat membuat ulang QRIS.');
+      setLastCheckNote('Gagal menghubungi server pembayaran QRIS saat membuat ulang tagihan.');
     } finally {
       setIsRegenerating(false);
     }
@@ -257,10 +251,10 @@ export const BuatQrisPaymentModal: React.FC = () => {
               <QrCode className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-base font-black tracking-tight">Pembayaran BuatQRIS</h2>
+              <h2 className="text-base font-black tracking-tight">Pembayaran QRIS Nusantara</h2>
               <p className="text-xs text-sky-200/80">
                 {order.modeUsed === 'api'
-                  ? 'Mode Gateway API BuatQRIS Live'
+                  ? 'Mode Gateway QRIS Live'
                   : 'Mode QRIS Dinamis EMVCo (CRC16-CCITT)'}
               </p>
             </div>
@@ -355,7 +349,7 @@ export const BuatQrisPaymentModal: React.FC = () => {
               {qrDataUrl ? (
                 <img
                   src={qrDataUrl}
-                  alt="Kode QRIS BuatQRIS"
+                  alt="Kode QRIS Nusantara"
                   className={`h-60 w-60 rounded-xl object-contain transition ${
                     isExpired ? 'opacity-25 grayscale' : ''
                   }`}
@@ -387,22 +381,16 @@ export const BuatQrisPaymentModal: React.FC = () => {
               )}
             </div>
 
-            {order.configNotice && !isExpired && !isPaid && (
-              <div className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-800">
-                {order.configNotice}
-              </div>
-            )}
-
             {/* Reference / Order ID */}
-            <div className="mt-3 flex w-full items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-xs">
-              <div className="truncate">
+            <div className="mt-3 flex w-full items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs">
+              <div className="min-w-0 break-all">
                 <span className="font-semibold text-slate-500">Order ID: </span>
                 <span className="font-mono font-bold text-slate-800">{order.orderId}</span>
               </div>
               <button
                 type="button"
                 onClick={() => handleCopy(order.orderId, 'orderId')}
-                className="ml-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-200"
+                className="ml-2 inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-200"
               >
                 {copiedField === 'orderId' ? (
                   <>
@@ -419,12 +407,12 @@ export const BuatQrisPaymentModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Live Status Polling Bar (No Simulation Button - Live BuatQRIS Only) */}
+          {/* Live Status Polling Bar */}
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
-                <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                <span>Sinkronisasi Live BuatQRIS (Auto-cek tiap 3 detik)</span>
+                <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
+                <span>Sinkronisasi Live QRIS (Auto-cek tiap 3 detik)</span>
               </div>
               {!isExpired && !isPaid && (
                 <button

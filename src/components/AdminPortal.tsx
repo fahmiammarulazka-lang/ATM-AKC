@@ -959,7 +959,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             className="w-4 h-4"
           />
           <span>
-            BuatQRIS ({qrisOrders.length}) &amp; Keluarga ({families.length})
+            QRIS ({qrisOrders.length}) &amp; Keluarga ({families.length})
           </span>
         </button>
 
@@ -1575,7 +1575,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               </div>
             </div>
 
-            {/* 4. DISKON PEMBELIAN PERMATA (250 PILIHAN + CUSTOM VIA BUATQRIS) — TERINTEGRASI DI TAB DISKON */}
+            {/* 4. DISKON PEMBELIAN PERMATA (250 PILIHAN + CUSTOM VIA QRIS NUSANTARA) — TERINTEGRASI DI TAB DISKON */}
             <div className="p-5 rounded-2xl bg-slate-950/90 border-2 border-cyan-400/50 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -1584,7 +1584,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     <DiamondIcon tone="bright" className="w-3 h-3" />
                     <span>&amp; DISKON 250 PAKET</span>
                     <DiamondIcon tone="bright" className="w-3 h-3" />
-                    <span>(BUATQRIS)</span>
+                    <span>(QRIS)</span>
                   </span>
                   <h3 className="flex flex-wrap items-center gap-1 text-sm font-black text-white mt-0.5">
                     <span>Atur Harga Dasar</span>
@@ -1592,7 +1592,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     <span>(Default Rp 90) &amp; Diskon Pembelian (0% - 99%)</span>
                   </h3>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Terintegrasi langsung di Tab Diskon ini. Berlaku otomatis untuk seluruh 250 pilihan paket (1 – {MAX_DIAMOND_PACKAGE_AMOUNT.toLocaleString('id-ID')} <DiamondIcon tone="bright" className="w-3 h-3 mx-0.5" />) dan pembelian Custom dua arah via BuatQRIS dengan batas maksimal harga dasar {formatRupiah(MAX_DIAMOND_PURCHASE_RUPIAH)}.
+                    Terintegrasi langsung di Tab Diskon ini. Berlaku otomatis untuk seluruh 250 pilihan paket (1 – {MAX_DIAMOND_PACKAGE_AMOUNT.toLocaleString('id-ID')} <DiamondIcon tone="bright" className="w-3 h-3 mx-0.5" />) dan pembelian Custom dua arah via QRIS Nusantara dengan batas maksimal harga dasar {formatRupiah(MAX_DIAMOND_PURCHASE_RUPIAH)}.
                   </p>
                 </div>
                 <button

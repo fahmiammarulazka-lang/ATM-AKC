@@ -157,7 +157,7 @@ export const ADMIN_WARNING_PRESETS_25: AdminSystemWarningPreset[] = [
   {
     id: 'preset-03',
     category: 'perbaikan',
-    name: 'Perbaikan Jalur BuatQRIS',
+    name: 'Perbaikan Jalur QRIS',
     title: 'Pemeliharaan Layanan Pembayaran QRIS',
     message:
       'Sistem pembayaran QRIS sedang menjalani kalibrasi rutin. Apabila pembayaran Anda masih berstatus menunggu, saldo akan otomatis masuk setelah sinkronisasi selesai.',

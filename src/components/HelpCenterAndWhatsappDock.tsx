@@ -1346,20 +1346,20 @@ export const HelpCenterAndWhatsappDock: React.FC<HelpCenterAndWhatsappDockProps>
 
         {/* Baris Tombol Bulat Donasi (Sebelah WA) + WhatsApp Bantuan */}
         <div className="flex items-center gap-2.5">
-          {/* Tombol Dukung Aplikasi BuatQRIS */}
+          {/* Tombol Dukung Aplikasi QRIS Nusantara */}
           <div className="relative group">
             <span
               role="tooltip"
               className="pointer-events-none absolute -top-10 right-0 px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-600 to-orange-500 text-white text-[11px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity shadow-lg"
             >
-              Dukung Aplikasi via BuatQRIS
+              Dukung Aplikasi via QRIS Nusantara
             </span>
             <a
               href="https://app.buatqris.site/donation/azkaakc"
               target="_blank"
               rel="noopener noreferrer"
-              title="Dukung Aplikasi via BuatQRIS"
-              aria-label="Dukung Aplikasi via BuatQRIS"
+              title="Dukung Aplikasi via QRIS Nusantara"
+              aria-label="Dukung Aplikasi via QRIS Nusantara"
               className="w-12 h-12 rounded-full flex items-center justify-center bg-gradient-to-br from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-400 text-white shadow-xl border-2 border-amber-200/80 transition-transform hover:scale-105 active:scale-95 cursor-pointer"
             >
               <Coffee className="w-5 h-5" />

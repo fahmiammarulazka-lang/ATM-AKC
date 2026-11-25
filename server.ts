@@ -1481,8 +1481,13 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
     res.json({ success: false, postalCode: '' });
   });
 
-  // ==================== BUATQRIS.SITE PAYMENT GATEWAY & WEBHOOK API ====================
-  app.get('/api/buatqris/config-status', (_req, res) => {
+  // ==================== QRIS NUSANTARA PAYMENT GATEWAY & WEBHOOK API ====================
+  const sanitizeOrderForClient = (order: ServerQrisOrder): Omit<ServerQrisOrder, 'qrisImageUrl' | 'configNotice'> => {
+    const { qrisImageUrl: _img, configNotice: _notice, ...safeOrder } = order;
+    return safeOrder;
+  };
+
+  app.get('/api/qris/config-status', (_req, res) => {
     const cfg = getBuatQrisConfig();
     const hasLoginId = Boolean(cfg.BUATQRIS_LOGIN_ID);
     const hasAccountId = Boolean(cfg.ACCOUNT_ID);
@@ -1493,8 +1498,6 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
     const activeMode: 'api' | 'emvco' = hasSecretKey && hasAccountId ? 'api' : 'emvco';
     res.json({
       success: true,
-      siteUrl: cfg.BUATQRIS_URL_SITE,
-      urlSite: cfg.BUATQRIS_URL_SITE,
       defaultMode: cfg.DEFAULT_MODE,
       expiryMinutes: cfg.DEFAULT_EXPIRY_MINUTES,
       useUniqueCode: cfg.USE_UNIQUE_CODE_3_DIGIT,
@@ -1508,18 +1511,18 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       hasStaticQris,
       activeMode,
       activeEngine: activeMode,
-      webhookEndpoints: ['POST /', 'POST /api/buatqris/webhook'],
     });
   });
 
-  app.get('/api/buatqris/orders', (_req, res) => {
+  app.get('/api/qris/orders', (_req, res) => {
     const list = Object.values(serverState.qrisOrders || {})
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-      .slice(0, 100);
+      .slice(0, 100)
+      .map(sanitizeOrderForClient);
     res.json({ success: true, orders: list });
   });
 
-  app.post('/api/buatqris/create', async (req, res) => {
+  app.post('/api/qris/create', async (req, res) => {
     const body = (req.body || {}) as Record<string, unknown>;
     const rawOrderId = String(body.orderId || `QRIS-${Date.now()}`).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
     const amount = Math.round(Number(body.amount) || 0);
@@ -1618,17 +1621,18 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       }
       savePersistedState();
 
-      res.json(created);
+      const { qrisImageUrl: _unusedImg, configNotice: _unusedNotice, ...clientSafeCreated } = created;
+      res.json(clientSafeCreated);
     } catch (err) {
       res.status(500).json({
         success: false,
-        message: 'Terjadi kesalahan saat membuat tagihan BuatQRIS.',
+        message: 'Terjadi kesalahan saat membuat tagihan QRIS Nusantara.',
         error: String(err),
       });
     }
   });
 
-  app.get('/api/buatqris/status/:orderId', async (req, res) => {
+  app.get('/api/qris/status/:orderId', async (req, res) => {
     const orderId = String(req.params.orderId || '').replace(/[^A-Za-z0-9_-]/g, '');
     const order = serverState.qrisOrders[orderId];
     if (!order) {
@@ -1643,7 +1647,7 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         paidAt: order.paidAt,
         providerReference: order.providerReference,
         configReady: order.configReady,
-        order,
+        order: sanitizeOrderForClient(order),
       });
       return;
     }
@@ -1656,12 +1660,12 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         success: true,
         status: 'EXPIRED',
         configReady: order.configReady,
-        order,
+        order: sanitizeOrderForClient(order),
       });
       return;
     }
 
-    // Query live BuatQRIS API if credentials configured
+    // Query live QRIS gateway API if credentials configured
     if (order.modeUsed === 'api') {
       const liveCheck = await checkBuatQrisStatusServer(order.orderId, order.externalInvoiceId);
       if (liveCheck) {
@@ -1672,7 +1676,12 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
           savePersistedState();
           broadcastToAll({
             type: 'qris_payment:paid',
-            payload: { orderId: order.orderId, status: 'PAID', paidAt: order.paidAt, order },
+            payload: {
+              orderId: order.orderId,
+              status: 'PAID',
+              paidAt: order.paidAt,
+              order: sanitizeOrderForClient(order),
+            },
           });
           res.json({
             success: true,
@@ -1680,14 +1689,19 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
             paidAt: order.paidAt,
             providerReference: order.providerReference,
             configReady: order.configReady,
-            order,
+            order: sanitizeOrderForClient(order),
           });
           return;
         }
         if (liveCheck.status === 'EXPIRED') {
           order.status = 'EXPIRED';
           savePersistedState();
-          res.json({ success: true, status: 'EXPIRED', configReady: order.configReady, order });
+          res.json({
+            success: true,
+            status: 'EXPIRED',
+            configReady: order.configReady,
+            order: sanitizeOrderForClient(order),
+          });
           return;
         }
       }
@@ -1697,7 +1711,7 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       success: true,
       status: order.status,
       configReady: order.configReady,
-      order,
+      order: sanitizeOrderForClient(order),
     });
   });
 
@@ -1743,7 +1757,7 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         sigBuf.length === hmacBuf.length && crypto.timingSafeEqual(sigBuf, hmacBuf);
 
       if (!matchesDirect && !matchesHmac) {
-        res.status(401).json({ success: false, message: 'Invalid BuatQRIS webhook signature.' });
+        res.status(401).json({ success: false, message: 'Signature webhook QRIS tidak valid.' });
         return;
       }
     }
@@ -1832,7 +1846,7 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
           status: 'PAID',
           paidAt: matchedOrder.paidAt,
           providerReference: matchedOrder.providerReference,
-          order: matchedOrder,
+          order: sanitizeOrderForClient(matchedOrder),
         },
       });
     } else if (
@@ -1853,7 +1867,8 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
     });
   };
 
-  // Dual webhook endpoints: dedicated route AND root POST / (for https://atm-akc.vercel.app/)
+  // Primary clean QRIS webhook endpoints + silent backward-compatible webhook alias
+  app.post('/api/qris/webhook', handleBuatQrisWebhook);
   app.post('/api/buatqris/webhook', handleBuatQrisWebhook);
   app.post('/', handleBuatQrisWebhook);
 

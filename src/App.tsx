@@ -438,7 +438,7 @@ function BankAppContent() {
           </button>
         </div>
       )}
-      {/* Global Closable Website System Notification Modal, Debt Popup, Diamond Store & BuatQRIS Modal */}
+      {/* Global Closable Website System Notification Modal, Debt Popup, Diamond Store & QRIS Nusantara Modal */}
       <WebsiteSystemNotificationModal />
       <GlobalChatAndNotificationLayer />
       <GiftLetterOverlayAndCornerPopup />

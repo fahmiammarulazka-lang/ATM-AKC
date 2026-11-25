@@ -226,6 +226,14 @@ export async function readFastBootSnapshot(): Promise<FastBootCacheSnapshot | nu
   return null;
 }
 
+export async function clearFastBootSnapshot(): Promise<void> {
+  try {
+    await idbDelete(STORE_STAGING, FAST_BOOT_CACHE_KEY);
+  } catch {
+    // abaikan error cleanup
+  }
+}
+
 // ============================================================================
 // DEDICATED GIFT EVENTS & LETTER SEAL INDEXEDDB CACHE (SURVIVES REFRESH)
 // ============================================================================
@@ -321,6 +329,8 @@ export interface FastBootSessionSnapshot {
   isPinVerified: boolean;
   hasCompletedOnboarding: boolean;
   accountBackups: any[];
+  deviceId?: string;
+  verifiedAtMs?: number;
   savedAtMs: number;
 }
 
