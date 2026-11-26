@@ -3081,6 +3081,35 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-42-50',
+    version: 'v16.42.50',
+    releaseType: 'major',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan Besar v16.42.50: Perbaikan Total QRIS Hybrid (Bot BuatQRIS + QR Manual Admin), Tab Status 24 Jam ala WhatsApp, & 15 Fitur Ekstra Mobile Banking, Chat & Admin',
+    fullDate: 'Kamis, 26 November 2026 • Pukul 07:00 WIB',
+    dateText: 'Kamis, 26 November 2026 • Pukul 07:00 WIB',
+    description:
+      'Pembaruan besar v16.42.50 memperbaiki sistem QRIS Top-Up Diamond dengan arsitektur Hybrid Bot BuatQRIS otomatis dan mode QR Manual Admin (upload gambar QR / tempel teks QRIS statis-dinamis + unggah bukti transfer & persetujuan instan Admin + tes koneksi & tes simulasi). Selain itu, menu Lowongan Kerja telah dirapikan hanya di Navbar utama (dihapus dari dalam Mobile Banking), hadir Tab Status 24 Jam lengkap ala WhatsApp (Teks Warna, Foto, Video, Audio/Suara, Nama Lengkap + User ID 16-digit, Daftar Dilihat, Reaksi Cepat, Balas Status ke Chat Privat, Menu Sembunyikan/Tampilkan/Lapor), serta 15 fitur ekstra di Mobile Banking (Kantong Impian Berbunga, Kotak QRIS Pribadi, Analitik Keuangan Bulanan, Check-In & Poin Loyalty, Brankas Pengaman Saldo) dan Chat (Stiker Ekspresif, GIF, Efek Teks, Pesan Terjadwal, Pangkat Reputasi, Filter Cerdas, Mood/Musik & DND Terjadwal).',
+    highlights: [
+      'Perbaikan QRIS Top-Up Diamond Hybrid (Bot BuatQRIS + QR Manual Admin): Jika Admin tidak mengatur QR manual, sistem otomatis memakai Bot & API BuatQRIS dengan validasi CRC16 EMVCo anti-error; di Panel Admin tersedia upload gambar QR / tempel teks QRIS, tombol Reset ke Bot BuatQRIS, Tes Koneksi BuatQRIS, Tes Simulasi QRIS, serta antrean Persetujuan Instan bukti transfer nasabah.',
+      'Tab Status 24 Jam ala WhatsApp (Sebelah Chat Privat): Buat Status Teks Warna, Foto, Video, dan Audio/Suara yang otomatis hilang setelah 24 jam, dilengkapi Nama Lengkap + User ID 16-digit, Banner Status Tersemat Admin, daftar "Dilihat oleh", reaksi emoji cepat, balas langsung masuk ke Chat Privat, pengaturan privasi (Semua Nasabah / Kontak), dan menu titik tiga Sembunyikan / Hapus / Laporkan ke Admin.',
+      '5 Fitur Baru Mobile Banking & Perapian Menu: Penambahan Kantong Impian Berbunga, Kotak Scan & Terima QRIS Rekening Pribadi, Analitik Keuangan Bulanan + Ekspor CSV, Pencapaian Harian + Streak & Poin Loyalty, Brankas Pengaman Kunci Saldo, serta penghapusan menu Lowongan Kerja dari dalam Mobile Banking (tetap aman di Navbar).',
+      'Ekspansi Chat & Kendali Admin Maksimal: Penambahan Stiker Ekspresif, Motion GIF, Efek Teks Berwarna, Pesan Terjadwal Otomatis, Pangkat Reputasi Chat, Filter Chat Cerdas (Media/Tautan/Transaksi), Mood/Musik Profil, Mode Diam Terjadwal, Moderasi Status 24 Jam & Banner Admin, serta Manajemen Kantong Impian & Poin Loyalty di Panel Admin (Kartu tier Admin tetap ∞ di seluruh fitur).',
+    ],
+    changes: [
+      'Perbaikan QRIS Top-Up Diamond Hybrid (Bot BuatQRIS + QR Manual Admin): Jika Admin tidak mengatur QR manual, sistem otomatis memakai Bot & API BuatQRIS dengan validasi CRC16 EMVCo anti-error; di Panel Admin tersedia upload gambar QR / tempel teks QRIS, tombol Reset ke Bot BuatQRIS, Tes Koneksi BuatQRIS, Tes Simulasi QRIS, serta antrean Persetujuan Instan bukti transfer nasabah.',
+      'Tab Status 24 Jam ala WhatsApp (Sebelah Chat Privat): Buat Status Teks Warna, Foto, Video, dan Audio/Suara yang otomatis hilang setelah 24 jam, dilengkapi Nama Lengkap + User ID 16-digit, Banner Status Tersemat Admin, daftar "Dilihat oleh", reaksi emoji cepat, balas langsung masuk ke Chat Privat, pengaturan privasi (Semua Nasabah / Kontak), dan menu titik tiga Sembunyikan / Hapus / Laporkan ke Admin.',
+      '5 Fitur Baru Mobile Banking & Perapian Menu: Penambahan Kantong Impian Berbunga, Kotak Scan & Terima QRIS Rekening Pribadi, Analitik Keuangan Bulanan + Ekspor CSV, Pencapaian Harian + Streak & Poin Loyalty, Brankas Pengaman Kunci Saldo, serta penghapusan menu Lowongan Kerja dari dalam Mobile Banking (tetap aman di Navbar).',
+      'Ekspansi Chat & Kendali Admin Maksimal: Penambahan Stiker Ekspresif, Motion GIF, Efek Teks Berwarna, Pesan Terjadwal Otomatis, Pangkat Reputasi Chat, Filter Chat Cerdas (Media/Tautan/Transaksi), Mood/Musik Profil, Mode Diam Terjadwal, Moderasi Status 24 Jam & Banner Admin, serta Manajemen Kantong Impian & Poin Loyalty di Panel Admin (Kartu tier Admin tetap ∞ di seluruh fitur).',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-26T07:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v15-42-50',
     version: 'v15.42.50',
     releaseType: 'patch',
@@ -3103,8 +3132,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Cadangan Audio Permanen 3 Lapis + Tombol Muat Ulang Audio: Voice Note dan file audio kini dicadangkan aman ke Cloud (mematuhi batas ukuran dokumen) selain server media dan data pesan langsung, plus pesan error informatif dan tombol Muat Ulang Audio bila jaringan terputus.',
       'Sinkronisasi Menyeluruh Chat Global, 1-on-1 & Grup: Seluruh peningkatan pemutaran, perekaman, dan ketahanan audio aktif seragam di pratinjau maupun gelembung pesan semua ruang chat.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-26T01:45:00.000Z',
     isAutoDetected: true,

@@ -696,6 +696,7 @@ export interface ChatFeatureFlags {
   disableMessageEdit?: boolean;
   disableChatSystemNotifications?: boolean;
   disableWelcomeGreeting?: boolean;
+  disableStatusTab?: boolean;
 }
 
 export interface ChatAntiSpamConfig {
@@ -739,6 +740,12 @@ export interface GlobalChatMessage {
   voiceAttachment?: ChatVoiceAttachment;
   contactAttachment?: ChatContactAttachment;
   redPacket?: ChatRedPacketData;
+  textEffect?: ChatTextEffectStyle;
+  stickerId?: string;
+  gifId?: string;
+  statusReplyRef?: ChatStatusReplyRef;
+  senderReputationLabel?: string;
+  senderMoodText?: string;
 }
 
 export interface GlobalChatConfig {
@@ -1332,6 +1339,12 @@ export interface ChatMessage {
     rejectedAt?: string;
     rejectedByName?: string;
   };
+  textEffect?: ChatTextEffectStyle;
+  stickerId?: string;
+  gifId?: string;
+  statusReplyRef?: ChatStatusReplyRef;
+  senderReputationLabel?: string;
+  senderMoodText?: string;
 }
 
 export interface PocketSaving {
@@ -2383,7 +2396,46 @@ export interface AdminSystemWarningPreset {
   suggestedLockScreen: boolean;
 }
 
-export type QrisOrderStatus = 'PENDING' | 'LUNAS' | 'EXPIRED';
+export type QrisOrderStatus = 'PENDING' | 'LUNAS' | 'EXPIRED' | 'MENUNGGU_ADMIN' | 'DITOLAK';
+
+export type QrisGatewayMode = 'auto_buatqris' | 'manual_override';
+
+export interface QrisAdminConfig {
+  mode: QrisGatewayMode;
+  manualQrImageDataUrl?: string;
+  manualQrisString?: string;
+  manualUseDynamicEmvco?: boolean;
+  manualMerchantName?: string;
+  manualPaymentNote?: string;
+  customAccountId?: string;
+  customLoginId?: string;
+  customGatewayUrl?: string;
+  customStaticQrisString?: string;
+  updatedAtMs: number;
+  updatedBy?: string;
+}
+
+export interface ManualQrisSubmission {
+  id: string;
+  orderId: string;
+  accountId: string;
+  accountName: string;
+  accountNumber: string;
+  userId16?: string;
+  purpose: 'diamond_topup' | 'coin_topup' | 'feature_checkout';
+  diamondAmount?: number;
+  baseAmount: number;
+  uniqueCode: number;
+  totalAmount: number;
+  proofImageDataUrl: string;
+  proofFileName?: string;
+  note?: string;
+  status: 'menunggu' | 'disetujui' | 'ditolak';
+  adminNote?: string;
+  reviewedBy?: string;
+  createdAtMs: number;
+  reviewedAtMs?: number;
+}
 
 export interface QrisPaymentOrder {
   orderId: string;
@@ -2396,11 +2448,15 @@ export interface QrisPaymentOrder {
   uniqueCode: number;
   totalAmount: number;
   discountPercentApplied?: number;
-  modeUsed: 'api' | 'emvco';
+  modeUsed: 'api' | 'emvco' | 'manual';
   configReady: boolean;
   configNotice?: string;
   qrisString: string;
   qrisImageUrl?: string;
+  manualQrImageDataUrl?: string;
+  manualPaymentNote?: string;
+  manualSubmissionId?: string;
+  manualSubmissionStatus?: 'menunggu' | 'disetujui' | 'ditolak';
   status: QrisOrderStatus;
   fulfilled?: boolean;
   providerReference?: string;
@@ -2794,4 +2850,147 @@ export interface LiveActivityDetectorConfig {
   ruleThresholds?: Record<string, number>;
   ruleWindowMinutes?: Record<string, number>;
   updatedAt?: string;
+}
+
+// ==================== STATUS 24 JAM ALA WHATSAPP & EKSPANSI SOSIAL CHAT ====================
+export type ChatStatusType = 'text' | 'image' | 'video' | 'audio';
+export type ChatStatusPrivacy = 'all' | 'contacts';
+export type ChatTextEffectStyle =
+  | 'none'
+  | 'emerald_glow'
+  | 'gold_shimmer'
+  | 'ocean_wave'
+  | 'sunset_fire'
+  | 'royal_neon';
+
+export interface ChatStatusViewRecord {
+  viewerAccountId: string;
+  viewerName: string;
+  viewerUserId16?: string;
+  viewedAtMs: number;
+}
+
+export interface ChatStatusReplyRef {
+  statusId: string;
+  authorAccountId: string;
+  authorName: string;
+  authorUserId16?: string;
+  statusType: ChatStatusType;
+  previewText: string;
+  mediaUrl?: string;
+}
+
+export interface ChatStatusEntry {
+  id: string;
+  authorAccountId: string;
+  authorName: string;
+  authorUserId16: string;
+  authorAvatarUrl?: string;
+  authorRole: 'admin' | 'customer';
+  authorCardTier?: CardTier;
+  isVerified?: boolean;
+  type: ChatStatusType;
+  text?: string;
+  caption?: string;
+  bgTheme?: string;
+  fontStyle?: 'sans' | 'serif' | 'mono' | 'bold';
+  mediaUrl?: string;
+  mimeType?: string;
+  durationSec?: number;
+  waveformPeaks?: number[];
+  privacy: ChatStatusPrivacy;
+  isPinnedAdminBanner?: boolean;
+  createdAtMs: number;
+  expiresAtMs: number;
+  views: ChatStatusViewRecord[];
+  reactions: Record<string, string[]>;
+  updatedAtMs: number;
+}
+
+export interface ChatStatusReport {
+  id: string;
+  statusId: string;
+  statusAuthorId: string;
+  statusAuthorName: string;
+  statusAuthorUserId16?: string;
+  reporterAccountId: string;
+  reporterName: string;
+  reason: string;
+  statusPreview: string;
+  createdAtMs: number;
+  resolution: 'pending' | 'deleted' | 'dismissed';
+}
+
+export interface SocialChatPreferences {
+  mutedStatusAccountIds: string[];
+  statusPrivacyDefault: ChatStatusPrivacy;
+  moodEmoji?: string;
+  moodText?: string;
+  musicTrack?: string;
+  dndEnabled: boolean;
+  dndStartHour?: number;
+  dndEndHour?: number;
+  textEffectDefault?: ChatTextEffectStyle;
+  updatedAtMs?: number;
+}
+
+export interface ScheduledChatMessage {
+  id: string;
+  roomType: 'global' | 'dm' | 'group';
+  targetId?: string;
+  targetLabel: string;
+  senderAccountId: string;
+  text: string;
+  textEffect?: ChatTextEffectStyle;
+  scheduledAtMs: number;
+  status: 'pending' | 'sent' | 'cancelled';
+  createdAtMs: number;
+}
+
+// ==================== EKSPANSI MOBILE BANKING (KANTONG IMPIAN, BRANKAS & LOYALTY) ====================
+export interface DreamPocket {
+  id: string;
+  accountId: string;
+  name: string;
+  emoji: string;
+  category: string;
+  targetAmount: number;
+  currentAmount: number;
+  deadlineIso?: string;
+  colorTheme: string;
+  interestEarnedTotal: number;
+  lastInterestAppliedMs: number;
+  createdAtMs: number;
+}
+
+export interface DreamPocketAdminConfig {
+  enabled: boolean;
+  annualInterestPercent: number;
+  maxPocketsPerAccount: number;
+  allowEarlyWithdraw: boolean;
+  updatedAtMs?: number;
+}
+
+export interface SafeVaultAccountState {
+  lockedBalanceRupiah: number;
+  lastLockedAtMs?: number;
+}
+
+export interface LoyaltyAccountState {
+  points: number;
+  streakDays: number;
+  lastCheckInDate?: string;
+  claimedAchievementIds: string[];
+  totalCheckIns: number;
+  redeemedCount: number;
+}
+
+export interface LoyaltyAdminConfig {
+  enabled: boolean;
+  dailyCheckInPoints: number;
+  streakBonus7DaysPoints: number;
+  rupiahPerPoint: number;
+  coinPer100Points: number;
+  diamondPer100Points: number;
+  updatedAtMs?: number;
 }

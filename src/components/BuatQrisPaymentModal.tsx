@@ -15,6 +15,10 @@ import {
   Download,
   Share2,
   Lock,
+  Upload,
+  Image as ImageIcon,
+  Send,
+  XCircle,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { formatRupiah } from '../utils/bankUtils';
@@ -58,6 +62,8 @@ export const BuatQrisPaymentModal: React.FC = () => {
     currentAccount,
     diamondConfig,
     recordLiveActivity,
+    submitManualQrisProof,
+    manualQrisSubmissions,
   } = useBank();
 
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
@@ -75,6 +81,11 @@ export const BuatQrisPaymentModal: React.FC = () => {
   const [hdQrCache, setHdQrCache] = useState<{ orderId: string; dataUrl: string } | null>(null);
   const [showMobileFallbackPanel, setShowMobileFallbackPanel] = useState<boolean>(false);
   const [isSharingQr, setIsSharingQr] = useState<boolean>(false);
+  const [proofImageDataUrl, setProofImageDataUrl] = useState<string>('');
+  const [proofFileName, setProofFileName] = useState<string>('');
+  const [proofNote, setProofNote] = useState<string>('');
+  const [proofFeedback, setProofFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [isSubmittingProof, setIsSubmittingProof] = useState<boolean>(false);
 
   const pollTimerRef = useRef<number | null>(null);
   const autoCloseTimerRef = useRef<number | null>(null);
@@ -82,6 +93,9 @@ export const BuatQrisPaymentModal: React.FC = () => {
   const hasFulfilledRef = useRef<boolean>(false);
 
   const order = activeQrisModalOrder;
+  const linkedManualSub = order
+    ? manualQrisSubmissions.find((s) => s.orderId === order.orderId || s.id === order.manualSubmissionId)
+    : undefined;
 
   // Render crisp local QR code directly from qrisString (base64 data URI, zero external URL)
   useEffect(() => {
@@ -102,9 +116,15 @@ export const BuatQrisPaymentModal: React.FC = () => {
     setDownloadState('idle');
     setDownloadFeedbackMsg('');
     setShowMobileFallbackPanel(false);
+    setProofFeedback(null);
     if (downloadResetTimerRef.current) {
       window.clearTimeout(downloadResetTimerRef.current);
       downloadResetTimerRef.current = null;
+    }
+
+    if (order.manualQrImageDataUrl) {
+      setQrDataUrl(order.manualQrImageDataUrl);
+      return;
     }
 
     if (order.qrisString) {
@@ -122,15 +142,21 @@ export const BuatQrisPaymentModal: React.FC = () => {
           if (active) setQrDataUrl(url);
         })
         .catch(() => {
-          if (active) setQrRenderError('Gagal merender gambar QR Code dari string QRIS.');
+          if (active && order.qrisImageUrl) {
+            setQrDataUrl(order.qrisImageUrl);
+          } else if (active) {
+            setQrRenderError('Gagal merender gambar QR Code dari string QRIS.');
+          }
         });
       return () => {
         active = false;
       };
+    } else if (order.qrisImageUrl) {
+      setQrDataUrl(order.qrisImageUrl);
     } else {
       setQrDataUrl('');
     }
-  }, [order?.orderId, order?.qrisString, order?.status]);
+  }, [order?.orderId, order?.qrisString, order?.qrisImageUrl, order?.manualQrImageDataUrl, order?.status]);
 
   // Countdown timer (10 minutes)
   useEffect(() => {
@@ -207,11 +233,67 @@ export const BuatQrisPaymentModal: React.FC = () => {
 
   if (!order) return null;
 
-  const isExpired = order.status === 'EXPIRED' || remainingSeconds <= 0;
+  const isManualMode = order.modeUsed === 'manual';
+  const isWaitingAdmin = order.status === 'MENUNGGU_ADMIN';
+  const isRejected = order.status === 'DITOLAK';
+  const isExpired = order.status === 'EXPIRED' || (order.status === 'PENDING' && remainingSeconds <= 0);
   const isPaid = order.status === 'LUNAS' || Boolean(paidSuccessBanner);
-  const isDownloadDisabled = isExpired || isPaid || !order.qrisString || downloadState === 'downloading';
+  const hasDisplayableQr = Boolean(order.qrisString || order.manualQrImageDataUrl || order.qrisImageUrl || qrDataUrl);
+  const isDownloadDisabled = isExpired || isPaid || !hasDisplayableQr || downloadState === 'downloading';
   const expectedFilename = buildQrisDownloadFilename(order.orderId, order.totalAmount);
   const supportsShareFile = canDeviceSharePngFile(expectedFilename);
+
+  const handleSelectProofFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setProofFeedback({ type: 'error', text: 'File bukti harus berupa gambar (JPG/PNG/WebP).' });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const rawUrl = String(reader.result || '');
+      const img = new Image();
+      img.onload = () => {
+        const maxSide = 900;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          setProofImageDataUrl(canvas.toDataURL('image/jpeg', 0.78));
+        } else {
+          setProofImageDataUrl(rawUrl);
+        }
+        setProofFileName(file.name);
+        setProofFeedback(null);
+      };
+      img.onerror = () => {
+        setProofImageDataUrl(rawUrl);
+        setProofFileName(file.name);
+      };
+      img.src = rawUrl;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSubmitManualProof = () => {
+    if (!proofImageDataUrl) {
+      setProofFeedback({ type: 'error', text: 'Silakan unggah foto/screenshot bukti transfer terlebih dahulu.' });
+      return;
+    }
+    setIsSubmittingProof(true);
+    const res = submitManualQrisProof({
+      orderId: order.orderId,
+      proofImageDataUrl,
+      proofFileName,
+      note: proofNote,
+    });
+    setIsSubmittingProof(false);
+    setProofFeedback({ type: res.success ? 'success' : 'error', text: res.message });
+  };
 
   const logQrisDownloadActivity = (methodLabel: string) => {
     if (!currentAccount) return;
@@ -233,6 +315,20 @@ export const BuatQrisPaymentModal: React.FC = () => {
     setDownloadState('downloading');
     setDownloadFeedbackMsg('');
     try {
+      if (!order.qrisString && (order.manualQrImageDataUrl || qrDataUrl)) {
+        const directUrl = order.manualQrImageDataUrl || qrDataUrl;
+        const a = document.createElement('a');
+        a.href = directUrl;
+        a.download = expectedFilename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setDownloadState('success');
+        setDownloadFeedbackMsg(`Gambar QR (${expectedFilename}) berhasil diunduh!`);
+        logQrisDownloadActivity('Unduh Gambar QR Manual');
+        downloadResetTimerRef.current = window.setTimeout(() => setDownloadState('idle'), 2000);
+        return;
+      }
       const cachedUrl = hdQrCache && hdQrCache.orderId === order.orderId ? hdQrCache.dataUrl : undefined;
       const result = await downloadPureQrisPng(
         {
@@ -364,6 +460,9 @@ export const BuatQrisPaymentModal: React.FC = () => {
           configNotice: res.configNotice,
           status: 'PENDING',
           qrisString: res.qrisString,
+          qrisImageUrl: res.qrisImageUrl,
+          manualQrImageDataUrl: res.manualQrImageDataUrl,
+          manualPaymentNote: res.manualPaymentNote,
           createdAt: res.createdAt || new Date().toISOString(),
           expiresAt: res.expiresAt,
         };
@@ -412,8 +511,10 @@ export const BuatQrisPaymentModal: React.FC = () => {
             <div>
               <h2 className="text-base font-black tracking-tight">Pembayaran QRIS Nusantara</h2>
               <p className="text-xs text-sky-200/80">
-                {order.modeUsed === 'api'
-                  ? 'Mode Gateway QRIS Live'
+                {order.modeUsed === 'manual'
+                  ? 'Mode QRIS Manual Admin (Verifikasi Bukti Instan)'
+                  : order.modeUsed === 'api'
+                  ? 'Mode Bot BuatQRIS Live'
                   : 'Mode QRIS Dinamis EMVCo (CRC16-CCITT)'}
               </p>
             </div>
@@ -463,6 +564,10 @@ export const BuatQrisPaymentModal: React.FC = () => {
               className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black tabular-nums ${
                 isPaid
                   ? 'bg-emerald-100 text-emerald-800'
+                  : isWaitingAdmin
+                  ? 'bg-amber-100 text-amber-800'
+                  : isRejected
+                  ? 'bg-rose-100 text-rose-800'
                   : isExpired
                   ? 'bg-rose-100 text-rose-800'
                   : remainingSeconds <= 120
@@ -471,9 +576,41 @@ export const BuatQrisPaymentModal: React.FC = () => {
               }`}
             >
               <Clock className="h-3.5 w-3.5" />
-              {isPaid ? 'LUNAS' : isExpired ? 'EXPIRED' : `Berlaku ${formatCountdown(remainingSeconds)}`}
+              {isPaid
+                ? 'LUNAS'
+                : isWaitingAdmin
+                ? 'MENUNGGU ADMIN'
+                : isRejected
+                ? 'DITOLAK'
+                : isExpired
+                ? 'EXPIRED'
+                : `Berlaku ${formatCountdown(remainingSeconds)}`}
             </div>
           </div>
+
+          {isWaitingAdmin && !isPaid && (
+            <div className="flex items-start gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
+              <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-amber-600" />
+              <div>
+                <p className="text-xs font-black">Bukti Transfer Sedang Ditinjau Admin</p>
+                <p className="mt-0.5 text-[11px] text-amber-800">
+                  Admin menerima notifikasi instan. Begitu Admin menekan Setujui Instan, Diamond langsung masuk ke akun Anda!
+                </p>
+              </div>
+            </div>
+          )}
+
+          {isRejected && !isPaid && (
+            <div className="flex items-start gap-3 rounded-2xl border border-rose-300 bg-rose-50 p-4 text-rose-950">
+              <XCircle className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
+              <div>
+                <p className="text-xs font-black">Bukti Transfer Ditolak Admin</p>
+                <p className="mt-0.5 text-[11px] text-rose-800">
+                  {linkedManualSub?.adminNote || 'Bukti belum sesuai. Anda dapat mengunggah ulang bukti transfer yang benar di bawah.'}
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Exact Payable Amount (kode unik tetap dihitung otomatis ke totalAmount tanpa ditampilkan) */}
           <div className="rounded-2xl border-2 border-sky-200 bg-sky-50/60 p-4">
@@ -693,12 +830,87 @@ export const BuatQrisPaymentModal: React.FC = () => {
             </div>
           </div>
 
+          {/* Panel Unggah Bukti Transfer untuk Mode QR Manual Admin */}
+          {(isManualMode || isWaitingAdmin || isRejected) && !isPaid && !isExpired && (
+            <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/70 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Upload className="h-4 w-4 text-indigo-600" />
+                  <p className="text-xs font-black text-indigo-950">
+                    Konfirmasi Pembayaran QR Manual (Persetujuan Instan Admin)
+                  </p>
+                </div>
+              </div>
+              {order.manualPaymentNote && (
+                <p className="rounded-xl border border-indigo-200 bg-white px-3 py-2 text-[11px] font-medium text-indigo-900">
+                  Catatan Admin: {order.manualPaymentNote}
+                </p>
+              )}
+              <div className="space-y-2.5">
+                <label className="flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-indigo-300 bg-white px-4 py-3 text-xs font-bold text-indigo-700 transition hover:bg-indigo-50">
+                  <ImageIcon className="h-4 w-4 shrink-0" />
+                  <span>{proofFileName ? `File dipilih: ${proofFileName}` : 'Pilih Foto / Screenshot Bukti Transfer'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleSelectProofFile}
+                    className="hidden"
+                  />
+                </label>
+                {proofImageDataUrl && (
+                  <div className="flex items-center gap-3 rounded-xl border border-indigo-200 bg-white p-2.5">
+                    <img
+                      src={proofImageDataUrl}
+                      alt="Pratinjau bukti transfer"
+                      className="h-14 w-14 rounded-lg object-cover border border-slate-200"
+                    />
+                    <div className="min-w-0 flex-1 text-[11px] text-slate-600">
+                      <p className="font-bold text-slate-800 truncate">{proofFileName || 'Bukti Transfer'}</p>
+                      <p>Siap dikirim ke antrean persetujuan instan Admin.</p>
+                    </div>
+                  </div>
+                )}
+                <input
+                  type="text"
+                  value={proofNote}
+                  onChange={(e) => setProofNote(e.target.value)}
+                  placeholder="Catatan opsional (misal: Nama pengirim e-wallet / jam transfer)..."
+                  className="w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs text-slate-800 placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none"
+                />
+                {proofFeedback && (
+                  <p
+                    className={`rounded-xl border px-3 py-2 text-[11px] font-bold ${
+                      proofFeedback.type === 'success'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                        : 'border-rose-200 bg-rose-50 text-rose-800'
+                    }`}
+                  >
+                    {proofFeedback.text}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSubmitManualProof}
+                  disabled={isSubmittingProof || !proofImageDataUrl}
+                  className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  <Send className="h-4 w-4" />
+                  <span>{isWaitingAdmin ? 'Kirim Ulang Bukti Transfer' : 'Kirim Bukti Pembayaran ke Admin'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Live Status Polling Bar */}
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
                 <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
-                <span>Sinkronisasi Live QRIS (Auto-cek tiap 3 detik)</span>
+                <span>
+                  {isManualMode
+                    ? 'Verifikasi Manual Admin & Sinkronisasi Real-Time'
+                    : 'Sinkronisasi Live QRIS (Auto-cek tiap 3 detik)'}
+                </span>
               </div>
               {!isExpired && !isPaid && (
                 <button

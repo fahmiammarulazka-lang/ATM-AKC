@@ -10,6 +10,13 @@ import {
   SlidersHorizontal,
   Save,
   AlertTriangle,
+  Upload,
+  CheckCircle2,
+  XCircle,
+  Zap,
+  Wifi,
+  RotateCcw,
+  X,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -48,6 +55,12 @@ export const AdminDiamondFamilyTab: React.FC = () => {
     families,
     adminUpdateFamilyConfig,
     adminDeleteFamily,
+    qrisAdminConfig,
+    manualQrisSubmissions,
+    adminUpdateQrisConfig,
+    adminResetQrisConfig,
+    adminReviewManualQrisSubmission,
+    adminSimulateQrisOrder,
   } = useBank();
 
   const [selectedAccountId, setSelectedAccountId] = useState<string>(accounts[0]?.id || 'acc-admin');
@@ -56,6 +69,39 @@ export const AdminDiamondFamilyTab: React.FC = () => {
   const [qrisConfigStatus, setQrisConfigStatus] = useState<QrisGatewayStatusInfo | null>(null);
   const [loadingStatus, setLoadingStatus] = useState<boolean>(false);
   const [confirmResetDiamond, setConfirmResetDiamond] = useState<boolean>(false);
+
+  // Hybrid BuatQRIS & QR Manual Admin states
+  const [qrModeDraft, setQrModeDraft] = useState<'auto_buatqris' | 'manual_override'>(
+    qrisAdminConfig.mode || 'auto_buatqris'
+  );
+  const [manualQrisStringDraft, setManualQrisStringDraft] = useState<string>(
+    qrisAdminConfig.manualQrisString || ''
+  );
+  const [manualQrImageDraft, setManualQrImageDraft] = useState<string>(
+    qrisAdminConfig.manualQrImageDataUrl || ''
+  );
+  const [manualDynamicDraft, setManualDynamicDraft] = useState<boolean>(
+    Boolean(qrisAdminConfig.manualUseDynamicEmvco ?? true)
+  );
+  const [manualNoteDraft, setManualNoteDraft] = useState<string>(
+    qrisAdminConfig.manualPaymentNote || ''
+  );
+  const [testingGateway, setTestingGateway] = useState<boolean>(false);
+  const [gatewayTestResult, setGatewayTestResult] = useState<{
+    ok: boolean;
+    message: string;
+    detail?: string;
+  } | null>(null);
+  const [simulatingOrderId, setSimulatingOrderId] = useState<string | null>(null);
+  const [proofLightboxUrl, setProofLightboxUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    setQrModeDraft(qrisAdminConfig.mode || 'auto_buatqris');
+    setManualQrisStringDraft(qrisAdminConfig.manualQrisString || '');
+    setManualQrImageDraft(qrisAdminConfig.manualQrImageDataUrl || '');
+    setManualDynamicDraft(Boolean(qrisAdminConfig.manualUseDynamicEmvco ?? true));
+    setManualNoteDraft(qrisAdminConfig.manualPaymentNote || '');
+  }, [qrisAdminConfig]);
 
   // Anti-reset local string drafts for Diamond & Family configs
   const isDiamondDirtyRef = useRef<boolean>(false);
@@ -125,6 +171,56 @@ export const AdminDiamondFamilyTab: React.FC = () => {
   const showMsg = (msg: string) => {
     setFeedback(msg);
     window.setTimeout(() => setFeedback(''), 4500);
+  };
+
+  const handleManualQrImageUpload = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = typeof reader.result === 'string' ? reader.result : '';
+      if (!src) return;
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 680;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(120, Math.round(img.width * scale));
+        canvas.height = Math.max(120, Math.round(img.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          setManualQrImageDraft(canvas.toDataURL('image/jpeg', 0.86));
+        } else {
+          setManualQrImageDraft(src);
+        }
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleTestBuatQrisConnection = async () => {
+    setTestingGateway(true);
+    setGatewayTestResult(null);
+    try {
+      const resp = await fetch('/api/qris/test-connection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await resp.json();
+      setGatewayTestResult({
+        ok: Boolean(data.success),
+        message: data.message || (data.success ? 'Koneksi BuatQRIS Sehat!' : 'Gagal terhubung ke gateway.'),
+        detail: data.gatewayMode ? `Mode: ${data.gatewayMode} • Latency: ${data.latencyMs ?? 0}ms` : undefined,
+      });
+      void fetchQrisStatus();
+    } catch (err) {
+      setGatewayTestResult({
+        ok: false,
+        message: err instanceof Error ? err.message : 'Gagal menghubungi server /api/qris/test-connection.',
+      });
+    } finally {
+      setTestingGateway(false);
+    }
   };
 
   return (
@@ -558,8 +654,8 @@ export const AdminDiamondFamilyTab: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 2: MONITOR INTEGRASI QRIS & RIWAYAT ORDER */}
-      <div className="rounded-3xl border-2 border-sky-500/50 bg-slate-900/95 p-4 sm:p-6 shadow-xl space-y-4">
+      {/* SECTION 2: KELOLA HYBRID BUATQRIS BOT, QR MANUAL ADMIN, TES KONEKSI & BUKTI TRANSFER */}
+      <div className="rounded-3xl border-2 border-sky-500/50 bg-slate-900/95 p-4 sm:p-6 shadow-xl space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div className="flex items-center gap-3 min-w-0">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-sky-500/20 text-sky-300 border border-sky-400/40">
@@ -567,30 +663,63 @@ export const AdminDiamondFamilyTab: React.FC = () => {
             </div>
             <div className="min-w-0">
               <h3 className="text-base font-black text-white">
-                Status Koneksi QRIS &amp; Monitor Transaksi ({qrisOrders.length})
+                Kelola QRIS Hybrid (Bot BuatQRIS &amp; QR Manual Admin) • {qrisOrders.length} Transaksi
               </h3>
               <p className="text-[11px] text-slate-400">
-                Pantau kesiapan layanan pembayaran QRIS Nusantara dan riwayat transaksi nasabah secara real-time.
+                Jika Admin tidak mengaktifkan QR Manual, sistem otomatis memakai Bot &amp; API BuatQRIS bawaan agar Top-Up Diamond selalu berjalan tanpa error.
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void fetchQrisStatus()}
-            disabled={loadingStatus}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 px-3 py-2 font-bold text-sky-300 hover:bg-slate-700 cursor-pointer shrink-0"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loadingStatus ? 'animate-spin' : ''}`} />
-            Refresh Status
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleTestBuatQrisConnection()}
+              disabled={testingGateway}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 px-3 py-2 font-bold text-emerald-300 cursor-pointer shrink-0"
+            >
+              <Wifi className={`h-3.5 w-3.5 ${testingGateway ? 'animate-pulse' : ''}`} />
+              <span>{testingGateway ? 'Mengetes...' : 'Tes Koneksi BuatQRIS'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void fetchQrisStatus()}
+              disabled={loadingStatus}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 px-3 py-2 font-bold text-sky-300 hover:bg-slate-700 cursor-pointer shrink-0"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loadingStatus ? 'animate-spin' : ''}`} />
+              Refresh Status
+            </button>
+          </div>
         </div>
+
+        {gatewayTestResult && (
+          <div
+            className={`rounded-2xl border p-3.5 flex flex-wrap items-center justify-between gap-2 ${
+              gatewayTestResult.ok
+                ? 'border-emerald-500/50 bg-emerald-950/40 text-emerald-200'
+                : 'border-rose-500/50 bg-rose-950/40 text-rose-200'
+            }`}
+          >
+            <div>
+              <p className="font-black">{gatewayTestResult.message}</p>
+              {gatewayTestResult.detail && <p className="text-[11px] opacity-80">{gatewayTestResult.detail}</p>}
+            </div>
+            <button type="button" onClick={() => setGatewayTestResult(null)} className="opacity-70 hover:opacity-100">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
         {qrisConfigStatus && (
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
               <span className="text-[10px] text-slate-400 block">Mode Aktif</span>
               <span className="font-black text-sky-300 uppercase">
-                {qrisConfigStatus.activeMode === 'api' ? 'QRIS LIVE' : 'QRIS DINAMIS'}
+                {qrModeDraft === 'manual_override'
+                  ? 'QR MANUAL ADMIN'
+                  : qrisConfigStatus.activeMode === 'api'
+                    ? 'BOT BUATQRIS API'
+                    : 'BUATQRIS DINAMIS'}
               </span>
             </div>
             <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
@@ -626,7 +755,236 @@ export const AdminDiamondFamilyTab: React.FC = () => {
           </div>
         )}
 
-        <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+        {/* PANEL PENGATURAN QR MANUAL ADMIN VS BOT BUATQRIS */}
+        <div className="rounded-2xl border border-sky-500/40 bg-slate-950/90 p-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="font-black text-white">Pengaturan Sumber Kode QRIS Pembayaran Diamond</h4>
+              <p className="text-[11px] text-slate-400">
+                Pilih Mode Bot BuatQRIS (otomatis terverifikasi) atau ganti dengan QRIS Pribadi / Toko Admin.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const res = adminResetQrisConfig();
+                  showMsg(res.message);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 px-3 py-1.5 font-bold text-slate-200 cursor-pointer"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Reset ke Bot BuatQRIS</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const res = adminUpdateQrisConfig({
+                    mode: qrModeDraft,
+                    manualQrisString: manualQrisStringDraft.trim() || undefined,
+                    manualQrImageDataUrl: manualQrImageDraft || undefined,
+                    manualUseDynamicEmvco: manualDynamicDraft,
+                    manualPaymentNote: manualNoteDraft.trim() || undefined,
+                  });
+                  showMsg(res.message);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-sky-400 hover:bg-sky-300 px-3.5 py-1.5 font-black text-slate-950 cursor-pointer"
+              >
+                <Save className="h-3.5 w-3.5" />
+                <span>Simpan Mode QRIS</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => setQrModeDraft('auto_buatqris')}
+              className={`rounded-2xl border p-3.5 text-left transition cursor-pointer ${
+                qrModeDraft === 'auto_buatqris'
+                  ? 'border-emerald-400 bg-emerald-950/40 text-white'
+                  : 'border-slate-800 bg-slate-900 text-slate-400'
+              }`}
+            >
+              <p className="font-black text-sm">🤖 Mode Bawaan: Bot BuatQRIS Otomatis</p>
+              <p className="text-[11px] opacity-80 mt-0.5">
+                QR dibuat langsung oleh Bot/API BuatQRIS dengan verifikasi otomatis &amp; fallback EMVCo aman.
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setQrModeDraft('manual_override')}
+              className={`rounded-2xl border p-3.5 text-left transition cursor-pointer ${
+                qrModeDraft === 'manual_override'
+                  ? 'border-amber-400 bg-amber-950/40 text-white'
+                  : 'border-slate-800 bg-slate-900 text-slate-400'
+              }`}
+            >
+              <p className="font-black text-sm">🖼️ Mode QR Manual Admin Sendiri</p>
+              <p className="text-[11px] opacity-80 mt-0.5">
+                Gunakan gambar QR atau teks QRIS statis milik Admin. Nasabah unggah bukti transfer &amp; Admin setujui instan.
+              </p>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <div className="lg:col-span-5 space-y-2 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+              <label className="font-bold text-slate-200 block">Upload Gambar Kode QR Manual (PNG/JPG)</label>
+              <div className="flex items-center gap-3">
+                <label className="inline-flex items-center gap-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-2 font-bold text-cyan-300 cursor-pointer">
+                  <Upload className="h-3.5 w-3.5" />
+                  <span>Pilih Gambar QR</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleManualQrImageUpload(f);
+                    }}
+                  />
+                </label>
+                {manualQrImageDraft && (
+                  <button
+                    type="button"
+                    onClick={() => setManualQrImageDraft('')}
+                    className="rounded-xl bg-rose-500/20 px-2.5 py-2 font-bold text-rose-300 hover:bg-rose-500/30"
+                  >
+                    Hapus Gambar
+                  </button>
+                )}
+              </div>
+              {manualQrImageDraft ? (
+                <div className="mt-2 inline-block rounded-xl bg-white p-2">
+                  <img src={manualQrImageDraft} alt="Preview QR Manual" className="h-28 w-28 object-contain" />
+                </div>
+              ) : (
+                <p className="text-[10px] text-slate-500">Belum ada gambar QR custom (opsional jika sudah isi string QRIS).</p>
+              )}
+            </div>
+
+            <div className="lg:col-span-7 space-y-2.5 rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+              <div>
+                <label className="font-bold text-slate-200 block mb-1">
+                  Tempel Teks String QRIS Statis (Dimulai 000201...)
+                </label>
+                <textarea
+                  rows={2}
+                  value={manualQrisStringDraft}
+                  onChange={(e) => setManualQrisStringDraft(e.target.value)}
+                  placeholder="00020101021126670016COM.NOBUBANK.WWW..."
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-[11px] text-white"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <label className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={manualDynamicDraft}
+                    onChange={(e) => setManualDynamicDraft(e.target.checked)}
+                    className="h-4 w-4 accent-sky-400"
+                  />
+                  <span className="font-semibold text-slate-300">Suntik Nominal Dinamis EMVCo</span>
+                </label>
+                <input
+                  type="text"
+                  value={manualNoteDraft}
+                  onChange={(e) => setManualNoteDraft(e.target.value)}
+                  placeholder="Instruksi bayar (mis. A.n Toko Nusantara)"
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ANTREAN PERSETUJUAN INSTAN BUKTI TRANSFER QR MANUAL */}
+        <div className="rounded-2xl border border-amber-500/40 bg-slate-950/90 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="font-black text-amber-300">
+              Antrean Bukti Transfer QRIS Manual ({manualQrisSubmissions.filter((s) => s.status === 'menunggu').length} Menunggu)
+            </h4>
+          </div>
+          {manualQrisSubmissions.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-slate-800 py-4 text-center text-slate-500">
+              Belum ada kiriman bukti transfer QRIS manual dari nasabah.
+            </p>
+          ) : (
+            <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+              {manualQrisSubmissions.map((sub) => (
+                <div
+                  key={sub.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/90 p-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {sub.proofImageDataUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setProofLightboxUrl(sub.proofImageDataUrl)}
+                        className="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-slate-700 bg-black cursor-pointer"
+                        title="Klik untuk perbesar bukti transfer"
+                      >
+                        <img src={sub.proofImageDataUrl} alt="Bukti Transfer" className="h-full w-full object-cover" />
+                      </button>
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-white">{sub.accountName}</span>
+                        <span className="font-mono text-[10px] text-slate-400">
+                          {sub.userId16 ? `ID ${sub.userId16}` : sub.accountNumber}
+                        </span>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-black uppercase ${
+                            sub.status === 'disetujui'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : sub.status === 'ditolak'
+                                ? 'bg-rose-500/20 text-rose-300'
+                                : 'bg-amber-500/20 text-amber-300'
+                          }`}
+                        >
+                          {sub.status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-bold text-cyan-300">
+                        +{(sub.diamondAmount || 0).toLocaleString('id-ID')} Diamond • {formatRupiah(sub.totalAmount)}
+                      </p>
+                      {sub.note && <p className="text-[10px] text-slate-400 truncate">Catatan: {sub.note}</p>}
+                    </div>
+                  </div>
+                  {sub.status === 'menunggu' && (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = adminReviewManualQrisSubmission(sub.id, 'disetujui');
+                          showMsg(res.message);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-3 py-1.5 font-black text-slate-950 cursor-pointer"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        <span>Setujui Instan</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = adminReviewManualQrisSubmission(sub.id, 'ditolak', 'Bukti transfer tidak valid.');
+                          showMsg(res.message);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 px-3 py-1.5 font-bold text-rose-300 cursor-pointer"
+                      >
+                        <XCircle className="h-3.5 w-3.5" />
+                        <span>Tolak</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* DAFTAR ORDER QRIS + TOMBOL TES SIMULASI QRIS LUNAS */}
+        <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
           {qrisOrders.length === 0 ? (
             <p className="rounded-xl border border-dashed border-slate-800 py-6 text-center text-slate-500">
               Belum ada transaksi QRIS yang dibuat nasabah.
@@ -648,9 +1006,11 @@ export const AdminDiamondFamilyTab: React.FC = () => {
                       className={`rounded px-1.5 py-0.5 text-[10px] font-black ${
                         ord.status === 'LUNAS'
                           ? 'bg-emerald-500/20 text-emerald-300'
-                          : ord.status === 'EXPIRED'
-                          ? 'bg-rose-500/20 text-rose-300'
-                          : 'bg-amber-500/20 text-amber-300'
+                          : ord.status === 'EXPIRED' || ord.status === 'DITOLAK'
+                            ? 'bg-rose-500/20 text-rose-300'
+                            : ord.status === 'MENUNGGU_ADMIN'
+                              ? 'bg-sky-500/20 text-sky-300'
+                              : 'bg-amber-500/20 text-amber-300'
                       }`}
                     >
                       {ord.status}
@@ -660,13 +1020,53 @@ export const AdminDiamondFamilyTab: React.FC = () => {
                     {ord.orderId} • Mode {ord.modeUsed.toUpperCase()} • {new Date(ord.createdAt).toLocaleString('id-ID')}
                   </p>
                 </div>
-                <span className="font-mono font-black text-sky-300 tabular-nums">
-                  {formatRupiah(ord.totalAmount)}
-                </span>
+                <div className="flex items-center gap-2.5">
+                  {(ord.status === 'PENDING' || ord.status === 'MENUNGGU_ADMIN') && (
+                    <button
+                      type="button"
+                      disabled={simulatingOrderId === ord.orderId}
+                      onClick={async () => {
+                        setSimulatingOrderId(ord.orderId);
+                        try {
+                          const res = await adminSimulateQrisOrder(ord.orderId);
+                          showMsg(res.message);
+                        } finally {
+                          setSimulatingOrderId(null);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 px-2.5 py-1 text-[10px] font-black text-cyan-200 cursor-pointer"
+                      title="Tes Simulasi QRIS Lunas & Masuk Diamond Instan"
+                    >
+                      <Zap className="h-3 w-3" />
+                      <span>{simulatingOrderId === ord.orderId ? 'Proses...' : 'Tes Simulasi QRIS'}</span>
+                    </button>
+                  )}
+                  <span className="font-mono font-black text-sky-300 tabular-nums">
+                    {formatRupiah(ord.totalAmount)}
+                  </span>
+                </div>
               </div>
             ))
           )}
         </div>
+
+        {proofLightboxUrl && (
+          <div
+            onClick={() => setProofLightboxUrl(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 p-4"
+          >
+            <div className="relative max-w-lg rounded-2xl bg-slate-900 p-3 border border-slate-700">
+              <button
+                type="button"
+                onClick={() => setProofLightboxUrl(null)}
+                className="absolute right-2 top-2 rounded-lg bg-slate-800 p-1.5 text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <img src={proofLightboxUrl} alt="Bukti Transfer Zoom" className="max-h-[75vh] rounded-xl object-contain" />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* SECTION 3: PENGATURAN PENUH FITUR KELUARGA & MODERASI */}

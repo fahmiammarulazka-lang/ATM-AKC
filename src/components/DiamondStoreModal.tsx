@@ -349,6 +349,9 @@ export const DiamondStoreModal: React.FC = () => {
         configNotice: res.configNotice,
         status: 'PENDING',
         qrisString: res.qrisString,
+        qrisImageUrl: res.qrisImageUrl,
+        manualQrImageDataUrl: res.manualQrImageDataUrl,
+        manualPaymentNote: res.manualPaymentNote,
         createdAt: res.createdAt || new Date().toISOString(),
         expiresAt: res.expiresAt,
       };

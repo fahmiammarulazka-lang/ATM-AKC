@@ -256,7 +256,26 @@ import {
   SuggestionReward,
   SuggestionRewardProgramConfig,
   SuggestionRecord,
+  QrisAdminConfig,
+  ManualQrisSubmission,
+  ChatStatusEntry,
+  ChatStatusType,
+  ChatStatusPrivacy,
+  ChatStatusReport,
+  ChatStatusReplyRef,
+  ChatTextEffectStyle,
+  SocialChatPreferences,
+  ScheduledChatMessage,
+  DreamPocket,
+  DreamPocketAdminConfig,
+  SafeVaultAccountState,
+  LoyaltyAccountState,
+  LoyaltyAdminConfig,
 } from '../types/bank';
+import {
+  DAILY_ACHIEVEMENT_CATALOG,
+  computeChatReputationRank,
+} from '../data/socialAndBankingExtrasCatalog';
 import {
   AUTO_DETECTOR_69_RULES,
   createDefault69RulesEnabledMap,
@@ -457,6 +476,10 @@ interface SendChatInput {
   splitBill?: ChatSplitBillData;
   expiresAtMs?: number;
   adminDivisionLabel?: ChatAdminDivision;
+  textEffect?: ChatTextEffectStyle;
+  stickerId?: string;
+  gifId?: string;
+  statusReplyRef?: ChatStatusReplyRef;
   transferAttachment?: {
     amount: number;
     assetKind?: ChatAssetKind;
@@ -622,6 +645,10 @@ interface BankContextType {
     redPacket?: ChatRedPacketData;
     expiresAtMs?: number;
     adminDivisionLabel?: ChatAdminDivision;
+    textEffect?: ChatTextEffectStyle;
+    stickerId?: string;
+    gifId?: string;
+    statusReplyRef?: ChatStatusReplyRef;
   }) => Promise<{ success: boolean; message: string }>;
   editGlobalChatMessage: (
     id: string,
@@ -1679,6 +1706,94 @@ interface BankContextType {
     partial: Partial<DiamondSystemConfig>
   ) => { success: boolean; message: string };
   adminResetDiamondConfig: () => { success: boolean; message: string };
+  qrisAdminConfig: QrisAdminConfig;
+  manualQrisSubmissions: ManualQrisSubmission[];
+  adminUpdateQrisConfig: (partial: Partial<QrisAdminConfig>) => { success: boolean; message: string };
+  adminResetQrisConfig: () => { success: boolean; message: string };
+  submitManualQrisProof: (input: {
+    orderId: string;
+    proofImageDataUrl: string;
+    proofFileName?: string;
+    note?: string;
+  }) => { success: boolean; message: string; submission?: ManualQrisSubmission };
+  adminReviewManualQrisSubmission: (
+    submissionId: string,
+    decision: 'disetujui' | 'ditolak',
+    adminNote?: string
+  ) => { success: boolean; message: string };
+  adminSimulateQrisOrder: (orderId: string) => Promise<{ success: boolean; message: string }>;
+  // Status 24 Jam (ala WhatsApp) & Fitur Sosial Ekspresif
+  chatStatuses: ChatStatusEntry[];
+  chatStatusReports: ChatStatusReport[];
+  socialChatPreferencesMap: Record<string, SocialChatPreferences>;
+  scheduledChatMessages: ScheduledChatMessage[];
+  createChatStatus: (input: {
+    type: ChatStatusType;
+    text?: string;
+    caption?: string;
+    bgTheme?: string;
+    fontStyle?: 'sans' | 'serif' | 'mono' | 'bold';
+    mediaUrl?: string;
+    mimeType?: string;
+    durationSec?: number;
+    waveformPeaks?: number[];
+    privacy?: ChatStatusPrivacy;
+    isPinnedAdminBanner?: boolean;
+  }) => { success: boolean; message: string; status?: ChatStatusEntry };
+  viewChatStatus: (statusId: string) => void;
+  reactChatStatus: (statusId: string, emoji: string) => void;
+  replyChatStatusToDm: (statusId: string, replyText: string) => { success: boolean; message: string };
+  deleteChatStatus: (statusId: string) => { success: boolean; message: string };
+  reportChatStatus: (statusId: string, reason: string) => { success: boolean; message: string };
+  adminModerateChatStatus: (
+    statusId: string,
+    action: 'delete' | 'pin_banner' | 'unpin_banner'
+  ) => { success: boolean; message: string };
+  adminResolveStatusReport: (
+    reportId: string,
+    resolution: 'deleted' | 'dismissed'
+  ) => { success: boolean; message: string };
+  updateSocialChatPreferences: (partial: Partial<SocialChatPreferences>) => void;
+  toggleMuteStatusAuthor: (authorAccountId: string) => { muted: boolean; message: string };
+  isDndActiveForAccount: (accountId?: string) => boolean;
+  scheduleChatMessage: (input: {
+    roomType: 'global' | 'dm' | 'group';
+    targetId?: string;
+    targetLabel: string;
+    text: string;
+    textEffect?: ChatTextEffectStyle;
+    scheduledAtMs: number;
+  }) => { success: boolean; message: string };
+  cancelScheduledChatMessage: (id: string) => void;
+  // Ekspansi Mobile Banking: Kantong Impian Berbunga, Brankas Pengaman & Loyalty
+  dreamPockets: DreamPocket[];
+  dreamPocketConfig: DreamPocketAdminConfig;
+  createDreamPocket: (input: {
+    name: string;
+    emoji: string;
+    category: string;
+    targetAmount: number;
+    deadlineIso?: string;
+    colorTheme: string;
+  }) => { success: boolean; message: string; pocket?: DreamPocket };
+  depositToDreamPocket: (pocketId: string, amount: number) => { success: boolean; message: string };
+  withdrawFromDreamPocket: (pocketId: string, amount: number) => { success: boolean; message: string };
+  deleteDreamPocket: (pocketId: string) => { success: boolean; message: string };
+  adminUpdateDreamPocketConfig: (partial: Partial<DreamPocketAdminConfig>) => { success: boolean; message: string };
+  safeVaultMap: Record<string, SafeVaultAccountState>;
+  getUnlockedAvailableBalance: (accountId?: string) => number;
+  lockBalanceToSafeVault: (amount: number, pin: string) => { success: boolean; message: string };
+  unlockBalanceFromSafeVault: (amount: number, pin: string) => { success: boolean; message: string };
+  loyaltyMap: Record<string, LoyaltyAccountState>;
+  loyaltyConfig: LoyaltyAdminConfig;
+  claimDailyCheckIn: () => { success: boolean; message: string; pointsEarned?: number; streak?: number };
+  claimAchievementReward: (achievementId: string) => { success: boolean; message: string; pointsEarned?: number };
+  redeemLoyaltyPoints: (
+    pointsToSpend: number,
+    target: 'cash' | 'coin' | 'diamond'
+  ) => { success: boolean; message: string };
+  adminUpdateLoyaltyConfig: (partial: Partial<LoyaltyAdminConfig>) => { success: boolean; message: string };
+  adminAdjustLoyaltyPoints: (accountId: string, points: number, mode: 'add' | 'set') => { success: boolean; message: string };
   adminAdjustAccountDiamonds: (
     accountId: string,
     diamonds: number,
@@ -3521,6 +3636,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     disableMessageEdit: false,
     disableChatSystemNotifications: false,
     disableWelcomeGreeting: false,
+    disableStatusTab: false,
   };
 
   const DEFAULT_CHAT_ANTI_SPAM: ChatAntiSpamConfig = {
@@ -3979,6 +4095,72 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       order?: QrisPaymentOrder;
     }) | null
   >(null);
+
+  const DEFAULT_QRIS_ADMIN_CONFIG: QrisAdminConfig = {
+    mode: 'auto_buatqris',
+    manualUseDynamicEmvco: true,
+    updatedAtMs: 0,
+  };
+  const DEFAULT_DREAM_POCKET_ADMIN_CONFIG: DreamPocketAdminConfig = {
+    enabled: true,
+    annualInterestPercent: 6.5,
+    maxPocketsPerAccount: 8,
+    allowEarlyWithdraw: true,
+    updatedAtMs: 0,
+  };
+  const DEFAULT_LOYALTY_ADMIN_CONFIG: LoyaltyAdminConfig = {
+    enabled: true,
+    dailyCheckInPoints: 25,
+    streakBonus7DaysPoints: 150,
+    rupiahPerPoint: 500,
+    coinPer100Points: 15,
+    diamondPer100Points: 10,
+    updatedAtMs: 0,
+  };
+
+  const [qrisAdminConfig, setQrisAdminConfig] = useState<QrisAdminConfig>(DEFAULT_QRIS_ADMIN_CONFIG);
+  const qrisAdminConfigRef = useRef<QrisAdminConfig>(qrisAdminConfig);
+  qrisAdminConfigRef.current = qrisAdminConfig;
+
+  const [manualQrisSubmissions, setManualQrisSubmissions] = useState<ManualQrisSubmission[]>([]);
+  const manualQrisSubmissionsRef = useRef<ManualQrisSubmission[]>(manualQrisSubmissions);
+  manualQrisSubmissionsRef.current = manualQrisSubmissions;
+
+  const [chatStatuses, setChatStatuses] = useState<ChatStatusEntry[]>([]);
+  const chatStatusesRef = useRef<ChatStatusEntry[]>(chatStatuses);
+  chatStatusesRef.current = chatStatuses;
+
+  const [chatStatusReports, setChatStatusReports] = useState<ChatStatusReport[]>([]);
+  const chatStatusReportsRef = useRef<ChatStatusReport[]>(chatStatusReports);
+  chatStatusReportsRef.current = chatStatusReports;
+
+  const [socialChatPreferencesMap, setSocialChatPreferencesMap] = useState<Record<string, SocialChatPreferences>>({});
+  const socialChatPreferencesMapRef = useRef<Record<string, SocialChatPreferences>>(socialChatPreferencesMap);
+  socialChatPreferencesMapRef.current = socialChatPreferencesMap;
+
+  const [scheduledChatMessages, setScheduledChatMessages] = useState<ScheduledChatMessage[]>([]);
+  const scheduledChatMessagesRef = useRef<ScheduledChatMessage[]>(scheduledChatMessages);
+  scheduledChatMessagesRef.current = scheduledChatMessages;
+
+  const [dreamPockets, setDreamPockets] = useState<DreamPocket[]>([]);
+  const dreamPocketsRef = useRef<DreamPocket[]>(dreamPockets);
+  dreamPocketsRef.current = dreamPockets;
+
+  const [dreamPocketConfig, setDreamPocketConfig] = useState<DreamPocketAdminConfig>(DEFAULT_DREAM_POCKET_ADMIN_CONFIG);
+  const dreamPocketConfigRef = useRef<DreamPocketAdminConfig>(dreamPocketConfig);
+  dreamPocketConfigRef.current = dreamPocketConfig;
+
+  const [safeVaultMap, setSafeVaultMap] = useState<Record<string, SafeVaultAccountState>>({});
+  const safeVaultMapRef = useRef<Record<string, SafeVaultAccountState>>(safeVaultMap);
+  safeVaultMapRef.current = safeVaultMap;
+
+  const [loyaltyMap, setLoyaltyMap] = useState<Record<string, LoyaltyAccountState>>({});
+  const loyaltyMapRef = useRef<Record<string, LoyaltyAccountState>>(loyaltyMap);
+  loyaltyMapRef.current = loyaltyMap;
+
+  const [loyaltyConfig, setLoyaltyConfig] = useState<LoyaltyAdminConfig>(DEFAULT_LOYALTY_ADMIN_CONFIG);
+  const loyaltyConfigRef = useRef<LoyaltyAdminConfig>(loyaltyConfig);
+  loyaltyConfigRef.current = loyaltyConfig;
 
   const [familyConfig, setFamilyConfig] = useState<FamilySystemConfig>(
     DEFAULT_FAMILY_SYSTEM_CONFIG
@@ -5085,6 +5267,65 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       qrisOrdersRef.current = incomingOrders;
       setQrisOrders(incomingOrders);
     }
+    if (data.qrisAdminConfig && typeof data.qrisAdminConfig === 'object') {
+      const incCfg = data.qrisAdminConfig as QrisAdminConfig;
+      if ((incCfg.updatedAtMs || 0) >= (qrisAdminConfigRef.current.updatedAtMs || 0)) {
+        const merged = { ...DEFAULT_QRIS_ADMIN_CONFIG, ...incCfg };
+        qrisAdminConfigRef.current = merged;
+        setQrisAdminConfig(merged);
+      }
+    }
+    if (Array.isArray(data.manualQrisSubmissions)) {
+      const incSubs = data.manualQrisSubmissions as ManualQrisSubmission[];
+      manualQrisSubmissionsRef.current = incSubs;
+      setManualQrisSubmissions(incSubs);
+    }
+    if (Array.isArray(data.chatStatuses)) {
+      const nowMs = Date.now();
+      const validStatuses = (data.chatStatuses as ChatStatusEntry[]).filter((s) => s && s.expiresAtMs > nowMs);
+      chatStatusesRef.current = validStatuses;
+      setChatStatuses(validStatuses);
+    }
+    if (Array.isArray(data.chatStatusReports)) {
+      const incReps = data.chatStatusReports as ChatStatusReport[];
+      chatStatusReportsRef.current = incReps;
+      setChatStatusReports(incReps);
+    }
+    if (data.socialChatPreferencesMap && typeof data.socialChatPreferencesMap === 'object') {
+      const merged = { ...socialChatPreferencesMapRef.current, ...(data.socialChatPreferencesMap as Record<string, SocialChatPreferences>) };
+      socialChatPreferencesMapRef.current = merged;
+      setSocialChatPreferencesMap(merged);
+    }
+    if (Array.isArray(data.scheduledChatMessages)) {
+      const incSched = data.scheduledChatMessages as ScheduledChatMessage[];
+      scheduledChatMessagesRef.current = incSched;
+      setScheduledChatMessages(incSched);
+    }
+    if (Array.isArray(data.dreamPockets)) {
+      const incPockets = data.dreamPockets as DreamPocket[];
+      dreamPocketsRef.current = incPockets;
+      setDreamPockets(incPockets);
+    }
+    if (data.dreamPocketConfig && typeof data.dreamPocketConfig === 'object') {
+      const next = { ...DEFAULT_DREAM_POCKET_ADMIN_CONFIG, ...(data.dreamPocketConfig as Partial<DreamPocketAdminConfig>) };
+      dreamPocketConfigRef.current = next;
+      setDreamPocketConfig(next);
+    }
+    if (data.safeVaultMap && typeof data.safeVaultMap === 'object') {
+      const merged = { ...safeVaultMapRef.current, ...(data.safeVaultMap as Record<string, SafeVaultAccountState>) };
+      safeVaultMapRef.current = merged;
+      setSafeVaultMap(merged);
+    }
+    if (data.loyaltyMap && typeof data.loyaltyMap === 'object') {
+      const merged = { ...loyaltyMapRef.current, ...(data.loyaltyMap as Record<string, LoyaltyAccountState>) };
+      loyaltyMapRef.current = merged;
+      setLoyaltyMap(merged);
+    }
+    if (data.loyaltyConfig && typeof data.loyaltyConfig === 'object') {
+      const next = { ...DEFAULT_LOYALTY_ADMIN_CONFIG, ...(data.loyaltyConfig as Partial<LoyaltyAdminConfig>) };
+      loyaltyConfigRef.current = next;
+      setLoyaltyConfig(next);
+    }
     if (data.familyConfig && typeof data.familyConfig === 'object') {
       const mergedFamCfg: FamilySystemConfig = {
         ...DEFAULT_FAMILY_SYSTEM_CONFIG,
@@ -5475,6 +5716,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     suggestions?: SuggestionRecord[];
     suggestionRewardConfig?: SuggestionRewardProgramConfig;
     qrisOrders?: QrisPaymentOrder[];
+    qrisAdminConfig?: QrisAdminConfig;
+    manualQrisSubmissions?: ManualQrisSubmission[];
+    chatStatuses?: ChatStatusEntry[];
+    chatStatusReports?: ChatStatusReport[];
+    socialChatPreferencesMap?: Record<string, SocialChatPreferences>;
+    scheduledChatMessages?: ScheduledChatMessage[];
+    dreamPockets?: DreamPocket[];
+    dreamPocketConfig?: DreamPocketAdminConfig;
+    safeVaultMap?: Record<string, SafeVaultAccountState>;
+    loyaltyMap?: Record<string, LoyaltyAccountState>;
+    loyaltyConfig?: LoyaltyAdminConfig;
     familyConfig?: FamilySystemConfig;
     families?: FamilyGroup[];
     missions?: AppMissionDefinition[];
@@ -5668,6 +5920,64 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         : {}),
       ...(overrides?.qrisOrders !== undefined
         ? { qrisOrders: overrides.qrisOrders.slice(0, 120) }
+        : {}),
+      ...(overrides?.qrisAdminConfig !== undefined
+        ? {
+            qrisAdminConfig: {
+              ...overrides.qrisAdminConfig,
+              manualQrImageDataUrl:
+                overrides.qrisAdminConfig.manualQrImageDataUrl &&
+                overrides.qrisAdminConfig.manualQrImageDataUrl.length < 180_000
+                  ? overrides.qrisAdminConfig.manualQrImageDataUrl
+                  : undefined,
+            },
+          }
+        : {}),
+      ...(overrides?.manualQrisSubmissions !== undefined
+        ? {
+            manualQrisSubmissions: overrides.manualQrisSubmissions.slice(0, 60).map((s) => ({
+              ...s,
+              proofImageDataUrl:
+                s.proofImageDataUrl && s.proofImageDataUrl.length < 120_000
+                  ? s.proofImageDataUrl
+                  : '',
+            })),
+          }
+        : {}),
+      ...(overrides?.chatStatuses !== undefined
+        ? {
+            chatStatuses: overrides.chatStatuses
+              .filter((s) => s.expiresAtMs > Date.now())
+              .slice(0, 80)
+              .map((s) => ({
+                ...s,
+                mediaUrl: s.mediaUrl && s.mediaUrl.length < 140_000 ? s.mediaUrl : undefined,
+              })),
+          }
+        : {}),
+      ...(overrides?.chatStatusReports !== undefined
+        ? { chatStatusReports: overrides.chatStatusReports.slice(0, 80) }
+        : {}),
+      ...(overrides?.socialChatPreferencesMap !== undefined
+        ? { socialChatPreferencesMap: overrides.socialChatPreferencesMap }
+        : {}),
+      ...(overrides?.scheduledChatMessages !== undefined
+        ? { scheduledChatMessages: overrides.scheduledChatMessages.slice(0, 100) }
+        : {}),
+      ...(overrides?.dreamPockets !== undefined
+        ? { dreamPockets: overrides.dreamPockets.slice(0, 200) }
+        : {}),
+      ...(overrides?.dreamPocketConfig !== undefined
+        ? { dreamPocketConfig: overrides.dreamPocketConfig }
+        : {}),
+      ...(overrides?.safeVaultMap !== undefined
+        ? { safeVaultMap: overrides.safeVaultMap }
+        : {}),
+      ...(overrides?.loyaltyMap !== undefined
+        ? { loyaltyMap: overrides.loyaltyMap }
+        : {}),
+      ...(overrides?.loyaltyConfig !== undefined
+        ? { loyaltyConfig: overrides.loyaltyConfig }
         : {}),
       ...(overrides?.families !== undefined ? { families: overrides.families.slice(0, 150) } : {}),
       ...(overrides?.missionProgressByAccount !== undefined
@@ -11155,7 +11465,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return mergePrivateChatsUnion(prev, incomingList);
       });
       if (shouldBeep) {
-        playAtmSound('beep');
+        const activeAccForDnd = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+        const dndPrefs = activeAccForDnd ? socialChatPreferencesMapRef.current[activeAccForDnd.id] : undefined;
+        let dndActive = Boolean(activeAccForDnd?.chatDndEnabled);
+        if (!dndActive && dndPrefs?.dndEnabled) {
+          const curHr = new Date().getHours();
+          const st = dndPrefs.dndStartHour ?? 22;
+          const en = dndPrefs.dndEndHour ?? 7;
+          dndActive = st <= en ? curHr >= st && curHr < en : curHr >= st || curHr < en;
+        }
+        if (!dndActive) {
+          playAtmSound('beep');
+        }
       }
     };
 
@@ -11321,6 +11642,64 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         if (Array.isArray(data.privateChatMessages)) {
           mergeIncomingPrivateMessages(data.privateChatMessages as ChatMessage[], !isInitial);
+        }
+        if (data.qrisAdminConfig && typeof data.qrisAdminConfig === 'object') {
+          const incQ = data.qrisAdminConfig as QrisAdminConfig;
+          if ((incQ.updatedAtMs || 0) >= (qrisAdminConfigRef.current.updatedAtMs || 0)) {
+            const merged = { ...DEFAULT_QRIS_ADMIN_CONFIG, ...incQ };
+            qrisAdminConfigRef.current = merged;
+            setQrisAdminConfig(merged);
+          }
+        }
+        if (Array.isArray(data.manualQrisSubmissions)) {
+          const incS = data.manualQrisSubmissions as ManualQrisSubmission[];
+          if (incS.length > 0 || manualQrisSubmissionsRef.current.length === 0) {
+            manualQrisSubmissionsRef.current = incS;
+            setManualQrisSubmissions(incS);
+          }
+        }
+        if (Array.isArray(data.chatStatuses)) {
+          const nowMs = Date.now();
+          const valid = (data.chatStatuses as ChatStatusEntry[]).filter((s) => s && s.expiresAtMs > nowMs);
+          chatStatusesRef.current = valid;
+          setChatStatuses(valid);
+        }
+        if (Array.isArray(data.chatStatusReports)) {
+          chatStatusReportsRef.current = data.chatStatusReports as ChatStatusReport[];
+          setChatStatusReports(data.chatStatusReports as ChatStatusReport[]);
+        }
+        if (data.socialChatPreferencesMap && typeof data.socialChatPreferencesMap === 'object') {
+          const merged = { ...socialChatPreferencesMapRef.current, ...(data.socialChatPreferencesMap as Record<string, SocialChatPreferences>) };
+          socialChatPreferencesMapRef.current = merged;
+          setSocialChatPreferencesMap(merged);
+        }
+        if (Array.isArray(data.scheduledChatMessages)) {
+          scheduledChatMessagesRef.current = data.scheduledChatMessages as ScheduledChatMessage[];
+          setScheduledChatMessages(data.scheduledChatMessages as ScheduledChatMessage[]);
+        }
+        if (Array.isArray(data.dreamPockets)) {
+          dreamPocketsRef.current = data.dreamPockets as DreamPocket[];
+          setDreamPockets(data.dreamPockets as DreamPocket[]);
+        }
+        if (data.dreamPocketConfig && typeof data.dreamPocketConfig === 'object') {
+          const merged = { ...DEFAULT_DREAM_POCKET_ADMIN_CONFIG, ...(data.dreamPocketConfig as Partial<DreamPocketAdminConfig>) };
+          dreamPocketConfigRef.current = merged;
+          setDreamPocketConfig(merged);
+        }
+        if (data.safeVaultMap && typeof data.safeVaultMap === 'object') {
+          const merged = { ...safeVaultMapRef.current, ...(data.safeVaultMap as Record<string, SafeVaultAccountState>) };
+          safeVaultMapRef.current = merged;
+          setSafeVaultMap(merged);
+        }
+        if (data.loyaltyMap && typeof data.loyaltyMap === 'object') {
+          const merged = { ...loyaltyMapRef.current, ...(data.loyaltyMap as Record<string, LoyaltyAccountState>) };
+          loyaltyMapRef.current = merged;
+          setLoyaltyMap(merged);
+        }
+        if (data.loyaltyConfig && typeof data.loyaltyConfig === 'object') {
+          const merged = { ...DEFAULT_LOYALTY_ADMIN_CONFIG, ...(data.loyaltyConfig as Partial<LoyaltyAdminConfig>) };
+          loyaltyConfigRef.current = merged;
+          setLoyaltyConfig(merged);
         }
         if (Array.isArray(data.suggestions)) {
           setSuggestions(filterListByAdminTombstones('suggestions', data.suggestions as SuggestionRecord[]));
@@ -11770,6 +12149,61 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               }
               if (Array.isArray(msg.payload.privateChatMessages)) {
                 mergeIncomingPrivateMessages(msg.payload.privateChatMessages as ChatMessage[], false);
+              }
+              if (msg.payload.qrisAdminConfig && typeof msg.payload.qrisAdminConfig === 'object') {
+                const incQ = msg.payload.qrisAdminConfig as QrisAdminConfig;
+                if ((incQ.updatedAtMs || 0) >= (qrisAdminConfigRef.current.updatedAtMs || 0)) {
+                  const merged = { ...DEFAULT_QRIS_ADMIN_CONFIG, ...incQ };
+                  qrisAdminConfigRef.current = merged;
+                  setQrisAdminConfig(merged);
+                }
+              }
+              if (Array.isArray(msg.payload.manualQrisSubmissions)) {
+                manualQrisSubmissionsRef.current = msg.payload.manualQrisSubmissions as ManualQrisSubmission[];
+                setManualQrisSubmissions(msg.payload.manualQrisSubmissions as ManualQrisSubmission[]);
+              }
+              if (Array.isArray(msg.payload.chatStatuses)) {
+                const nowMs = Date.now();
+                const valid = (msg.payload.chatStatuses as ChatStatusEntry[]).filter((s) => s && s.expiresAtMs > nowMs);
+                chatStatusesRef.current = valid;
+                setChatStatuses(valid);
+              }
+              if (Array.isArray(msg.payload.chatStatusReports)) {
+                chatStatusReportsRef.current = msg.payload.chatStatusReports as ChatStatusReport[];
+                setChatStatusReports(msg.payload.chatStatusReports as ChatStatusReport[]);
+              }
+              if (msg.payload.socialChatPreferencesMap && typeof msg.payload.socialChatPreferencesMap === 'object') {
+                const merged = { ...socialChatPreferencesMapRef.current, ...(msg.payload.socialChatPreferencesMap as Record<string, SocialChatPreferences>) };
+                socialChatPreferencesMapRef.current = merged;
+                setSocialChatPreferencesMap(merged);
+              }
+              if (Array.isArray(msg.payload.scheduledChatMessages)) {
+                scheduledChatMessagesRef.current = msg.payload.scheduledChatMessages as ScheduledChatMessage[];
+                setScheduledChatMessages(msg.payload.scheduledChatMessages as ScheduledChatMessage[]);
+              }
+              if (Array.isArray(msg.payload.dreamPockets)) {
+                dreamPocketsRef.current = msg.payload.dreamPockets as DreamPocket[];
+                setDreamPockets(msg.payload.dreamPockets as DreamPocket[]);
+              }
+              if (msg.payload.dreamPocketConfig && typeof msg.payload.dreamPocketConfig === 'object') {
+                const merged = { ...DEFAULT_DREAM_POCKET_ADMIN_CONFIG, ...(msg.payload.dreamPocketConfig as Partial<DreamPocketAdminConfig>) };
+                dreamPocketConfigRef.current = merged;
+                setDreamPocketConfig(merged);
+              }
+              if (msg.payload.safeVaultMap && typeof msg.payload.safeVaultMap === 'object') {
+                const merged = { ...safeVaultMapRef.current, ...(msg.payload.safeVaultMap as Record<string, SafeVaultAccountState>) };
+                safeVaultMapRef.current = merged;
+                setSafeVaultMap(merged);
+              }
+              if (msg.payload.loyaltyMap && typeof msg.payload.loyaltyMap === 'object') {
+                const merged = { ...loyaltyMapRef.current, ...(msg.payload.loyaltyMap as Record<string, LoyaltyAccountState>) };
+                loyaltyMapRef.current = merged;
+                setLoyaltyMap(merged);
+              }
+              if (msg.payload.loyaltyConfig && typeof msg.payload.loyaltyConfig === 'object') {
+                const merged = { ...DEFAULT_LOYALTY_ADMIN_CONFIG, ...(msg.payload.loyaltyConfig as Partial<LoyaltyAdminConfig>) };
+                loyaltyConfigRef.current = merged;
+                setLoyaltyConfig(merged);
               }
               if (Array.isArray(msg.payload.suggestions)) {
                 setSuggestions(
@@ -12368,6 +12802,79 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               window.setTimeout(() => {
                 fulfillPaidQrisOrderRef.current?.(paidOrderId, providerRef);
               }, 0);
+            } else if (msg.type === 'qris_admin_config:updated' && msg.payload?.qrisAdminConfig) {
+              const incQ = msg.payload.qrisAdminConfig as QrisAdminConfig;
+              if ((incQ.updatedAtMs || 0) >= (qrisAdminConfigRef.current.updatedAtMs || 0)) {
+                const merged = { ...DEFAULT_QRIS_ADMIN_CONFIG, ...incQ };
+                qrisAdminConfigRef.current = merged;
+                setQrisAdminConfig(merged);
+              }
+            } else if (msg.type === 'qris_manual_submission:updated' && Array.isArray(msg.payload?.manualQrisSubmissions)) {
+              const subs = msg.payload.manualQrisSubmissions as ManualQrisSubmission[];
+              manualQrisSubmissionsRef.current = subs;
+              setManualQrisSubmissions(subs);
+              const sub = msg.payload?.submission as ManualQrisSubmission | undefined;
+              if (sub?.orderId) {
+                const mappedStatus: QrisOrderStatus =
+                  sub.status === 'disetujui' ? 'LUNAS' : sub.status === 'ditolak' ? 'DITOLAK' : 'MENUNGGU_ADMIN';
+                setQrisOrders((prev) =>
+                  prev.map((o) =>
+                    o.orderId === sub.orderId
+                      ? { ...o, status: mappedStatus, manualSubmissionStatus: sub.status, manualSubmissionId: sub.id }
+                      : o
+                  )
+                );
+                setActiveQrisModalOrder((prev) =>
+                  prev && prev.orderId === sub.orderId
+                    ? { ...prev, status: mappedStatus, manualSubmissionStatus: sub.status, manualSubmissionId: sub.id }
+                    : prev
+                );
+              }
+            } else if (msg.type === 'chat_status:updated' && Array.isArray(msg.payload?.chatStatuses)) {
+              const nowMs = Date.now();
+              const valid = (msg.payload.chatStatuses as ChatStatusEntry[]).filter((s) => s && s.expiresAtMs > nowMs);
+              chatStatusesRef.current = valid;
+              setChatStatuses(valid);
+            } else if (msg.type === 'chat_status_report:updated' && Array.isArray(msg.payload?.chatStatusReports)) {
+              const reps = msg.payload.chatStatusReports as ChatStatusReport[];
+              chatStatusReportsRef.current = reps;
+              setChatStatusReports(reps);
+            } else if (msg.type === 'social_prefs:updated' && msg.payload?.accountId && msg.payload?.prefs) {
+              const accId = String(msg.payload.accountId);
+              const merged = { ...socialChatPreferencesMapRef.current, [accId]: msg.payload.prefs as SocialChatPreferences };
+              socialChatPreferencesMapRef.current = merged;
+              setSocialChatPreferencesMap(merged);
+            } else if (msg.type === 'scheduled_chat:updated' && Array.isArray(msg.payload?.scheduledChatMessages)) {
+              const list = msg.payload.scheduledChatMessages as ScheduledChatMessage[];
+              scheduledChatMessagesRef.current = list;
+              setScheduledChatMessages(list);
+            } else if (msg.type === 'dream_pockets:updated' && msg.payload) {
+              if (Array.isArray(msg.payload.dreamPockets)) {
+                const list = msg.payload.dreamPockets as DreamPocket[];
+                dreamPocketsRef.current = list;
+                setDreamPockets(list);
+              }
+              if (msg.payload.dreamPocketConfig && typeof msg.payload.dreamPocketConfig === 'object') {
+                const merged = { ...DEFAULT_DREAM_POCKET_ADMIN_CONFIG, ...(msg.payload.dreamPocketConfig as Partial<DreamPocketAdminConfig>) };
+                dreamPocketConfigRef.current = merged;
+                setDreamPocketConfig(merged);
+              }
+            } else if (msg.type === 'safe_vault:updated' && msg.payload?.accountId && msg.payload?.state) {
+              const accId = String(msg.payload.accountId);
+              const merged = { ...safeVaultMapRef.current, [accId]: msg.payload.state as SafeVaultAccountState };
+              safeVaultMapRef.current = merged;
+              setSafeVaultMap(merged);
+            } else if (msg.type === 'loyalty:updated' && msg.payload) {
+              if (msg.payload.loyaltyMap && typeof msg.payload.loyaltyMap === 'object') {
+                const merged = { ...loyaltyMapRef.current, ...(msg.payload.loyaltyMap as Record<string, LoyaltyAccountState>) };
+                loyaltyMapRef.current = merged;
+                setLoyaltyMap(merged);
+              }
+              if (msg.payload.loyaltyConfig && typeof msg.payload.loyaltyConfig === 'object') {
+                const merged = { ...DEFAULT_LOYALTY_ADMIN_CONFIG, ...(msg.payload.loyaltyConfig as Partial<LoyaltyAdminConfig>) };
+                loyaltyConfigRef.current = merged;
+                setLoyaltyConfig(merged);
+              }
             }
           } catch {
             // ignore
@@ -12662,10 +13169,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     redPacket?: ChatRedPacketData;
     expiresAtMs?: number;
     adminDivisionLabel?: ChatAdminDivision;
+    textEffect?: ChatTextEffectStyle;
+    stickerId?: string;
+    gifId?: string;
+    statusReplyRef?: ChatStatusReplyRef;
   }): Promise<{ success: boolean; message: string }> => {
     const cleanText = input.text.trim();
     const hasMediaArr = Array.isArray(input.mediaAttachments) && input.mediaAttachments.length > 0;
-    if (!cleanText && !input.poll && !input.imageAttachment && !input.videoAttachment && !hasMediaArr && !input.voiceAttachment && !input.contactAttachment && !input.redPacket) {
+    if (!cleanText && !input.poll && !input.imageAttachment && !input.videoAttachment && !hasMediaArr && !input.voiceAttachment && !input.contactAttachment && !input.redPacket && !input.stickerId && !input.gifId) {
       return { success: false, message: 'Pesan Chat Global tidak boleh kosong!' };
     }
 
@@ -12809,6 +13320,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       contactAttachment: input.contactAttachment,
       redPacket: input.redPacket,
       expiresAtMs: input.expiresAtMs,
+      textEffect: input.textEffect,
+      stickerId: input.stickerId,
+      gifId: input.gifId,
+      statusReplyRef: input.statusReplyRef,
+      senderReputationLabel: activeAcc
+        ? computeChatReputationRank({
+            isAdmin: isAdminSender,
+            loyaltyPoints: loyaltyMapRef.current[activeAcc.id]?.points || 0,
+            txCount: transactions.filter((t) => t.accountId === activeAcc.id).length,
+            messageCount: globalChats.filter((m) => m.senderAccountId === activeAcc.id).length + 1,
+          }).title
+        : undefined,
+      senderMoodText: activeAcc && socialChatPreferencesMapRef.current[activeAcc.id]?.moodText
+        ? `${socialChatPreferencesMapRef.current[activeAcc.id].moodEmoji || '✨'} ${socialChatPreferencesMapRef.current[activeAcc.id].moodText}`
+        : undefined,
     };
 
     seenChatIdsRef.current.add(msgId);
@@ -19832,6 +20358,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       redPacket: input.redPacket,
       splitBill: input.splitBill,
       expiresAtMs: input.expiresAtMs,
+      textEffect: input.textEffect,
+      stickerId: input.stickerId,
+      gifId: input.gifId,
+      statusReplyRef: input.statusReplyRef,
+      senderReputationLabel: computeChatReputationRank({
+        isAdmin: isAdminSender,
+        loyaltyPoints: loyaltyMapRef.current[currentAccount.id]?.points || 0,
+        txCount: transactions.filter((t) => t.accountId === currentAccount.id).length,
+        messageCount: chats.filter((m) => m.senderAccountId === currentAccount.id).length + 1,
+      }).title,
+      senderMoodText: socialChatPreferencesMapRef.current[currentAccount.id]?.moodText
+        ? `${socialChatPreferencesMapRef.current[currentAccount.id].moodEmoji || '✨'} ${socialChatPreferencesMapRef.current[currentAccount.id].moodText}`
+        : undefined,
     };
 
     seenPrivateChatIdsRef.current.add(newMsg.id);
@@ -24685,12 +25224,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const totalRequired = input.amount + fee;
 
     const isAdminCard = currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+    const lockedVault = safeVaultMapRef.current[currentAccount.id]?.lockedBalanceRupiah || 0;
+    const unlockedBalance = isAdminCard ? UNLIMITED_BALANCE : Math.max(0, currentAccount.balance - lockedVault);
 
-    if (!isAdminCard && currentAccount.balance < totalRequired) {
+    if (!isAdminCard && unlockedBalance < totalRequired) {
       playAtmSound('alert');
       return {
         success: false,
-        message: `Saldo tidak cukup! Total transfer + biaya admin: Rp ${totalRequired.toLocaleString('id-ID')}`,
+        message: lockedVault > 0
+          ? `Saldo bebas tidak cukup! Rp ${lockedVault.toLocaleString('id-ID')} sedang terkunci di Brankas Pengaman. Saldo bebas: Rp ${unlockedBalance.toLocaleString('id-ID')}.`
+          : `Saldo tidak cukup! Total transfer + biaya admin: Rp ${totalRequired.toLocaleString('id-ID')}`,
       };
     }
 
@@ -26559,6 +27102,1021 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       message: `Pengaturan berhasil direset ke default (Rp 90, Diskon 0%, Maks ${MAX_DIAMOND_PACKAGE_AMOUNT.toLocaleString(
         'id-ID'
       )} / Rp ${MAX_DIAMOND_PURCHASE_RUPIAH.toLocaleString('id-ID')}).`,
+    };
+  };
+
+  // ================= QRIS MANUAL / BUATQRIS HYBRID & SIMULASI ADMIN =================
+  const adminUpdateQrisConfig = (partial: Partial<QrisAdminConfig>): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    const nextCfg: QrisAdminConfig = {
+      ...qrisAdminConfigRef.current,
+      ...partial,
+      updatedAtMs: Date.now(),
+      updatedBy: activeAcc?.fullName || 'Admin Bank Nusantara',
+    };
+    qrisAdminConfigRef.current = nextCfg;
+    setQrisAdminConfig(nextCfg);
+    flushMasterStateToCloud({ qrisAdminConfig: nextCfg });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'qris_admin_config:sync', payload: nextCfg }));
+    }
+    playAtmSound('success');
+    return {
+      success: true,
+      message:
+        nextCfg.mode === 'manual_override'
+          ? 'Mode QRIS Manual Admin aktif! Pembeli kini memindai QR pilihan Admin & mengirim bukti transfer.'
+          : 'Mode QRIS otomatis kembali ke Bot & API BuatQRIS bawaan.',
+    };
+  };
+
+  const adminResetQrisConfig = (): { success: boolean; message: string } => {
+    const resetCfg: QrisAdminConfig = {
+      mode: 'auto_buatqris',
+      manualUseDynamicEmvco: true,
+      updatedAtMs: Date.now(),
+      updatedBy: 'Admin Reset',
+    };
+    qrisAdminConfigRef.current = resetCfg;
+    setQrisAdminConfig(resetCfg);
+    flushMasterStateToCloud({ qrisAdminConfig: resetCfg });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'qris_admin_config:sync', payload: resetCfg }));
+    }
+    playAtmSound('success');
+    return { success: true, message: 'Pengaturan QRIS direset ke Bot BuatQRIS otomatis bawaan.' };
+  };
+
+  const submitManualQrisProof = (input: {
+    orderId: string;
+    proofImageDataUrl: string;
+    proofFileName?: string;
+    note?: string;
+  }): { success: boolean; message: string; submission?: ManualQrisSubmission } => {
+    const targetOrder = qrisOrdersRef.current.find((o) => o.orderId === input.orderId);
+    if (!targetOrder) return { success: false, message: 'Order QRIS tidak ditemukan.' };
+    if (!input.proofImageDataUrl) return { success: false, message: 'Silakan pilih foto/screenshot bukti transfer terlebih dahulu.' };
+    const orderAcc = accountsRef.current.find((a) => a.id === targetOrder.accountId);
+    const sub: ManualQrisSubmission = {
+      id: `qsub-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      orderId: targetOrder.orderId,
+      accountId: targetOrder.accountId,
+      accountName: targetOrder.accountName,
+      accountNumber: orderAcc?.accountNumber || '-',
+      userId16: orderAcc?.userId16,
+      purpose: targetOrder.purpose,
+      diamondAmount: targetOrder.diamondAmount,
+      baseAmount: targetOrder.baseAmount,
+      uniqueCode: targetOrder.uniqueCode,
+      totalAmount: targetOrder.totalAmount,
+      proofImageDataUrl: input.proofImageDataUrl,
+      proofFileName: input.proofFileName,
+      note: input.note?.trim() || undefined,
+      status: 'menunggu',
+      createdAtMs: Date.now(),
+    };
+    const nextSubs = [sub, ...manualQrisSubmissionsRef.current.filter((x) => x.orderId !== targetOrder.orderId)].slice(0, 200);
+    manualQrisSubmissionsRef.current = nextSubs;
+    setManualQrisSubmissions(nextSubs);
+
+    const nextOrders = qrisOrdersRef.current.map((o) =>
+      o.orderId === targetOrder.orderId
+        ? { ...o, status: 'MENUNGGU_ADMIN' as QrisOrderStatus, manualSubmissionId: sub.id, manualSubmissionStatus: 'menunggu' as const }
+        : o
+    );
+    qrisOrdersRef.current = nextOrders;
+    setQrisOrders(nextOrders);
+    setActiveQrisModalOrder((prev) =>
+      prev && prev.orderId === targetOrder.orderId
+        ? { ...prev, status: 'MENUNGGU_ADMIN', manualSubmissionId: sub.id, manualSubmissionStatus: 'menunggu' }
+        : prev
+    );
+    flushMasterStateToCloud({ manualQrisSubmissions: nextSubs, qrisOrders: nextOrders });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'qris_manual_submission:upsert', payload: { submission: sub } }));
+    }
+    emitAdminTierNotification({
+      eventType: 'qris_topup',
+      title: `🧾 Bukti Transfer QRIS Manual Masuk (${targetOrder.accountName})`,
+      message: `${targetOrder.accountName} mengirim bukti transfer Rp ${targetOrder.totalAmount.toLocaleString('id-ID')} untuk ${(targetOrder.diamondAmount || 0).toLocaleString('id-ID')} Diamond. Klik untuk Setujui Instan!`,
+      adminTargetTab: 'diamond_system',
+      accountId: targetOrder.accountId,
+      referenceId: targetOrder.orderId,
+    });
+    playAtmSound('success');
+    return {
+      success: true,
+      submission: sub,
+      message: 'Bukti transfer berhasil dikirim! Menunggu persetujuan instan dari Admin.',
+    };
+  };
+
+  const adminReviewManualQrisSubmission = (
+    submissionId: string,
+    decision: 'disetujui' | 'ditolak',
+    adminNote?: string
+  ): { success: boolean; message: string } => {
+    const sub = manualQrisSubmissionsRef.current.find((s) => s.id === submissionId);
+    if (!sub) return { success: false, message: 'Data pengajuan bukti transfer tidak ditemukan.' };
+    const reviewer = accountsRef.current.find((a) => a.id === currentAccountIdRef.current)?.fullName || 'Admin Bank Nusantara';
+    const updatedSub: ManualQrisSubmission = {
+      ...sub,
+      status: decision,
+      adminNote: adminNote?.trim() || (decision === 'disetujui' ? 'Disetujui instan oleh Admin' : 'Bukti transfer tidak sesuai'),
+      reviewedBy: reviewer,
+      reviewedAtMs: Date.now(),
+    };
+    const nextSubs = manualQrisSubmissionsRef.current.map((s) => (s.id === submissionId ? updatedSub : s));
+    manualQrisSubmissionsRef.current = nextSubs;
+    setManualQrisSubmissions(nextSubs);
+
+    if (decision === 'disetujui') {
+      const fulfillRes = fulfillPaidQrisOrder(sub.orderId, `MANUAL-APPROVED-${sub.id}`);
+      const nextOrders = qrisOrdersRef.current.map((o) =>
+        o.orderId === sub.orderId ? { ...o, manualSubmissionStatus: 'disetujui' as const } : o
+      );
+      qrisOrdersRef.current = nextOrders;
+      setQrisOrders(nextOrders);
+      flushMasterStateToCloud({ manualQrisSubmissions: nextSubs, qrisOrders: nextOrders });
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'qris_manual_submission:upsert', payload: { submission: updatedSub } }));
+      }
+      return {
+        success: true,
+        message: fulfillRes.success
+          ? `Bukti transfer disetujui instan! +${(sub.diamondAmount || 0).toLocaleString('id-ID')} Diamond masuk ke akun ${sub.accountName}.`
+          : 'Pengajuan ditandai disetujui.',
+      };
+    }
+
+    updateQrisOrderStatus(sub.orderId, 'DITOLAK', { manualSubmissionStatus: 'ditolak' });
+    flushMasterStateToCloud({ manualQrisSubmissions: nextSubs });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'qris_manual_submission:upsert', payload: { submission: updatedSub } }));
+    }
+    addNotification(
+      'Bukti QRIS Manual Ditolak',
+      `Bukti pembayaran order ${sub.orderId} ditolak Admin${updatedSub.adminNote ? `: ${updatedSub.adminNote}` : '.'}`,
+      'warning',
+      { accountId: sub.accountId }
+    );
+    return { success: true, message: `Pengajuan ${sub.accountName} ditolak.` };
+  };
+
+  const adminSimulateQrisOrder = async (orderId: string): Promise<{ success: boolean; message: string }> => {
+    try {
+      const res = await fetch('/api/qris/admin-simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId }),
+      });
+      if (res.ok) {
+        const fulfilled = fulfillPaidQrisOrder(orderId, `SIM-ADMIN-${Date.now()}`);
+        return { success: true, message: fulfilled.message };
+      }
+    } catch { /* fallback local */ }
+    const fulfilled = fulfillPaidQrisOrder(orderId, `SIM-ADMIN-${Date.now()}`);
+    return { success: fulfilled.success, message: fulfilled.message };
+  };
+
+  // ================= STATUS 24 JAM ALA WHATSAPP & FITUR SOSIAL CHAT =================
+  const syncStatusEntryToServer = (statusEntry: ChatStatusEntry) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'chat_status:upsert', payload: { statusEntry } }));
+    }
+  };
+
+  const createChatStatus = (input: {
+    type: ChatStatusType;
+    text?: string;
+    caption?: string;
+    bgTheme?: string;
+    fontStyle?: 'sans' | 'serif' | 'mono' | 'bold';
+    mediaUrl?: string;
+    mimeType?: string;
+    durationSec?: number;
+    waveformPeaks?: number[];
+    privacy?: ChatStatusPrivacy;
+    isPinnedAdminBanner?: boolean;
+  }): { success: boolean; message: string; status?: ChatStatusEntry } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Silakan masuk ke akun untuk membuat Status.' };
+    if (input.type === 'text' && !input.text?.trim()) {
+      return { success: false, message: 'Teks Status tidak boleh kosong.' };
+    }
+    if (input.type !== 'text' && !input.mediaUrl) {
+      return { success: false, message: 'Media Status wajib dipilih atau direkam.' };
+    }
+    const nowMs = Date.now();
+    const isAdminAcc = Boolean(
+      adminUnlockedRef.current || activeAcc.cardTier === 'admin' || activeAcc.isOfficialAdminAccount || activeAcc.id === 'acc-admin'
+    );
+    const defaultPriv = socialChatPreferencesMapRef.current[activeAcc.id]?.statusPrivacyDefault || 'all';
+    const entry: ChatStatusEntry = {
+      id: `st-${nowMs}-${Math.floor(Math.random() * 999)}`,
+      authorAccountId: activeAcc.id,
+      authorName: activeAcc.fullName,
+      authorUserId16: activeAcc.userId16 || activeAcc.accountNumber,
+      authorAvatarUrl: activeAcc.avatarUrl,
+      authorRole: isAdminAcc ? 'admin' : 'customer',
+      authorCardTier: activeAcc.cardTier,
+      isVerified: isAdminAcc || Boolean(activeAcc.isVerified),
+      type: input.type,
+      text: input.text?.trim(),
+      caption: input.caption?.trim(),
+      bgTheme: input.bgTheme || 'emerald',
+      fontStyle: input.fontStyle || 'sans',
+      mediaUrl: input.mediaUrl,
+      mimeType: input.mimeType,
+      durationSec: input.durationSec,
+      waveformPeaks: input.waveformPeaks,
+      privacy: input.privacy || defaultPriv,
+      isPinnedAdminBanner: isAdminAcc ? Boolean(input.isPinnedAdminBanner) : false,
+      createdAtMs: nowMs,
+      expiresAtMs: nowMs + 86_400_000,
+      views: [],
+      reactions: {},
+      updatedAtMs: nowMs,
+    };
+    const nextList = [entry, ...chatStatusesRef.current.filter((s) => s.expiresAtMs > nowMs)].slice(0, 300);
+    chatStatusesRef.current = nextList;
+    setChatStatuses(nextList);
+    flushMasterStateToCloud({ chatStatuses: nextList });
+    syncStatusEntryToServer(entry);
+    playAtmSound('success');
+    return { success: true, status: entry, message: 'Status 24 jam berhasil dipublikasikan!' };
+  };
+
+  const viewChatStatus = (statusId: string) => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return;
+    const target = chatStatusesRef.current.find((s) => s.id === statusId);
+    if (!target || target.authorAccountId === activeAcc.id) return;
+    if (target.views.some((v) => v.viewerAccountId === activeAcc.id)) return;
+    const nextEntry: ChatStatusEntry = {
+      ...target,
+      views: [
+        ...target.views,
+        {
+          viewerAccountId: activeAcc.id,
+          viewerName: activeAcc.fullName,
+          viewerUserId16: activeAcc.userId16 || activeAcc.accountNumber,
+          viewedAtMs: Date.now(),
+        },
+      ],
+      updatedAtMs: Date.now(),
+    };
+    const nextList = chatStatusesRef.current.map((s) => (s.id === statusId ? nextEntry : s));
+    chatStatusesRef.current = nextList;
+    setChatStatuses(nextList);
+    syncStatusEntryToServer(nextEntry);
+  };
+
+  const reactChatStatus = (statusId: string, emoji: string) => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return;
+    const target = chatStatusesRef.current.find((s) => s.id === statusId);
+    if (!target) return;
+    const prevUsers = target.reactions?.[emoji] || [];
+    const has = prevUsers.includes(activeAcc.id);
+    const nextUsers = has ? prevUsers.filter((id) => id !== activeAcc.id) : [...prevUsers, activeAcc.id];
+    const nextReactions = { ...(target.reactions || {}), [emoji]: nextUsers };
+    const nextEntry: ChatStatusEntry = { ...target, reactions: nextReactions, updatedAtMs: Date.now() };
+    const nextList = chatStatusesRef.current.map((s) => (s.id === statusId ? nextEntry : s));
+    chatStatusesRef.current = nextList;
+    setChatStatuses(nextList);
+    flushMasterStateToCloud({ chatStatuses: nextList });
+    syncStatusEntryToServer(nextEntry);
+    if (!has && target.authorAccountId !== activeAcc.id) {
+      const authorAcc = accountsRef.current.find((a) => a.id === target.authorAccountId);
+      if (authorAcc) {
+        sendChatMessage({
+          recipientAccount: authorAcc.accountNumber,
+          recipientAccountId: authorAcc.id,
+          recipientName: authorAcc.fullName,
+          text: `${emoji} menanggapi Status Anda`,
+          statusReplyRef: {
+            statusId: target.id,
+            authorAccountId: target.authorAccountId,
+            authorName: target.authorName,
+            authorUserId16: target.authorUserId16,
+            statusType: target.type,
+            previewText: target.text || target.caption || `[Status ${target.type.toUpperCase()}]`,
+            mediaUrl: target.type === 'image' ? target.mediaUrl : undefined,
+          },
+        });
+      }
+    }
+    playAtmSound('beep');
+  };
+
+  const replyChatStatusToDm = (statusId: string, replyText: string): { success: boolean; message: string } => {
+    const clean = replyText.trim();
+    if (!clean) return { success: false, message: 'Balasan Status tidak boleh kosong.' };
+    const target = chatStatusesRef.current.find((s) => s.id === statusId);
+    if (!target) return { success: false, message: 'Status sudah berakhir atau dihapus.' };
+    const authorAcc = accountsRef.current.find((a) => a.id === target.authorAccountId);
+    if (!authorAcc) return { success: false, message: 'Akun pembuat Status tidak ditemukan.' };
+    sendChatMessage({
+      recipientAccount: authorAcc.accountNumber,
+      recipientAccountId: authorAcc.id,
+      recipientName: authorAcc.fullName,
+      text: clean,
+      statusReplyRef: {
+        statusId: target.id,
+        authorAccountId: target.authorAccountId,
+        authorName: target.authorName,
+        authorUserId16: target.authorUserId16,
+        statusType: target.type,
+        previewText: target.text || target.caption || `[Status ${target.type.toUpperCase()}]`,
+        mediaUrl: target.type === 'image' ? target.mediaUrl : undefined,
+      },
+    });
+    playAtmSound('success');
+    return { success: true, message: `Balasan Status terkirim ke Chat Privat ${authorAcc.fullName}!` };
+  };
+
+  const deleteChatStatus = (statusId: string): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    const target = chatStatusesRef.current.find((s) => s.id === statusId);
+    if (!target) return { success: false, message: 'Status tidak ditemukan.' };
+    const isAdmin = Boolean(adminUnlockedRef.current || activeAcc?.cardTier === 'admin' || activeAcc?.id === 'acc-admin');
+    if (target.authorAccountId !== activeAcc?.id && !isAdmin) {
+      return { success: false, message: 'Anda hanya dapat menghapus Status milik Anda sendiri.' };
+    }
+    const nextList = chatStatusesRef.current.filter((s) => s.id !== statusId);
+    chatStatusesRef.current = nextList;
+    setChatStatuses(nextList);
+    flushMasterStateToCloud({ chatStatuses: nextList });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'chat_status:delete', payload: { statusId } }));
+    }
+    return { success: true, message: 'Status berhasil dihapus.' };
+  };
+
+  const reportChatStatus = (statusId: string, reason: string): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    const target = chatStatusesRef.current.find((s) => s.id === statusId);
+    if (!activeAcc || !target) return { success: false, message: 'Status atau akun tidak ditemukan.' };
+    const report: ChatStatusReport = {
+      id: `strep-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      statusId: target.id,
+      statusAuthorId: target.authorAccountId,
+      statusAuthorName: target.authorName,
+      statusAuthorUserId16: target.authorUserId16,
+      reporterAccountId: activeAcc.id,
+      reporterName: activeAcc.fullName,
+      reason: reason.trim() || 'Konten Status tidak pantas',
+      statusPreview: target.text || target.caption || `[Status ${target.type.toUpperCase()}]`,
+      createdAtMs: Date.now(),
+      resolution: 'pending',
+    };
+    const nextReps = [report, ...chatStatusReportsRef.current].slice(0, 150);
+    chatStatusReportsRef.current = nextReps;
+    setChatStatusReports(nextReps);
+    flushMasterStateToCloud({ chatStatusReports: nextReps });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'chat_status_report:upsert', payload: { report } }));
+    }
+    return { success: true, message: 'Laporan Status telah dikirim ke Panel Moderasi Admin.' };
+  };
+
+  const adminModerateChatStatus = (
+    statusId: string,
+    action: 'delete' | 'pin_banner' | 'unpin_banner'
+  ): { success: boolean; message: string } => {
+    if (action === 'delete') {
+      const nextList = chatStatusesRef.current.filter((s) => s.id !== statusId);
+      chatStatusesRef.current = nextList;
+      setChatStatuses(nextList);
+      flushMasterStateToCloud({ chatStatuses: nextList });
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'chat_status:delete', payload: { statusId } }));
+      }
+      return { success: true, message: 'Status dihapus oleh Moderasi Admin.' };
+    }
+    const target = chatStatusesRef.current.find((s) => s.id === statusId);
+    if (!target) return { success: false, message: 'Status tidak ditemukan.' };
+    const nextEntry: ChatStatusEntry = {
+      ...target,
+      isPinnedAdminBanner: action === 'pin_banner',
+      updatedAtMs: Date.now(),
+    };
+    const nextList = chatStatusesRef.current.map((s) => (s.id === statusId ? nextEntry : s));
+    chatStatusesRef.current = nextList;
+    setChatStatuses(nextList);
+    flushMasterStateToCloud({ chatStatuses: nextList });
+    syncStatusEntryToServer(nextEntry);
+    return {
+      success: true,
+      message: action === 'pin_banner' ? 'Status disematkan sebagai Banner Pengumuman!' : 'Sematkan Banner dilepas.',
+    };
+  };
+
+  const adminResolveStatusReport = (
+    reportId: string,
+    resolution: 'deleted' | 'dismissed'
+  ): { success: boolean; message: string } => {
+    const rep = chatStatusReportsRef.current.find((r) => r.id === reportId);
+    if (!rep) return { success: false, message: 'Laporan tidak ditemukan.' };
+    if (resolution === 'deleted') {
+      adminModerateChatStatus(rep.statusId, 'delete');
+    }
+    const updatedRep: ChatStatusReport = { ...rep, resolution };
+    const nextReps = chatStatusReportsRef.current.map((r) => (r.id === reportId ? updatedRep : r));
+    chatStatusReportsRef.current = nextReps;
+    setChatStatusReports(nextReps);
+    flushMasterStateToCloud({ chatStatusReports: nextReps });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'chat_status_report:upsert', payload: { report: updatedRep } }));
+    }
+    return {
+      success: true,
+      message: resolution === 'deleted' ? 'Status pelanggar dihapus & laporan ditutup.' : 'Laporan Status diabaikan.',
+    };
+  };
+
+  const updateSocialChatPreferences = (partial: Partial<SocialChatPreferences>) => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return;
+    const prev: SocialChatPreferences = socialChatPreferencesMapRef.current[activeAcc.id] || {
+      mutedStatusAccountIds: [],
+      statusPrivacyDefault: 'all',
+      dndEnabled: false,
+      dndStartHour: 22,
+      dndEndHour: 7,
+    };
+    const nextPrefs: SocialChatPreferences = {
+      ...prev,
+      ...partial,
+      updatedAtMs: Date.now(),
+    };
+    const nextMap = { ...socialChatPreferencesMapRef.current, [activeAcc.id]: nextPrefs };
+    socialChatPreferencesMapRef.current = nextMap;
+    setSocialChatPreferencesMap(nextMap);
+    flushMasterStateToCloud({ socialChatPreferencesMap: nextMap });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'social_prefs:sync', payload: { accountId: activeAcc.id, prefs: nextPrefs } }));
+    }
+  };
+
+  const toggleMuteStatusAuthor = (authorAccountId: string): { muted: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { muted: false, message: 'Akun tidak aktif.' };
+    const prev = socialChatPreferencesMapRef.current[activeAcc.id]?.mutedStatusAccountIds || [];
+    const isMuted = prev.includes(authorAccountId);
+    const nextIds = isMuted ? prev.filter((id) => id !== authorAccountId) : [...prev, authorAccountId];
+    updateSocialChatPreferences({ mutedStatusAccountIds: nextIds });
+    return {
+      muted: !isMuted,
+      message: !isMuted ? 'Status pengguna disembunyikan dari daftar aktif.' : 'Status pengguna ditampilkan kembali.',
+    };
+  };
+
+  const isDndActiveForAccount = (accountId?: string): boolean => {
+    const id = accountId || currentAccountIdRef.current;
+    if (!id) return false;
+    const acc = accountsRef.current.find((a) => a.id === id);
+    if (acc?.chatDndEnabled) return true;
+    const prefs = socialChatPreferencesMapRef.current[id];
+    if (!prefs?.dndEnabled) return false;
+    const hr = new Date().getHours();
+    const st = prefs.dndStartHour ?? 22;
+    const en = prefs.dndEndHour ?? 7;
+    return st <= en ? hr >= st && hr < en : hr >= st || hr < en;
+  };
+
+  const scheduleChatMessage = (input: {
+    roomType: 'global' | 'dm' | 'group';
+    targetId?: string;
+    targetLabel: string;
+    text: string;
+    textEffect?: ChatTextEffectStyle;
+    scheduledAtMs: number;
+  }): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak aktif.' };
+    if (!input.text.trim()) return { success: false, message: 'Isi pesan terjadwal wajib diisi.' };
+    if (input.scheduledAtMs <= Date.now()) return { success: false, message: 'Waktu kirim harus lebih maju dari sekarang.' };
+    const item: ScheduledChatMessage = {
+      id: `schm-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      roomType: input.roomType,
+      targetId: input.targetId,
+      targetLabel: input.targetLabel,
+      senderAccountId: activeAcc.id,
+      text: input.text.trim(),
+      textEffect: input.textEffect,
+      scheduledAtMs: input.scheduledAtMs,
+      status: 'pending',
+      createdAtMs: Date.now(),
+    };
+    const nextList = [item, ...scheduledChatMessagesRef.current].slice(0, 200);
+    scheduledChatMessagesRef.current = nextList;
+    setScheduledChatMessages(nextList);
+    flushMasterStateToCloud({ scheduledChatMessages: nextList });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'scheduled_chat:sync', payload: { items: nextList } }));
+    }
+    return {
+      success: true,
+      message: `Pesan dijadwalkan untuk ${new Date(input.scheduledAtMs).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}!`,
+    };
+  };
+
+  const cancelScheduledChatMessage = (id: string) => {
+    const nextList = scheduledChatMessagesRef.current.map((s) =>
+      s.id === id ? { ...s, status: 'cancelled' as const } : s
+    );
+    scheduledChatMessagesRef.current = nextList;
+    setScheduledChatMessages(nextList);
+    flushMasterStateToCloud({ scheduledChatMessages: nextList });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'scheduled_chat:sync', payload: { items: nextList } }));
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      // Auto expire 24h statuses locally
+      if (chatStatusesRef.current.some((s) => s.expiresAtMs <= now)) {
+        const clean = chatStatusesRef.current.filter((s) => s.expiresAtMs > now);
+        chatStatusesRef.current = clean;
+        setChatStatuses(clean);
+      }
+      const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+      if (!activeAcc) return;
+      const due = scheduledChatMessagesRef.current.filter(
+        (m) => m.senderAccountId === activeAcc.id && m.status === 'pending' && m.scheduledAtMs <= now
+      );
+      if (due.length === 0) return;
+      const updated = scheduledChatMessagesRef.current.map((m) =>
+        m.senderAccountId === activeAcc.id && m.status === 'pending' && m.scheduledAtMs <= now
+          ? { ...m, status: 'sent' as const }
+          : m
+      );
+      scheduledChatMessagesRef.current = updated;
+      setScheduledChatMessages(updated);
+      flushMasterStateToCloud({ scheduledChatMessages: updated });
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'scheduled_chat:sync', payload: { items: updated } }));
+      }
+      due.forEach((item) => {
+        if (item.roomType === 'global') {
+          void sendGlobalChatMessage({ text: item.text, textEffect: item.textEffect });
+        } else if (item.roomType === 'group' && item.targetId) {
+          sendChatMessage({
+            recipientAccount: `group:${item.targetId}`,
+            recipientName: item.targetLabel,
+            groupId: item.targetId,
+            text: item.text,
+            textEffect: item.textEffect,
+          });
+        } else if (item.roomType === 'dm' && item.targetId) {
+          const targetAcc = accountsRef.current.find((a) => a.id === item.targetId);
+          if (targetAcc) {
+            sendChatMessage({
+              recipientAccount: targetAcc.accountNumber,
+              recipientAccountId: targetAcc.id,
+              recipientName: targetAcc.fullName,
+              text: item.text,
+              textEffect: item.textEffect,
+            });
+          }
+        }
+      });
+    }, 5000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ================= KANTONG IMPIAN BERBUNGA, BRANKAS PENGAMAN & LOYALTY =================
+  const syncDreamPocketsToServer = (nextPockets: DreamPocket[], nextCfg = dreamPocketConfigRef.current) => {
+    flushMasterStateToCloud({ dreamPockets: nextPockets, dreamPocketConfig: nextCfg });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'dream_pockets:sync', payload: { dreamPockets: nextPockets, dreamPocketConfig: nextCfg } }));
+    }
+  };
+
+  const createDreamPocket = (input: {
+    name: string;
+    emoji: string;
+    category: string;
+    targetAmount: number;
+    deadlineIso?: string;
+    colorTheme: string;
+  }): { success: boolean; message: string; pocket?: DreamPocket } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    if (!dreamPocketConfigRef.current.enabled) {
+      return { success: false, message: 'Fitur Kantong Impian sedang dinonaktifkan sementara oleh Admin.' };
+    }
+    const cleanName = input.name.trim();
+    if (cleanName.length < 2) return { success: false, message: 'Nama Kantong Impian minimal 2 karakter.' };
+    const isAdminTier = isAdminCardAccount(activeAcc);
+    const mine = dreamPocketsRef.current.filter((p) => p.accountId === activeAcc.id);
+    if (!isAdminTier && mine.length >= (dreamPocketConfigRef.current.maxPocketsPerAccount || 8)) {
+      return { success: false, message: `Maksimal ${dreamPocketConfigRef.current.maxPocketsPerAccount} Kantong Impian per rekening.` };
+    }
+    const pocket: DreamPocket = {
+      id: `drpkt-${Date.now()}-${Math.floor(Math.random() * 999)}`,
+      accountId: activeAcc.id,
+      name: cleanName,
+      emoji: input.emoji || '🎯',
+      category: input.category || 'Tabungan Target',
+      targetAmount: Math.max(10_000, Math.round(input.targetAmount || 100_000)),
+      currentAmount: 0,
+      deadlineIso: input.deadlineIso,
+      colorTheme: input.colorTheme || 'from-emerald-500/20 to-teal-500/10 border-emerald-500/40',
+      interestEarnedTotal: 0,
+      lastInterestAppliedMs: Date.now(),
+      createdAtMs: Date.now(),
+    };
+    const next = [pocket, ...dreamPocketsRef.current];
+    dreamPocketsRef.current = next;
+    setDreamPockets(next);
+    syncDreamPocketsToServer(next);
+    playAtmSound('success');
+    return { success: true, pocket, message: `Kantong Impian "${cleanName}" berhasil dibuat!` };
+  };
+
+  const depositToDreamPocket = (pocketId: string, amount: number): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const pocket = dreamPocketsRef.current.find((p) => p.id === pocketId && p.accountId === activeAcc.id);
+    if (!pocket) return { success: false, message: 'Kantong Impian tidak ditemukan.' };
+    const cleanAmt = Math.round(Number(amount) || 0);
+    if (cleanAmt < 1000) return { success: false, message: 'Minimal setoran Kantong Impian Rp 1.000.' };
+    const isAdminTier = isAdminCardAccount(activeAcc) || isUnlimitedNumber(activeAcc.balance);
+    const unlockedBal = getUnlockedAvailableBalance(activeAcc.id);
+    if (!isAdminTier && unlockedBal < cleanAmt) {
+      return { success: false, message: `Saldo bebas tidak cukup! Tersedia: ${formatRupiah(unlockedBal)}.` };
+    }
+    const interestBonus = Math.round(cleanAmt * ((dreamPocketConfigRef.current.annualInterestPercent || 6.5) / 100 / 12));
+    const nextPockets = dreamPocketsRef.current.map((p) =>
+      p.id === pocketId
+        ? {
+            ...p,
+            currentAmount: p.currentAmount + cleanAmt + interestBonus,
+            interestEarnedTotal: p.interestEarnedTotal + interestBonus,
+            lastInterestAppliedMs: Date.now(),
+          }
+        : p
+    );
+    dreamPocketsRef.current = nextPockets;
+    setDreamPockets(nextPockets);
+    const tx: Transaction = {
+      id: `tx-drpkt-in-${Date.now()}`,
+      accountId: activeAcc.id,
+      type: 'celengan_simpan',
+      title: `Setor Kantong Impian: ${pocket.name}`,
+      amount: cleanAmt,
+      status: 'success',
+      referenceNo: `DRIN${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      balanceDeducted: true,
+      category: 'investasi',
+      note: interestBonus > 0 ? `Bonus bunga tabungan +${formatRupiah(interestBonus)}` : undefined,
+    };
+    const nextTxs = [tx, ...transactions];
+    setTransactions(nextTxs);
+    if (!isAdminTier) {
+      commitAccountMutationPermanent(
+        activeAcc.id,
+        (a) => ({ ...a, balance: Math.max(0, a.balance - cleanAmt) }),
+        { transactions: nextTxs, dreamPockets: nextPockets }
+      );
+    } else {
+      flushMasterStateToCloud({ transactions: nextTxs, dreamPockets: nextPockets });
+    }
+    syncDreamPocketsToServer(nextPockets);
+    playAtmSound('cash');
+    return {
+      success: true,
+      message: `Berhasil menabung ${formatRupiah(cleanAmt)} + bunga ${formatRupiah(interestBonus)} ke "${pocket.name}"!`,
+    };
+  };
+
+  const withdrawFromDreamPocket = (pocketId: string, amount: number): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const pocket = dreamPocketsRef.current.find((p) => p.id === pocketId && p.accountId === activeAcc.id);
+    if (!pocket) return { success: false, message: 'Kantong Impian tidak ditemukan.' };
+    if (!dreamPocketConfigRef.current.allowEarlyWithdraw && pocket.currentAmount < pocket.targetAmount) {
+      return { success: false, message: 'Admin mewajibkan target tercapai 100% sebelum mencairkan dana.' };
+    }
+    const cleanAmt = Math.round(Number(amount) || 0);
+    if (cleanAmt < 1000 || cleanAmt > pocket.currentAmount) {
+      return { success: false, message: 'Nominal pencairan tidak valid atau melebihi saldo kantong.' };
+    }
+    const nextPockets = dreamPocketsRef.current.map((p) =>
+      p.id === pocketId ? { ...p, currentAmount: Math.max(0, p.currentAmount - cleanAmt) } : p
+    );
+    dreamPocketsRef.current = nextPockets;
+    setDreamPockets(nextPockets);
+    const tx: Transaction = {
+      id: `tx-drpkt-out-${Date.now()}`,
+      accountId: activeAcc.id,
+      type: 'setor',
+      title: `Cairkan Kantong Impian: ${pocket.name}`,
+      amount: cleanAmt,
+      status: 'success',
+      referenceNo: `DROUT${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      category: 'investasi',
+    };
+    const nextTxs = [tx, ...transactions];
+    setTransactions(nextTxs);
+    commitAccountMutationPermanent(
+      activeAcc.id,
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          balance: isAdminCardAccount(a) ? UNLIMITED_BALANCE : a.balance + cleanAmt,
+        }),
+      { transactions: nextTxs, dreamPockets: nextPockets }
+    );
+    syncDreamPocketsToServer(nextPockets);
+    playAtmSound('success');
+    return { success: true, message: `${formatRupiah(cleanAmt)} dicairkan ke rekening utama!` };
+  };
+
+  const deleteDreamPocket = (pocketId: string): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    const pocket = dreamPocketsRef.current.find((p) => p.id === pocketId && p.accountId === activeAcc?.id);
+    if (!activeAcc || !pocket) return { success: false, message: 'Kantong Impian tidak ditemukan.' };
+    if (pocket.currentAmount > 0) {
+      return { success: false, message: 'Cairkan seluruh saldo Kantong Impian terlebih dahulu sebelum menghapus.' };
+    }
+    const nextPockets = dreamPocketsRef.current.filter((p) => p.id !== pocketId);
+    dreamPocketsRef.current = nextPockets;
+    setDreamPockets(nextPockets);
+    syncDreamPocketsToServer(nextPockets);
+    return { success: true, message: `Kantong "${pocket.name}" dihapus.` };
+  };
+
+  const adminUpdateDreamPocketConfig = (partial: Partial<DreamPocketAdminConfig>): { success: boolean; message: string } => {
+    const nextCfg: DreamPocketAdminConfig = {
+      ...dreamPocketConfigRef.current,
+      ...partial,
+      updatedAtMs: Date.now(),
+    };
+    dreamPocketConfigRef.current = nextCfg;
+    setDreamPocketConfig(nextCfg);
+    syncDreamPocketsToServer(dreamPocketsRef.current, nextCfg);
+    playAtmSound('success');
+    return { success: true, message: 'Pengaturan Kantong Impian & Bunga berhasil diperbarui!' };
+  };
+
+  const getUnlockedAvailableBalance = (accountId?: string): number => {
+    const id = accountId || currentAccountIdRef.current;
+    const acc = accountsRef.current.find((a) => a.id === id);
+    if (!acc) return 0;
+    if (isAdminCardAccount(acc) || isUnlimitedNumber(acc.balance)) return UNLIMITED_BALANCE;
+    const locked = safeVaultMapRef.current[acc.id]?.lockedBalanceRupiah || 0;
+    return Math.max(0, acc.balance - locked);
+  };
+
+  const lockBalanceToSafeVault = (amount: number, pin: string): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    if (activeAcc.pin !== pin) {
+      playAtmSound('alert');
+      return { success: false, message: 'PIN 6 digit tidak sesuai!' };
+    }
+    const cleanAmt = Math.round(Number(amount) || 0);
+    if (cleanAmt < 10_000) return { success: false, message: 'Minimal kunci saldo Rp 10.000.' };
+    const unlocked = getUnlockedAvailableBalance(activeAcc.id);
+    if (!isAdminCardAccount(activeAcc) && unlocked < cleanAmt) {
+      return { success: false, message: `Saldo bebas tidak cukup untuk dikunci! Maksimal: ${formatRupiah(unlocked)}.` };
+    }
+    const prevState = safeVaultMapRef.current[activeAcc.id] || { lockedBalanceRupiah: 0 };
+    const nextState: SafeVaultAccountState = {
+      lockedBalanceRupiah: prevState.lockedBalanceRupiah + cleanAmt,
+      lastLockedAtMs: Date.now(),
+    };
+    const nextMap = { ...safeVaultMapRef.current, [activeAcc.id]: nextState };
+    safeVaultMapRef.current = nextMap;
+    setSafeVaultMap(nextMap);
+    flushMasterStateToCloud({ safeVaultMap: nextMap });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'safe_vault:sync', payload: { accountId: activeAcc.id, state: nextState } }));
+    }
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `${formatRupiah(cleanAmt)} berhasil dikunci di Brankas Pengaman! Dana ini terlindungi dari transfer keluar.`,
+    };
+  };
+
+  const unlockBalanceFromSafeVault = (amount: number, pin: string): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    if (activeAcc.pin !== pin) {
+      playAtmSound('alert');
+      return { success: false, message: 'PIN 6 digit tidak sesuai!' };
+    }
+    const prevState = safeVaultMapRef.current[activeAcc.id] || { lockedBalanceRupiah: 0 };
+    const cleanAmt = Math.round(Number(amount) || 0);
+    if (cleanAmt < 1000 || cleanAmt > prevState.lockedBalanceRupiah) {
+      return { success: false, message: 'Nominal buka kunci tidak valid atau melebihi saldo terkunci.' };
+    }
+    const nextState: SafeVaultAccountState = {
+      lockedBalanceRupiah: Math.max(0, prevState.lockedBalanceRupiah - cleanAmt),
+      lastLockedAtMs: Date.now(),
+    };
+    const nextMap = { ...safeVaultMapRef.current, [activeAcc.id]: nextState };
+    safeVaultMapRef.current = nextMap;
+    setSafeVaultMap(nextMap);
+    flushMasterStateToCloud({ safeVaultMap: nextMap });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'safe_vault:sync', payload: { accountId: activeAcc.id, state: nextState } }));
+    }
+    playAtmSound('success');
+    return { success: true, message: `${formatRupiah(cleanAmt)} dibuka kembali ke saldo bebas rekening.` };
+  };
+
+  const syncLoyaltyToServer = (nextMap = loyaltyMapRef.current, nextCfg = loyaltyConfigRef.current) => {
+    flushMasterStateToCloud({ loyaltyMap: nextMap, loyaltyConfig: nextCfg });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'loyalty:sync', payload: { loyaltyMap: nextMap, loyaltyConfig: nextCfg } }));
+    }
+  };
+
+  const claimDailyCheckIn = (): { success: boolean; message: string; pointsEarned?: number; streak?: number } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    if (!loyaltyConfigRef.current.enabled) return { success: false, message: 'Program Loyalty sedang nonaktif.' };
+    const today = new Date().toISOString().slice(0, 10);
+    const prev: LoyaltyAccountState = loyaltyMapRef.current[activeAcc.id] || {
+      points: 0,
+      streakDays: 0,
+      claimedAchievementIds: [],
+      totalCheckIns: 0,
+      redeemedCount: 0,
+    };
+    if (prev.lastCheckInDate === today) {
+      return { success: false, message: 'Anda sudah melakukan check-in harian hari ini. Kembali lagi besok!' };
+    }
+    const yest = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const nextStreak = prev.lastCheckInDate === yest ? prev.streakDays + 1 : 1;
+    const basePts = loyaltyConfigRef.current.dailyCheckInPoints || 25;
+    const bonusPts = nextStreak % 7 === 0 ? loyaltyConfigRef.current.streakBonus7DaysPoints || 150 : 0;
+    const totalPts = basePts + bonusPts;
+    const nextState: LoyaltyAccountState = {
+      ...prev,
+      points: isAdminCardAccount(activeAcc) ? UNLIMITED_BALANCE : prev.points + totalPts,
+      streakDays: nextStreak,
+      lastCheckInDate: today,
+      totalCheckIns: prev.totalCheckIns + 1,
+    };
+    const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return {
+      success: true,
+      pointsEarned: totalPts,
+      streak: nextStreak,
+      message:
+        bonusPts > 0
+          ? `Check-in Hari ke-${nextStreak}! +${basePts} Poin + Bonus Streak 7 Hari +${bonusPts} Poin!`
+          : `Check-in Hari ke-${nextStreak} berhasil! +${totalPts} Poin Loyalty.`,
+    };
+  };
+
+  const claimAchievementReward = (achievementId: string): { success: boolean; message: string; pointsEarned?: number } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const def = DAILY_ACHIEVEMENT_CATALOG.find((a) => a.id === achievementId);
+    if (!def) return { success: false, message: 'Pencapaian tidak ditemukan.' };
+    const prev: LoyaltyAccountState = loyaltyMapRef.current[activeAcc.id] || {
+      points: 0,
+      streakDays: 0,
+      claimedAchievementIds: [],
+      totalCheckIns: 0,
+      redeemedCount: 0,
+    };
+    if (prev.claimedAchievementIds.includes(achievementId)) {
+      return { success: false, message: 'Hadiah pencapaian ini sudah pernah diklaim.' };
+    }
+    const isAdminTier = isAdminCardAccount(activeAcc);
+    const eligible = isAdminTier || def.check({
+      txCount: transactions.filter((t) => t.accountId === activeAcc.id).length,
+      dreamPocketCount: dreamPocketsRef.current.filter((p) => p.accountId === activeAcc.id).length,
+      loyaltyStreak: prev.streakDays,
+      goldGrams: activeAcc.goldGrams || 0,
+      statusesPosted: chatStatusesRef.current.filter((s) => s.authorAccountId === activeAcc.id).length,
+    });
+    if (!eligible) {
+      return { success: false, message: 'Syarat pencapaian belum terpenuhi.' };
+    }
+    const nextState: LoyaltyAccountState = {
+      ...prev,
+      points: isAdminTier ? UNLIMITED_BALANCE : prev.points + def.rewardPoints,
+      claimedAchievementIds: [...prev.claimedAchievementIds, achievementId],
+    };
+    const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return {
+      success: true,
+      pointsEarned: def.rewardPoints,
+      message: `Pencapaian "${def.title}" diklaim! +${def.rewardPoints} Poin Loyalty.`,
+    };
+  };
+
+  const redeemLoyaltyPoints = (
+    pointsToSpend: number,
+    target: 'cash' | 'coin' | 'diamond'
+  ): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const cleanPts = Math.round(Number(pointsToSpend) || 0);
+    if (cleanPts < 50) return { success: false, message: 'Minimal penukaran 50 Poin Loyalty.' };
+    const isAdminTier = isAdminCardAccount(activeAcc);
+    const prev: LoyaltyAccountState = loyaltyMapRef.current[activeAcc.id] || {
+      points: 0,
+      streakDays: 0,
+      claimedAchievementIds: [],
+      totalCheckIns: 0,
+      redeemedCount: 0,
+    };
+    if (!isAdminTier && prev.points < cleanPts) {
+      return { success: false, message: `Poin Loyalty tidak cukup (Tersedia: ${prev.points.toLocaleString('id-ID')} poin).` };
+    }
+    const cfg = loyaltyConfigRef.current;
+    const rewardAmount =
+      target === 'cash'
+        ? cleanPts * (cfg.rupiahPerPoint || 500)
+        : target === 'coin'
+        ? Math.max(1, Math.floor((cleanPts / 100) * (cfg.coinPer100Points || 15)))
+        : Math.max(1, Math.floor((cleanPts / 100) * (cfg.diamondPer100Points || 10)));
+
+    const nextState: LoyaltyAccountState = {
+      ...prev,
+      points: isAdminTier ? UNLIMITED_BALANCE : Math.max(0, prev.points - cleanPts),
+      redeemedCount: prev.redeemedCount + 1,
+    };
+    const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+
+    commitAccountMutationPermanent(
+      activeAcc.id,
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          balance: target === 'cash' && !isAdminCardAccount(a) ? a.balance + rewardAmount : a.balance,
+          spinCoins: target === 'coin' && !isAdminCardAccount(a) ? (a.spinCoins || 0) + rewardAmount : a.spinCoins,
+          diamonds: target === 'diamond' && !isAdminCardAccount(a) ? (a.diamonds || 0) + rewardAmount : a.diamonds,
+        }),
+      { loyaltyMap: nextMap }
+    );
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('cash');
+    const unitLabel = target === 'cash' ? formatRupiah(rewardAmount) : target === 'coin' ? `${rewardAmount} Coin` : `${rewardAmount} Diamond`;
+    return { success: true, message: `${cleanPts} Poin berhasil ditukar menjadi ${unitLabel}!` };
+  };
+
+  const adminUpdateLoyaltyConfig = (partial: Partial<LoyaltyAdminConfig>): { success: boolean; message: string } => {
+    const nextCfg: LoyaltyAdminConfig = { ...loyaltyConfigRef.current, ...partial, updatedAtMs: Date.now() };
+    loyaltyConfigRef.current = nextCfg;
+    setLoyaltyConfig(nextCfg);
+    syncLoyaltyToServer(loyaltyMapRef.current, nextCfg);
+    playAtmSound('success');
+    return { success: true, message: 'Pengaturan Poin Loyalty berhasil diperbarui!' };
+  };
+
+  const adminAdjustLoyaltyPoints = (
+    accountId: string,
+    points: number,
+    mode: 'add' | 'set'
+  ): { success: boolean; message: string } => {
+    const acc = accountsRef.current.find((a) => a.id === accountId);
+    if (!acc) return { success: false, message: 'Nasabah tidak ditemukan.' };
+    const prev: LoyaltyAccountState = loyaltyMapRef.current[accountId] || {
+      points: 0,
+      streakDays: 0,
+      claimedAchievementIds: [],
+      totalCheckIns: 0,
+      redeemedCount: 0,
+    };
+    const nextPoints = isAdminCardAccount(acc)
+      ? UNLIMITED_BALANCE
+      : mode === 'set'
+      ? Math.max(0, Math.round(points))
+      : Math.max(0, prev.points + Math.round(points));
+    const nextMap = { ...loyaltyMapRef.current, [accountId]: { ...prev, points: nextPoints } };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    return {
+      success: true,
+      message: `Poin Loyalty ${acc.fullName} diperbarui menjadi ${isUnlimitedNumber(nextPoints) ? '∞' : nextPoints.toLocaleString('id-ID')} poin.`,
     };
   };
 
@@ -37379,6 +38937,48 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         fulfillPaidQrisOrder,
         adminUpdateDiamondConfig,
         adminResetDiamondConfig,
+        qrisAdminConfig,
+        manualQrisSubmissions,
+        adminUpdateQrisConfig,
+        adminResetQrisConfig,
+        submitManualQrisProof,
+        adminReviewManualQrisSubmission,
+        adminSimulateQrisOrder,
+        chatStatuses,
+        chatStatusReports,
+        socialChatPreferencesMap,
+        scheduledChatMessages,
+        createChatStatus,
+        viewChatStatus,
+        reactChatStatus,
+        replyChatStatusToDm,
+        deleteChatStatus,
+        reportChatStatus,
+        adminModerateChatStatus,
+        adminResolveStatusReport,
+        updateSocialChatPreferences,
+        toggleMuteStatusAuthor,
+        isDndActiveForAccount,
+        scheduleChatMessage,
+        cancelScheduledChatMessage,
+        dreamPockets,
+        dreamPocketConfig,
+        createDreamPocket,
+        depositToDreamPocket,
+        withdrawFromDreamPocket,
+        deleteDreamPocket,
+        adminUpdateDreamPocketConfig,
+        safeVaultMap,
+        getUnlockedAvailableBalance,
+        lockBalanceToSafeVault,
+        unlockBalanceFromSafeVault,
+        loyaltyMap,
+        loyaltyConfig,
+        claimDailyCheckIn,
+        claimAchievementReward,
+        redeemLoyaltyPoints,
+        adminUpdateLoyaltyConfig,
+        adminAdjustLoyaltyPoints,
         adminAdjustAccountDiamonds,
         spendAccountDiamonds,
         upgradeJobLevelWithDiamonds,

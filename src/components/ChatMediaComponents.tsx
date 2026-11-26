@@ -1,5 +1,5 @@
 /**
- * Bank Nusantara — Komponen Media Chat Kustom (v15.42.50)
+ * Bank Nusantara — Komponen Media Chat Kustom (v16.42.50)
  * 1. CustomVoicePlayer (Hybrid Web Audio + <audio> Fallback, Auto-Normalisasi + Boost 200%, Cloud Backup Failover)
  * 2. MediaPreviewModal (Portal Pratinjau Multi-Foto/Video + Tambah/Ganti/Hapus + Keterangan Enter/Ctrl+Enter)
  * 3. VoiceStagingModal (Portal Pratinjau Rekaman/File Audio HP 600d + Dengar Ulang/Geser/Keterangan)

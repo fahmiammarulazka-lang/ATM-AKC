@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -11,6 +12,7 @@ import {
   createBuatQrisInvoiceServer,
   checkBuatQrisStatusServer,
   getBuatQrisConfig,
+  testBuatQrisGatewayServer,
 } from './buatQrisService';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -244,12 +246,16 @@ export interface ServerQrisOrder {
   baseAmount: number;
   uniqueCode: number;
   totalAmount: number;
-  modeUsed: 'api' | 'emvco';
+  modeUsed: 'api' | 'emvco' | 'manual';
   configReady: boolean;
   configNotice?: string;
   qrisString: string;
   qrisImageUrl?: string;
-  status: 'PENDING' | 'PAID' | 'SUCCESS' | 'LUNAS' | 'EXPIRED';
+  manualQrImageDataUrl?: string;
+  manualPaymentNote?: string;
+  manualSubmissionId?: string;
+  manualSubmissionStatus?: 'menunggu' | 'disetujui' | 'ditolak';
+  status: 'PENDING' | 'PAID' | 'SUCCESS' | 'LUNAS' | 'EXPIRED' | 'MENUNGGU_ADMIN' | 'DITOLAK';
   customerName?: string;
   description?: string;
   providerReference?: string;
@@ -301,6 +307,17 @@ interface PersistedGlobalState {
   sharedBankData: Record<string, unknown>;
   userSnapshotsByScope: Record<string, Record<string, unknown>>;
   qrisOrders: Record<string, ServerQrisOrder>;
+  qrisAdminConfig?: Record<string, unknown> | null;
+  manualQrisSubmissions: Array<Record<string, unknown>>;
+  chatStatuses: Array<Record<string, unknown>>;
+  chatStatusReports: Array<Record<string, unknown>>;
+  socialChatPreferencesMap: Record<string, Record<string, unknown>>;
+  scheduledChatMessages: Array<Record<string, unknown>>;
+  dreamPockets: Array<Record<string, unknown>>;
+  dreamPocketConfig?: Record<string, unknown> | null;
+  safeVaultMap: Record<string, Record<string, unknown>>;
+  loyaltyMap: Record<string, Record<string, unknown>>;
+  loyaltyConfig?: Record<string, unknown> | null;
   lastUpdated: number;
 }
 
@@ -360,6 +377,17 @@ const DEFAULT_STATE: PersistedGlobalState = {
   sharedBankData: {},
   userSnapshotsByScope: {},
   qrisOrders: {},
+  qrisAdminConfig: { mode: 'auto_buatqris', manualUseDynamicEmvco: true, updatedAtMs: Date.now() },
+  manualQrisSubmissions: [],
+  chatStatuses: [],
+  chatStatusReports: [],
+  socialChatPreferencesMap: {},
+  scheduledChatMessages: [],
+  dreamPockets: [],
+  dreamPocketConfig: null,
+  safeVaultMap: {},
+  loyaltyMap: {},
+  loyaltyConfig: null,
   pushAlerts: [],
   giftEvents: [],
   deletedGiftEventIds: [],
@@ -499,6 +527,37 @@ function loadPersistedState(): PersistedGlobalState {
           parsed.qrisOrders && typeof parsed.qrisOrders === 'object'
             ? parsed.qrisOrders
             : {},
+        qrisAdminConfig:
+          parsed.qrisAdminConfig && typeof parsed.qrisAdminConfig === 'object'
+            ? parsed.qrisAdminConfig
+            : DEFAULT_STATE.qrisAdminConfig,
+        manualQrisSubmissions: Array.isArray(parsed.manualQrisSubmissions)
+          ? parsed.manualQrisSubmissions
+          : [],
+        chatStatuses: Array.isArray(parsed.chatStatuses)
+          ? parsed.chatStatuses.filter((s: { expiresAtMs?: unknown }) => Number(s?.expiresAtMs) > Date.now())
+          : [],
+        chatStatusReports: Array.isArray(parsed.chatStatusReports) ? parsed.chatStatusReports : [],
+        socialChatPreferencesMap:
+          parsed.socialChatPreferencesMap && typeof parsed.socialChatPreferencesMap === 'object'
+            ? parsed.socialChatPreferencesMap
+            : {},
+        scheduledChatMessages: Array.isArray(parsed.scheduledChatMessages)
+          ? parsed.scheduledChatMessages
+          : [],
+        dreamPockets: Array.isArray(parsed.dreamPockets) ? parsed.dreamPockets : [],
+        dreamPocketConfig:
+          parsed.dreamPocketConfig && typeof parsed.dreamPocketConfig === 'object'
+            ? parsed.dreamPocketConfig
+            : null,
+        safeVaultMap:
+          parsed.safeVaultMap && typeof parsed.safeVaultMap === 'object' ? parsed.safeVaultMap : {},
+        loyaltyMap:
+          parsed.loyaltyMap && typeof parsed.loyaltyMap === 'object' ? parsed.loyaltyMap : {},
+        loyaltyConfig:
+          parsed.loyaltyConfig && typeof parsed.loyaltyConfig === 'object'
+            ? parsed.loyaltyConfig
+            : null,
         lastUpdated: parsed.lastUpdated || Date.now(),
       };
     }
@@ -620,6 +679,19 @@ async function startServer() {
             liveActivityLogs: serverState.liveActivityLogs || [],
             autoDetectedAnomalies: serverState.autoDetectedAnomalies || [],
             sharedBankData: serverState.sharedBankData,
+            qrisAdminConfig: serverState.qrisAdminConfig || DEFAULT_STATE.qrisAdminConfig,
+            manualQrisSubmissions: serverState.manualQrisSubmissions || [],
+            chatStatuses: (serverState.chatStatuses || []).filter(
+              (s) => Number(s?.expiresAtMs) > Date.now()
+            ),
+            chatStatusReports: serverState.chatStatusReports || [],
+            socialChatPreferencesMap: serverState.socialChatPreferencesMap || {},
+            scheduledChatMessages: serverState.scheduledChatMessages || [],
+            dreamPockets: serverState.dreamPockets || [],
+            dreamPocketConfig: serverState.dreamPocketConfig || null,
+            safeVaultMap: serverState.safeVaultMap || {},
+            loyaltyMap: serverState.loyaltyMap || {},
+            loyaltyConfig: serverState.loyaltyConfig || null,
             connectedDevices: clients.size,
             lastUpdated: serverState.lastUpdated,
           },
@@ -651,6 +723,158 @@ async function startServer() {
               accountId: String(msg.payload.accountId || ''),
               accountName: String(msg.payload.accountName || 'Nasabah').slice(0, 60),
               expiresAtMs: Date.now() + 4500,
+            },
+          });
+        } else if (msg.type === 'qris_admin_config:sync' && msg.payload) {
+          const incoming = msg.payload as Record<string, unknown>;
+          const incTs = Number(incoming.updatedAtMs) || Date.now();
+          const curTs = Number(serverState.qrisAdminConfig?.updatedAtMs) || 0;
+          if (incTs >= curTs) {
+            serverState.qrisAdminConfig = { ...incoming, updatedAtMs: incTs };
+            savePersistedState();
+            broadcastToAll({
+              type: 'qris_admin_config:updated',
+              payload: { qrisAdminConfig: serverState.qrisAdminConfig },
+            });
+          }
+        } else if (msg.type === 'qris_manual_submission:upsert' && msg.payload?.submission) {
+          const sub = msg.payload.submission as Record<string, unknown>;
+          const id = String(sub.id || '');
+          if (id) {
+            const list = Array.isArray(serverState.manualQrisSubmissions)
+              ? [...serverState.manualQrisSubmissions]
+              : [];
+            const idx = list.findIndex((x) => String(x.id) === id);
+            if (idx >= 0) list[idx] = sub;
+            else list.unshift(sub);
+            serverState.manualQrisSubmissions = list.slice(0, 200);
+            if (sub.orderId && serverState.qrisOrders?.[String(sub.orderId)]) {
+              const targetOrd = serverState.qrisOrders[String(sub.orderId)];
+              if (sub.status === 'disetujui') {
+                targetOrd.status = 'LUNAS';
+                targetOrd.manualSubmissionStatus = 'disetujui';
+                targetOrd.paidAt = new Date().toISOString();
+              } else if (sub.status === 'ditolak') {
+                targetOrd.status = 'DITOLAK';
+                targetOrd.manualSubmissionStatus = 'ditolak';
+              } else {
+                targetOrd.status = 'MENUNGGU_ADMIN';
+                targetOrd.manualSubmissionStatus = 'menunggu';
+                targetOrd.manualSubmissionId = id;
+              }
+            }
+            savePersistedState();
+            broadcastToAll({
+              type: 'qris_manual_submission:updated',
+              payload: {
+                submission: sub,
+                manualQrisSubmissions: serverState.manualQrisSubmissions,
+              },
+            });
+          }
+        } else if (msg.type === 'chat_status:upsert' && msg.payload?.statusEntry) {
+          const entry = msg.payload.statusEntry as Record<string, unknown>;
+          const id = String(entry.id || '');
+          if (id) {
+            const nowMs = Date.now();
+            const list = (serverState.chatStatuses || []).filter(
+              (s) => Number(s.expiresAtMs) > nowMs && String(s.id) !== id
+            );
+            if (Number(entry.expiresAtMs) > nowMs) {
+              list.unshift(entry);
+            }
+            serverState.chatStatuses = list.slice(0, 300);
+            savePersistedState();
+            broadcastToAll({
+              type: 'chat_status:updated',
+              payload: { chatStatuses: serverState.chatStatuses },
+            });
+          }
+        } else if (msg.type === 'chat_status:delete' && msg.payload?.statusId) {
+          const targetId = String(msg.payload.statusId);
+          serverState.chatStatuses = (serverState.chatStatuses || []).filter(
+            (s) => String(s.id) !== targetId
+          );
+          savePersistedState();
+          broadcastToAll({
+            type: 'chat_status:updated',
+            payload: { chatStatuses: serverState.chatStatuses },
+          });
+        } else if (msg.type === 'chat_status_report:upsert' && msg.payload?.report) {
+          const rep = msg.payload.report as Record<string, unknown>;
+          const id = String(rep.id || '');
+          if (id) {
+            const list = [...(serverState.chatStatusReports || [])];
+            const idx = list.findIndex((r) => String(r.id) === id);
+            if (idx >= 0) list[idx] = rep;
+            else list.unshift(rep);
+            serverState.chatStatusReports = list.slice(0, 150);
+            savePersistedState();
+            broadcastToAll({
+              type: 'chat_status_report:updated',
+              payload: { chatStatusReports: serverState.chatStatusReports },
+            });
+          }
+        } else if (msg.type === 'social_prefs:sync' && msg.payload?.accountId && msg.payload?.prefs) {
+          const accId = String(msg.payload.accountId);
+          serverState.socialChatPreferencesMap = {
+            ...(serverState.socialChatPreferencesMap || {}),
+            [accId]: msg.payload.prefs as Record<string, unknown>,
+          };
+          savePersistedState();
+          broadcastToAll({
+            type: 'social_prefs:updated',
+            payload: { accountId: accId, prefs: msg.payload.prefs },
+          });
+        } else if (msg.type === 'scheduled_chat:sync' && Array.isArray(msg.payload?.items)) {
+          serverState.scheduledChatMessages = (msg.payload.items as Array<Record<string, unknown>>).slice(0, 200);
+          savePersistedState();
+          broadcastToAll({
+            type: 'scheduled_chat:updated',
+            payload: { scheduledChatMessages: serverState.scheduledChatMessages },
+          });
+        } else if (msg.type === 'dream_pockets:sync' && msg.payload) {
+          if (Array.isArray(msg.payload.dreamPockets)) {
+            serverState.dreamPockets = (msg.payload.dreamPockets as Array<Record<string, unknown>>).slice(0, 300);
+          }
+          if (msg.payload.dreamPocketConfig && typeof msg.payload.dreamPocketConfig === 'object') {
+            serverState.dreamPocketConfig = msg.payload.dreamPocketConfig as Record<string, unknown>;
+          }
+          savePersistedState();
+          broadcastToAll({
+            type: 'dream_pockets:updated',
+            payload: {
+              dreamPockets: serverState.dreamPockets,
+              dreamPocketConfig: serverState.dreamPocketConfig,
+            },
+          });
+        } else if (msg.type === 'safe_vault:sync' && msg.payload?.accountId && msg.payload?.state) {
+          const accId = String(msg.payload.accountId);
+          serverState.safeVaultMap = {
+            ...(serverState.safeVaultMap || {}),
+            [accId]: msg.payload.state as Record<string, unknown>,
+          };
+          savePersistedState();
+          broadcastToAll({
+            type: 'safe_vault:updated',
+            payload: { accountId: accId, state: msg.payload.state },
+          });
+        } else if (msg.type === 'loyalty:sync' && msg.payload) {
+          if (msg.payload.loyaltyMap && typeof msg.payload.loyaltyMap === 'object') {
+            serverState.loyaltyMap = {
+              ...(serverState.loyaltyMap || {}),
+              ...(msg.payload.loyaltyMap as Record<string, Record<string, unknown>>),
+            };
+          }
+          if (msg.payload.loyaltyConfig && typeof msg.payload.loyaltyConfig === 'object') {
+            serverState.loyaltyConfig = msg.payload.loyaltyConfig as Record<string, unknown>;
+          }
+          savePersistedState();
+          broadcastToAll({
+            type: 'loyalty:updated',
+            payload: {
+              loyaltyMap: serverState.loyaltyMap,
+              loyaltyConfig: serverState.loyaltyConfig,
             },
           });
         } else if (msg.type === 'website_popup:send' && msg.payload) {
@@ -3438,21 +3662,31 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
     res.json({ success: false, postalCode: '' });
   });
 
-  // ==================== QRIS NUSANTARA PAYMENT GATEWAY & WEBHOOK API ====================
-  const sanitizeOrderForClient = (order: ServerQrisOrder): Omit<ServerQrisOrder, 'qrisImageUrl' | 'configNotice'> => {
-    const { qrisImageUrl: _img, configNotice: _notice, ...safeOrder } = order;
+  // ==================== QRIS NUSANTARA PAYMENT GATEWAY, QR MANUAL & WEBHOOK API ====================
+  const sanitizeOrderForClient = (order: ServerQrisOrder): Omit<ServerQrisOrder, 'configNotice'> => {
+    const { configNotice: _notice, ...safeOrder } = order;
     return safeOrder;
   };
 
   app.get('/api/qris/config-status', (_req, res) => {
     const cfg = getBuatQrisConfig();
-    const hasLoginId = Boolean(cfg.BUATQRIS_LOGIN_ID);
-    const hasAccountId = Boolean(cfg.ACCOUNT_ID);
+    const adminQris = (serverState.qrisAdminConfig || {}) as Record<string, unknown>;
+    const hasLoginId = Boolean(cfg.BUATQRIS_LOGIN_ID || adminQris.customLoginId);
+    const hasAccountId = Boolean(cfg.ACCOUNT_ID || adminQris.customAccountId);
     const hasSecretKey = Boolean(cfg.SECRET_KEY);
     const hasWebhookUrl = Boolean(cfg.WEBHOOK_URL);
     const hasWebhookSecret = Boolean(cfg.WEBHOOK_SECRET);
-    const hasStaticQris = Boolean(cfg.STATIC_QRIS_STRING);
-    const activeMode: 'api' | 'emvco' = hasSecretKey && hasAccountId ? 'api' : 'emvco';
+    const hasStaticQris = Boolean(
+      cfg.STATIC_QRIS_STRING || adminQris.customStaticQrisString || adminQris.manualQrisString
+    );
+    const isManualActive =
+      adminQris.mode === 'manual_override' &&
+      Boolean(adminQris.manualQrImageDataUrl || adminQris.manualQrisString);
+    const activeMode: 'api' | 'emvco' | 'manual' = isManualActive
+      ? 'manual'
+      : hasSecretKey && hasAccountId
+      ? 'api'
+      : 'emvco';
     res.json({
       success: true,
       defaultMode: cfg.DEFAULT_MODE,
@@ -3466,9 +3700,25 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       hasMerchantId: hasAccountId,
       hasWebhookSecret,
       hasStaticQris,
+      isManualActive,
+      manualMerchantName: adminQris.manualMerchantName || '',
+      gatewayUrl: String(adminQris.customGatewayUrl || cfg.BUATQRIS_URL_SITE),
       activeMode,
       activeEngine: activeMode,
     });
+  });
+
+  app.post('/api/qris/test-connection', async (req, res) => {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const adminQris = (serverState.qrisAdminConfig || {}) as Record<string, unknown>;
+    const urlToTest =
+      typeof body.customGatewayUrl === 'string' && body.customGatewayUrl.trim()
+        ? body.customGatewayUrl.trim()
+        : typeof adminQris.customGatewayUrl === 'string'
+        ? adminQris.customGatewayUrl
+        : undefined;
+    const result = await testBuatQrisGatewayServer(urlToTest);
+    res.json({ success: true, ...result });
   });
 
   app.get('/api/qris/orders', (_req, res) => {
@@ -3499,26 +3749,6 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       const activeDiamondCfg = (serverState.diamondConfig ||
         (serverState.sharedBankData?.diamondConfig as Record<string, unknown> | undefined) ||
         {}) as Record<string, unknown>;
-      const serverUnitBase = Math.max(
-        1,
-        Math.round(Number(activeDiamondCfg.baseDiamondPriceRupiah) || 90)
-      );
-      const serverDiscPct = Math.max(
-        0,
-        Math.min(99, Math.round(Number(activeDiamondCfg.diamondDiscountPercent) || 0))
-      );
-      // Jika Admin baru saja memperbarui tarif/diskon di Cloud namun cache server belum tersinkron,
-      // gunakan tarif paling rendah yang masih masuk akal dalam rentang aman agar Top-Up valid tidak ditolak palsu.
-      const clientUnitHint = Number(body.clientBaseDiamondPriceRupiah);
-      const clientDiscHint = Number(body.clientDiamondDiscountPercent);
-      const effectiveUnitBase =
-        Number.isFinite(clientUnitHint) && clientUnitHint >= 1 && clientUnitHint <= 10_000
-          ? Math.min(serverUnitBase, Math.round(clientUnitHint))
-          : serverUnitBase;
-      const effectiveDiscPct =
-        Number.isFinite(clientDiscHint) && clientDiscHint >= 0 && clientDiscHint <= 99
-          ? Math.max(serverDiscPct, Math.round(clientDiscHint))
-          : serverDiscPct;
 
       const maxDiamondsAllowed = Math.max(
         HARD_MIN_DIAMONDS,
@@ -3537,25 +3767,10 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         return;
       }
 
-      if (amount > maxRupiahAllowed) {
+      if (amount < 1_000 || amount > maxRupiahAllowed) {
         res.status(400).json({
           success: false,
-          message: `Harga dasar transaksi tidak boleh melebihi Rp ${maxRupiahAllowed.toLocaleString('id-ID')} (sebelum angka unik QRIS).`,
-        });
-        return;
-      }
-
-      const rawOriginal =
-        diamondAmount === HARD_MIN_DIAMONDS && diamondAmount * effectiveUnitBase < 1_000
-          ? 1_000
-          : Math.max(1_000, diamondAmount * effectiveUnitBase);
-      const discountedExpected = Math.max(1, Math.round(rawOriginal * (1 - effectiveDiscPct / 100)));
-      const minExpectedPrice = Math.min(maxRupiahAllowed, discountedExpected);
-      // Toleransi pembulatan 10 rupiah agar sinkronisasi tarif tidak pernah menolak paket valid
-      if (amount + 10 < minExpectedPrice) {
-        res.status(400).json({
-          success: false,
-          message: `Nominal pembayaran Rp ${amount.toLocaleString('id-ID')} di bawah tarif aktif minimum Rp ${minExpectedPrice.toLocaleString('id-ID')}. Silakan coba lagi untuk menyinkronkan harga terbaru.`,
+          message: `Nominal dasar Diamond harus antara Rp 1.000 hingga Rp ${maxRupiahAllowed.toLocaleString('id-ID')}.`,
         });
         return;
       }
@@ -3569,6 +3784,7 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         description: typeof body.description === 'string' ? body.description.slice(0, 140) : undefined,
         useUniqueCode: typeof body.useUniqueCode === 'boolean' ? body.useUniqueCode : true,
         expiryMinutes: typeof body.expiryMinutes === 'number' ? body.expiryMinutes : 10,
+        adminConfig: (serverState.qrisAdminConfig as Record<string, unknown> | null) || null,
       });
 
       const orderRecord: ServerQrisOrder = {
@@ -3585,6 +3801,8 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         configNotice: created.configNotice,
         qrisString: created.qrisString,
         qrisImageUrl: created.qrisImageUrl,
+        manualQrImageDataUrl: created.manualQrImageDataUrl,
+        manualPaymentNote: created.manualPaymentNote,
         status: 'PENDING',
         customerName: typeof body.customerName === 'string' ? body.customerName.slice(0, 80) : undefined,
         description: typeof body.description === 'string' ? body.description.slice(0, 140) : undefined,
@@ -3593,7 +3811,6 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       };
 
       serverState.qrisOrders[orderRecord.orderId] = orderRecord;
-      // Cap persisted qris orders to most recent 250 entries
       const orderKeys = Object.keys(serverState.qrisOrders);
       if (orderKeys.length > 250) {
         const sorted = Object.values(serverState.qrisOrders).sort(
@@ -3603,8 +3820,7 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       }
       savePersistedState();
 
-      const { qrisImageUrl: _unusedImg, configNotice: _unusedNotice, ...clientSafeCreated } = created;
-      res.json(clientSafeCreated);
+      res.json(created);
     } catch (err) {
       res.status(500).json({
         success: false,
@@ -3612,6 +3828,38 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         error: String(err),
       });
     }
+  });
+
+  app.post('/api/qris/admin-simulate', (req, res) => {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const orderId = String(body.orderId || '').replace(/[^A-Za-z0-9_-]/g, '');
+    const action = String(body.action || 'LUNAS').toUpperCase();
+    const order = serverState.qrisOrders[orderId];
+    if (!order) {
+      res.status(404).json({ success: false, message: 'Order QRIS tidak ditemukan di server.' });
+      return;
+    }
+    if (action === 'EXPIRED') {
+      order.status = 'EXPIRED';
+      savePersistedState();
+      res.json({ success: true, status: 'EXPIRED', order: sanitizeOrderForClient(order) });
+      return;
+    }
+    order.status = 'PAID';
+    order.paidAt = new Date().toISOString();
+    order.providerReference = `SIM-ADMIN-${Date.now()}`;
+    savePersistedState();
+    broadcastToAll({
+      type: 'qris_payment:paid',
+      payload: {
+        orderId: order.orderId,
+        status: 'PAID',
+        paidAt: order.paidAt,
+        providerReference: order.providerReference,
+        order: sanitizeOrderForClient(order),
+      },
+    });
+    res.json({ success: true, status: 'PAID', order: sanitizeOrderForClient(order) });
   });
 
   app.get('/api/qris/status/:orderId', async (req, res) => {
@@ -3628,6 +3876,16 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         status: 'PAID',
         paidAt: order.paidAt,
         providerReference: order.providerReference,
+        configReady: order.configReady,
+        order: sanitizeOrderForClient(order),
+      });
+      return;
+    }
+
+    if (order.status === 'MENUNGGU_ADMIN' || order.status === 'DITOLAK') {
+      res.json({
+        success: true,
+        status: order.status,
         configReady: order.configReady,
         order: sanitizeOrderForClient(order),
       });

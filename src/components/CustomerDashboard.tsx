@@ -30,7 +30,6 @@ import {
   Sliders,
   Filter,
   MessageSquare,
-  Briefcase,
   Crown,
   Zap,
   Clock,
@@ -39,6 +38,11 @@ import {
   Eye,
   EyeOff,
   X,
+  Target,
+  QrCode,
+  BarChart3,
+  Trophy,
+  Shield,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CardVisualizer } from './CardVisualizer';
@@ -46,7 +50,7 @@ import { NusantaraChat } from './NusantaraChat';
 import { PinPromptModal } from './PinPromptModal';
 import { DigitalBankingFeatures } from './DigitalBankingFeatures';
 import { DiamondText } from './DiamondIcon';
-import { JobVacancyView } from './JobVacancyView';
+import { MobileBankingExtraTabs, type MobileBankingExtraTabKey } from './MobileBankingExtraTabs';
 import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
 import { TopLeaderboardBadges } from './TopLeaderboardBadges';
 import { TabEmasView } from './TabEmasView';
@@ -70,14 +74,14 @@ import { getCelebrationEffectProfile } from '../data/celebrationEffectsCatalog';
 
 export type DashboardTab =
   | 'ringkasan'
-  | 'pekerjaan'
   | 'layanan'
   | 'chat'
   | 'transfer'
   | 'emas'
   | 'pinjaman'
   | 'mutasi'
-  | 'jadwal';
+  | 'jadwal'
+  | MobileBankingExtraTabKey;
 
 interface CustomerDashboardProps {
   requestedSubTab?: { tab: DashboardTab; nonce: number } | null;
@@ -140,14 +144,19 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
 
   // Active sub-tab in dashboard
   const [activeTab, setActiveTab] = useState<DashboardTab>(
-    requestedSubTab?.tab && (requestedSubTab.tab as string) !== 'keamanan'
+    requestedSubTab?.tab &&
+      (requestedSubTab.tab as string) !== 'keamanan' &&
+      (requestedSubTab.tab as string) !== 'pekerjaan'
       ? requestedSubTab.tab
       : 'ringkasan'
   );
   useEffect(() => {
     if (requestedSubTab?.tab) {
       setActiveTab(
-        (requestedSubTab.tab as string) === 'keamanan' ? 'ringkasan' : requestedSubTab.tab
+        (requestedSubTab.tab as string) === 'keamanan' ||
+          (requestedSubTab.tab as string) === 'pekerjaan'
+          ? 'ringkasan'
+          : requestedSubTab.tab
       );
     }
   }, [requestedSubTab]);
@@ -157,7 +166,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
     if (!currentAccount?.id) return;
     const SUBTAB_LABELS: Record<DashboardTab, { label: string; action: string }> = {
       ringkasan: { label: 'Ringkasan Rekening', action: 'Melihat Saldo & Kartu di Ringkasan' },
-      pekerjaan: { label: 'Karir & Bisnis Sultan', action: 'Membuka Tab Karir & Sultan Empire' },
       layanan: { label: 'Layanan Digital & QRIS', action: 'Membuka Menu Layanan Digital / QRIS' },
       chat: { label: 'Nusantara Chat', action: 'Membuka Tab Chat di Dashboard' },
       transfer: { label: 'Transfer Dana', action: 'Menyiapkan Transfer Dana di Dashboard' },
@@ -165,6 +173,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       pinjaman: { label: 'Pinjaman Online', action: 'Membuka Menu Pinjaman Online' },
       mutasi: { label: 'Mutasi Rekening', action: 'Memeriksa Riwayat Mutasi Rekening' },
       jadwal: { label: 'Pembayaran Terjadwal', action: 'Melihat Jadwal Pembayaran Otomatis' },
+      kantong_impian: { label: 'Kantong Impian Berbunga', action: 'Mengelola Kantong Impian Target Tabungan' },
+      qris_pribadi: { label: 'QRIS Terima & Scan Pribadi', action: 'Membuka QRIS Rekening Pribadi' },
+      analitik: { label: 'Analitik Keuangan Bulanan', action: 'Melihat Grafik Arus Kas Bulanan' },
+      loyalty: { label: 'Pencapaian & Poin Loyalty', action: 'Membuka Streak & Poin Loyalty' },
+      brankas: { label: 'Brankas & Freeze Kartu', action: 'Mengatur Brankas Pengaman Saldo' },
     };
     const meta = SUBTAB_LABELS[activeTab] || { label: activeTab, action: `Membuka Tab ${activeTab}` };
     reportLivePresence({
@@ -890,18 +903,6 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         </button>
 
         <button
-          onClick={() => setActiveTab('pekerjaan')}
-          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
-            activeTab === 'pekerjaan'
-              ? 'bg-gradient-to-r from-emerald-400 to-teal-400 text-slate-950 font-black shadow-lg shadow-emerald-500/30'
-              : 'text-emerald-300 hover:text-white hover:bg-emerald-500/10 border border-emerald-500/30'
-          }`}
-        >
-          <Briefcase className="w-4 h-4" />
-          <span>💼 Lowongan Kerja, Suit &amp; 12 Game (Lv.{currentAccount.jobLevel || 1})</span>
-        </button>
-
-        <button
           onClick={() => setActiveTab('layanan')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'layanan'
@@ -950,6 +951,66 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('kantong_impian')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            activeTab === 'kantong_impian'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+              : 'text-emerald-300 hover:text-white hover:bg-emerald-500/10'
+          }`}
+        >
+          <Target className="w-4 h-4" />
+          <span>Kantong Impian</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('qris_pribadi')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            activeTab === 'qris_pribadi'
+              ? 'bg-sky-600 text-white shadow-lg shadow-sky-600/30'
+              : 'text-sky-300 hover:text-white hover:bg-sky-500/10'
+          }`}
+        >
+          <QrCode className="w-4 h-4" />
+          <span>QRIS Pribadi</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('analitik')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            activeTab === 'analitik'
+              ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-600/30'
+              : 'text-cyan-300 hover:text-white hover:bg-cyan-500/10'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          <span>Analitik Bulanan</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('loyalty')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            activeTab === 'loyalty'
+              ? 'bg-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/30'
+              : 'text-amber-300 hover:text-white hover:bg-amber-500/10'
+          }`}
+        >
+          <Trophy className="w-4 h-4" />
+          <span>Streak &amp; Loyalty</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('brankas')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+            activeTab === 'brankas'
+              ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30'
+              : 'text-indigo-300 hover:text-white hover:bg-indigo-500/10'
+          }`}
+        >
+          <Shield className="w-4 h-4" />
+          <span>Brankas &amp; Freeze</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('pinjaman')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
             activeTab === 'pinjaman'
@@ -986,10 +1047,11 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
         </button>
       </div>
 
-      {/* =========================================================================
-          TAB PEKERJAAN: LOWONGAN PEKERJAAN, SISTEM LEVEL & SUIT KOMPUTER MEDIUM
-         ========================================================================= */}
-      {activeTab === 'pekerjaan' && <JobVacancyView />}
+      {(activeTab === 'kantong_impian' ||
+        activeTab === 'qris_pribadi' ||
+        activeTab === 'analitik' ||
+        activeTab === 'loyalty' ||
+        activeTab === 'brankas') && <MobileBankingExtraTabs activeTab={activeTab} />}
 
       {/* =========================================================================
           TAB 1: RINGKASAN & KARTU (Section 1, 3, 4)

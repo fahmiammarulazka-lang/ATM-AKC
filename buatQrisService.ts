@@ -233,13 +233,25 @@ export interface CreateBuatQrisPayload {
   useUniqueCode?: boolean;
   expiryMinutes?: number;
   preferredMode?: BuatQrisMode;
+  adminConfig?: {
+    mode?: 'auto_buatqris' | 'manual_override';
+    manualQrImageDataUrl?: string;
+    manualQrisString?: string;
+    manualUseDynamicEmvco?: boolean;
+    manualMerchantName?: string;
+    manualPaymentNote?: string;
+    customAccountId?: string;
+    customLoginId?: string;
+    customGatewayUrl?: string;
+    customStaticQrisString?: string;
+  } | null;
 }
 
 export interface CreateBuatQrisResult {
   success: boolean;
   orderId: string;
   externalInvoiceId?: string;
-  modeUsed: 'api' | 'emvco';
+  modeUsed: 'api' | 'emvco' | 'manual';
   configReady: boolean;
   configNotice?: string;
   baseAmount: number;
@@ -247,6 +259,8 @@ export interface CreateBuatQrisResult {
   totalAmount: number;
   qrisString: string;
   qrisImageUrl?: string;
+  manualQrImageDataUrl?: string;
+  manualPaymentNote?: string;
   createdAt: string;
   expiresAt: string;
 }
@@ -283,14 +297,15 @@ function isAllowedBuatQrisHost(urlStr: string): boolean {
 }
 
 /**
- * Membuat tagihan QRIS menggunakan Mode Hybrid (Server-Side):
- * - Mode API Gateway jika BUATQRIS_API_KEY & MERCHANT_ID tersedia
- * - Fallback otomatis ke Mode QRIS Dinamis EMVCo jika kredensial API belum diisi
+ * Membuat tagihan QRIS menggunakan Mode Hybrid (Server-Side) + Dukungan QR Manual Admin:
+ * - Jika Admin mengaktifkan Mode QR Manual dan mengisi gambar QR / string QRIS -> pakai QR Manual Admin
+ * - Jika tidak, otomatis memakai Bot & API Gateway BuatQRIS (atau fallback EMVCo dinamis valid CRC16-CCITT)
  */
 export async function createBuatQrisInvoiceServer(
   input: CreateBuatQrisPayload
 ): Promise<CreateBuatQrisResult> {
   const cfg = getBuatQrisConfig();
+  const adminCfg = input.adminConfig || null;
   const baseAmount = Math.max(1, Math.round(Number(input.amount) || 0));
   const useUnique =
     typeof input.useUniqueCode === 'boolean'
@@ -301,91 +316,161 @@ export async function createBuatQrisInvoiceServer(
   const expiryMinutes = Math.max(1, Math.min(60, input.expiryMinutes || cfg.DEFAULT_EXPIRY_MINUTES));
   const now = new Date();
   const expiresAt = new Date(now.getTime() + expiryMinutes * 60 * 1000).toISOString();
+
+  // 1. Cek Mode QR Manual Admin terlebih dahulu (jika aktif & gambar/string QR terisi)
+  const hasManualImg = Boolean(adminCfg?.manualQrImageDataUrl?.trim());
+  const hasManualStr = Boolean(adminCfg?.manualQrisString?.trim());
+  if (adminCfg?.mode === 'manual_override' && (hasManualImg || hasManualStr)) {
+    const rawManualStr = (adminCfg.manualQrisString || '').trim();
+    const useDynamic = adminCfg.manualUseDynamicEmvco !== false;
+    const computedManualQrisString = rawManualStr
+      ? useDynamic
+        ? generateDynamicEmvcoQris(rawManualStr, totalAmount)
+        : rawManualStr
+      : '';
+    return {
+      success: true,
+      orderId: input.orderId,
+      externalInvoiceId: input.orderId,
+      modeUsed: 'manual',
+      configReady: true,
+      configNotice:
+        adminCfg.manualMerchantName
+          ? `Mode QR Manual Admin (${adminCfg.manualMerchantName}) aktif — kirim bukti transfer untuk persetujuan instan Admin.`
+          : 'Mode QR Manual Admin aktif — lakukan transfer sesuai nominal lalu unggah bukti bayar.',
+      baseAmount,
+      uniqueCode,
+      totalAmount,
+      qrisString: computedManualQrisString,
+      manualQrImageDataUrl: hasManualImg ? adminCfg.manualQrImageDataUrl : undefined,
+      manualPaymentNote: adminCfg.manualPaymentNote || undefined,
+      createdAt: now.toISOString(),
+      expiresAt,
+    };
+  }
+
+  // 2. Mode Bawaan Bot & API BuatQRIS (atau fallback EMVCo jika API key/gateway belum diisi)
+  const effectiveGatewayUrl = normalizeBuatQrisUrl(
+    adminCfg?.customGatewayUrl || cfg.BUATQRIS_URL_SITE
+  );
+  const effectiveAccountId = (cfg.ACCOUNT_ID || adminCfg?.customAccountId || '').trim();
+  const effectiveLoginId = (cfg.BUATQRIS_LOGIN_ID || adminCfg?.customLoginId || '').trim();
+  const effectiveStaticQris = (
+    cfg.STATIC_QRIS_STRING ||
+    adminCfg?.customStaticQrisString ||
+    adminCfg?.manualQrisString ||
+    ''
+  ).trim();
+
   const mode = input.preferredMode || cfg.DEFAULT_MODE;
-
-  const hasApiCreds = Boolean(cfg.SECRET_KEY && cfg.ACCOUNT_ID);
+  const hasApiCreds = Boolean(cfg.SECRET_KEY && effectiveAccountId);
   const shouldTryApi = (mode === 'api' || mode === 'hybrid') && hasApiCreds;
+  let lastApiFailureNote = '';
 
-  if (shouldTryApi && isAllowedBuatQrisHost(cfg.BUATQRIS_URL_SITE)) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const baseUrl = cfg.BUATQRIS_URL_SITE.replace(/\/+$/, '');
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${cfg.SECRET_KEY}`,
-        'X-Secret-Key': cfg.SECRET_KEY,
-        'X-API-Key': cfg.SECRET_KEY,
-        'X-Account-Id': cfg.ACCOUNT_ID,
-        'X-Merchant-Id': cfg.ACCOUNT_ID,
-      };
-      if (cfg.BUATQRIS_LOGIN_ID) {
-        headers['X-Login-Id'] = cfg.BUATQRIS_LOGIN_ID;
-      }
+  if (shouldTryApi && isAllowedBuatQrisHost(effectiveGatewayUrl)) {
+    const baseUrl = effectiveGatewayUrl.replace(/\/+$/, '');
+    const candidateEndpoints = [`${baseUrl}/api/v1/qris/create`, `${baseUrl}/api/qris/create`];
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      Authorization: `Bearer ${cfg.SECRET_KEY}`,
+      'X-Secret-Key': cfg.SECRET_KEY,
+      'X-API-Key': cfg.SECRET_KEY,
+      'X-Account-Id': effectiveAccountId,
+      'X-Merchant-Id': effectiveAccountId,
+    };
+    if (effectiveLoginId) {
+      headers['X-Login-Id'] = effectiveLoginId;
+    }
 
-      const response = await fetch(`${baseUrl}/api/v1/qris/create`, {
-        method: 'POST',
-        signal: controller.signal,
-        headers,
-        body: JSON.stringify({
-          order_id: input.orderId,
-          reference_id: input.orderId,
-          account_id: cfg.ACCOUNT_ID,
-          merchant_id: cfg.ACCOUNT_ID,
-          ...(cfg.BUATQRIS_LOGIN_ID ? { login_id: cfg.BUATQRIS_LOGIN_ID } : {}),
-          ...(cfg.WEBHOOK_URL ? { webhook_url: cfg.WEBHOOK_URL } : {}),
-          amount: totalAmount,
-          base_amount: baseAmount,
-          unique_code: uniqueCode,
-          customer_name: input.customerName || 'Nasabah Bank Nusantara',
-          description: input.description || `Pembayaran ${input.orderId}`,
-          expiry_minutes: expiryMinutes,
-        }),
-      });
+    for (const endpoint of candidateEndpoints) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 7500);
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          signal: controller.signal,
+          headers,
+          body: JSON.stringify({
+            order_id: input.orderId,
+            reference_id: input.orderId,
+            merchant_ref: input.orderId,
+            account_id: effectiveAccountId,
+            merchant_id: effectiveAccountId,
+            ...(effectiveLoginId ? { login_id: effectiveLoginId } : {}),
+            ...(cfg.WEBHOOK_URL ? { webhook_url: cfg.WEBHOOK_URL } : {}),
+            amount: totalAmount,
+            base_amount: baseAmount,
+            unique_code: uniqueCode,
+            customer_name: input.customerName || 'Nasabah Bank Nusantara',
+            description: input.description || `Pembayaran ${input.orderId}`,
+            expiry_minutes: expiryMinutes,
+          }),
+        });
 
-      if (response.ok) {
-        const json = (await response.json()) as Record<string, unknown>;
-        const dataObj =
-          json.data && typeof json.data === 'object'
-            ? (json.data as Record<string, unknown>)
-            : json;
-        const qrisString = String(
-          dataObj.qris_content || dataObj.qris_string || dataObj.qr_string || ''
-        ).trim();
-        const qrisImageUrl = String(
-          dataObj.qris_url || dataObj.qr_image_url || dataObj.image_url || ''
-        ).trim();
-        const externalInvoiceId = String(
-          dataObj.qris_invoiceid || dataObj.invoice_id || dataObj.reference || input.orderId
-        ).trim();
-
-        if (qrisString || qrisImageUrl) {
-          return {
-            success: true,
-            orderId: input.orderId,
-            externalInvoiceId,
-            modeUsed: 'api',
-            configReady: true,
-            baseAmount,
-            uniqueCode,
-            totalAmount,
-            qrisString: qrisString || generateDynamicEmvcoQris(cfg.STATIC_QRIS_STRING, totalAmount),
-            createdAt: now.toISOString(),
-            expiresAt,
-          };
+        const rawText = await response.text();
+        let json: Record<string, unknown> = {};
+        try {
+          json = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : {};
+        } catch {
+          json = {};
         }
+
+        if (response.ok) {
+          const dataObj =
+            json.data && typeof json.data === 'object'
+              ? (json.data as Record<string, unknown>)
+              : json;
+          const qrisString = String(
+            dataObj.qris_content ||
+              dataObj.qris_string ||
+              dataObj.qr_string ||
+              dataObj.qris ||
+              dataObj.qr_content ||
+              ''
+          ).trim();
+          const qrisImageUrl = String(
+            dataObj.qris_url || dataObj.qr_image_url || dataObj.image_url || dataObj.qr_url || ''
+          ).trim();
+          const externalInvoiceId = String(
+            dataObj.qris_invoiceid ||
+              dataObj.invoice_id ||
+              dataObj.reference ||
+              dataObj.trx_id ||
+              input.orderId
+          ).trim();
+
+          if (qrisString || qrisImageUrl) {
+            return {
+              success: true,
+              orderId: input.orderId,
+              externalInvoiceId,
+              modeUsed: 'api',
+              configReady: true,
+              baseAmount,
+              uniqueCode,
+              totalAmount,
+              qrisString:
+                qrisString || generateDynamicEmvcoQris(effectiveStaticQris, totalAmount),
+              qrisImageUrl: qrisImageUrl || undefined,
+              createdAt: now.toISOString(),
+              expiresAt,
+            };
+          }
+        } else {
+          lastApiFailureNote = `Gateway QRIS HTTP ${response.status}`;
+        }
+      } catch (err) {
+        lastApiFailureNote = err instanceof Error ? err.message : 'Timeout menghubungi gateway QRIS';
+      } finally {
+        clearTimeout(timer);
       }
-    } catch {
-      // Fall through seamlessly to EMVCo dynamic mode in hybrid mode
-    } finally {
-      clearTimeout(timer);
     }
   }
 
-  // Mode EMVCo Dinamis Otomatis (Tag 54 + Kode Unik 3 Digit + CRC16-CCITT)
-  const hasStaticQris = Boolean(cfg.STATIC_QRIS_STRING);
-  const dynamicQrisString = generateDynamicEmvcoQris(cfg.STATIC_QRIS_STRING, totalAmount);
+  // 3. Fallback EMVCo Dinamis Otomatis (Tag 54 + Kode Unik 3 Digit + CRC16-CCITT valid)
+  const hasStaticQris = Boolean(effectiveStaticQris);
+  const dynamicQrisString = generateDynamicEmvcoQris(effectiveStaticQris, totalAmount);
 
   return {
     success: true,
@@ -393,6 +478,11 @@ export async function createBuatQrisInvoiceServer(
     externalInvoiceId: input.orderId,
     modeUsed: 'emvco',
     configReady: hasStaticQris || hasApiCreds,
+    configNotice: !hasApiCreds && !hasStaticQris
+      ? 'Bot QRIS berjalan dalam mode pratinjau EMVCo lokal (isi kredensial BuatQRIS di Secrets atau pasang QR Manual di Panel Admin untuk scan pembayaran nyata).'
+      : lastApiFailureNote
+      ? `Gateway BuatQRIS sementara sibuk (${lastApiFailureNote}) — dialihkan mulus ke QRIS Dinamis EMVCo.`
+      : undefined,
     baseAmount,
     uniqueCode,
     totalAmount,
@@ -400,6 +490,77 @@ export async function createBuatQrisInvoiceServer(
     createdAt: now.toISOString(),
     expiresAt,
   };
+}
+
+export async function testBuatQrisGatewayServer(customGatewayUrl?: string): Promise<{
+  ok: boolean;
+  latencyMs: number;
+  gatewayUrl: string;
+  hasSecretKey: boolean;
+  hasAccountId: boolean;
+  hasStaticQris: boolean;
+  httpStatus?: number;
+  message: string;
+}> {
+  const cfg = getBuatQrisConfig();
+  const targetUrl = normalizeBuatQrisUrl(customGatewayUrl || cfg.BUATQRIS_URL_SITE);
+  const hasSecretKey = Boolean(cfg.SECRET_KEY);
+  const hasAccountId = Boolean(cfg.ACCOUNT_ID);
+  const hasStaticQris = Boolean(cfg.STATIC_QRIS_STRING);
+  const start = Date.now();
+
+  if (!isAllowedBuatQrisHost(targetUrl)) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      gatewayUrl: targetUrl,
+      hasSecretKey,
+      hasAccountId,
+      hasStaticQris,
+      message: 'Domain gateway harus mengarah ke host resmi buatqris.site / qris.id.',
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  try {
+    const resp = await fetch(targetUrl, { method: 'GET', signal: controller.signal });
+    const latencyMs = Date.now() - start;
+    if (!hasSecretKey || !hasAccountId) {
+      return {
+        ok: true,
+        latencyMs,
+        gatewayUrl: targetUrl,
+        hasSecretKey,
+        hasAccountId,
+        hasStaticQris,
+        httpStatus: resp.status,
+        message: `Server BuatQRIS merespons (HTTP ${resp.status}, ${latencyMs}ms). Lengkapi QRIS_SECRET_KEY & QRIS_ACCOUNT_ID di Settings -> Secrets untuk transaksi Live, atau gunakan QR Manual Admin.`,
+      };
+    }
+    return {
+      ok: resp.status < 500,
+      latencyMs,
+      gatewayUrl: targetUrl,
+      hasSecretKey,
+      hasAccountId,
+      hasStaticQris,
+      httpStatus: resp.status,
+      message: `Koneksi ke Bot & Gateway BuatQRIS aktif (${latencyMs}ms, HTTP ${resp.status}). Kredensial server siap memproses tagihan QRIS.`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      gatewayUrl: targetUrl,
+      hasSecretKey,
+      hasAccountId,
+      hasStaticQris,
+      message: `Gagal menjangkau gateway BuatQRIS (${err instanceof Error ? err.message : 'timeout'}). Fallback EMVCo / QR Manual Admin tetap siap digunakan.`,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -593,7 +754,7 @@ export async function requestCreateQrisPayment(
       }
 
       const data = (await resp.json()) as CreateBuatQrisResult & { message?: string };
-      if (!data || !data.success || !data.qrisString) {
+      if (!data || !data.success || (!data.qrisString && !data.qrisImageUrl && !data.manualQrImageDataUrl)) {
         if (data?.message) {
           throw new QrisValidationError(data.message, 400, 'validation');
         }

@@ -67,6 +67,10 @@ import {
   Award,
   ShieldCheck,
   Coins,
+  Pin,
+  Radio,
+  Star,
+  PiggyBank,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -340,6 +344,18 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     liveActivityLogs,
     autoDetectedAnomalies,
     adminWarnings,
+    chatStatuses,
+    chatStatusReports,
+    createChatStatus,
+    adminModerateChatStatus,
+    adminResolveStatusReport,
+    dreamPockets,
+    dreamPocketConfig,
+    adminUpdateDreamPocketConfig,
+    loyaltyMap,
+    loyaltyConfig,
+    adminUpdateLoyaltyConfig,
+    adminAdjustLoyaltyPoints,
   } = useBank();
 
   const [liveMonitorFocusAccountId, setLiveMonitorFocusAccountId] = useState<string | null>(null);
@@ -681,6 +697,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   const [adminRpNote, setAdminRpNote] = useState<string>('Amplop Hadiah Resmi Admin Bank Nusantara!');
   const [showAdminRpPinModal, setShowAdminRpPinModal] = useState<boolean>(false);
   const [chatReportFilter, setChatReportFilter] = useState<'pending' | 'all'>('pending');
+  const [adminStatusBannerText, setAdminStatusBannerText] = useState<string>('');
+  const [adminStatusBannerTheme, setAdminStatusBannerTheme] = useState<string>('gold');
+  const [loyaltyTargetAccId, setLoyaltyTargetAccId] = useState<string>(accounts[0]?.id || 'acc-admin');
+  const [loyaltyAdjustVal, setLoyaltyAdjustVal] = useState<number>(250);
+  const [dreamInterestDraft, setDreamInterestDraft] = useState<string>(
+    String(dreamPocketConfig.annualInterestRatePercent ?? 6)
+  );
+  const [dreamMaxPocketsDraft, setDreamMaxPocketsDraft] = useState<string>(
+    String(dreamPocketConfig.maxPocketsPerAccount ?? 10)
+  );
+  const [loyaltyCheckInDraft, setLoyaltyCheckInDraft] = useState<string>(
+    String(loyaltyConfig.dailyCheckInPoints ?? 25)
+  );
+  const [loyaltyRedeemRateDraft, setLoyaltyRedeemRateDraft] = useState<string>(
+    String(loyaltyConfig.pointsPer1000Rupiah ?? 10)
+  );
+  const [extraMgmtFeedback, setExtraMgmtFeedback] = useState<string>('');
 
   useEffect(() => {
     if (globalChatConfig.maintenanceNotice) setChatMaintenanceDraft(globalChatConfig.maintenanceNotice);
@@ -2410,7 +2443,178 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
       )}
 
       {/* ================= ADMIN TAB: DIAMOND, BUATQRIS & PENGATURAN KELUARGA LENGKAP ================= */}
-      {activeAdminTab === 'diamond_family_admin' && <AdminDiamondFamilyTab />}
+      {activeAdminTab === 'diamond_family_admin' && (
+        <div className="space-y-6">
+          <AdminDiamondFamilyTab />
+
+          {/* SECTION 4: MANAJEMEN KANTONG IMPIAN BERBUNGA & POIN LOYALTY NASABAH */}
+          <div className="rounded-3xl border-2 border-amber-500/50 bg-slate-900/95 p-6 shadow-xl space-y-5 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-400/40">
+                  <PiggyBank className="h-6 w-6" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-amber-400">
+                    MANAJEMEN TABUNGAN TARGET &amp; REWARD LOYALTY
+                  </span>
+                  <h3 className="text-lg font-black text-white">
+                    Kantong Impian ({dreamPockets.length} Aktif) &amp; Poin Loyalty Nasabah
+                  </h3>
+                </div>
+              </div>
+              {extraMgmtFeedback && (
+                <span className="rounded-xl border border-emerald-400 bg-emerald-950/90 px-3 py-1.5 font-bold text-emerald-200">
+                  ✅ {extraMgmtFeedback}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Pengaturan Kantong Impian */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3">
+                <h4 className="font-black text-emerald-300">Pengaturan Kantong Impian Berbunga</h4>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Bunga Tahunan (%)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={dreamInterestDraft}
+                      onChange={(e) => setDreamInterestDraft(e.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Maks Kantong / Akun</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={dreamMaxPocketsDraft}
+                      onChange={(e) => setDreamMaxPocketsDraft(e.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const r = adminUpdateDreamPocketConfig({
+                      annualInterestRatePercent: Math.max(0, Math.min(100, Number(dreamInterestDraft) || 6)),
+                      maxPocketsPerAccount: Math.max(1, Math.min(50, Number(dreamMaxPocketsDraft) || 10)),
+                    });
+                    setExtraMgmtFeedback(r.message);
+                    window.setTimeout(() => setExtraMgmtFeedback(''), 4000);
+                  }}
+                  className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 py-2 font-black text-slate-950 cursor-pointer"
+                >
+                  Simpan Aturan Kantong Impian
+                </button>
+              </div>
+
+              {/* Pengaturan Poin Loyalty */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3">
+                <h4 className="font-black text-amber-300">Pengaturan Check-In &amp; Kurs Poin Loyalty</h4>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Poin Check-In Harian</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10000}
+                      value={loyaltyCheckInDraft}
+                      onChange={(e) => setLoyaltyCheckInDraft(e.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Poin per Rp 1.000</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10000}
+                      value={loyaltyRedeemRateDraft}
+                      onChange={(e) => setLoyaltyRedeemRateDraft(e.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
+                    />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const r = adminUpdateLoyaltyConfig({
+                      dailyCheckInPoints: Math.max(1, Number(loyaltyCheckInDraft) || 25),
+                      pointsPer1000Rupiah: Math.max(1, Number(loyaltyRedeemRateDraft) || 10),
+                    });
+                    setExtraMgmtFeedback(r.message);
+                    window.setTimeout(() => setExtraMgmtFeedback(''), 4000);
+                  }}
+                  className="w-full rounded-xl bg-amber-400 hover:bg-amber-300 py-2 font-black text-slate-950 cursor-pointer"
+                >
+                  Simpan Aturan Poin Loyalty
+                </button>
+              </div>
+            </div>
+
+            {/* Atur / Suntik Poin Loyalty Nasabah */}
+            <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-2.5">
+              <h4 className="font-black text-white flex items-center gap-1.5">
+                <Star className="w-4 h-4 text-amber-400" />
+                <span>Suntik / Set Poin Loyalty Nasabah</span>
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                <select
+                  value={loyaltyTargetAccId}
+                  onChange={(e) => setLoyaltyTargetAccId(e.target.value)}
+                  className="sm:col-span-5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-white font-bold"
+                >
+                  {accounts.map((acc) => {
+                    const st = loyaltyMap[acc.id];
+                    return (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.fullName} ({acc.accountNumber}) — {isAdminCardAccount(acc) ? '∞' : (st?.points || 0)} Poin
+                      </option>
+                    );
+                  })}
+                </select>
+                <input
+                  type="number"
+                  min={0}
+                  value={loyaltyAdjustVal}
+                  onChange={(e) => setLoyaltyAdjustVal(Math.max(0, Number(e.target.value) || 0))}
+                  className="sm:col-span-3 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
+                />
+                <div className="sm:col-span-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const r = adminAdjustLoyaltyPoints(loyaltyTargetAccId, loyaltyAdjustVal, 'add');
+                      setExtraMgmtFeedback(r.message);
+                      window.setTimeout(() => setExtraMgmtFeedback(''), 4000);
+                    }}
+                    className="flex-1 rounded-xl bg-amber-400 hover:bg-amber-300 py-2 font-black text-slate-950 cursor-pointer"
+                  >
+                    + Tambah Poin
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const r = adminAdjustLoyaltyPoints(loyaltyTargetAccId, loyaltyAdjustVal, 'set');
+                      setExtraMgmtFeedback(r.message);
+                      window.setTimeout(() => setExtraMgmtFeedback(''), 4000);
+                    }}
+                    className="flex-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-400/40 py-2 font-black text-amber-300 cursor-pointer"
+                  >
+                    Set Persis
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ================= ADMIN TAB: KELOLA RIWAYAT UPDATE WEBSITE (UPDATE SEKARANG & SEBELUMNYA) ================= */}
       {activeAdminTab === 'app_updates' && (
@@ -4197,6 +4401,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           { key: 'disableMessageEdit', label: 'Matikan Edit Pesan', desc: 'Kunci tombol Edit Pesan milik nasabah' },
           { key: 'disableChatSystemNotifications', label: 'Matikan Notif Sistem Khusus Chat', desc: 'Nonaktifkan notifikasi/pop-up sistem khusus fitur chat' },
           { key: 'disableWelcomeGreeting', label: 'Matikan Kartu Sambutan Baru', desc: 'Sembunyikan sapaan Admin Utama untuk akun baru' },
+          { key: 'disableStatusTab', label: 'Matikan Tab Status 24 Jam', desc: 'Kunci tab Status 24 jam di sebelah Chat Privat' },
         ];
 
         const notifyChatCfg = (msg: string) => {
@@ -4319,6 +4524,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                       disableMessageEdit: false,
                       disableChatSystemNotifications: false,
                       disableWelcomeGreeting: false,
+                      disableStatusTab: false,
                     };
                     const r = await adminUpdateChatFeatureFlags(resetFlags, 'Aktifkan Semua 15 Fitur Chat');
                     notifyChatCfg(r.message);
@@ -5294,6 +5500,183 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     );
                   })
                 )}
+              </div>
+            </div>
+          </div>
+
+          {/* 5. MODERASI STATUS 24 JAM, TINJAU LAPORAN & BANNER STATUS TERSEMAT ADMIN */}
+          <div className="p-5 rounded-3xl bg-slate-950 border-2 border-cyan-500/50 space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h4 className="font-black text-white text-sm sm:text-base flex items-center gap-2">
+                  <Radio className="w-4 h-4 text-cyan-400" />
+                  <span>Moderasi Status 24 Jam ({chatStatuses.length} Aktif) &amp; Pengumuman Banner Tersemat</span>
+                </h4>
+                <p className="text-[11px] text-slate-400">
+                  Terbitkan Status Banner Resmi Admin yang tampil tersemat paling atas di tab Status, tinjau laporan nasabah, atau hapus status pelanggar.
+                </p>
+              </div>
+              <span className="px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-black">
+                {chatStatusReports.filter((r) => r.resolution === 'pending').length} Laporan Status Pending
+              </span>
+            </div>
+
+            {/* Buat Banner Status Tersemat Resmi Admin */}
+            <div className="rounded-2xl border border-amber-500/40 bg-slate-900 p-4 space-y-2.5">
+              <label className="font-black text-amber-300 block">
+                Buat Status Banner Pengumuman Resmi Admin (Tersemat di Tab Status 24 Jam):
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={adminStatusBannerTheme}
+                  onChange={(e) => setAdminStatusBannerTheme(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-bold"
+                >
+                  <option value="gold">Tema Emas Nusantara</option>
+                  <option value="emerald">Tema Zamrud</option>
+                  <option value="ocean">Tema Samudra</option>
+                  <option value="royal">Tema Royal Ungu</option>
+                  <option value="sunset">Tema Senja</option>
+                </select>
+                <input
+                  type="text"
+                  value={adminStatusBannerText}
+                  onChange={(e) => setAdminStatusBannerText(e.target.value)}
+                  placeholder="Tulis pengumuman Banner Status 24 jam..."
+                  className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white"
+                />
+                <button
+                  type="button"
+                  disabled={!adminStatusBannerText.trim()}
+                  onClick={() => {
+                    const r = createChatStatus({
+                      type: 'text',
+                      text: adminStatusBannerText.trim(),
+                      bgTheme: adminStatusBannerTheme,
+                      privacy: 'all',
+                      isPinnedAdminBanner: true,
+                    });
+                    notifyChatCfg(r.message);
+                    if (r.success) setAdminStatusBannerText('');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 disabled:opacity-45 text-slate-950 font-black inline-flex items-center gap-1.5 shrink-0"
+                >
+                  <Pin className="w-3.5 h-3.5" />
+                  <span>Terbitkan Banner Status</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Daftar Status Aktif 24 Jam */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3.5 space-y-2.5">
+                <h5 className="font-black text-cyan-300">Status 24 Jam Aktif ({chatStatuses.length})</h5>
+                <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                  {chatStatuses.length === 0 ? (
+                    <p className="text-center text-slate-500 py-5">Belum ada Status 24 jam aktif.</p>
+                  ) : (
+                    chatStatuses.map((st) => (
+                      <div key={st.id} className="flex items-start justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 p-2.5">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-white">{st.authorName}</span>
+                            <span className="font-mono text-[10px] text-slate-400">
+                              {st.authorUserId16 ? `ID ${st.authorUserId16}` : st.authorAccountNumber}
+                            </span>
+                            {st.isPinnedAdminBanner && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[9px]">
+                                BANNER TERSEMAT
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-300 truncate mt-0.5">
+                            [{st.type.toUpperCase()}] {st.text || st.caption || '(Media Status)'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = adminModerateChatStatus(st.id, st.isPinnedAdminBanner ? 'unpin_banner' : 'pin_banner');
+                              notifyChatCfg(r.message);
+                            }}
+                            className="p-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300"
+                            title={st.isPinnedAdminBanner ? 'Lepas Banner Tersemat' : 'Sematkan sebagai Banner Admin'}
+                          >
+                            <Pin className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = adminModerateChatStatus(st.id, 'delete');
+                              notifyChatCfg(r.message);
+                            }}
+                            className="p-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-400"
+                            title="Hapus Status"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Daftar Laporan Status Masuk */}
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3.5 space-y-2.5">
+                <h5 className="font-black text-rose-300">Laporan Status Nasabah ({chatStatusReports.length})</h5>
+                <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                  {chatStatusReports.length === 0 ? (
+                    <p className="text-center text-slate-500 py-5">Belum ada laporan status masuk.</p>
+                  ) : (
+                    chatStatusReports.map((rep) => (
+                      <div key={rep.id} className="rounded-xl border border-slate-800 bg-slate-950 p-2.5 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-white">
+                            Pelapor: {rep.reporterName} • Terlapor: {rep.authorName}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                              rep.resolution === 'pending'
+                                ? 'bg-amber-500/20 text-amber-300'
+                                : rep.resolution === 'deleted'
+                                  ? 'bg-rose-500/20 text-rose-300'
+                                  : 'bg-slate-700 text-slate-300'
+                            }`}
+                          >
+                            {rep.resolution}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-rose-200/90">Alasan: {rep.reason}</p>
+                        {rep.resolution === 'pending' && (
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const r = adminResolveStatusReport(rep.id, 'deleted');
+                                notifyChatCfg(r.message);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px]"
+                            >
+                              Hapus Status Pelanggar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const r = adminResolveStatusReport(rep.id, 'dismissed');
+                                notifyChatCfg(r.message);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[10px]"
+                            >
+                              Abaikan Laporan
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </div>

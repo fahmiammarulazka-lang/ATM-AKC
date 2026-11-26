@@ -1,5 +1,5 @@
 /**
- * Bank Nusantara — Chat Global & Priv (v15.42.50)
+ * Bank Nusantara — Chat Global, Privat & Status 24 Jam (v16.42.50)
  * - Perbaikan Total Suara Voice Note & Audio HP: Konversi WAV Universal + Normalisasi + Hybrid Web Audio Player (Boost 200%)
  * - Meteran Mikrofon Aktif Real-Time saat Merekam + Cadangan Audio Cloud Permanen
  * - Pratinjau Foto & Video + Keterangan sebelum terkirim + Menu Titik Tiga Rapi 1-on-1, Grup & Global
@@ -65,6 +65,11 @@ import {
   Award,
   Headphones,
   Keyboard,
+  Music,
+  Filter,
+  Radio,
+  Smile,
+  CalendarPlus,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -78,12 +83,21 @@ import {
   ChatPollData,
   ChatRedPacketData,
   ChatRedPacketMode,
+  ChatTextEffectStyle,
   ChatVideoAttachment,
   ChatVoiceAttachment,
   GlobalChatMessage,
   PrivateChatContact,
   PrivateChatGroup,
 } from '../types/bank';
+import { ChatStatusTab } from './ChatStatusTab';
+import {
+  CHAT_TEXT_EFFECT_PRESETS,
+  EXPRESSIVE_STICKERS,
+  MOOD_MUSIC_PRESETS,
+  MOTION_GIF_PRESETS,
+  computeChatReputationRank,
+} from '../data/socialAndBankingExtrasCatalog';
 import { formatRupiah } from '../utils/bankUtils';
 import { PinPromptModal } from './PinPromptModal';
 import {
@@ -131,7 +145,8 @@ import {
   type StagedChatVoiceDraft,
 } from '../utils/chatMediaUtils';
 
-type MainChatTab = 'global' | 'private';
+type MainChatTab = 'global' | 'private' | 'status';
+type SmartChatFilter = 'all' | 'media' | 'links' | 'transactions';
 type PrivateFilter = 'all' | 'dm' | 'group' | 'archived';
 
 interface ActivePrivateTarget {
@@ -169,7 +184,7 @@ function renderFormattedInlineSegment(segment: string, keyPrefix: string): React
   });
 }
 
-const CollapsibleChatBody: React.FC<{ text: string }> = ({ text }) => {
+const CollapsibleChatBody: React.FC<{ text: string; effectClass?: string }> = ({ text, effectClass }) => {
   const [expanded, setExpanded] = useState(false);
   const lines = text.split('\n');
   const isLong = lines.length > 12 || text.length > 720;
@@ -180,7 +195,7 @@ const CollapsibleChatBody: React.FC<{ text: string }> = ({ text }) => {
 
   return (
     <div className="space-y-1">
-      <div className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+      <div className={`text-sm whitespace-pre-wrap break-words leading-relaxed ${effectClass || ''}`}>
         {displayText.split('\n').map((line, lIdx) => (
           <React.Fragment key={lIdx}>
             {renderFormattedInlineSegment(line, `line-${lIdx}`)}
@@ -266,6 +281,15 @@ export const NusantaraChat: React.FC = () => {
     removeMemberFromPrivateGroup,
     leavePrivateChatGroup,
     deletePrivateChatGroup,
+    chatStatuses,
+    socialChatPreferencesMap,
+    scheduledChatMessages,
+    updateSocialChatPreferences,
+    isDndActiveForAccount,
+    scheduleChatMessage,
+    cancelScheduledChatMessage,
+    loyaltyMap,
+    transactions,
   } = useBank();
 
   const [mainTab, setMainTab] = useState<MainChatTab>('global');
@@ -324,6 +348,26 @@ export const NusantaraChat: React.FC = () => {
   const [globalCooldownLeft, setGlobalCooldownLeft] = useState(0);
   const [globalSending, setGlobalSending] = useState(false);
   const globalEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Ekspansi Fitur Sosial: Smart Filter, Sticker/GIF, Efek Teks, Pesan Terjadwal, Mood/Musik & DND Terjadwal
+  const [smartFilterGlobal, setSmartFilterGlobal] = useState<SmartChatFilter>('all');
+  const [smartFilterPrivate, setSmartFilterPrivate] = useState<SmartChatFilter>('all');
+  const [composerEffectByScope, setComposerEffectByScope] = useState<{
+    global: ChatTextEffectStyle;
+    private: ChatTextEffectStyle;
+  }>({ global: 'none', private: 'none' });
+  const [openStickerDrawerScope, setOpenStickerDrawerScope] = useState<'global' | 'private' | null>(null);
+  const [stickerDrawerTab, setStickerDrawerTab] = useState<'stickers' | 'gifs' | 'effects'>('stickers');
+  const [scheduleModalScope, setScheduleModalScope] = useState<'global' | 'private' | null>(null);
+  const [schedMsgText, setSchedMsgText] = useState('');
+  const [schedDateTime, setSchedDateTime] = useState('');
+  const [showMoodDndModal, setShowMoodDndModal] = useState(false);
+  const [moodEmojiDraft, setMoodEmojiDraft] = useState('🎧');
+  const [moodLabelDraft, setMoodLabelDraft] = useState('');
+  const [moodMusicDraft, setMoodMusicDraft] = useState('');
+  const [dndScheduledEnabledDraft, setDndScheduledEnabledDraft] = useState(false);
+  const [dndStartHourDraft, setDndStartHourDraft] = useState(22);
+  const [dndEndHourDraft, setDndEndHourDraft] = useState(7);
 
   // Private Chat states
   const [privateFilter, setPrivateFilter] = useState<PrivateFilter>('all');
@@ -512,6 +556,19 @@ export const NusantaraChat: React.FC = () => {
   const isPollLockedFlag = !isAdminUser && Boolean(featureFlags.disablePolls);
   const isReactionLockedFlag = !isAdminUser && Boolean(featureFlags.disableReactions);
   const isEditLockedFlag = !isAdminUser && Boolean(featureFlags.disableMessageEdit);
+  const isStatusLockedFlag = !isAdminUser && Boolean(featureFlags.disableStatusTab);
+  const activeStatusCount = useMemo(() => {
+    const now = Date.now();
+    return chatStatuses.filter((s) => !s.expiresAtMs || s.expiresAtMs > now).length;
+  }, [chatStatuses]);
+  const mySocialPrefs = currentAccount ? socialChatPreferencesMap[currentAccount.id] : undefined;
+  const myScheduledMessages = useMemo(
+    () =>
+      currentAccount
+        ? scheduledChatMessages.filter((s) => s.accountId === currentAccount.id && !s.sent)
+        : [],
+    [scheduledChatMessages, currentAccount]
+  );
   const maxVoiceDurationSec = Math.max(
     15,
     Math.min(600, Math.round(Number(globalChatConfig.maxVoiceDurationSec ?? 600) || 600))
@@ -844,6 +901,33 @@ export const NusantaraChat: React.FC = () => {
     [globalChats, hiddenChatIdSet, nowCheckMs]
   );
 
+  const matchesSmartFilter = (
+    m: Pick<
+      GlobalChatMessage | ChatMessage,
+      'text' | 'imageAttachment' | 'videoAttachment' | 'mediaAttachments' | 'voiceAttachment' | 'stickerId' | 'gifId' | 'redPacket'
+    > & { transferAttachment?: unknown; splitBill?: unknown; billReminder?: unknown },
+    filter: SmartChatFilter
+  ) => {
+    if (filter === 'all') return true;
+    if (filter === 'media') {
+      return Boolean(
+        m.imageAttachment ||
+          m.videoAttachment ||
+          (m.mediaAttachments && m.mediaAttachments.length > 0) ||
+          m.voiceAttachment ||
+          m.stickerId ||
+          m.gifId
+      );
+    }
+    if (filter === 'links') {
+      return /(https?:\/\/|www\.|[a-z0-9-]+\.(com|id|net|org|io))/i.test(m.text || '');
+    }
+    if (filter === 'transactions') {
+      return Boolean(m.redPacket || m.transferAttachment || m.splitBill || m.billReminder);
+    }
+    return true;
+  };
+
   const visibleGlobalMessages = useMemo(() => {
     const q = globalSearchQuery.trim().toLowerCase();
     return [...globalChats]
@@ -856,6 +940,7 @@ export const NusantaraChat: React.FC = () => {
         if (hiddenChatIdSet.has(m.id)) return false;
         if (m.expiresAtMs && m.expiresAtMs <= Date.now()) return false;
         if (globalBookmarkedOnly && !bookmarkedIdSet.has(m.id)) return false;
+        if (!matchesSmartFilter(m, smartFilterGlobal)) return false;
         if (!q) return true;
         return (
           m.text.toLowerCase().includes(q) ||
@@ -863,7 +948,7 @@ export const NusantaraChat: React.FC = () => {
           (m.senderAccount || '').includes(q)
         );
       });
-  }, [globalChats, globalSearchQuery, globalBookmarkedOnly, bookmarkedIdSet, hiddenChatIdSet]);
+  }, [globalChats, globalSearchQuery, globalBookmarkedOnly, bookmarkedIdSet, hiddenChatIdSet, smartFilterGlobal]);
 
   const groupPinnedMessages = useMemo(() => {
     if (!activeGroup) return [];
@@ -882,6 +967,7 @@ export const NusantaraChat: React.FC = () => {
       if (hiddenChatIdSet.has(m.id)) return false;
       if (m.expiresAtMs && m.expiresAtMs <= Date.now()) return false;
       if (privateBookmarkedOnly && !bookmarkedIdSet.has(m.id)) return false;
+      if (!matchesSmartFilter(m, smartFilterPrivate)) return false;
       if (!q) return true;
       return (
         m.text.toLowerCase().includes(q) ||
@@ -889,7 +975,7 @@ export const NusantaraChat: React.FC = () => {
         (m.poll?.question || '').toLowerCase().includes(q)
       );
     });
-  }, [activePrivateMessages, privateRoomSearchQuery, privateBookmarkedOnly, bookmarkedIdSet, hiddenChatIdSet]);
+  }, [activePrivateMessages, privateRoomSearchQuery, privateBookmarkedOnly, bookmarkedIdSet, hiddenChatIdSet, smartFilterPrivate]);
 
   // Mention candidates
   const mentionCandidates = useMemo(() => {
@@ -982,6 +1068,7 @@ export const NusantaraChat: React.FC = () => {
         replyToPreview: globalReplyTarget?.text?.slice(0, 90),
         mentions: mentions.length ? mentions : undefined,
         expiresAtMs: getExpiryTimestamp(),
+        textEffect: composerEffectByScope.global !== 'none' ? composerEffectByScope.global : undefined,
       });
       if (!res.success) {
         showToast(res.message, 'error');
@@ -989,6 +1076,7 @@ export const NusantaraChat: React.FC = () => {
         setDraftByRoom((prev) => ({ ...prev, global: '' }));
         setGlobalReplyTarget(null);
         setMentionQuery(null);
+        setComposerEffectByScope((prev) => ({ ...prev, global: 'none' }));
         if (!isAdminUser && (globalChatConfig.cooldownMs || 0) > 0) {
           setGlobalCooldownLeft(Math.ceil((globalChatConfig.cooldownMs || 0) / 1000));
         }
@@ -1027,6 +1115,7 @@ export const NusantaraChat: React.FC = () => {
     }
 
     const mentions = Array.from(text.matchAll(/@([A-Za-z0-9_]+)/g)).map((m) => m[1]);
+    const privEffect = composerEffectByScope.private !== 'none' ? composerEffectByScope.private : undefined;
     if (activeTarget.type === 'group' && activeGroup) {
       if (isGroupLockedFlag) {
         showToast('Chat Grup sedang dinonaktifkan sementara oleh Admin.', 'error');
@@ -1042,6 +1131,7 @@ export const NusantaraChat: React.FC = () => {
         replyToPreview: privateReplyTarget?.text?.slice(0, 90),
         mentions: mentions.length ? mentions : undefined,
         expiresAtMs: getExpiryTimestamp(),
+        textEffect: privEffect,
       });
     } else if (activeDmItem) {
       sendChatMessage({
@@ -1053,11 +1143,55 @@ export const NusantaraChat: React.FC = () => {
         replyToSender: privateReplyTarget?.senderName,
         replyToPreview: privateReplyTarget?.text?.slice(0, 90),
         expiresAtMs: getExpiryTimestamp(),
+        textEffect: privEffect,
       });
     }
     setDraftByRoom((prev) => ({ ...prev, [activeRoomKey]: '' }));
     setPrivateReplyTarget(null);
     setMentionQuery(null);
+    setComposerEffectByScope((prev) => ({ ...prev, private: 'none' }));
+  };
+
+  const handleSendStickerOrGif = async (
+    scope: 'global' | 'private',
+    payload: { stickerId?: string; gifId?: string; label: string }
+  ) => {
+    if (!currentAccount) return;
+    setOpenStickerDrawerScope(null);
+    if (scope === 'global') {
+      if (isGlobalLockedFlag) return;
+      const res = await sendGlobalChatMessage({
+        text: payload.label,
+        asAdmin: isAdminUser,
+        stickerId: payload.stickerId,
+        gifId: payload.gifId,
+        expiresAtMs: getExpiryTimestamp(),
+      });
+      if (!res.success) showToast(res.message, 'error');
+      return;
+    }
+    if (!activeTarget || activeDmBlocked) return;
+    if (activeTarget.type === 'group' && activeGroup) {
+      sendChatMessage({
+        groupId: activeGroup.id,
+        recipientAccount: `group:${activeGroup.id}`,
+        recipientName: activeGroup.name,
+        text: payload.label,
+        stickerId: payload.stickerId,
+        gifId: payload.gifId,
+        expiresAtMs: getExpiryTimestamp(),
+      });
+    } else if (activeDmItem) {
+      sendChatMessage({
+        recipientAccountId: activeDmItem.peerAccountId,
+        recipientAccount: activeDmItem.peerAccountNumber,
+        recipientName: activeDmItem.displayName,
+        text: payload.label,
+        stickerId: payload.stickerId,
+        gifId: payload.gifId,
+        expiresAtMs: getExpiryTimestamp(),
+      });
+    }
   };
 
   // KeyDown handler: DEFAULT Enter = New Line, Ctrl+Enter (or Cmd+Enter) = Send / Save Edit
@@ -1845,6 +1979,53 @@ export const NusantaraChat: React.FC = () => {
     );
   };
 
+  const renderSocialMessageAttachments = (
+    msg: Pick<GlobalChatMessage | ChatMessage, 'stickerId' | 'gifId' | 'statusReplyRef'>,
+    isMine: boolean
+  ) => {
+    const sticker = msg.stickerId ? EXPRESSIVE_STICKERS.find((s) => s.id === msg.stickerId) : undefined;
+    const gif = msg.gifId ? MOTION_GIF_PRESETS.find((g) => g.id === msg.gifId) : undefined;
+    return (
+      <>
+        {msg.statusReplyRef && (
+          <div
+            className={`mb-2 px-2.5 py-1.5 rounded-xl border-l-2 text-[11px] ${
+              isMine ? 'bg-black/25 border-emerald-200 text-emerald-50' : 'bg-[#0b0f19]/50 border-cyan-400 text-slate-200'
+            }`}
+          >
+            <p className="font-black text-[10px] uppercase tracking-wide text-cyan-300">
+              Membalas Status {msg.statusReplyRef.authorName}
+            </p>
+            <p className="truncate opacity-85">{msg.statusReplyRef.previewText}</p>
+          </div>
+        )}
+        {sticker && (
+          <div
+            className={`mb-1.5 p-3 rounded-2xl bg-gradient-to-br ${sticker.gradientClass} border ${sticker.borderClass} inline-flex flex-col items-center justify-center min-w-[130px] shadow-md`}
+          >
+            <span className="text-4xl leading-none">{sticker.emoji}</span>
+            <span className="mt-1.5 text-[11px] font-black text-white">{sticker.caption}</span>
+          </div>
+        )}
+        {gif && (
+          <div
+            className={`mb-1.5 p-3 rounded-2xl bg-gradient-to-br ${gif.bgClass} border border-white/20 inline-flex items-center gap-3 min-w-[170px] shadow-lg`}
+          >
+            <span className={`text-3xl leading-none ${gif.animClass}`}>{gif.primaryEmoji}</span>
+            <div className="min-w-0">
+              <span className="inline-block px-1.5 py-0.5 rounded bg-black/40 text-[9px] font-black uppercase text-amber-300">
+                {gif.badge}
+              </span>
+              <p className="text-xs font-black text-white mt-0.5">
+                {gif.label} {gif.secondaryEmoji}
+              </p>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  };
+
   const handleAddContactSubmit = (input: {
     customName?: string;
     userId?: string;
@@ -2373,6 +2554,29 @@ export const NusantaraChat: React.FC = () => {
               <span className="hidden sm:inline">{enterKeySends ? 'Enter: Kirim' : 'Enter: Baris Baru'}</span>
             </button>
 
+            {/* Mood/Musik & Mode Diam Terjadwal */}
+            <button
+              type="button"
+              onClick={() => {
+                setMoodEmojiDraft(mySocialPrefs?.moodEmoji || '🎧');
+                setMoodLabelDraft(mySocialPrefs?.moodLabel || '');
+                setMoodMusicDraft(mySocialPrefs?.musicTitle || '');
+                setDndScheduledEnabledDraft(Boolean(mySocialPrefs?.dndEnabled));
+                setDndStartHourDraft(mySocialPrefs?.dndStartHour ?? 22);
+                setDndEndHourDraft(mySocialPrefs?.dndEndHour ?? 7);
+                setShowMoodDndModal(true);
+              }}
+              className="px-2.5 py-2 rounded-xl text-[11px] font-bold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-cyan-300 inline-flex items-center gap-1.5 transition-colors"
+              title="Atur Status Mood/Musik & Mode Diam Terjadwal"
+            >
+              <Music className="w-3.5 h-3.5" />
+              <span className="hidden md:inline max-w-[130px] truncate">
+                {mySocialPrefs?.moodLabel
+                  ? `${mySocialPrefs.moodEmoji || '🎧'} ${mySocialPrefs.moodLabel}`
+                  : 'Mood & Jadwal DND'}
+              </span>
+            </button>
+
             {/* Do Not Disturb Toggle */}
             <button
               type="button"
@@ -2381,14 +2585,14 @@ export const NusantaraChat: React.FC = () => {
                 showToast(r.message, 'info');
               }}
               className={`px-2.5 py-2 rounded-xl text-[11px] font-bold border inline-flex items-center gap-1.5 transition-colors ${
-                currentAccount.chatDndEnabled
+                isDndActiveForAccount()
                   ? 'bg-amber-950/60 border-amber-500/60 text-amber-300'
                   : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300'
               }`}
               title="Mode Jangan Ganggu (Mute suara/pop-up notifikasi chat)"
             >
-              {currentAccount.chatDndEnabled ? <BellOff className="w-3.5 h-3.5" /> : <Bell className="w-3.5 h-3.5" />}
-              <span className="hidden sm:inline">{currentAccount.chatDndEnabled ? 'DND Aktif' : 'Notif On'}</span>
+              {isDndActiveForAccount() ? <BellOff className="w-3.5 h-3.5" /> : <Bell className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{isDndActiveForAccount() ? 'DND Aktif' : 'Notif On'}</span>
             </button>
 
             {/* Subtle Segarkan Chat Button */}
@@ -2416,19 +2620,19 @@ export const NusantaraChat: React.FC = () => {
           </div>
         </div>
 
-        {/* Main 2-Tab Switcher */}
-        <div className="mt-3 grid grid-cols-2 gap-2 p-1 rounded-2xl bg-[#111726]">
+        {/* Main 3-Tab Switcher: Chat Global | Chat Privat | Status */}
+        <div className="mt-3 grid grid-cols-3 gap-2 p-1 rounded-2xl bg-[#111726]">
           <button
             type="button"
             onClick={() => setMainTab('global')}
-            className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 transition-all ${
+            className={`py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 sm:gap-2 transition-all ${
               mainTab === 'global'
                 ? 'bg-[#0b0f19] text-emerald-400 shadow-sm'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
             <Globe className="w-4 h-4 shrink-0" />
-            <span>Chat Global</span>
+            <span className="truncate">Chat Global</span>
             {isGlobalLockedFlag && <Lock className="w-3 h-3 text-rose-400 shrink-0" />}
             {globalChatUnreadCount > 0 && (
               <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-600 text-white">
@@ -2439,18 +2643,36 @@ export const NusantaraChat: React.FC = () => {
           <button
             type="button"
             onClick={() => setMainTab('private')}
-            className={`py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 transition-all ${
+            className={`py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 sm:gap-2 transition-all ${
               mainTab === 'private'
                 ? 'bg-[#0b0f19] text-indigo-400 shadow-sm'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
             <Lock className="w-4 h-4 shrink-0" />
-            <span>Chat Privat</span>
+            <span className="truncate">Chat Privat</span>
             {isPrivateLockedFlag && <Lock className="w-3 h-3 text-rose-400 shrink-0" />}
             {privateChatUnreadCount > 0 && (
               <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-rose-600 text-white">
                 {privateChatUnreadCount > 99 ? '99+' : privateChatUnreadCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setMainTab('status')}
+            className={`py-2.5 px-2 sm:px-3 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 sm:gap-2 transition-all ${
+              mainTab === 'status'
+                ? 'bg-[#0b0f19] text-cyan-400 shadow-sm'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Radio className="w-4 h-4 shrink-0" />
+            <span className="truncate">Status</span>
+            {isStatusLockedFlag && <Lock className="w-3 h-3 text-rose-400 shrink-0" />}
+            {activeStatusCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-cyan-600 text-white">
+                {activeStatusCount > 99 ? '99+' : activeStatusCount}
               </span>
             )}
           </button>
@@ -2695,6 +2917,34 @@ export const NusantaraChat: React.FC = () => {
               </div>
             )}
 
+            {/* Smart Chat Filter Bar */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 shrink-0 mr-1">
+                <Filter className="w-3 h-3" /> Filter:
+              </span>
+              {(
+                [
+                  { id: 'all', label: 'Semua' },
+                  { id: 'media', label: 'Media & Stiker' },
+                  { id: 'links', label: 'Tautan' },
+                  { id: 'transactions', label: 'Transaksi' },
+                ] as const
+              ).map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setSmartFilterGlobal(f.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors ${
+                    smartFilterGlobal === f.id
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
             {/* Collapsible Search Bar */}
             {globalSearchOpen && (
               <div className="relative">
@@ -2891,6 +3141,23 @@ export const NusantaraChat: React.FC = () => {
                               </span>
                             )}
                             {renderCustomCustomerBadge(msg.senderCustomBadge ?? senderAccountObj?.chatCustomBadge)}
+                            {(() => {
+                              const rank = computeChatReputationRank({
+                                isAdmin: isMsgAdmin,
+                                loyaltyPoints: senderAccountObj ? loyaltyMap[senderAccountObj.id]?.points || 0 : 0,
+                                txCount: senderAccountObj ? transactions.filter((t) => t.accountId === senderAccountObj.id).length : 0,
+                              });
+                              return (
+                                <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${rank.badgeClass}`}>
+                                  {msg.senderReputationLabel || rank.title}
+                                </span>
+                              );
+                            })()}
+                            {(msg.senderMoodText || (senderAccountObj && socialChatPreferencesMap[senderAccountObj.id]?.moodLabel)) && (
+                              <span className="text-[9px] text-cyan-300/90 font-semibold truncate max-w-[140px]">
+                                • {msg.senderMoodText || `${socialChatPreferencesMap[senderAccountObj!.id]?.moodEmoji || '🎧'} ${socialChatPreferencesMap[senderAccountObj!.id]?.moodLabel}`}
+                              </span>
+                            )}
                             {msg.isAdminHighlight && isMsgAdmin && (
                               <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-amber-300">
                                 <Flame className="w-3 h-3" /> Sorotan
@@ -2945,9 +3212,15 @@ export const NusantaraChat: React.FC = () => {
 
                         {/* Photo / Multi-Media / Video + Custom Voice Player */}
                         {renderMessageMediaAttachmentBlock(msg, isStrictOwner)}
+                        {renderSocialMessageAttachments(msg, isStrictOwner)}
 
                         {/* Collapsible Formatted Body Text */}
-                        {msg.text && <CollapsibleChatBody text={msg.text} />}
+                        {msg.text && !(msg.stickerId || msg.gifId) && (
+                          <CollapsibleChatBody
+                            text={msg.text}
+                            effectClass={CHAT_TEXT_EFFECT_PRESETS.find((e) => e.id === msg.textEffect)?.bubbleTextClass}
+                          />
+                        )}
 
                         {/* Amplop Kaget Card */}
                         {msg.redPacket && renderRedPacketCard(msg.redPacket, 'global', msg.id)}
@@ -3474,6 +3747,89 @@ export const NusantaraChat: React.FC = () => {
               </div>
             )}
 
+            {/* Drawer Stiker / GIF / Efek Teks Chat Global */}
+            {openStickerDrawerScope === 'global' && (
+              <div className="mb-2 p-3 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1">
+                    {(
+                      [
+                        { id: 'stickers', label: 'Stiker' },
+                        { id: 'gifs', label: 'GIF Gerak' },
+                        { id: 'effects', label: 'Efek Teks' },
+                      ] as const
+                    ).map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setStickerDrawerTab(t.id)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+                          stickerDrawerTab === t.id ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOpenStickerDrawerScope(null)}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                {stickerDrawerTab === 'stickers' && (
+                  <div className="grid grid-cols-5 gap-1.5 max-h-40 overflow-y-auto">
+                    {EXPRESSIVE_STICKERS.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => void handleSendStickerOrGif('global', { stickerId: s.id, label: `[Stiker] ${s.caption}` })}
+                        className={`p-2 rounded-xl bg-gradient-to-br ${s.gradientClass} border ${s.borderClass} hover:scale-105 transition text-center`}
+                      >
+                        <span className="text-xl block">{s.emoji}</span>
+                        <span className="text-[9px] font-bold text-white truncate block mt-0.5">{s.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {stickerDrawerTab === 'gifs' && (
+                  <div className="grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto">
+                    {MOTION_GIF_PRESETS.map((g) => (
+                      <button
+                        key={g.id}
+                        type="button"
+                        onClick={() => void handleSendStickerOrGif('global', { gifId: g.id, label: `[GIF] ${g.label}` })}
+                        className={`p-2 rounded-xl bg-gradient-to-br ${g.bgClass} border border-white/15 hover:scale-105 transition text-left flex items-center gap-2`}
+                      >
+                        <span className={`text-xl ${g.animClass}`}>{g.primaryEmoji}</span>
+                        <span className="text-[10px] font-bold text-white truncate">{g.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {stickerDrawerTab === 'effects' && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {CHAT_TEXT_EFFECT_PRESETS.map((ef) => (
+                      <button
+                        key={ef.id}
+                        type="button"
+                        onClick={() =>
+                          setComposerEffectByScope((prev) => ({ ...prev, global: ef.id }))
+                        }
+                        className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold ${ef.previewClass} ${
+                          composerEffectByScope.global === ef.id ? 'ring-2 ring-emerald-400' : ''
+                        }`}
+                      >
+                        {ef.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <form onSubmit={handleSendGlobal} className="flex items-end gap-2 min-w-0">
               <button
                 type="button"
@@ -3490,6 +3846,32 @@ export const NusantaraChat: React.FC = () => {
                 title="Lampiran (Foto/Video, Audio HP, Amplop Kaget, Timer)"
               >
                 <Plus className={`w-5 h-5 transition-transform ${openComposerPlusScope === 'global' ? 'rotate-45' : ''}`} />
+              </button>
+              <button
+                type="button"
+                disabled={!isAdminUser && globalChatConfig.adminOnlyLock}
+                onClick={() => setOpenStickerDrawerScope((prev) => (prev === 'global' ? null : 'global'))}
+                className={`shrink-0 w-10 h-10 rounded-2xl flex items-center justify-center transition-colors disabled:opacity-40 ${
+                  openStickerDrawerScope === 'global' || composerEffectByScope.global !== 'none'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                }`}
+                title="Stiker, GIF & Efek Teks Berwarna"
+              >
+                <Smile className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                disabled={!isAdminUser && globalChatConfig.adminOnlyLock}
+                onClick={() => {
+                  setSchedMsgText(activeDraftText);
+                  setSchedDateTime('');
+                  setScheduleModalScope('global');
+                }}
+                className="shrink-0 w-10 h-10 rounded-2xl bg-slate-800 hover:bg-slate-700 text-cyan-300 flex items-center justify-center transition-colors disabled:opacity-40"
+                title="Jadwalkan Pesan Otomatis"
+              >
+                <CalendarPlus className="w-4 h-4" />
               </button>
               <button
                 type="button"
@@ -4482,6 +4864,34 @@ export const NusantaraChat: React.FC = () => {
                       </div>
                     )}
 
+                  {/* Smart Chat Filter Bar */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 shrink-0 mr-1">
+                      <Filter className="w-3 h-3" /> Filter:
+                    </span>
+                    {(
+                      [
+                        { id: 'all', label: 'Semua' },
+                        { id: 'media', label: 'Media & Stiker' },
+                        { id: 'links', label: 'Tautan' },
+                        { id: 'transactions', label: 'Transaksi' },
+                      ] as const
+                    ).map((f) => (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => setSmartFilterPrivate(f.id)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 transition-colors ${
+                          smartFilterPrivate === f.id
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+                        }`}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+
                   {/* In-room Search Bar */}
                   {privateRoomSearchOpen && (
                     <div className="relative">
@@ -4685,6 +5095,18 @@ export const NusantaraChat: React.FC = () => {
                                     </span>
                                   )}
                                   {renderCustomCustomerBadge(msg.senderCustomBadge ?? senderAccountObj?.chatCustomBadge)}
+                                  {(() => {
+                                    const rank = computeChatReputationRank({
+                                      isAdmin: isMsgAdmin,
+                                      loyaltyPoints: senderAccountObj ? loyaltyMap[senderAccountObj.id]?.points || 0 : 0,
+                                      txCount: senderAccountObj ? transactions.filter((t) => t.accountId === senderAccountObj.id).length : 0,
+                                    });
+                                    return (
+                                      <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${rank.badgeClass}`}>
+                                        {msg.senderReputationLabel || rank.title}
+                                      </span>
+                                    );
+                                  })()}
                                   {msg.expiresAtMs && (
                                     <span className="inline-flex items-center gap-0.5 text-[9px] font-bold opacity-80">
                                       <Clock className="w-2.5 h-2.5" /> Sementara
@@ -4908,8 +5330,14 @@ export const NusantaraChat: React.FC = () => {
 
                               {/* Photo / Video (Multi or Single) + Custom Interactive Voice Player */}
                               {renderMessageMediaAttachmentBlock(msg, isStrictOwner)}
+                              {renderSocialMessageAttachments(msg, isStrictOwner)}
 
-                              {msg.text && <CollapsibleChatBody text={msg.text} />}
+                              {msg.text && !(msg.stickerId || msg.gifId) && (
+                                <CollapsibleChatBody
+                                  text={msg.text}
+                                  effectClass={CHAT_TEXT_EFFECT_PRESETS.find((e) => e.id === msg.textEffect)?.bubbleTextClass}
+                                />
+                              )}
 
                               {/* Amplop Kaget Card */}
                               {msg.redPacket && renderRedPacketCard(msg.redPacket, 'private', msg.id)}
@@ -5552,6 +5980,89 @@ export const NusantaraChat: React.FC = () => {
                         </div>
                       )}
 
+                      {/* Drawer Stiker / GIF / Efek Teks Chat Privat */}
+                      {openStickerDrawerScope === 'private' && (
+                        <div className="mb-2 p-3 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl space-y-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1">
+                              {(
+                                [
+                                  { id: 'stickers', label: 'Stiker' },
+                                  { id: 'gifs', label: 'GIF Gerak' },
+                                  { id: 'effects', label: 'Efek Teks' },
+                                ] as const
+                              ).map((t) => (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  onClick={() => setStickerDrawerTab(t.id)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+                                    stickerDrawerTab === t.id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300'
+                                  }`}
+                                >
+                                  {t.label}
+                                </button>
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setOpenStickerDrawerScope(null)}
+                              className="text-slate-400 hover:text-white"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          {stickerDrawerTab === 'stickers' && (
+                            <div className="grid grid-cols-5 gap-1.5 max-h-40 overflow-y-auto">
+                              {EXPRESSIVE_STICKERS.map((s) => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  onClick={() => void handleSendStickerOrGif('private', { stickerId: s.id, label: `[Stiker] ${s.caption}` })}
+                                  className={`p-2 rounded-xl bg-gradient-to-br ${s.gradientClass} border ${s.borderClass} hover:scale-105 transition text-center`}
+                                >
+                                  <span className="text-xl block">{s.emoji}</span>
+                                  <span className="text-[9px] font-bold text-white truncate block mt-0.5">{s.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {stickerDrawerTab === 'gifs' && (
+                            <div className="grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto">
+                              {MOTION_GIF_PRESETS.map((g) => (
+                                <button
+                                  key={g.id}
+                                  type="button"
+                                  onClick={() => void handleSendStickerOrGif('private', { gifId: g.id, label: `[GIF] ${g.label}` })}
+                                  className={`p-2 rounded-xl bg-gradient-to-br ${g.bgClass} border border-white/15 hover:scale-105 transition text-left flex items-center gap-2`}
+                                >
+                                  <span className={`text-xl ${g.animClass}`}>{g.primaryEmoji}</span>
+                                  <span className="text-[10px] font-bold text-white truncate">{g.label}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {stickerDrawerTab === 'effects' && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {CHAT_TEXT_EFFECT_PRESETS.map((ef) => (
+                                <button
+                                  key={ef.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setComposerEffectByScope((prev) => ({ ...prev, private: ef.id }))
+                                  }
+                                  className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold ${ef.previewClass} ${
+                                    composerEffectByScope.private === ef.id ? 'ring-2 ring-indigo-400' : ''
+                                  }`}
+                                >
+                                  {ef.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <form onSubmit={handleSendPrivate} className="flex items-end gap-2 min-w-0">
                         <button
                           type="button"
@@ -5567,6 +6078,30 @@ export const NusantaraChat: React.FC = () => {
                           title="Lampiran (Foto/Video, Audio HP, Kirim Aset, Kartu Kontak, Timer)"
                         >
                           <Plus className={`w-5 h-5 transition-transform ${openComposerPlusScope === 'private' ? 'rotate-45' : ''}`} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setOpenStickerDrawerScope((prev) => (prev === 'private' ? null : 'private'))}
+                          className={`shrink-0 w-10 h-10 rounded-2xl flex items-center justify-center transition-colors ${
+                            openStickerDrawerScope === 'private' || composerEffectByScope.private !== 'none'
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                          }`}
+                          title="Stiker, GIF & Efek Teks Berwarna"
+                        >
+                          <Smile className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSchedMsgText(activeDraftText);
+                            setSchedDateTime('');
+                            setScheduleModalScope('private');
+                          }}
+                          className="shrink-0 w-10 h-10 rounded-2xl bg-slate-800 hover:bg-slate-700 text-cyan-300 flex items-center justify-center transition-colors"
+                          title="Jadwalkan Pesan Otomatis"
+                        >
+                          <CalendarPlus className="w-4 h-4" />
                         </button>
                         <button
                           type="button"
@@ -5639,6 +6174,33 @@ export const NusantaraChat: React.FC = () => {
             )}
           </div>
         </div>
+        )
+      )}
+
+      {/* ==================== TAB 3: STATUS 24 JAM (ALA WHATSAPP) ==================== */}
+      {mainTab === 'status' && (
+        isStatusLockedFlag ? (
+          <div className="rounded-3xl bg-[#0b0f19] border border-rose-500/40 p-8 text-center space-y-3 shadow-sm">
+            <div className="w-14 h-14 rounded-2xl bg-rose-950/60 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto">
+              <Lock className="w-7 h-7" />
+            </div>
+            <h3 className="text-lg font-black text-white">Tab Status 24 Jam Dinonaktifkan Sementara oleh Admin</h3>
+            <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+              Admin sedang menonaktifkan tab Status sementara waktu. Anda tetap dapat menggunakan Chat Global &amp; Chat Privat.
+            </p>
+          </div>
+        ) : (
+          <ChatStatusTab
+            onOpenPrivateDmWithAccount={(targetAccountId) => {
+              const targetAcc = accounts.find((a) => a.id === targetAccountId);
+              setMainTab('private');
+              setActiveTarget({
+                type: 'dm',
+                id: targetAccountId,
+                accountNumber: targetAcc?.accountNumber,
+              });
+            }}
+          />
         )
       )}
 
@@ -6151,6 +6713,224 @@ export const NusantaraChat: React.FC = () => {
                   : 'Masukkan PIN kartu 6 digit Anda'
         }
       />
+      {/* Modal Pesan Terjadwal & Pengingat Otomatis */}
+      {scheduleModalScope && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-700 p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="font-black text-white text-sm flex items-center gap-2">
+                <CalendarPlus className="w-4 h-4 text-cyan-400" />
+                <span>Pesan Terjadwal ({scheduleModalScope === 'global' ? 'Chat Global' : 'Ruang Privat'})</span>
+              </h4>
+              <button
+                type="button"
+                onClick={() => setScheduleModalScope(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Isi Pesan / Pengingat</label>
+                <textarea
+                  rows={3}
+                  value={schedMsgText}
+                  onChange={(e) => setSchedMsgText(e.target.value)}
+                  placeholder="Tulis pesan atau pengingat yang akan terkirim otomatis..."
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white"
+                />
+              </div>
+              <div>
+                <label className="text-slate-300 font-bold block mb-1">Waktu Kirim Otomatis</label>
+                <input
+                  type="datetime-local"
+                  value={schedDateTime}
+                  onChange={(e) => setSchedDateTime(e.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={!schedMsgText.trim() || !schedDateTime}
+                onClick={() => {
+                  const ts = Date.parse(schedDateTime);
+                  const roomType =
+                    scheduleModalScope === 'global'
+                      ? 'global'
+                      : activeTarget?.type === 'group'
+                        ? 'group'
+                        : 'dm';
+                  const targetId = scheduleModalScope === 'global' ? undefined : activeTarget?.id;
+                  const targetLabel =
+                    scheduleModalScope === 'global'
+                      ? 'Chat Global'
+                      : activeGroup?.name || activeDmItem?.displayName || 'Chat Privat';
+                  const r = scheduleChatMessage({
+                    roomType,
+                    targetId,
+                    targetLabel,
+                    text: schedMsgText.trim(),
+                    textEffect: composerEffectByScope[scheduleModalScope] !== 'none' ? composerEffectByScope[scheduleModalScope] : undefined,
+                    scheduledAtMs: ts,
+                  });
+                  showToast(r.message, r.success ? 'success' : 'error');
+                  if (r.success) setScheduleModalScope(null);
+                }}
+                className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-45 text-slate-950 font-black"
+              >
+                Simpan Jadwal Pengiriman
+              </button>
+              {myScheduledMessages.length > 0 && (
+                <div className="pt-2 border-t border-slate-800 space-y-1.5 max-h-36 overflow-y-auto">
+                  <p className="text-[10px] font-bold uppercase text-slate-400">
+                    Antrean Pesan Terjadwal ({myScheduledMessages.length})
+                  </p>
+                  {myScheduledMessages.map((sm) => (
+                    <div key={sm.id} className="flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-950 border border-slate-800">
+                      <div className="min-w-0">
+                        <p className="font-bold text-white truncate">{sm.text}</p>
+                        <p className="text-[10px] text-slate-400">
+                          {sm.targetLabel} • {new Date(sm.scheduledAtMs).toLocaleString('id-ID')}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => cancelScheduledChatMessage(sm.id)}
+                        className="text-rose-400 hover:text-rose-300 shrink-0"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Mood/Musik Profil & Mode Diam Terjadwal */}
+      {showMoodDndModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-700 p-5 space-y-4 shadow-2xl text-xs">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="font-black text-white text-sm flex items-center gap-2">
+                <Music className="w-4 h-4 text-cyan-400" />
+                <span>Mood / Musik Profil &amp; Mode Diam Terjadwal</span>
+              </h4>
+              <button type="button" onClick={() => setShowMoodDndModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <p className="text-[11px] font-bold text-slate-300 mb-1.5">Preset Cepat Mood &amp; Musik</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {MOOD_MUSIC_PRESETS.map((p) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => {
+                        setMoodEmojiDraft(p.emoji);
+                        setMoodLabelDraft(p.label);
+                        setMoodMusicDraft(p.music);
+                      }}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold"
+                    >
+                      {p.emoji} {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <label className="text-slate-400 block mb-1">Emoji</label>
+                  <input
+                    type="text"
+                    value={moodEmojiDraft}
+                    onChange={(e) => setMoodEmojiDraft(e.target.value)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2 text-center text-base"
+                  />
+                </div>
+                <div className="col-span-3">
+                  <label className="text-slate-400 block mb-1">Status Mood</label>
+                  <input
+                    type="text"
+                    value={moodLabelDraft}
+                    onChange={(e) => setMoodLabelDraft(e.target.value)}
+                    placeholder="Contoh: Fokus Produktif"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2 text-white"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-slate-400 block mb-1">Sedang Mendengarkan (Opsional)</label>
+                <input
+                  type="text"
+                  value={moodMusicDraft}
+                  onChange={(e) => setMoodMusicDraft(e.target.value)}
+                  placeholder="Contoh: Lo-Fi Chill Nusantara"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2 text-white"
+                />
+              </div>
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                <label className="flex items-center justify-between gap-2 font-bold text-slate-200 cursor-pointer">
+                  <span>Aktifkan Mode Diam (DND) Terjadwal</span>
+                  <input
+                    type="checkbox"
+                    checked={dndScheduledEnabledDraft}
+                    onChange={(e) => setDndScheduledEnabledDraft(e.target.checked)}
+                    className="h-4 w-4 accent-amber-400"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-400 block">Mulai Jam (0–23)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={dndStartHourDraft}
+                      onChange={(e) => setDndStartHourDraft(Math.max(0, Math.min(23, Number(e.target.value) || 0)))}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 p-1.5 text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block">Selesai Jam (0–23)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={dndEndHourDraft}
+                      onChange={(e) => setDndEndHourDraft(Math.max(0, Math.min(23, Number(e.target.value) || 0)))}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 p-1.5 text-white font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  updateSocialChatPreferences({
+                    moodEmoji: moodEmojiDraft.trim() || '🎧',
+                    moodLabel: moodLabelDraft.trim() || undefined,
+                    musicTitle: moodMusicDraft.trim() || undefined,
+                    dndEnabled: dndScheduledEnabledDraft,
+                    dndStartHour: dndStartHourDraft,
+                    dndEndHour: dndEndHourDraft,
+                  });
+                  setShowMoodDndModal(false);
+                  showToast('Mood/Musik & Jadwal DND tersimpan!', 'success');
+                }}
+                className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black"
+              >
+                Simpan Pengaturan Profil Sosial
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
