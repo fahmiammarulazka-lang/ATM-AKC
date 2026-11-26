@@ -3829,19 +3829,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const sanitizeChatPayloadForCloud = (val: unknown): unknown => {
     if (!val || typeof val !== 'object') return val;
     const obj = { ...(val as Record<string, unknown>) };
-    const stripLargeDataUrl = (att: unknown) => {
+    const stripLargeDataUrl = (att: unknown, maxInlineLen = 120_000) => {
       if (!att || typeof att !== 'object') return att;
       const copy = { ...(att as Record<string, unknown>) };
-      if (typeof copy.url === 'string' && copy.url && typeof copy.dataUrl === 'string' && copy.dataUrl.length > 120_000) {
+      if (typeof copy.url === 'string' && copy.url && typeof copy.dataUrl === 'string' && copy.dataUrl.length > maxInlineLen) {
         delete copy.dataUrl;
       }
       return copy;
     };
     if (obj.imageAttachment) obj.imageAttachment = stripLargeDataUrl(obj.imageAttachment);
     if (obj.videoAttachment) obj.videoAttachment = stripLargeDataUrl(obj.videoAttachment);
-    if (obj.voiceAttachment) obj.voiceAttachment = stripLargeDataUrl(obj.voiceAttachment);
+    if (obj.voiceAttachment) obj.voiceAttachment = stripLargeDataUrl(obj.voiceAttachment, 180_000);
     if (Array.isArray(obj.mediaAttachments)) {
-      obj.mediaAttachments = obj.mediaAttachments.map(stripLargeDataUrl);
+      obj.mediaAttachments = obj.mediaAttachments.map((item) => stripLargeDataUrl(item));
     }
     return obj;
   };

@@ -3081,6 +3081,35 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v15-42-50',
+    version: 'v15.42.50',
+    releaseType: 'patch',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v15.42.50 (Format D): Perbaikan Total Suara Voice Note & Audio Lintas Perangkat (Hybrid Player Boost 200%, WAV Universal, Meteran Mic & Cloud Backup)',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 23:59 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 23:59 WIB',
+    description:
+      'Pembaruan v15.42.50 menuntaskan masalah Voice Note dan file audio yang sebelumnya memajukan detik tanpa mengeluarkan suara di pratinjau maupun ruang Chat Global, 1-on-1, dan Grup. Kini perekaman mikrofon dikonversi ke format PCM WAV universal ternormalisasi dengan meteran suara mikrofon aktif real-time, diputar melalui mesin ganda Web Audio + HTML5 Audio lengkap dengan penguat volume hingga 200%, tombol Muat Ulang Audio, serta cadangan audio permanen di Cloud agar tidak pernah hilang setelah refresh.',
+    highlights: [
+      'Mesin Pemutar Audio Ganda + Penguat Volume 200%: Pemutar Voice Note dan Audio HP kini memakai Web Audio Engine (Dynamics Compressor + Auto-Normalisasi + Boost 0%–200%) dengan fallback otomatis elemen audio standar agar suara selalu jernih dan keras di iFrame, Android, iPhone/Safari, maupun PC.',
+      'Konversi Rekaman WAV Universal + Meteran Mikrofon Aktif: Rekaman mikrofon kini menampilkan bar level suara aktif real-time (dengan peringatan dini bila mic hening) dan otomatis dikonversi ke format WAV mono ternormalisasi agar terbaca lancar di semua perangkat.',
+      'Cadangan Audio Permanen 3 Lapis + Tombol Muat Ulang Audio: Voice Note dan file audio kini dicadangkan aman ke Cloud (mematuhi batas ukuran dokumen) selain server media dan data pesan langsung, plus pesan error informatif dan tombol Muat Ulang Audio bila jaringan terputus.',
+      'Sinkronisasi Menyeluruh Chat Global, 1-on-1 & Grup: Seluruh peningkatan pemutaran, perekaman, dan ketahanan audio aktif seragam di pratinjau maupun gelembung pesan semua ruang chat.',
+    ],
+    changes: [
+      'Mesin Pemutar Audio Ganda + Penguat Volume 200%: Pemutar Voice Note dan Audio HP kini memakai Web Audio Engine (Dynamics Compressor + Auto-Normalisasi + Boost 0%–200%) dengan fallback otomatis elemen audio standar agar suara selalu jernih dan keras di iFrame, Android, iPhone/Safari, maupun PC.',
+      'Konversi Rekaman WAV Universal + Meteran Mikrofon Aktif: Rekaman mikrofon kini menampilkan bar level suara aktif real-time (dengan peringatan dini bila mic hening) dan otomatis dikonversi ke format WAV mono ternormalisasi agar terbaca lancar di semua perangkat.',
+      'Cadangan Audio Permanen 3 Lapis + Tombol Muat Ulang Audio: Voice Note dan file audio kini dicadangkan aman ke Cloud (mematuhi batas ukuran dokumen) selain server media dan data pesan langsung, plus pesan error informatif dan tombol Muat Ulang Audio bila jaringan terputus.',
+      'Sinkronisasi Menyeluruh Chat Global, 1-on-1 & Grup: Seluruh peningkatan pemutaran, perekaman, dan ketahanan audio aktif seragam di pratinjau maupun gelembung pesan semua ruang chat.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-26T01:45:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v15-42-49',
     version: 'v15.42.49',
     releaseType: 'minor',
@@ -3103,8 +3132,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Menu Titik Tiga Rapi di Chat 1-on-1, Grup & Global: Header chat 1-on-1 kini super bersih (hanya status ringkas, Cari, Kirim Uang, & menu titik tiga bersekat ikon), tombol lampiran (+) rapi di samping kotak ketik, menu titik tiga pada daftar kontak kiri, serta penanda kunci Nonaktif Admin.',
       'Kendali Media Panel Admin: Penambahan saklar khusus Nonaktifkan Kirim Video Chat dan pengaturan Batas Durasi Maksimal Voice Note (hingga 600 detik) langsung di Panel Admin.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-26T00:15:00.000Z',
     isAutoDetected: true,

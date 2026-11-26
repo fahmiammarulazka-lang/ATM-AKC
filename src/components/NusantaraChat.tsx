@@ -1,8 +1,8 @@
 /**
- * Bank Nusantara — Chat Global & Priv (v15.42.49)
- * - Pratinjau Foto & Video + Keterangan sebelum terkirim + kompresi video otomatis
- * - Voice Note & File Audio Memori HP hingga 600 detik + Pemutar kustom (Waveform scrub, 1x/1.5x/2x, Volume)
- * - Header & Composer 1-on-1, Grup, dan Global rapi dengan Menu Titik Tiga (⋮) & Lampiran (+)
+ * Bank Nusantara — Chat Global & Priv (v15.42.50)
+ * - Perbaikan Total Suara Voice Note & Audio HP: Konversi WAV Universal + Normalisasi + Hybrid Web Audio Player (Boost 200%)
+ * - Meteran Mikrofon Aktif Real-Time saat Merekam + Cadangan Audio Cloud Permanen
+ * - Pratinjau Foto & Video + Keterangan sebelum terkirim + Menu Titik Tiga Rapi 1-on-1, Grup & Global
  */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
@@ -120,10 +120,12 @@ import {
 import {
   compressChatImageFileToBlob,
   compressVideoIfOversized,
+  encodePcmFloatToWavBlob,
   extractAudioDurationAndPeaks,
   formatMediaDuration,
   inspectVideoFileMetadata,
   isIncomingDmBlockedForViewer,
+  tryConvertAudioBlobToUniversalWav,
   uploadChatMediaToServer,
   type StagedChatMediaDraft,
   type StagedChatVoiceDraft,
@@ -297,8 +299,11 @@ export const NusantaraChat: React.FC = () => {
   // Voice Note recording
   const [recordingScope, setRecordingScope] = useState<'global' | 'private' | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [recordingMicLevel, setRecordingMicLevel] = useState(0);
+  const [recordingMicSilentWarning, setRecordingMicSilentWarning] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
+  const stopVoiceCaptureRef = useRef<(() => void) | null>(null);
 
   // Unified 3-dot Header Menu, Composer `+` Menu & Sidebar Row 3-dot Menu
   const [openHeaderMenuScope, setOpenHeaderMenuScope] = useState<'global' | 'private' | null>(null);
@@ -535,7 +540,9 @@ export const NusantaraChat: React.FC = () => {
     const timer = window.setInterval(() => {
       setRecordingSeconds((prev) => {
         if (prev >= maxVoiceDurationSec - 1) {
-          if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+          if (stopVoiceCaptureRef.current) {
+            stopVoiceCaptureRef.current();
+          } else if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
           }
           return maxVoiceDurationSec;
@@ -1344,70 +1351,269 @@ export const NusantaraChat: React.FC = () => {
     }
   };
 
-  // Voice Note start/stop (up to Admin maxVoiceDurationSec, default 600s) -> stages in VoiceStagingModal
+  // Voice Note start/stop (Universal normalized WAV + live Mic VU Meter + fallback MediaRecorder) -> stages in VoiceStagingModal
   const handleToggleVoiceRecord = async (scope: 'global' | 'private') => {
     if (isVoiceLockedFlag) {
       showToast('Pesan suara (Voice Note) sedang dinonaktifkan Admin.', 'error');
       return;
     }
     if (recordingScope) {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      if (stopVoiceCaptureRef.current) {
+        stopVoiceCaptureRef.current();
+      } else if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
       }
       setRecordingScope(null);
       return;
     }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      showToast('Browser perangkat ini belum mendukung rekam Voice Note.', 'error');
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast('Browser perangkat ini belum mendukung akses mikrofon.', 'error');
       return;
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferredAudioMime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-          ? 'audio/webm'
-          : '';
-      const recorder = new MediaRecorder(
-        stream,
-        preferredAudioMime ? { mimeType: preferredAudioMime, audioBitsPerSecond: 48_000 } : { audioBitsPerSecond: 48_000 }
-      );
-      recordingChunksRef.current = [];
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+
+      const pcmChunks: Float32Array[] = [];
+      let captureSampleRate = 48000;
+      let peakRmsGlobal = 0;
+      let audioCtx: AudioContext | null = null;
+      let sourceNode: MediaStreamAudioSourceNode | null = null;
+      let analyser: AnalyserNode | null = null;
+      let processor: ScriptProcessorNode | null = null;
+      let zeroGain: GainNode | null = null;
+      let meterTimer = 0;
+
       const startedAt = Date.now();
-      recorder.ondataavailable = (ev) => {
-        if (ev.data.size > 0) recordingChunksRef.current.push(ev.data);
-      };
-      recorder.onstop = async () => {
+      setRecordingMicLevel(0);
+      setRecordingMicSilentWarning(false);
+
+      if (AudioCtx) {
+        try {
+          audioCtx = new AudioCtx();
+          if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+          }
+          captureSampleRate = audioCtx.sampleRate || 48000;
+          sourceNode = audioCtx.createMediaStreamSource(stream);
+          analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+
+          processor = audioCtx.createScriptProcessor(4096, 1, 1);
+          zeroGain = audioCtx.createGain();
+          zeroGain.gain.value = 0;
+
+          processor.onaudioprocess = (ev) => {
+            const inputData = ev.inputBuffer.getChannelData(0);
+            if (!inputData || inputData.length === 0) return;
+            const copy = new Float32Array(inputData.length);
+            copy.set(inputData);
+            pcmChunks.push(copy);
+
+            let sumSq = 0;
+            for (let i = 0; i < copy.length; i += 4) {
+              sumSq += copy[i] * copy[i];
+            }
+            const rms = Math.sqrt(sumSq / Math.max(1, Math.ceil(copy.length / 4)));
+            if (rms > peakRmsGlobal) peakRmsGlobal = rms;
+          };
+
+          sourceNode.connect(analyser);
+          analyser.connect(processor);
+          processor.connect(zeroGain);
+          zeroGain.connect(audioCtx.destination);
+
+          const timeData = new Uint8Array(analyser.fftSize);
+          meterTimer = window.setInterval(() => {
+            if (!analyser) return;
+            analyser.getByteTimeDomainData(timeData);
+            let maxDev = 0;
+            for (let i = 0; i < timeData.length; i += 2) {
+              const dev = Math.abs(timeData[i] - 128) / 128;
+              if (dev > maxDev) maxDev = dev;
+            }
+            const pct = Math.min(100, Math.round(maxDev * 260));
+            setRecordingMicLevel(pct);
+            if (Date.now() - startedAt > 2600 && peakRmsGlobal < 0.004) {
+              setRecordingMicSilentWarning(true);
+            } else if (peakRmsGlobal >= 0.004) {
+              setRecordingMicSilentWarning(false);
+            }
+          }, 90);
+        } catch {
+          // Fallback to MediaRecorder below
+        }
+      }
+
+      let recorder: MediaRecorder | null = null;
+      recordingChunksRef.current = [];
+      if (typeof MediaRecorder !== 'undefined') {
+        try {
+          const preferredAudioMime = MediaRecorder.isTypeSupported('audio/mp4')
+            ? 'audio/mp4'
+            : MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+              ? 'audio/webm;codecs=opus'
+              : MediaRecorder.isTypeSupported('audio/webm')
+                ? 'audio/webm'
+                : '';
+          recorder = new MediaRecorder(
+            stream,
+            preferredAudioMime
+              ? { mimeType: preferredAudioMime, audioBitsPerSecond: 64_000 }
+              : { audioBitsPerSecond: 64_000 }
+          );
+          recorder.ondataavailable = (ev) => {
+            if (ev.data.size > 0) recordingChunksRef.current.push(ev.data);
+          };
+          mediaRecorderRef.current = recorder;
+          recorder.start(400);
+        } catch {
+          recorder = null;
+        }
+      }
+
+      let finalized = false;
+      const finalizeRecording = async () => {
+        if (finalized) return;
+        finalized = true;
+        stopVoiceCaptureRef.current = null;
+        if (meterTimer) window.clearInterval(meterTimer);
+        setRecordingMicLevel(0);
+        setRecordingMicSilentWarning(false);
+        setRecordingScope(null);
+
+        try {
+          if (processor) {
+            processor.onaudioprocess = null;
+            processor.disconnect();
+          }
+          if (analyser) analyser.disconnect();
+          if (sourceNode) sourceNode.disconnect();
+          if (zeroGain) zeroGain.disconnect();
+          if (audioCtx && audioCtx.state !== 'closed') {
+            void audioCtx.close().catch(() => {});
+          }
+        } catch {
+          // ignore audio graph teardown errors
+        }
+
         stream.getTracks().forEach((t) => t.stop());
-        const elapsedSec = Math.max(1, Math.min(maxVoiceDurationSec, Math.round((Date.now() - startedAt) / 1000)));
-        const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-        if (blob.size < 100) {
+
+        const elapsedSec = Math.max(
+          1,
+          Math.min(maxVoiceDurationSec, Math.round((Date.now() - startedAt) / 1000))
+        );
+
+        // Prefer universal normalized PCM WAV from live PCM buffer
+        const totalSamples = pcmChunks.reduce((acc, c) => acc + c.length, 0);
+        if (totalSamples > 1600) {
+          const merged = new Float32Array(totalSamples);
+          let writeOffset = 0;
+          for (const chunk of pcmChunks) {
+            merged.set(chunk, writeOffset);
+            writeOffset += chunk.length;
+          }
+          const wavRes = encodePcmFloatToWavBlob(merged, captureSampleRate, 16000);
+          if (!wavRes.hadSignal) {
+            showToast(
+              'Suara mikrofon tidak terdeteksi atau sangat pelan. Cek izin mikrofon lalu coba putar di pratinjau.',
+              'info'
+            );
+          }
+          const previewUrl = URL.createObjectURL(wavRes.blob);
+          setVoiceStagingState({
+            scope,
+            draft: {
+              sourceKind: 'recorded',
+              blob: wavRes.blob,
+              previewUrl,
+              fileName: `voice-note-${Date.now()}.wav`,
+              mimeType: 'audio/wav',
+              durationSec: Math.max(1, Math.min(maxVoiceDurationSec, wavRes.durationSec || elapsedSec)),
+              sizeBytes: wavRes.blob.size,
+              waveformPeaks: wavRes.waveformPeaks,
+            },
+            caption: activeDraftText.trim() || '',
+          });
+          return;
+        }
+
+        // Fallback: use MediaRecorder chunks -> try universal WAV conversion
+        const rawMime = recorder?.mimeType || 'audio/webm';
+        const rawBlob = new Blob(recordingChunksRef.current, { type: rawMime });
+        if (rawBlob.size < 100) {
           showToast('Rekaman suara terlalu singkat atau kosong.', 'error');
           return;
         }
-        const analyzed = await extractAudioDurationAndPeaks(blob);
-        const durationSec = Math.max(1, Math.min(maxVoiceDurationSec, analyzed.durationSec || elapsedSec));
-        const previewUrl = URL.createObjectURL(blob);
+        const converted = await tryConvertAudioBlobToUniversalWav(rawBlob);
+        if (converted) {
+          const previewUrl = URL.createObjectURL(converted.blob);
+          setVoiceStagingState({
+            scope,
+            draft: {
+              sourceKind: 'recorded',
+              blob: converted.blob,
+              previewUrl,
+              fileName: `voice-note-${Date.now()}.wav`,
+              mimeType: 'audio/wav',
+              durationSec: Math.max(1, Math.min(maxVoiceDurationSec, converted.durationSec || elapsedSec)),
+              sizeBytes: converted.blob.size,
+              waveformPeaks: converted.waveformPeaks,
+            },
+            caption: activeDraftText.trim() || '',
+          });
+          return;
+        }
+
+        const analyzed = await extractAudioDurationAndPeaks(rawBlob);
+        const ext = rawMime.includes('mp4') ? 'm4a' : rawMime.includes('ogg') ? 'ogg' : 'webm';
+        const previewUrl = URL.createObjectURL(rawBlob);
         setVoiceStagingState({
           scope,
           draft: {
             sourceKind: 'recorded',
-            blob,
+            blob: rawBlob,
             previewUrl,
-            fileName: `voice-note-${Date.now()}.webm`,
-            mimeType: blob.type || 'audio/webm',
-            durationSec,
-            sizeBytes: blob.size,
+            fileName: `voice-note-${Date.now()}.${ext}`,
+            mimeType: rawMime,
+            durationSec: Math.max(1, Math.min(maxVoiceDurationSec, analyzed.durationSec || elapsedSec)),
+            sizeBytes: rawBlob.size,
             waveformPeaks: analyzed.waveformPeaks,
           },
           caption: activeDraftText.trim() || '',
         });
       };
-      mediaRecorderRef.current = recorder;
-      recorder.start(500);
+
+      if (recorder) {
+        recorder.onstop = () => {
+          void finalizeRecording();
+        };
+      }
+
+      stopVoiceCaptureRef.current = () => {
+        if (recorder && recorder.state !== 'inactive') {
+          try {
+            recorder.stop();
+            return;
+          } catch {
+            // fall through
+          }
+        }
+        void finalizeRecording();
+      };
+
       setRecordingScope(scope);
     } catch {
-      showToast('Izin mikrofon ditolak atau tidak tersedia.', 'error');
+      showToast('Izin mikrofon ditolak atau tidak tersedia di perangkat ini.', 'error');
     }
   };
 
@@ -1472,6 +1678,7 @@ export const NusantaraChat: React.FC = () => {
       const voiceAttachment: ChatVoiceAttachment = {
         url: uploaded.url,
         dataUrl: uploaded.dataUrl,
+        cloudBackupId: uploaded.cloudBackupId,
         fileName: draft.sourceKind === 'file' ? draft.fileName : undefined,
         durationSec: draft.durationSec,
         mimeType: uploaded.mimeType,
@@ -1621,10 +1828,12 @@ export const NusantaraChat: React.FC = () => {
           </div>
         )}
 
-        {msg.voiceAttachment && voiceSrc && (
+        {msg.voiceAttachment && (voiceSrc || msg.voiceAttachment.cloudBackupId) && (
           <div className="mb-2">
             <CustomVoicePlayer
               src={voiceSrc}
+              fallbackSrc={msg.voiceAttachment.dataUrl}
+              cloudBackupId={msg.voiceAttachment.cloudBackupId}
               durationSec={msg.voiceAttachment.durationSec}
               waveformPeaks={msg.voiceAttachment.waveformPeaks}
               fileName={msg.voiceAttachment.fileName}
@@ -3218,6 +3427,52 @@ export const NusantaraChat: React.FC = () => {
                 </span>
               )}
             </div>
+
+            {recordingScope === 'global' && (
+              <div className="mb-2 px-3 py-2 rounded-2xl bg-rose-950/60 border border-rose-700/60 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 text-xs font-extrabold text-rose-100">
+                      <span>Merekam Voice Note</span>
+                      <span className="font-mono tabular-nums text-rose-300">
+                        {formatMediaDuration(recordingSeconds)} / {formatMediaDuration(maxVoiceDurationSec)}
+                      </span>
+                    </div>
+                    {recordingMicSilentWarning && (
+                      <p className="text-[10px] text-amber-300 font-semibold truncate">
+                        Mikrofon terlihat hening — pastikan izin &amp; volume mic perangkat aktif.
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-end gap-0.5 h-5 shrink-0" title={`Level Mikrofon: ${recordingMicLevel}%`}>
+                  {[12, 24, 36, 48, 60, 72, 84, 96].map((threshold, idx) => (
+                    <span
+                      key={idx}
+                      className={`w-1 rounded-full transition-all duration-75 ${
+                        recordingMicLevel >= threshold
+                          ? threshold >= 80
+                            ? 'bg-amber-400'
+                            : 'bg-emerald-400'
+                          : 'bg-slate-700'
+                      }`}
+                      style={{ height: `${35 + idx * 8}%` }}
+                    />
+                  ))}
+                  <span className="ml-1 text-[10px] font-mono text-slate-300 w-7 text-right">
+                    {recordingMicLevel}%
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleToggleVoiceRecord('global')}
+                  className="shrink-0 px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold"
+                >
+                  Selesai
+                </button>
+              </div>
+            )}
 
             <form onSubmit={handleSendGlobal} className="flex items-end gap-2 min-w-0">
               <button
@@ -5250,6 +5505,52 @@ export const NusantaraChat: React.FC = () => {
                           </span>
                         )}
                       </div>
+
+                      {recordingScope === 'private' && (
+                        <div className="mb-2 px-3 py-2 rounded-2xl bg-rose-950/60 border border-rose-700/60 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0" />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 text-xs font-extrabold text-rose-100">
+                                <span>Merekam Voice Note</span>
+                                <span className="font-mono tabular-nums text-rose-300">
+                                  {formatMediaDuration(recordingSeconds)} / {formatMediaDuration(maxVoiceDurationSec)}
+                                </span>
+                              </div>
+                              {recordingMicSilentWarning && (
+                                <p className="text-[10px] text-amber-300 font-semibold truncate">
+                                  Mikrofon terlihat hening — pastikan izin &amp; volume mic perangkat aktif.
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-end gap-0.5 h-5 shrink-0" title={`Level Mikrofon: ${recordingMicLevel}%`}>
+                            {[12, 24, 36, 48, 60, 72, 84, 96].map((threshold, idx) => (
+                              <span
+                                key={idx}
+                                className={`w-1 rounded-full transition-all duration-75 ${
+                                  recordingMicLevel >= threshold
+                                    ? threshold >= 80
+                                      ? 'bg-amber-400'
+                                      : 'bg-emerald-400'
+                                    : 'bg-slate-700'
+                                }`}
+                                style={{ height: `${35 + idx * 8}%` }}
+                              />
+                            ))}
+                            <span className="ml-1 text-[10px] font-mono text-slate-300 w-7 text-right">
+                              {recordingMicLevel}%
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleToggleVoiceRecord('private')}
+                            className="shrink-0 px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold"
+                          >
+                            Selesai
+                          </button>
+                        </div>
+                      )}
 
                       <form onSubmit={handleSendPrivate} className="flex items-end gap-2 min-w-0">
                         <button

@@ -573,6 +573,7 @@ export interface ChatMediaAttachmentItem {
 export interface ChatVoiceAttachment {
   dataUrl?: string;
   url?: string;
+  cloudBackupId?: string;
   fileName?: string;
   durationSec: number;
   mimeType?: string;

@@ -1,6 +1,6 @@
 /**
- * Bank Nusantara — Komponen Media Chat Kustom (v15.42.49)
- * 1. CustomVoicePlayer (Play/Pause, Waveform Scrubbing Interaktif, 1x/1.5x/2x Speed, Volume, Caption)
+ * Bank Nusantara — Komponen Media Chat Kustom (v15.42.50)
+ * 1. CustomVoicePlayer (Hybrid Web Audio + <audio> Fallback, Auto-Normalisasi + Boost 200%, Cloud Backup Failover)
  * 2. MediaPreviewModal (Portal Pratinjau Multi-Foto/Video + Tambah/Ganti/Hapus + Keterangan Enter/Ctrl+Enter)
  * 3. VoiceStagingModal (Portal Pratinjau Rekaman/File Audio HP 600d + Dengar Ulang/Geser/Keterangan)
  * 4. EnhancedMediaLightboxModal (Zoom Foto & Video Layar Penuh + Keterangan + Unduh)
@@ -23,20 +23,37 @@ import {
   Mic,
   FileAudio,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   buildFallbackWaveformPeaks,
   formatFileSizeBytes,
   formatMediaDuration,
+  restoreChatMediaFromCloud,
   type StagedChatMediaDraft,
   type StagedChatVoiceDraft,
 } from '../utils/chatMediaUtils';
 
 const VOICE_PLAY_EVENT = 'bn-chat-voice-play';
 
+let sharedVoiceAudioCtx: AudioContext | null = null;
+function getOrCreateSharedVoiceAudioCtx(): AudioContext | null {
+  if (typeof window === 'undefined') return null;
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return null;
+  if (!sharedVoiceAudioCtx || sharedVoiceAudioCtx.state === 'closed') {
+    sharedVoiceAudioCtx = new AudioCtx();
+  }
+  return sharedVoiceAudioCtx;
+}
+
 // ==================== 1. CUSTOM VOICE PLAYER ====================
 export const CustomVoicePlayer: React.FC<{
   src: string;
+  fallbackSrc?: string;
+  cloudBackupId?: string;
   durationSec: number;
   waveformPeaks?: number[];
   fileName?: string;
@@ -45,6 +62,8 @@ export const CustomVoicePlayer: React.FC<{
   compact?: boolean;
 }> = ({
   src,
+  fallbackSrc,
+  cloudBackupId,
   durationSec,
   waveformPeaks,
   fileName,
@@ -56,11 +75,26 @@ export const CustomVoicePlayer: React.FC<{
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const waveTrackRef = useRef<HTMLDivElement | null>(null);
 
+  // Web Audio playback refs
+  const decodedBufferRef = useRef<AudioBuffer | null>(null);
+  const smartAutoGainRef = useRef<number>(1);
+  const activeSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const activeGainRef = useRef<GainNode | null>(null);
+  const rafRef = useRef<number>(0);
+  const startedCtxTimeRef = useRef<number>(0);
+  const startedOffsetRef = useRef<number>(0);
+  const activeRateRef = useRef<number>(1);
+  const pausedOffsetRef = useRef<number>(0);
+  const useHtmlFallbackRef = useRef<boolean>(false);
+
+  const [activeMediaUrl, setActiveMediaUrl] = useState<string>(src || fallbackSrc || '');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [resolvedDuration, setResolvedDuration] = useState<number>(Math.max(1, durationSec || 1));
   const [playbackRate, setPlaybackRate] = useState<1 | 1.5 | 2>(1);
-  const [volume, setVolume] = useState<number>(1);
+  const [volume, setVolume] = useState<number>(1.15); // Slight default boost (115%) for clarity
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [showVolumeSlider, setShowVolumeSlider] = useState<boolean>(false);
   const [isDraggingWave, setIsDraggingWave] = useState<boolean>(false);
@@ -70,17 +104,70 @@ export const CustomVoicePlayer: React.FC<{
       ? waveformPeaks.slice(0, 36)
       : buildFallbackWaveformPeaks(36);
 
+  const stopWebAudioNode = () => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    const node = activeSourceRef.current;
+    activeSourceRef.current = null;
+    if (node) {
+      node.onended = null;
+      try {
+        node.stop();
+      } catch {
+        // already stopped
+      }
+      try {
+        node.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const pauseAllPlayback = () => {
+    const ctx = getOrCreateSharedVoiceAudioCtx();
+    if (activeSourceRef.current && ctx) {
+      const elapsed = Math.max(0, ctx.currentTime - startedCtxTimeRef.current) * activeRateRef.current;
+      pausedOffsetRef.current = Math.min(
+        Math.max(0.1, resolvedDuration),
+        startedOffsetRef.current + elapsed
+      );
+      setCurrentTime(pausedOffsetRef.current);
+      stopWebAudioNode();
+    }
+    const el = audioRef.current;
+    if (el && !el.paused) {
+      el.pause();
+    }
+    setIsPlaying(false);
+  };
+
+  // Reset cached decode buffer when primary source changes
+  useEffect(() => {
+    pauseAllPlayback();
+    decodedBufferRef.current = null;
+    smartAutoGainRef.current = 1;
+    useHtmlFallbackRef.current = false;
+    pausedOffsetRef.current = 0;
+    setCurrentTime(0);
+    setAudioError(null);
+    setActiveMediaUrl(src || fallbackSrc || '');
+  }, [src, fallbackSrc, cloudBackupId]);
+
   // Sync single active player across entire chat
   useEffect(() => {
     const onOtherVoicePlay = (ev: Event) => {
       const customEv = ev as CustomEvent<string>;
-      if (customEv.detail !== playerId && audioRef.current && !audioRef.current.paused) {
-        audioRef.current.pause();
+      if (customEv.detail !== playerId) {
+        pauseAllPlayback();
       }
     };
     window.addEventListener(VOICE_PLAY_EVENT, onOtherVoicePlay);
     return () => {
       window.removeEventListener(VOICE_PLAY_EVENT, onOtherVoicePlay);
+      stopWebAudioNode();
       if (audioRef.current && !audioRef.current.paused) {
         audioRef.current.pause();
       }
@@ -88,46 +175,290 @@ export const CustomVoicePlayer: React.FC<{
   }, [playerId]);
 
   useEffect(() => {
-    if (durationSec > 0) {
+    if (durationSec > 0 && !decodedBufferRef.current) {
       setResolvedDuration(durationSec);
     }
   }, [durationSec]);
 
   useEffect(() => {
+    const ctx = getOrCreateSharedVoiceAudioCtx();
+    if (activeSourceRef.current && ctx) {
+      const elapsed = Math.max(0, ctx.currentTime - startedCtxTimeRef.current) * activeRateRef.current;
+      const curPos = startedOffsetRef.current + elapsed;
+      startedOffsetRef.current = curPos;
+      startedCtxTimeRef.current = ctx.currentTime;
+      activeRateRef.current = playbackRate;
+      activeSourceRef.current.playbackRate.setValueAtTime(playbackRate, ctx.currentTime);
+    }
     const el = audioRef.current;
-    if (!el) return;
-    el.playbackRate = playbackRate;
+    if (el) {
+      el.playbackRate = playbackRate;
+    }
   }, [playbackRate]);
 
   useEffect(() => {
+    const ctx = getOrCreateSharedVoiceAudioCtx();
+    if (activeGainRef.current && ctx) {
+      const targetGain = isMuted ? 0 : Math.max(0, Math.min(2.5, volume)) * smartAutoGainRef.current;
+      activeGainRef.current.gain.setValueAtTime(targetGain, ctx.currentTime);
+    }
     const el = audioRef.current;
-    if (!el) return;
-    el.volume = isMuted ? 0 : volume;
-    el.muted = isMuted;
+    if (el) {
+      el.volume = isMuted ? 0 : Math.min(1, Math.max(0, volume));
+      el.muted = isMuted;
+    }
   }, [volume, isMuted]);
 
-  const togglePlay = async () => {
-    const el = audioRef.current;
-    if (!el || !src) return;
-    if (el.paused) {
-      window.dispatchEvent(new CustomEvent(VOICE_PLAY_EVENT, { detail: playerId }));
-      el.playbackRate = playbackRate;
-      el.volume = isMuted ? 0 : volume;
-      try {
-        await el.play();
-      } catch {
-        setIsPlaying(false);
+  const startWebAudioFromOffset = (ctx: AudioContext, buffer: AudioBuffer, offsetSec: number) => {
+    stopWebAudioNode();
+    const safeDuration = Math.max(0.1, buffer.duration);
+    const clampedOffset = offsetSec >= safeDuration - 0.08 ? 0 : Math.max(0, offsetSec);
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.playbackRate.value = playbackRate;
+
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -16;
+    compressor.knee.value = 18;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.005;
+    compressor.release.value = 0.15;
+
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = (isMuted ? 0 : Math.max(0, Math.min(2.5, volume))) * smartAutoGainRef.current;
+
+    source.connect(compressor);
+    compressor.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    activeSourceRef.current = source;
+    activeGainRef.current = gainNode;
+    startedCtxTimeRef.current = ctx.currentTime;
+    startedOffsetRef.current = clampedOffset;
+    activeRateRef.current = playbackRate;
+    pausedOffsetRef.current = clampedOffset;
+
+    source.onended = () => {
+      if (activeSourceRef.current !== source) return;
+      activeSourceRef.current = null;
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
       }
-    } else {
-      el.pause();
+      pausedOffsetRef.current = 0;
+      setCurrentTime(0);
+      setIsPlaying(false);
+    };
+
+    source.start(0, clampedOffset);
+    setIsPlaying(true);
+
+    const tick = () => {
+      if (activeSourceRef.current !== source) return;
+      const nowPos =
+        startedOffsetRef.current + Math.max(0, ctx.currentTime - startedCtxTimeRef.current) * activeRateRef.current;
+      if (!isDraggingWave) {
+        setCurrentTime(Math.min(safeDuration, nowPos));
+      }
+      if (nowPos < safeDuration + 0.05) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  const fetchAndDecodeCandidate = async (
+    candidateUrl: string,
+    ctx: AudioContext
+  ): Promise<{ buffer: AudioBuffer; urlUsed: string } | null> => {
+    if (!candidateUrl) return null;
+    const resp = await fetch(candidateUrl);
+    if (!resp.ok) return null;
+    const arr = await resp.arrayBuffer();
+    if (!arr || arr.byteLength < 32) return null;
+    const decoded = await ctx.decodeAudioData(arr.slice(0));
+    return { buffer: decoded, urlUsed: candidateUrl };
+  };
+
+  const loadAudioBufferOrFallback = async (ctx: AudioContext | null, forceReload = false): Promise<boolean> => {
+    if (forceReload) {
+      decodedBufferRef.current = null;
+      useHtmlFallbackRef.current = false;
+    }
+    if (decodedBufferRef.current) return true;
+
+    const candidates: string[] = [];
+    if (src) candidates.push(src);
+    if (fallbackSrc && fallbackSrc !== src) candidates.push(fallbackSrc);
+
+    setIsLoadingAudio(true);
+    setAudioError(null);
+    try {
+      let workingUrl = '';
+
+      if (ctx) {
+        for (const cand of candidates) {
+          try {
+            const decodedRes = await fetchAndDecodeCandidate(cand, ctx);
+            if (decodedRes) {
+              const ch = decodedRes.buffer.getChannelData(0);
+              let peak = 0;
+              const step = Math.max(1, Math.floor(ch.length / 4000));
+              for (let i = 0; i < ch.length; i += step) {
+                const v = Math.abs(ch[i]);
+                if (v > peak) peak = v;
+              }
+              smartAutoGainRef.current = peak > 0.002 && peak < 0.55 ? Math.min(2.8, 0.78 / peak) : 1;
+              decodedBufferRef.current = decodedRes.buffer;
+              setResolvedDuration(Math.max(1, Math.round(decodedRes.buffer.duration)));
+              setActiveMediaUrl(decodedRes.urlUsed);
+              return true;
+            }
+          } catch {
+            // try next candidate
+          }
+        }
+
+        // Try Cloud Firestore/RTDB backup if local URL expired/404 or failed decode
+        if (cloudBackupId) {
+          const restoredDataUrl = await restoreChatMediaFromCloud(cloudBackupId);
+          if (restoredDataUrl) {
+            workingUrl = restoredDataUrl;
+            setActiveMediaUrl(restoredDataUrl);
+            try {
+              const decodedCloud = await fetchAndDecodeCandidate(restoredDataUrl, ctx);
+              if (decodedCloud) {
+                const ch = decodedCloud.buffer.getChannelData(0);
+                let peak = 0;
+                const step = Math.max(1, Math.floor(ch.length / 4000));
+                for (let i = 0; i < ch.length; i += step) {
+                  const v = Math.abs(ch[i]);
+                  if (v > peak) peak = v;
+                }
+                smartAutoGainRef.current = peak > 0.002 && peak < 0.55 ? Math.min(2.8, 0.78 / peak) : 1;
+                decodedBufferRef.current = decodedCloud.buffer;
+                setResolvedDuration(Math.max(1, Math.round(decodedCloud.buffer.duration)));
+                return true;
+              }
+            } catch {
+              // fall through to HTML <audio> fallback using restoredDataUrl
+            }
+          }
+        }
+      }
+
+      // Check reachability for HTML5 <audio> fallback
+      if (!workingUrl) {
+        for (const cand of candidates) {
+          if (cand.startsWith('blob:') || cand.startsWith('data:')) {
+            workingUrl = cand;
+            break;
+          }
+          try {
+            const headRes = await fetch(cand, { method: 'HEAD' });
+            if (headRes.ok) {
+              workingUrl = cand;
+              break;
+            }
+          } catch {
+            // continue
+          }
+        }
+      }
+      if (!workingUrl && cloudBackupId) {
+        const restored = await restoreChatMediaFromCloud(cloudBackupId);
+        if (restored) workingUrl = restored;
+      }
+
+      if (workingUrl) {
+        useHtmlFallbackRef.current = true;
+        setActiveMediaUrl(workingUrl);
+        return true;
+      }
+
+      setAudioError('Sumber audio tidak ditemukan atau gagal dimuat.');
+      return false;
+    } finally {
+      setIsLoadingAudio(false);
+    }
+  };
+
+  const togglePlay = async () => {
+    if (isLoadingAudio) return;
+    if (isPlaying) {
+      pauseAllPlayback();
+      return;
+    }
+
+    // Must resume AudioContext synchronously inside click gesture for mobile Safari/Chrome & iframes
+    const ctx = getOrCreateSharedVoiceAudioCtx();
+    if (ctx && ctx.state === 'suspended') {
+      void ctx.resume().catch(() => {});
+    }
+
+    window.dispatchEvent(new CustomEvent(VOICE_PLAY_EVENT, { detail: playerId }));
+    setAudioError(null);
+
+    const ready = await loadAudioBufferOrFallback(ctx, false);
+    if (!ready) return;
+
+    if (ctx && ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch {
+        // continue
+      }
+    }
+
+    if (decodedBufferRef.current && ctx && !useHtmlFallbackRef.current) {
+      startWebAudioFromOffset(ctx, decodedBufferRef.current, pausedOffsetRef.current || currentTime);
+      return;
+    }
+
+    const el = audioRef.current;
+    if (!el) {
+      setAudioError('Pemutar audio perangkat tidak siap.');
+      return;
+    }
+    try {
+      el.playbackRate = playbackRate;
+      el.muted = isMuted;
+      el.volume = isMuted ? 0 : Math.min(1, Math.max(0, volume));
+      if (pausedOffsetRef.current > 0 && Number.isFinite(pausedOffsetRef.current)) {
+        el.currentTime = pausedOffsetRef.current;
+      }
+      await el.play();
+    } catch {
+      setIsPlaying(false);
+      setAudioError('Browser menolak atau gagal memutar audio ini. Ketuk Muat Ulang Audio.');
+    }
+  };
+
+  const handleRetryAudio = async () => {
+    pauseAllPlayback();
+    const ctx = getOrCreateSharedVoiceAudioCtx();
+    if (ctx && ctx.state === 'suspended') {
+      void ctx.resume().catch(() => {});
+    }
+    const ok = await loadAudioBufferOrFallback(ctx, true);
+    if (ok) {
+      await togglePlay();
     }
   };
 
   const seekToSeconds = (sec: number) => {
-    const el = audioRef.current;
     const maxDur = Math.max(1, resolvedDuration);
     const clamped = Math.max(0, Math.min(maxDur, sec));
+    pausedOffsetRef.current = clamped;
     setCurrentTime(clamped);
+
+    const ctx = getOrCreateSharedVoiceAudioCtx();
+    if (isPlaying && decodedBufferRef.current && ctx && !useHtmlFallbackRef.current) {
+      startWebAudioFromOffset(ctx, decodedBufferRef.current, clamped);
+      return;
+    }
+    const el = audioRef.current;
     if (el && Number.isFinite(clamped)) {
       el.currentTime = clamped;
     }
@@ -153,28 +484,42 @@ export const CustomVoicePlayer: React.FC<{
         isMine
           ? 'bg-slate-950/35 border-white/15 text-white'
           : 'bg-slate-950/85 border-slate-700/80 text-slate-100'
-      } ${compact ? 'min-w-[235px]' : 'min-w-[250px] sm:min-w-[290px]'}`}
+      } ${compact ? 'min-w-[235px]' : 'min-w-[250px] sm:min-w-[300px]'}`}
     >
       <audio
         ref={audioRef}
-        src={src}
+        src={activeMediaUrl || undefined}
         preload="metadata"
         onLoadedMetadata={(e) => {
           const d = e.currentTarget.duration;
-          if (Number.isFinite(d) && d > 0.5) {
+          if (!decodedBufferRef.current && Number.isFinite(d) && d > 0.5) {
             setResolvedDuration(Math.round(d));
           }
         }}
         onTimeUpdate={(e) => {
-          if (!isDraggingWave) {
+          if (useHtmlFallbackRef.current && !isDraggingWave) {
             setCurrentTime(e.currentTarget.currentTime);
+            pausedOffsetRef.current = e.currentTarget.currentTime;
           }
         }}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
+        onPlay={() => {
+          if (useHtmlFallbackRef.current) setIsPlaying(true);
+        }}
+        onPause={() => {
+          if (useHtmlFallbackRef.current) setIsPlaying(false);
+        }}
         onEnded={() => {
-          setIsPlaying(false);
-          setCurrentTime(0);
+          if (useHtmlFallbackRef.current) {
+            setIsPlaying(false);
+            pausedOffsetRef.current = 0;
+            setCurrentTime(0);
+          }
+        }}
+        onError={() => {
+          if (useHtmlFallbackRef.current) {
+            setIsPlaying(false);
+            setAudioError('Gagal memutar file audio. Ketuk Muat Ulang Audio.');
+          }
         }}
       />
 
@@ -189,14 +534,21 @@ export const CustomVoicePlayer: React.FC<{
         <button
           type="button"
           onClick={() => void togglePlay()}
-          className={`w-10 h-10 min-w-[40px] min-h-[40px] rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-95 ${
+          disabled={isLoadingAudio}
+          className={`w-10 h-10 min-w-[40px] min-h-[40px] rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-95 disabled:opacity-60 ${
             isMine
               ? 'bg-white text-slate-950 hover:bg-slate-100'
               : 'bg-emerald-500 text-slate-950 hover:bg-emerald-400'
           }`}
-          title={isPlaying ? 'Jeda Suara' : 'Putar Suara'}
+          title={isLoadingAudio ? 'Memuat audio...' : isPlaying ? 'Jeda Suara' : 'Putar Suara'}
         >
-          {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+          {isLoadingAudio ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : isPlaying ? (
+            <Pause className="w-4 h-4 fill-current" />
+          ) : (
+            <Play className="w-4 h-4 fill-current ml-0.5" />
+          )}
         </button>
 
         {/* Interactive Waveform + Precision Seekbar */}
@@ -211,13 +563,23 @@ export const CustomVoicePlayer: React.FC<{
             tabIndex={0}
             onPointerDown={(e) => {
               setIsDraggingWave(true);
-              seekFromPointer(e.clientX);
+              const rect = e.currentTarget.getBoundingClientRect();
+              const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+              setCurrentTime(ratio * Math.max(1, resolvedDuration));
               e.currentTarget.setPointerCapture?.(e.pointerId);
             }}
             onPointerMove={(e) => {
-              if (isDraggingWave) seekFromPointer(e.clientX);
+              if (!isDraggingWave) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(1, rect.width)));
+              setCurrentTime(ratio * Math.max(1, resolvedDuration));
             }}
-            onPointerUp={() => setIsDraggingWave(false)}
+            onPointerUp={(e) => {
+              if (isDraggingWave) {
+                setIsDraggingWave(false);
+                seekFromPointer(e.clientX);
+              }
+            }}
             onPointerCancel={() => setIsDraggingWave(false)}
             className="flex items-center gap-[2px] h-7 cursor-pointer touch-none select-none"
             title="Klik atau geser gelombang suara sesuai detik yang diinginkan"
@@ -269,16 +631,19 @@ export const CustomVoicePlayer: React.FC<{
                 type="button"
                 onClick={() => setShowVolumeSlider((v) => !v)}
                 onDoubleClick={() => setIsMuted((m) => !m)}
-                className={`p-1 rounded-md transition-colors ${
+                className={`px-1.5 py-0.5 rounded-md inline-flex items-center gap-1 transition-colors text-[10px] font-bold ${
                   isMuted || volume === 0
                     ? 'bg-rose-900/70 text-rose-300'
                     : showVolumeSlider
                       ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                      : volume > 1.25
+                        ? 'bg-amber-600/25 border border-amber-500/40 text-amber-300 hover:bg-amber-600/35'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                 }`}
-                title="Atur Volume Suara"
+                title="Atur Volume & Penguat Suara (hingga 200%)"
               >
                 {isMuted || volume === 0 ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                <span>{isMuted ? '0%' : `${Math.round(volume * 100)}%`}</span>
               </button>
             </div>
           </div>
@@ -286,31 +651,76 @@ export const CustomVoicePlayer: React.FC<{
       </div>
 
       {showVolumeSlider && (
-        <div className="flex items-center gap-2 pt-1 border-t border-slate-700/60">
+        <div className="space-y-1.5 pt-1.5 border-t border-slate-700/60">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsMuted((m) => !m)}
+              className="text-[10px] font-bold text-slate-300 hover:text-white shrink-0"
+            >
+              {isMuted || volume === 0 ? 'Buka' : 'Bisu'}
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={isMuted ? 0 : volume}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setVolume(v);
+                setIsMuted(v === 0);
+              }}
+              aria-label="Volume dan Penguat Voice Note hingga 200%"
+              className="flex-1 h-1.5 accent-indigo-400 cursor-pointer"
+            />
+            <span className="text-[10px] font-mono tabular-nums text-amber-300 font-bold w-10 text-right">
+              {isMuted ? '0%' : `${Math.round(volume * 100)}%`}
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1 text-[10px]">
+            <span className="text-slate-400">Penguat Suara:</span>
+            <div className="flex items-center gap-1">
+              {[
+                { label: '100%', val: 1 },
+                { label: '150%', val: 1.5 },
+                { label: '200% Boost', val: 2 },
+              ].map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => {
+                    setVolume(preset.val);
+                    setIsMuted(false);
+                  }}
+                  className={`px-2 py-0.5 rounded-md font-bold transition-colors ${
+                    !isMuted && Math.abs(volume - preset.val) < 0.05
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {audioError && (
+        <div className="rounded-xl bg-rose-950/60 border border-rose-700/60 px-2.5 py-2 flex items-center justify-between gap-2 text-[11px] text-rose-200">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+            <span className="truncate">{audioError}</span>
+          </div>
           <button
             type="button"
-            onClick={() => setIsMuted((m) => !m)}
-            className="text-[10px] font-bold text-slate-300 hover:text-white shrink-0"
+            onClick={() => void handleRetryAudio()}
+            className="shrink-0 px-2 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold inline-flex items-center gap-1"
           >
-            {isMuted || volume === 0 ? 'Buka Suara' : 'Bisukan'}
+            <RefreshCw className="w-3 h-3" />
+            <span>Muat Ulang Audio</span>
           </button>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={isMuted ? 0 : volume}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setVolume(v);
-              setIsMuted(v === 0);
-            }}
-            aria-label="Volume Voice Note"
-            className="flex-1 h-1.5 accent-indigo-400 cursor-pointer"
-          />
-          <span className="text-[10px] font-mono tabular-nums text-slate-300 w-8 text-right">
-            {isMuted ? '0%' : `${Math.round(volume * 100)}%`}
-          </span>
         </div>
       )}
 

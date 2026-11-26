@@ -1,6 +1,7 @@
 /**
- * Bank Nusantara — Utilitas Media Chat (Foto, Video Kompresi Aman, Audio 600d & Waveform)
+ * Bank Nusantara — Utilitas Media Chat (Foto, Video Kompresi Aman, Audio 600d Universal WAV & Cloud Backup)
  */
+import { readCloudDoc, writeCloudDoc } from '../lib/firebase';
 
 export interface StagedChatMediaDraft {
   id: string;
@@ -420,23 +421,268 @@ export async function extractAudioDurationAndPeaks(
   };
 }
 
+export function extractPeaksFromPcm(samples: Float32Array, barCount = 36): number[] {
+  if (!samples || samples.length === 0) return buildFallbackWaveformPeaks(barCount);
+  const blockSize = Math.max(1, Math.floor(samples.length / barCount));
+  const rawPeaks: number[] = [];
+  for (let i = 0; i < barCount; i += 1) {
+    const start = i * blockSize;
+    let sum = 0;
+    const step = Math.max(1, Math.floor(blockSize / 64));
+    let count = 0;
+    for (let j = 0; j < blockSize && start + j < samples.length; j += step) {
+      sum += Math.abs(samples[start + j]);
+      count += 1;
+    }
+    rawPeaks.push(count > 0 ? sum / count : 0.14);
+  }
+  const maxPeak = Math.max(...rawPeaks, 0.01);
+  return rawPeaks.map((p) => Number(Math.min(1, Math.max(0.16, p / maxPeak)).toFixed(2)));
+}
+
+export function encodePcmFloatToWavBlob(
+  samples: Float32Array,
+  sourceSampleRate: number,
+  targetSampleRate = 16000
+): { blob: Blob; durationSec: number; waveformPeaks: number[]; hadSignal: boolean } {
+  const safeSrcRate = Math.max(8000, Math.round(sourceSampleRate || 48000));
+  const safeDstRate = Math.max(8000, Math.min(safeSrcRate, Math.round(targetSampleRate || 16000)));
+  const ratio = safeSrcRate / safeDstRate;
+  const outLength = Math.max(1, Math.floor(samples.length / ratio));
+  const downsampled = new Float32Array(outLength);
+
+  let peakAbs = 0;
+  for (let i = 0; i < outLength; i += 1) {
+    const startIdx = Math.floor(i * ratio);
+    const endIdx = Math.min(samples.length, Math.max(startIdx + 1, Math.floor((i + 1) * ratio)));
+    let acc = 0;
+    for (let j = startIdx; j < endIdx; j += 1) {
+      acc += samples[j];
+    }
+    const avg = acc / Math.max(1, endIdx - startIdx);
+    downsampled[i] = avg;
+    const a = Math.abs(avg);
+    if (a > peakAbs) peakAbs = a;
+  }
+
+  const hadSignal = peakAbs > 0.0015;
+  // Auto-normalize quiet microphone capture so voice note is crisp and loud across all devices
+  const normGain =
+    peakAbs > 0.0015 && peakAbs < 0.78 ? Math.min(10, 0.86 / peakAbs) : 1;
+
+  const buffer = new ArrayBuffer(44 + outLength * 2);
+  const view = new DataView(buffer);
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i += 1) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + outLength * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true); // PCM chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, 1, true); // Mono
+  view.setUint32(24, safeDstRate, true);
+  view.setUint32(28, safeDstRate * 2, true); // ByteRate = SampleRate * 1 * 2
+  view.setUint16(32, 2, true); // BlockAlign
+  view.setUint16(34, 16, true); // BitsPerSample
+  writeString(36, 'data');
+  view.setUint32(40, outLength * 2, true);
+
+  let offset = 44;
+  for (let i = 0; i < outLength; i += 1) {
+    let val = downsampled[i] * normGain;
+    // Soft saturation limiter above 0.92
+    if (val > 0.92) val = 0.92 + Math.tanh((val - 0.92) * 2) * 0.07;
+    else if (val < -0.92) val = -0.92 + Math.tanh((val + 0.92) * 2) * 0.07;
+    val = Math.max(-1, Math.min(1, val));
+    view.setInt16(offset, val < 0 ? val * 0x8000 : val * 0x7fff, true);
+    offset += 2;
+  }
+
+  const blob = new Blob([buffer], { type: 'audio/wav' });
+  const durationSec = Math.max(1, Math.round(outLength / safeDstRate));
+  const waveformPeaks = extractPeaksFromPcm(downsampled, 36);
+  return { blob, durationSec, waveformPeaks, hadSignal };
+}
+
+export async function tryConvertAudioBlobToUniversalWav(blob: Blob): Promise<{
+  blob: Blob;
+  mimeType: string;
+  durationSec: number;
+  waveformPeaks: number[];
+} | null> {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx || blob.size > 24 * 1024 * 1024) return null;
+    const ctx = new AudioCtx();
+    try {
+      const arr = await blob.arrayBuffer();
+      const decoded = await ctx.decodeAudioData(arr.slice(0));
+      const ch0 = decoded.getChannelData(0);
+      const res = encodePcmFloatToWavBlob(ch0, decoded.sampleRate || 44100, 16000);
+      return {
+        blob: res.blob,
+        mimeType: 'audio/wav',
+        durationSec: Math.max(1, Math.round(decoded.duration || res.durationSec)),
+        waveformPeaks: res.waveformPeaks,
+      };
+    } finally {
+      void ctx.close().catch(() => {});
+    }
+  } catch {
+    return null;
+  }
+}
+
+const restoredCloudMediaCache = new Map<string, string>();
+const inflightCloudMediaRestore = new Map<string, Promise<string | null>>();
+
+export async function saveChatMediaToCloudBackup(
+  dataUrl: string,
+  fileName: string,
+  mimeType: string
+): Promise<string | undefined> {
+  if (!dataUrl || dataUrl.length > 9 * 1024 * 1024) return undefined;
+  const backupId = `vn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const nowMs = Date.now();
+  const safeMime = mimeType || 'audio/wav';
+
+  try {
+    if (dataUrl.length <= 360_000) {
+      await writeCloudDoc('bank_state_v1', `chat_media_${backupId}`, {
+        id: backupId,
+        fileName,
+        mimeType: safeMime,
+        totalChunks: 1,
+        dataUrl,
+        updatedAtMs: nowMs,
+      });
+      restoredCloudMediaCache.set(backupId, dataUrl);
+      return backupId;
+    }
+
+    const chunkSize = 350_000;
+    const totalChunks = Math.ceil(dataUrl.length / chunkSize);
+    const writes: Promise<boolean>[] = [
+      writeCloudDoc('bank_state_v1', `chat_media_${backupId}`, {
+        id: backupId,
+        fileName,
+        mimeType: safeMime,
+        totalChunks,
+        updatedAtMs: nowMs,
+      }),
+    ];
+    for (let i = 0; i < totalChunks; i += 1) {
+      const slice = dataUrl.slice(i * chunkSize, (i + 1) * chunkSize);
+      writes.push(
+        writeCloudDoc('bank_state_v1', `chat_media_${backupId}_c${i}`, {
+          id: `${backupId}_c${i}`,
+          index: i,
+          data: slice,
+          updatedAtMs: nowMs,
+        })
+      );
+    }
+    await Promise.all(writes);
+    restoredCloudMediaCache.set(backupId, dataUrl);
+    return backupId;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function restoreChatMediaFromCloud(backupId?: string): Promise<string | null> {
+  if (!backupId) return null;
+  const cached = restoredCloudMediaCache.get(backupId);
+  if (cached) return cached;
+
+  const existing = inflightCloudMediaRestore.get(backupId);
+  if (existing) return existing;
+
+  const task = (async () => {
+    try {
+      const meta = await readCloudDoc<{
+        dataUrl?: string;
+        totalChunks?: number;
+        mimeType?: string;
+      }>('bank_state_v1', `chat_media_${backupId}`, { timeoutMs: 4500 });
+      if (!meta) return null;
+      if (typeof meta.dataUrl === 'string' && meta.dataUrl.startsWith('data:')) {
+        restoredCloudMediaCache.set(backupId, meta.dataUrl);
+        return meta.dataUrl;
+      }
+      const total = Math.max(0, Number(meta.totalChunks) || 0);
+      if (total <= 0 || total > 30) return null;
+      const chunkDocs = await Promise.all(
+        Array.from({ length: total }, (_, idx) =>
+          readCloudDoc<{ data?: string }>('bank_state_v1', `chat_media_${backupId}_c${idx}`, {
+            timeoutMs: 4500,
+          })
+        )
+      );
+      const parts = chunkDocs.map((d) => (d && typeof d.data === 'string' ? d.data : ''));
+      if (parts.some((p) => !p)) return null;
+      const assembled = parts.join('');
+      if (!assembled.startsWith('data:')) return null;
+      restoredCloudMediaCache.set(backupId, assembled);
+      return assembled;
+    } catch {
+      return null;
+    } finally {
+      inflightCloudMediaRestore.delete(backupId);
+    }
+  })();
+
+  inflightCloudMediaRestore.set(backupId, task);
+  return task;
+}
+
 export async function uploadChatMediaToServer(
   blobOrFile: Blob,
   fileName: string,
   mimeType: string
-): Promise<{ url?: string; dataUrl?: string; sizeBytes: number; mimeType: string }> {
+): Promise<{
+  url?: string;
+  dataUrl?: string;
+  cloudBackupId?: string;
+  sizeBytes: number;
+  mimeType: string;
+}> {
   const dataUrl = await blobToDataUrl(blobOrFile);
+  const resolvedMime = mimeType || blobOrFile.type || 'application/octet-stream';
+  const isAudio = resolvedMime.startsWith('audio/');
+  const inlineLimit = isAudio ? 165_000 : 55_000;
+
+  let cloudBackupId: string | undefined;
+  const cloudPromise = isAudio
+    ? Promise.race([
+        saveChatMediaToCloudBackup(dataUrl, fileName, resolvedMime),
+        new Promise<undefined>((resolve) => window.setTimeout(() => resolve(undefined), 3500)),
+      ])
+    : Promise.resolve(undefined);
+
   try {
-    const resp = await fetch('/api/chat-media', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dataUrl,
-        fileName,
-        mimeType: mimeType || blobOrFile.type || 'application/octet-stream',
-      }),
-    });
-    if (resp.ok) {
+    const [resp, backupResult] = await Promise.all([
+      fetch('/api/chat-media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dataUrl,
+          fileName,
+          mimeType: resolvedMime,
+        }),
+      }).catch(() => null),
+      cloudPromise,
+    ]);
+    cloudBackupId = backupResult;
+
+    if (resp && resp.ok) {
       const json = (await resp.json()) as {
         success?: boolean;
         url?: string;
@@ -446,21 +692,23 @@ export async function uploadChatMediaToServer(
       if (json.success && json.url) {
         return {
           url: json.url,
-          dataUrl: dataUrl.length <= 55_000 ? dataUrl : undefined,
+          dataUrl: dataUrl.length <= inlineLimit ? dataUrl : undefined,
+          cloudBackupId,
           sizeBytes: json.sizeBytes || blobOrFile.size,
-          mimeType: json.mimeType || mimeType || blobOrFile.type,
+          mimeType: json.mimeType || resolvedMime,
         };
       }
     }
   } catch {
-    // fallback below for tiny inline payloads
+    cloudBackupId = await cloudPromise;
   }
 
-  if (dataUrl.length <= 180_000) {
+  if (cloudBackupId || dataUrl.length <= (isAudio ? 280_000 : 180_000)) {
     return {
-      dataUrl,
+      dataUrl: dataUrl.length <= (isAudio ? 280_000 : 180_000) ? dataUrl : undefined,
+      cloudBackupId,
       sizeBytes: blobOrFile.size,
-      mimeType: mimeType || blobOrFile.type,
+      mimeType: resolvedMime,
     };
   }
 
