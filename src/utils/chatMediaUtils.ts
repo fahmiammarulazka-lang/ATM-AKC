@@ -466,3 +466,78 @@ export async function uploadChatMediaToServer(
 
   throw new Error('Gagal mengunggah media ke server Bank Nusantara. Periksa koneksi lalu coba lagi.');
 }
+
+export function isIncomingDmBlockedForViewer(
+  msg: {
+    deleted?: boolean;
+    groupId?: string;
+    senderAccountId?: string;
+    senderAccount?: string;
+    recipientAccountId?: string;
+    recipientAccount?: string;
+    createdAtMs?: number;
+    timestamp?: string;
+  },
+  viewer: {
+    id: string;
+    accountNumber?: string;
+    blockedChatAccountIds?: string[];
+    blockedChatIntervalsMap?: Record<string, Array<{ startMs: number; endMs?: number }>>;
+  } | null | undefined,
+  accountsList?: Array<{ id: string; accountNumber?: string }>
+): boolean {
+  if (!viewer || !msg || msg.deleted || msg.groupId) return false;
+
+  const isFromViewer =
+    (Boolean(msg.senderAccountId) && msg.senderAccountId === viewer.id) ||
+    (Boolean(viewer.accountNumber) && msg.senderAccount === viewer.accountNumber);
+  if (isFromViewer) return false;
+
+  const isToViewer =
+    (Boolean(msg.recipientAccountId) && msg.recipientAccountId === viewer.id) ||
+    (Boolean(viewer.accountNumber) && msg.recipientAccount === viewer.accountNumber);
+  if (!isToViewer) return false;
+
+  const senderAcc = accountsList?.find(
+    (a) =>
+      (msg.senderAccountId && a.id === msg.senderAccountId) ||
+      (msg.senderAccount && a.accountNumber === msg.senderAccount)
+  );
+  const candidateKeys = Array.from(
+    new Set(
+      [msg.senderAccountId, senderAcc?.id, msg.senderAccount].filter(
+        (v): v is string => typeof v === 'string' && v.length > 0
+      )
+    )
+  );
+  if (candidateKeys.length === 0) return false;
+
+  const intervalsMap = viewer.blockedChatIntervalsMap || {};
+  const msgTs = msg.createdAtMs || (msg.timestamp ? Date.parse(msg.timestamp) : 0) || 0;
+  let hasRecordedIntervals = false;
+
+  for (const key of candidateKeys) {
+    const intervals = intervalsMap[key];
+    if (Array.isArray(intervals) && intervals.length > 0) {
+      hasRecordedIntervals = true;
+      for (const iv of intervals) {
+        if (!iv || typeof iv.startMs !== 'number') continue;
+        const end = typeof iv.endMs === 'number' ? iv.endMs : Number.POSITIVE_INFINITY;
+        if (msgTs > 0) {
+          if (msgTs >= iv.startMs && msgTs <= end) return true;
+        } else if (typeof iv.endMs !== 'number') {
+          return true;
+        }
+      }
+    }
+  }
+
+  const blockedIds = Array.isArray(viewer.blockedChatAccountIds) ? viewer.blockedChatAccountIds : [];
+  if (!hasRecordedIntervals && blockedIds.length > 0) {
+    const blockedSet = new Set(blockedIds);
+    if (candidateKeys.some((k) => blockedSet.has(k))) return true;
+  }
+
+  return false;
+}
+

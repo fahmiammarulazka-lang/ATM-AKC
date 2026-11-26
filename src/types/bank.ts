@@ -331,6 +331,7 @@ export interface BankAccount {
   pinnedChatRoomKeys?: string[];
   archivedChatRoomKeys?: string[];
   blockedChatAccountIds?: string[];
+  blockedChatIntervalsMap?: Record<string, Array<{ startMs: number; endMs?: number }>>;
   chatDndEnabled?: boolean;
   enterKeySendsMessage?: boolean;
 }

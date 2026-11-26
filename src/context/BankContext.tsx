@@ -102,6 +102,7 @@ import {
   createCloudSnapshot,
   type BankingBackupPayload,
 } from '../services/timeMachineBackupService';
+import { isIncomingDmBlockedForViewer } from '../utils/chatMediaUtils';
 import {
   BankAccount,
   DebtHistoryEntry,
@@ -7305,8 +7306,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   shouldBeep = true;
                 }
               } else if (
-                inc.recipientAccountId === activeAcc.id ||
-                inc.recipientAccount === activeAcc.accountNumber
+                (inc.recipientAccountId === activeAcc.id ||
+                  inc.recipientAccount === activeAcc.accountNumber) &&
+                !isIncomingDmBlockedForViewer(inc, activeAcc, accountsRef.current)
               ) {
                 shouldBeep = true;
               }
@@ -11141,8 +11143,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   shouldBeep = true;
                 }
               } else if (
-                inc.recipientAccountId === activeAcc.id ||
-                inc.recipientAccount === activeAcc.accountNumber
+                (inc.recipientAccountId === activeAcc.id ||
+                  inc.recipientAccount === activeAcc.accountNumber) &&
+                !isIncomingDmBlockedForViewer(inc, activeAcc, accountsRef.current)
               ) {
                 shouldBeep = true;
               }
@@ -13504,13 +13507,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           msg.recipientAccountId === currentAccount.id ||
           msg.recipientAccount === currentAccount.accountNumber;
         if (!isToMe) continue;
+        if (isIncomingDmBlockedForViewer(msg, currentAccount, accounts)) continue;
         const peerKey = msg.senderAccountId || msg.senderAccount;
         const lastRead = chatLastReadMap[`dm:${peerKey}`] || chatLastReadMap[`dm:${msg.senderAccount}`] || 0;
         if (ts > lastRead) total += 1;
       }
     }
     return total;
-  }, [chats, privateChatGroups, chatLastReadMap, currentAccount]);
+  }, [chats, privateChatGroups, chatLastReadMap, currentAccount, accounts]);
 
   const totalChatUnreadCount = globalChatUnreadCount + privateChatUnreadCount;
 
@@ -14399,12 +14403,40 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!currentAccount) return { blocked: false, message: 'Akun tidak aktif.' };
     const existing = Array.isArray(currentAccount.blockedChatAccountIds) ? currentAccount.blockedChatAccountIds : [];
     const exists = existing.includes(accountId);
-    const nextList = exists ? existing.filter((id) => id !== accountId) : [accountId, ...existing];
-    updateCurrentAccountChatPref((a) => ({
-      ...a,
-      blockedChatAccountIds: nextList,
-      accountUpdatedAtMs: Date.now(),
-    }));
+    const nowMs = Date.now();
+    updateCurrentAccountChatPref((a) => {
+      const currBlocked = Array.isArray(a.blockedChatAccountIds) ? a.blockedChatAccountIds : [];
+      const currExists = currBlocked.includes(accountId);
+      const nextList = currExists ? currBlocked.filter((id) => id !== accountId) : [accountId, ...currBlocked];
+      const prevMap = a.blockedChatIntervalsMap || {};
+      const prevIntervals = Array.isArray(prevMap[accountId]) ? prevMap[accountId] : [];
+      let nextIntervals = prevIntervals;
+      if (currExists) {
+        let closedAny = false;
+        nextIntervals = prevIntervals.map((iv) => {
+          if (iv && typeof iv.endMs !== 'number') {
+            closedAny = true;
+            return { ...iv, endMs: nowMs };
+          }
+          return iv;
+        });
+        if (!closedAny && prevIntervals.length === 0) {
+          nextIntervals = [{ startMs: 0, endMs: nowMs }];
+        }
+      } else {
+        const hasOpen = prevIntervals.some((iv) => iv && typeof iv.endMs !== 'number');
+        nextIntervals = hasOpen ? prevIntervals : [...prevIntervals, { startMs: nowMs }];
+      }
+      return {
+        ...a,
+        blockedChatAccountIds: nextList,
+        blockedChatIntervalsMap: {
+          ...prevMap,
+          [accountId]: nextIntervals,
+        },
+        accountUpdatedAtMs: nowMs,
+      };
+    });
     return {
       blocked: !exists,
       message: exists

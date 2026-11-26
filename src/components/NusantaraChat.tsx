@@ -123,6 +123,7 @@ import {
   extractAudioDurationAndPeaks,
   formatMediaDuration,
   inspectVideoFileMetadata,
+  isIncomingDmBlockedForViewer,
   uploadChatMediaToServer,
   type StagedChatMediaDraft,
   type StagedChatVoiceDraft,
@@ -594,6 +595,7 @@ export const NusantaraChat: React.FC = () => {
     return chats
       .filter((m) => {
         if (m.deleted || m.groupId) return false;
+        if (isIncomingDmBlockedForViewer(m, currentAccount, accounts)) return false;
         const fromMeToTarget =
           (m.senderAccountId === currentAccount.id || m.senderAccount === currentAccount.accountNumber) &&
           (m.recipientAccountId === targetAccId || (targetAccNo && m.recipientAccount === targetAccNo));
@@ -603,7 +605,7 @@ export const NusantaraChat: React.FC = () => {
         return fromMeToTarget || fromTargetToMe;
       })
       .sort((a, b) => (a.createdAtMs || Date.parse(a.timestamp || '')) - (b.createdAtMs || Date.parse(b.timestamp || '')));
-  }, [chats, currentAccount, activeTarget]);
+  }, [chats, currentAccount, activeTarget, accounts]);
 
   useEffect(() => {
     if (mainTab !== 'private' || !activeTarget || !currentAccount) return;
@@ -677,6 +679,7 @@ export const NusantaraChat: React.FC = () => {
     // 2. Scan DM messages for last message, unread counts, and UNSAVED senders!
     for (const m of chats) {
       if (m.deleted || m.groupId || hiddenChatIdSet.has(m.id)) continue;
+      if (isIncomingDmBlockedForViewer(m, currentAccount, accounts)) continue;
       const isFromMe =
         (m.senderAccountId && m.senderAccountId === currentAccount.id) ||
         m.senderAccount === currentAccount.accountNumber;
@@ -788,7 +791,7 @@ export const NusantaraChat: React.FC = () => {
 
   const activeGroupOnlineCount = useMemo(() => {
     if (!activeGroup) return 0;
-    return activeGroup.memberAccountIds.filter((id) => {
+    return (activeGroup.memberAccountIds || []).filter((id) => {
       if (id === currentAccount?.id) return true;
       const st = customerPresenceMap?.[id]?.status;
       return st === 'online' || st === 'idle';
@@ -889,7 +892,7 @@ export const NusantaraChat: React.FC = () => {
         ? accounts.filter((a) => a.id !== currentAccount?.id)
         : activeGroup
           ? accounts.filter(
-              (a) => a.id !== currentAccount?.id && activeGroup.memberAccountIds.includes(a.id)
+              (a) => a.id !== currentAccount?.id && (activeGroup.memberAccountIds || []).includes(a.id)
             )
           : [];
     return pool
@@ -906,8 +909,13 @@ export const NusantaraChat: React.FC = () => {
   // Typing users in current room
   const activeTypingUsers = useMemo(() => {
     const entries = chatTypingMap[activeRoomKey] || [];
-    return entries.filter((e) => e.accountId !== currentAccount?.id && e.expiresAtMs > Date.now());
-  }, [chatTypingMap, activeRoomKey, currentAccount?.id]);
+    return entries.filter(
+      (e) =>
+        e.accountId !== currentAccount?.id &&
+        e.expiresAtMs > Date.now() &&
+        !(activeTarget?.type === 'dm' && blockedAccountIdSet.has(e.accountId))
+    );
+  }, [chatTypingMap, activeRoomKey, currentAccount?.id, activeTarget?.type, blockedAccountIdSet]);
 
   const activeDmBlocked = Boolean(
     activeTarget?.type === 'dm' && blockedAccountIdSet.has(activeTarget.id)
@@ -3447,7 +3455,7 @@ export const NusantaraChat: React.FC = () => {
                             <p className="text-xs text-slate-400 truncate">
                               {lastMsg
                                 ? `${lastMsg.senderName}: ${lastMsg.text || (lastMsg.redPacket ? 'Amplop Kaget' : 'Lampiran')}`
-                                : `${grp.memberAccountIds.length} anggota`}
+                                : `${(grp.memberAccountIds || []).length} anggota`}
                             </p>
                             {unread > 0 && (
                               <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-indigo-600 text-white">
@@ -3810,7 +3818,7 @@ export const NusantaraChat: React.FC = () => {
                         <p className="text-[11px] text-slate-400 truncate flex items-center gap-1.5 flex-wrap">
                           {activeTarget.type === 'group' && activeGroup ? (
                             <span>
-                              {activeGroup.memberAccountIds.length} anggota · {activeGroupOnlineCount} online
+                              {(activeGroup.memberAccountIds || []).length} anggota · {activeGroupOnlineCount} online
                             </span>
                           ) : activeDmBlocked ? (
                             <span className="text-rose-400 font-semibold">Kontak diblokir</span>
@@ -4361,10 +4369,10 @@ export const NusantaraChat: React.FC = () => {
                       const canViewGroupReceipts = Boolean(activeGroup && (isStrictOwner || isGroupAdmin));
 
                       const groupOtherCount = activeGroup
-                        ? Math.max(0, activeGroup.memberAccountIds.filter((id) => id !== msg.senderAccountId).length)
+                        ? Math.max(0, (activeGroup.memberAccountIds || []).filter((id) => id !== msg.senderAccountId).length)
                         : 0;
                       const groupReaderCount = activeGroup
-                        ? activeGroup.memberAccountIds.filter(
+                        ? (activeGroup.memberAccountIds || []).filter(
                             (id) => id !== msg.senderAccountId && Boolean(msg.readBy?.[id])
                           ).length
                         : 0;

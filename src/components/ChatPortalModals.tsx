@@ -762,18 +762,6 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
     }
   }, [open, group]);
 
-  if (!group || !currentAccount) return null;
-
-  const isCreator = group.creatorAccountId === currentAccount.id;
-  const coAdmins = group.coAdminAccountIds || [];
-  const isCoAdmin = coAdmins.includes(currentAccount.id);
-  const canManage = isCreator || isCoAdmin;
-
-  const isSavedContact = (accId: string, accNo?: string) =>
-    savedContacts.some((c) => c.targetAccountId === accId || (accNo && c.targetAccountNumber === accNo));
-
-  const addableSavedContacts = savedContacts.filter((c) => !group.memberAccountIds.includes(c.targetAccountId));
-
   const lookupMatch = useMemo(() => {
     const clean = lookupInput.replace(/\D/g, '').trim();
     if (clean.length < 4) return null;
@@ -786,12 +774,25 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
     );
   }, [accounts, lookupInput]);
 
+  if (!group || !currentAccount) return null;
+
+  const memberIds = Array.isArray(group.memberAccountIds) ? group.memberAccountIds : [];
+  const isCreator = group.creatorAccountId === currentAccount.id;
+  const coAdmins = group.coAdminAccountIds || [];
+  const isCoAdmin = coAdmins.includes(currentAccount.id);
+  const canManage = isCreator || isCoAdmin;
+
+  const isSavedContact = (accId: string, accNo?: string) =>
+    savedContacts.some((c) => c.targetAccountId === accId || (accNo && c.targetAccountNumber === accNo));
+
+  const addableSavedContacts = savedContacts.filter((c) => !memberIds.includes(c.targetAccountId));
+
   return (
     <PortalModalShell
       open={open}
       onClose={onClose}
       title={`Info Grup • ${group.name}`}
-      subtitle={`${group.memberAccountIds.length} anggota aktif`}
+      subtitle={`${memberIds.length} anggota aktif`}
       icon={
         <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${getChatGroupColorClass(group.accentColor)}`}>
           {renderChatGroupIcon(group.iconKey, 'w-5 h-5')}
@@ -955,10 +956,10 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
       {/* Member List + Simpan Nasabah for unsaved members + Co-Admin controls */}
       <div className="space-y-2">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-          Daftar Anggota ({group.memberAccountIds.length})
+          Daftar Anggota ({memberIds.length})
         </p>
         <div className="space-y-2">
-          {group.memberAccountIds.map((memberId) => {
+          {memberIds.map((memberId) => {
             const acc = accounts.find((a) => a.id === memberId);
             const isMe = memberId === currentAccount.id;
             const memberIsCreator = memberId === group.creatorAccountId;
@@ -1078,7 +1079,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
           />
           <button
             type="button"
-            disabled={!lookupMatch || group.memberAccountIds.includes(lookupMatch.id)}
+            disabled={!lookupMatch || memberIds.includes(lookupMatch.id)}
             onClick={() => {
               if (lookupMatch) {
                 void onAddMember(lookupMatch.id);
@@ -1093,7 +1094,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
         {lookupInput.length >= 4 && (
           <p className="text-[11px] text-slate-400">
             {lookupMatch
-              ? group.memberAccountIds.includes(lookupMatch.id)
+              ? memberIds.includes(lookupMatch.id)
                 ? `${lookupMatch.fullName} sudah menjadi anggota grup ini.`
                 : `Ditemukan: ${lookupMatch.fullName} (Rek ${lookupMatch.accountNumber})`
               : 'Belum cocok dengan User ID / No. Rekening nasabah manapun.'}
