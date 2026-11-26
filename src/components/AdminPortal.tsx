@@ -63,6 +63,10 @@ import {
   RotateCcw,
   Activity,
   Lightbulb,
+  Flag,
+  Award,
+  ShieldCheck,
+  Coins,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -83,6 +87,11 @@ import {
   BugReportReward,
   BugReportStatus,
   AdminTierNotificationEventType,
+  ChatAssetKind,
+  ChatCustomBadgeTier,
+  ChatRedPacketMode,
+  ChatAdminDivision,
+  ChatFeatureFlags,
 } from '../types/bank';
 import { AdminDiamondFamilyTab } from './AdminDiamondFamilyTab';
 import { AdminSuggestionsTab } from './AdminSuggestionsTab';
@@ -144,6 +153,7 @@ import {
   AdminLiveMonitorTabView,
 } from './AdminLiveMonitorPanel';
 import { AdminWarningStudioSection } from './AdminWarningStudioSection';
+import { PinPromptModal } from './PinPromptModal';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -151,6 +161,7 @@ interface AdminPortalProps {
 
 export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDashboard }) => {
   const {
+    currentAccount,
     accounts,
     loans,
     transactions,
@@ -198,9 +209,24 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     purchasedCodes,
     resetAllData,
     globalChats,
+    chats,
+    globalChatConfig,
+    chatModerationLogs,
+    chatReports,
     sendGlobalChatMessage,
     deleteGlobalChatMessage,
     clearGlobalChatMessages,
+    adminUpdateGlobalChatConfig,
+    adminUpdateChatFeatureFlags,
+    adminSetCustomerChatBadge,
+    adminBroadcastToAllPrivateDms,
+    adminScheduleAnnouncement,
+    adminDeleteScheduledAnnouncement,
+    adminResolveChatReport,
+    createChatRedPacket,
+    adminMuteGlobalChatUser,
+    adminUnmuteGlobalChatUser,
+    adminWarnUserFromChat,
     connectedDevicesCount,
     bugReports,
     bugRewardConfig,
@@ -624,10 +650,45 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   const [customFeatApproval, setCustomFeatApproval] = useState<boolean>(false);
   const [customFeatFeedback, setCustomFeatFeedback] = useState<string>('');
 
-  // State for Admin Global Chat ("Pesan dari Admin" ke Semua HP - Hanya Admin)
+  // State for Admin Global Chat & Settingan Chat Lengkap
   const [globalChatText, setGlobalChatText] = useState<string>('');
   const [globalChatAdminName, setGlobalChatAdminName] = useState<string>('Admin Bank Nusantara');
   const [globalChatFeedback, setGlobalChatFeedback] = useState<string>('');
+  const [chatSettingsFeedback, setChatSettingsFeedback] = useState<string>('');
+  const [chatMaintenanceDraft, setChatMaintenanceDraft] = useState<string>(
+    globalChatConfig.maintenanceNotice ||
+      'Layanan Chat Global & Chat Privat Bank Nusantara sedang dalam pemeliharaan terjadwal oleh Admin. Silakan coba kembali beberapa saat lagi.'
+  );
+  const [chatWelcomeDraft, setChatWelcomeDraft] = useState<string>(
+    globalChatConfig.customWelcomeText ||
+      'Selamat datang di Chat Global & Priv Bank Nusantara! Jaga sopan santun, gunakan fitur Kirim Uang/Coin/Diamond & Amplop Kaget secara bijak, dan tekan Ctrl+Enter untuk mengirim pesan.'
+  );
+  const [chatBannedWordsDraft, setChatBannedWordsDraft] = useState<string>(
+    (globalChatConfig.bannedWords || []).join(', ')
+  );
+  const [adminDmBroadcastText, setAdminDmBroadcastText] = useState<string>('');
+  const [schedAnnText, setSchedAnnText] = useState<string>('');
+  const [schedAnnDateTime, setSchedAnnDateTime] = useState<string>('');
+  const [schedAnnPinned, setSchedAnnPinned] = useState<boolean>(true);
+  const [schedAnnPopup, setSchedAnnPopup] = useState<boolean>(true);
+  const [badgeTargetAccId, setBadgeTargetAccId] = useState<string>(
+    accounts.find((a) => a.cardTier !== 'admin')?.id || accounts[0]?.id || ''
+  );
+  const [adminRpAssetKind, setAdminRpAssetKind] = useState<ChatAssetKind>('uang');
+  const [adminRpTotal, setAdminRpTotal] = useState<string>('100000');
+  const [adminRpQuota, setAdminRpQuota] = useState<string>('10');
+  const [adminRpMode, setAdminRpMode] = useState<ChatRedPacketMode>('fastest_biggest');
+  const [adminRpNote, setAdminRpNote] = useState<string>('Amplop Hadiah Resmi Admin Bank Nusantara!');
+  const [showAdminRpPinModal, setShowAdminRpPinModal] = useState<boolean>(false);
+  const [chatReportFilter, setChatReportFilter] = useState<'pending' | 'all'>('pending');
+
+  useEffect(() => {
+    if (globalChatConfig.maintenanceNotice) setChatMaintenanceDraft(globalChatConfig.maintenanceNotice);
+    if (globalChatConfig.customWelcomeText) setChatWelcomeDraft(globalChatConfig.customWelcomeText);
+    if (Array.isArray(globalChatConfig.bannedWords)) {
+      setChatBannedWordsDraft(globalChatConfig.bannedWords.join(', '));
+    }
+  }, [globalChatConfig.updatedAtMs]);
 
   // State for Bug Reports in Admin Panel (25 Standardized Statuses #25 down to #01)
   const [bugReplyMap, setBugReplyMap] = useState<Record<string, string>>({});
@@ -991,12 +1052,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           onClick={() => setActiveAdminTab('global_chat')}
           className="p-4 rounded-2xl bg-slate-900/90 border border-amber-500/40 hover:border-amber-400 shadow-lg cursor-pointer transition-all"
         >
-          <span className="text-amber-300 font-bold block text-[11px]">💬 Chat Global (Hanya Admin)</span>
+          <span className="text-amber-300 font-bold block text-[11px]">💬 Settingan Chat Lengkap</span>
           <div className="font-mono text-xl sm:text-2xl font-black text-white mt-1 flex items-center gap-2">
             <span>{globalChats.length} Pesan</span>
+            {chatReports.some((r) => r.status === 'pending') && (
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-400 animate-ping" />
+            )}
           </div>
           <span className="text-[10px] text-emerald-300 font-mono block mt-0.5">
-            Khusus Admin Panel
+            {chatReports.filter((r) => r.status === 'pending').length} Laporan • Saklar Fitur
           </span>
         </div>
 
@@ -1525,7 +1589,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           }`}
         >
           <MessageSquare className="w-4 h-4" />
-          <span>💬 Broadcast &amp; Notif Banyak ({globalChats.length})</span>
+          <span>
+            💬 Settingan Chat Lengkap ({globalChats.length}
+            {chatReports.filter((r) => r.status === 'pending').length > 0
+              ? ` • ${chatReports.filter((r) => r.status === 'pending').length} Laporan`
+              : ''}
+            )
+          </span>
         </button>
 
         <button
@@ -4090,25 +4160,826 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         </div>
       )}
 
-      {/* ================= ADMIN TAB: CHAT GLOBAL & KIRIM BANYAK NOTIFIKASI LATAR BELAKANG ================= */}
-      {activeAdminTab === 'global_chat' && (
+      {/* ================= ADMIN TAB: SETTINGAN CHAT LENGKAP & PUSAT NOTIFIKASI MASSAL ================= */}
+      {activeAdminTab === 'global_chat' && (() => {
+        const flags: ChatFeatureFlags = globalChatConfig.featureFlags || {};
+        const pendingReports = chatReports.filter((r) => r.status === 'pending');
+        const shownReports = chatReportFilter === 'pending' ? pendingReports : chatReports;
+        const activeRedPacketsCount =
+          globalChats.filter((m) => m.redPacket?.status === 'active').length +
+          chats.filter((m) => m.redPacket?.status === 'active').length;
+        const antiSpam = globalChatConfig.antiSpamConfig || {
+          enabled: true,
+          maxMessagesPer10s: 5,
+          blockExternalLinks: false,
+        };
+        const senderAcct = currentAccount || accounts.find((a) => a.id === 'acc-admin' || a.cardTier === 'admin');
+        const redPacketTotalNum = Math.floor(Number(adminRpTotal.replace(/[^\d]/g, '')) || 0);
+        const redPacketQuotaNum = Math.max(1, Math.min(100, Math.floor(Number(adminRpQuota.replace(/[^\d]/g, '')) || 1)));
+
+        const granularChatSwitches: Array<{
+          key: keyof ChatFeatureFlags;
+          label: string;
+          desc: string;
+        }> = [
+          { key: 'disableGlobalChat', label: 'Matikan Chat Global', desc: 'Kunci tab Chat Global di layar nasabah' },
+          { key: 'disablePrivateChat', label: 'Matikan Chat Privat', desc: 'Kunci tab Chat Privat 1-on-1 & Grup' },
+          { key: 'disableGroupChat', label: 'Matikan Grup Chat', desc: 'Sembunyikan fitur percakapan Grup Privat' },
+          { key: 'disableCreateGroup', label: 'Larang Buat Grup Baru', desc: 'Nasabah tidak bisa membuat grup baru' },
+          { key: 'disableAssetTransfers', label: 'Matikan Kirim/Minta Aset', desc: 'Kunci kirim & minta Uang, Coin, Diamond di chat' },
+          { key: 'disableRedPacket', label: 'Matikan Amplop Kaget', desc: 'Kunci buat & klaim Amplop Kaget ala DANA' },
+          { key: 'disableSplitBill', label: 'Matikan Patungan Grup', desc: 'Kunci fitur patungan Split Bill di grup' },
+          { key: 'disableImages', label: 'Matikan Kirim Foto', desc: 'Nonaktifkan upload foto di seluruh ruang chat' },
+          { key: 'disableVoiceNotes', label: 'Matikan Voice Note', desc: 'Nonaktifkan rekam & kirim pesan suara' },
+          { key: 'disablePolls', label: 'Matikan Polling / Voting', desc: 'Kunci pembuatan & voting polling chat' },
+          { key: 'disableReactions', label: 'Matikan Reaksi Emoji', desc: 'Nonaktifkan reaksi emoji pada bubble chat' },
+          { key: 'disableMessageEdit', label: 'Matikan Edit Pesan', desc: 'Kunci tombol Edit Pesan milik nasabah' },
+          { key: 'disableChatSystemNotifications', label: 'Matikan Notif Sistem Khusus Chat', desc: 'Nonaktifkan notifikasi/pop-up sistem khusus fitur chat' },
+          { key: 'disableWelcomeGreeting', label: 'Matikan Kartu Sambutan Baru', desc: 'Sembunyikan sapaan Admin Utama untuk akun baru' },
+        ];
+
+        const notifyChatCfg = (msg: string) => {
+          setChatSettingsFeedback(msg);
+          window.setTimeout(() => {
+            setChatSettingsFeedback((prev) => (prev === msg ? '' : prev));
+          }, 5000);
+        };
+
+        return (
         <div className="bg-slate-900/90 border-2 border-amber-400/60 rounded-3xl p-6 shadow-2xl space-y-6 text-xs">
+          {/* Header */}
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-mono font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  <span>KHUSUS ADMIN PANEL • {connectedDevicesCount} HP TERHUBUNG</span>
+                  <span>PANEL SETTINGAN CHAT LENGKAP • {connectedDevicesCount} HP TERHUBUNG</span>
                 </span>
-                <VerifiedBadge size="sm" showText text="HANYA ADMIN YANG BISA MENGIRIM" />
+                <VerifiedBadge size="sm" showText text="KENDALI PENUH ADMIN" />
               </div>
               <h3 className="text-lg sm:text-xl font-black text-white mt-1.5 flex items-center gap-2">
-                <MessageSquare className="w-5 h-5 text-amber-400" />
-                <span>Chat Global &amp; Pusat Notifikasi Latar Belakang Massal</span>
+                <Sliders className="w-5 h-5 text-amber-400" />
+                <span>Settingan Chat Lengkap, Saklar Fitur, Moderasi &amp; Notifikasi</span>
               </h3>
               <p className="text-slate-300 text-xs mt-1 max-w-3xl leading-relaxed">
-                Kirim pesan pop-up ke semua HP atau kirim <strong>banyak notifikasi latar belakang sekaligus</strong> ke seluruh perangkat (Banner Push + Service Worker Browser + Lonceng Notifikasi).
+                Kontrol penuh seluruh fitur Chat Global &amp; Privat: matikan fitur satuan atau tutup total sementara dengan pesan maintenance khusus, tinjau laporan nasabah, atur anti-spam, jadwalkan pengumuman, bagikan lencana &amp; Amplop Hadiah Resmi Admin.
               </p>
+            </div>
+          </div>
+
+          {chatSettingsFeedback && (
+            <div className="p-3.5 rounded-2xl bg-emerald-950/90 border border-emerald-400 text-emerald-200 font-bold flex items-center justify-between gap-3 shadow-lg">
+              <span>✅ {chatSettingsFeedback}</span>
+              <button type="button" onClick={() => setChatSettingsFeedback('')} className="text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* 1. STATISTIK ANALITIK CHAT REAL-TIME */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
+              <span className="text-slate-400 font-bold block text-[11px]">Total Pesan Global</span>
+              <span className="font-mono text-2xl font-black text-emerald-400 tabular-nums mt-1 block">
+                {globalChats.length}
+              </span>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800">
+              <span className="text-slate-400 font-bold block text-[11px]">Total Pesan Privat &amp; Grup</span>
+              <span className="font-mono text-2xl font-black text-indigo-400 tabular-nums mt-1 block">
+                {chats.filter((m) => !m.deleted).length}
+              </span>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-950 border border-rose-500/40">
+              <span className="text-rose-300 font-bold block text-[11px]">Laporan Pelanggaran Masuk</span>
+              <span className="font-mono text-2xl font-black text-rose-400 tabular-nums mt-1 block">
+                {pendingReports.length} Pending
+              </span>
+            </div>
+            <div className="p-4 rounded-2xl bg-slate-950 border border-amber-500/40">
+              <span className="text-amber-300 font-bold block text-[11px]">Amplop Kaget Aktif</span>
+              <span className="font-mono text-2xl font-black text-amber-400 tabular-nums mt-1 block">
+                {activeRedPacketsCount} Aktif
+              </span>
+            </div>
+          </div>
+
+          {/* 2. SAKLAR MATIKAN TOTAL CHAT + HALAMAN PENUTUPAN & 14 SAKLAR FITUR SATUAN */}
+          <div className="p-5 rounded-3xl bg-slate-950 border-2 border-rose-500/50 space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-5 h-5 text-rose-400" />
+                  <h4 className="font-black text-white text-sm sm:text-base">
+                    Saklar Utama Penutupan Chat &amp; Kontrol 14 Fitur Chat Satuan
+                  </h4>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Jika saklar utama dimatikan, nasabah akan melihat halaman penutupan sementara chat yang Anda tulis di bawah (akun Admin tetap dapat mengakses chat).
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const nextVal = !Boolean(flags.chatSystemDisabled);
+                    const r = await adminUpdateChatFeatureFlags(
+                      { chatSystemDisabled: nextVal },
+                      nextVal ? 'Tutup Total Layanan Chat' : 'Buka Kembali Layanan Chat'
+                    );
+                    notifyChatCfg(r.message);
+                  }}
+                  className={`px-4 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 cursor-pointer transition-all ${
+                    flags.chatSystemDisabled
+                      ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-500/25'
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'
+                  }`}
+                >
+                  {flags.chatSystemDisabled ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                  <span>{flags.chatSystemDisabled ? 'STATUS: CHAT DITUTUP TOTAL' : 'STATUS: CHAT AKTIF NORMAL'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const resetFlags: ChatFeatureFlags = {
+                      chatSystemDisabled: false,
+                      disableGlobalChat: false,
+                      disablePrivateChat: false,
+                      disableGroupChat: false,
+                      disableCreateGroup: false,
+                      disableAssetTransfers: false,
+                      disableRedPacket: false,
+                      disableSplitBill: false,
+                      disableImages: false,
+                      disableVoiceNotes: false,
+                      disablePolls: false,
+                      disableReactions: false,
+                      disableMessageEdit: false,
+                      disableChatSystemNotifications: false,
+                      disableWelcomeGreeting: false,
+                    };
+                    const r = await adminUpdateChatFeatureFlags(resetFlags, 'Aktifkan Semua 14 Fitur Chat');
+                    notifyChatCfg(r.message);
+                  }}
+                  className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 font-bold text-xs cursor-pointer"
+                >
+                  Aktifkan Semua Fitur
+                </button>
+              </div>
+            </div>
+
+            {/* Maintenance Page Text Editor */}
+            <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 space-y-2.5">
+              <label className="text-amber-300 font-bold block">
+                Teks Halaman Penutupan Sementara Chat (Tampil ke Nasabah saat Saklar Utama Ditutup):
+              </label>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <textarea
+                  rows={2}
+                  value={chatMaintenanceDraft}
+                  onChange={(e) => setChatMaintenanceDraft(e.target.value)}
+                  className="flex-1 bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-white text-xs"
+                  placeholder="Tulis pengumuman penutupan sementara chat..."
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const r = await adminUpdateGlobalChatConfig(
+                      { maintenanceNotice: chatMaintenanceDraft.trim() },
+                      'Update teks halaman maintenance chat'
+                    );
+                    notifyChatCfg(r.message);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shrink-0 self-end sm:self-stretch cursor-pointer"
+                >
+                  Simpan Pesan Penutupan
+                </button>
+              </div>
+            </div>
+
+            {/* 14 Granular Feature Switches */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {granularChatSwitches.map((sw) => {
+                const isDisabled = Boolean(flags[sw.key]);
+                return (
+                  <button
+                    key={sw.key}
+                    type="button"
+                    onClick={async () => {
+                      const r = await adminUpdateChatFeatureFlags(
+                        { [sw.key]: !isDisabled },
+                        `${!isDisabled ? 'Matikan' : 'Aktifkan'}: ${sw.label}`
+                      );
+                      notifyChatCfg(`${sw.label}: ${!isDisabled ? 'DINONAKTIFKAN' : 'DIAKTIFKAN'}`);
+                      void r;
+                    }}
+                    className={`p-3 rounded-2xl border text-left transition-all flex items-center justify-between gap-2.5 cursor-pointer ${
+                      isDisabled
+                        ? 'bg-rose-950/50 border-rose-500/60 text-rose-100'
+                        : 'bg-slate-900 border-slate-800 hover:border-emerald-500/50 text-slate-200'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="font-extrabold text-xs truncate">{sw.label}</p>
+                      <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">{sw.desc}</p>
+                    </div>
+                    <span
+                      className={`px-2 py-1 rounded-lg text-[10px] font-black shrink-0 ${
+                        isDisabled ? 'bg-rose-600 text-white' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      }`}
+                    >
+                      {isDisabled ? 'MATI' : 'AKTIF'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 3. ANTREAN LAPORAN PELANGGARAN & BROADCAST DM / JADWAL PENGUMUMAN */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Chat Reports Queue */}
+            <div className="lg:col-span-6 p-5 rounded-3xl bg-slate-950 border border-rose-500/40 space-y-3.5">
+              <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Flag className="w-4 h-4 text-rose-400" />
+                  <h4 className="font-black text-white text-sm">
+                    Laporan Pesan Masuk ({pendingReports.length} Pending)
+                  </h4>
+                </div>
+                <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl">
+                  <button
+                    type="button"
+                    onClick={() => setChatReportFilter('pending')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${
+                      chatReportFilter === 'pending' ? 'bg-rose-600 text-white' : 'text-slate-400'
+                    }`}
+                  >
+                    Pending ({pendingReports.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChatReportFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${
+                      chatReportFilter === 'all' ? 'bg-slate-700 text-white' : 'text-slate-400'
+                    }`}
+                  >
+                    Semua ({chatReports.length})
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                {shownReports.length === 0 ? (
+                  <p className="text-center text-slate-500 py-8">Tidak ada laporan pesan yang perlu ditinjau.</p>
+                ) : (
+                  shownReports.map((rep) => (
+                    <div key={rep.id} className="p-3 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-white">
+                          Terlapor: <span className="text-rose-300">{rep.reportedName}</span>
+                        </span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                            rep.status === 'pending'
+                              ? 'bg-amber-500 text-slate-950'
+                              : rep.status === 'reviewed'
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-700 text-slate-300'
+                          }`}
+                        >
+                          {rep.status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Pelapor: {rep.reporterName} • Ruang: {rep.scope === 'global' ? 'Chat Global' : rep.roomKey}
+                      </p>
+                      <p className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 italic line-clamp-2">
+                        &ldquo;{rep.messagePreview}&rdquo;
+                      </p>
+                      <p className="text-[11px] text-amber-300 font-semibold">Alasan: {rep.reason}</p>
+                      {rep.status === 'pending' && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const r = await adminResolveChatReport(rep.id, 'reviewed', 'Ditindak oleh Admin');
+                              notifyChatCfg(r.message);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px]"
+                          >
+                            Tandai Selesai
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const r = await adminResolveChatReport(rep.id, 'dismissed', 'Diabaikan Admin');
+                              notifyChatCfg(r.message);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[10px]"
+                          >
+                            Abaikan
+                          </button>
+                          {rep.scope === 'global' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await deleteGlobalChatMessage(rep.messageId, { asAdminModeration: true });
+                                await adminResolveChatReport(rep.id, 'reviewed', 'Pesan Global dihapus Admin');
+                                notifyChatCfg('Pesan Global dihapus & laporan ditandai selesai.');
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[10px]"
+                            >
+                              Hapus Pesan Global
+                            </button>
+                          )}
+                          {rep.reportedAccountId && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await adminMuteGlobalChatUser({
+                                  accountId: rep.reportedAccountId!,
+                                  accountName: rep.reportedName,
+                                  amount: 1,
+                                  unit: 'hours',
+                                  reason: rep.reason,
+                                });
+                                notifyChatCfg(`${rep.reportedName} di-mute 1 jam.`);
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-black text-[10px]"
+                            >
+                              Mute 1 Jam
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Broadcast DM Massal & Scheduled Announcements */}
+            <div className="lg:col-span-6 p-5 rounded-3xl bg-slate-950 border border-indigo-500/40 space-y-4">
+              <div className="space-y-2 border-b border-slate-800 pb-4">
+                <h4 className="font-black text-white text-sm flex items-center gap-2">
+                  <Megaphone className="w-4 h-4 text-indigo-400" />
+                  <span>Broadcast DM Resmi ke Semua Nasabah</span>
+                </h4>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={adminDmBroadcastText}
+                    onChange={(e) => setAdminDmBroadcastText(e.target.value)}
+                    placeholder="Kirim pesan Chat Privat 1-on-1 ke seluruh akun nasabah..."
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white text-xs"
+                  />
+                  <button
+                    type="button"
+                    disabled={!adminDmBroadcastText.trim()}
+                    onClick={async () => {
+                      const r = await adminBroadcastToAllPrivateDms(
+                        adminDmBroadcastText.trim(),
+                        globalChatAdminName.trim() || 'Admin Bank Nusantara'
+                      );
+                      notifyChatCfg(r.message);
+                      if (r.success) setAdminDmBroadcastText('');
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-45 text-white font-black text-xs shrink-0"
+                  >
+                    Kirim DM Massal
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                <h4 className="font-black text-white text-sm flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  <span>Jadwal Pengumuman Chat Global Otomatis</span>
+                </h4>
+                <input
+                  type="text"
+                  value={schedAnnText}
+                  onChange={(e) => setSchedAnnText(e.target.value)}
+                  placeholder="Isi pengumuman terjadwal..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white text-xs"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="datetime-local"
+                    value={schedAnnDateTime}
+                    onChange={(e) => setSchedAnnDateTime(e.target.value)}
+                    className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-xs"
+                  />
+                  <label className="inline-flex items-center gap-1.5 text-slate-300 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={schedAnnPinned}
+                      onChange={(e) => setSchedAnnPinned(e.target.checked)}
+                    />
+                    Sematkan
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 text-slate-300 font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={schedAnnPopup}
+                      onChange={(e) => setSchedAnnPopup(e.target.checked)}
+                    />
+                    Pop-up HP
+                  </label>
+                  <button
+                    type="button"
+                    disabled={!schedAnnText.trim() || !schedAnnDateTime}
+                    onClick={async () => {
+                      const ts = Date.parse(schedAnnDateTime);
+                      if (!Number.isFinite(ts) || ts <= Date.now()) {
+                        notifyChatCfg('Pilih waktu jadwal di masa mendatang.');
+                        return;
+                      }
+                      const r = await adminScheduleAnnouncement({
+                        text: schedAnnText.trim(),
+                        scheduledAtMs: ts,
+                        isPinned: schedAnnPinned,
+                        showPopupOnAllPhones: schedAnnPopup,
+                      });
+                      notifyChatCfg(r.message);
+                      if (r.success) setSchedAnnText('');
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-45 text-slate-950 font-black text-xs ml-auto"
+                  >
+                    Jadwalkan
+                  </button>
+                </div>
+
+                {(globalChatConfig.scheduledAnnouncements || []).length > 0 && (
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto pt-1">
+                    {(globalChatConfig.scheduledAnnouncements || []).map((sa) => (
+                      <div
+                        key={sa.id}
+                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-900 border border-slate-800"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-white font-bold truncate">{sa.text}</p>
+                          <p className="text-[10px] text-slate-400">
+                            {new Date(sa.scheduledAtMs).toLocaleString('id-ID')} •{' '}
+                            <strong className={sa.sent ? 'text-emerald-400' : 'text-amber-300'}>
+                              {sa.sent ? 'Sudah Terkirim' : 'Menunggu Jadwal'}
+                            </strong>
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void adminDeleteScheduledAnnouncement(sa.id)}
+                          className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-950/60 shrink-0"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 4. MODERASI ANTI-SPAM, DIVISI ADMIN, SAMBUTAN, LENCANA & AMPLOP HADIAH RESMI */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            {/* Anti-Spam, Slow Mode, Banned Words & Division Label */}
+            <div className="lg:col-span-6 p-5 rounded-3xl bg-slate-950 border border-slate-800 space-y-4">
+              <h4 className="font-black text-white text-sm flex items-center gap-2 border-b border-slate-800 pb-3">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Anti-Spam Otomatis, Filter Kata, Divisi Admin &amp; Sambutan</span>
+              </h4>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const r = await adminUpdateGlobalChatConfig(
+                      { adminOnlyLock: !globalChatConfig.adminOnlyLock },
+                      'Toggle Kunci Global Khusus Admin'
+                    );
+                    notifyChatCfg(r.message);
+                  }}
+                  className={`px-3 py-2 rounded-xl font-black text-xs inline-flex items-center gap-1.5 ${
+                    globalChatConfig.adminOnlyLock
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40'
+                  }`}
+                >
+                  {globalChatConfig.adminOnlyLock ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                  {globalChatConfig.adminOnlyLock ? 'Global: Khusus Admin' : 'Global: Semua Nasabah'}
+                </button>
+
+                <select
+                  value={globalChatConfig.cooldownMs || 0}
+                  onChange={async (e) => {
+                    const r = await adminUpdateGlobalChatConfig(
+                      { cooldownMs: Number(e.target.value) },
+                      `Atur Slow Mode ${Number(e.target.value) / 1000}d`
+                    );
+                    notifyChatCfg(r.message);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-bold text-xs"
+                >
+                  <option value={0}>Slow Mode: Off</option>
+                  <option value={3000}>Slow Mode: 3 Detik</option>
+                  <option value={5000}>Slow Mode: 5 Detik</option>
+                  <option value={15000}>Slow Mode: 15 Detik</option>
+                  <option value={30000}>Slow Mode: 30 Detik</option>
+                  <option value={60000}>Slow Mode: 60 Detik</option>
+                </select>
+
+                <select
+                  value={globalChatConfig.activeAdminDivision || 'Admin Utama'}
+                  onChange={async (e) => {
+                    const div = e.target.value as ChatAdminDivision;
+                    const r = await adminUpdateGlobalChatConfig(
+                      { activeAdminDivision: div },
+                      `Ubah Label Divisi Admin ke ${div}`
+                    );
+                    notifyChatCfg(r.message);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-900 border border-amber-500/40 text-amber-300 font-bold text-xs"
+                >
+                  {(['Admin Utama', 'CS Resmi', 'Keamanan', 'Manajemen Promo'] as const).map((d) => (
+                    <option key={d} value={d}>
+                      Divisi: {d}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Anti-Spam Controls */}
+              <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-slate-200">Perlindungan Anti-Spam Otomatis</span>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const r = await adminUpdateGlobalChatConfig(
+                        { antiSpamConfig: { ...antiSpam, enabled: !antiSpam.enabled } },
+                        'Toggle Anti-Spam Otomatis'
+                      );
+                      notifyChatCfg(r.message);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-black text-[10px] ${
+                      antiSpam.enabled ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300'
+                    }`}
+                  >
+                    {antiSpam.enabled ? 'ANTI-SPAM AKTIF' : 'ANTI-SPAM MATI'}
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-slate-300">
+                    <span>Maks pesan/10 detik:</span>
+                    <input
+                      type="number"
+                      min={2}
+                      max={30}
+                      value={antiSpam.maxMessagesPer10s}
+                      onChange={async (e) => {
+                        const val = Math.max(2, Math.min(30, Number(e.target.value) || 5));
+                        await adminUpdateGlobalChatConfig({
+                          antiSpamConfig: { ...antiSpam, maxMessagesPer10s: val },
+                        });
+                      }}
+                      className="w-16 px-2 py-1 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono text-center"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const r = await adminUpdateGlobalChatConfig({
+                        antiSpamConfig: { ...antiSpam, blockExternalLinks: !antiSpam.blockExternalLinks },
+                      });
+                      notifyChatCfg(r.message);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] border ${
+                      antiSpam.blockExternalLinks
+                        ? 'bg-rose-950/60 border-rose-500 text-rose-200'
+                        : 'bg-slate-950 border-slate-700 text-slate-400'
+                    }`}
+                  >
+                    Blokir Tautan Luar: {antiSpam.blockExternalLinks ? 'YA' : 'TIDAK'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Banned Words */}
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-bold block">
+                  Kata Terlarang (Pisahkan dengan koma):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatBannedWordsDraft}
+                    onChange={(e) => setChatBannedWordsDraft(e.target.value)}
+                    placeholder="Contoh: judol, slot, penipu, pinjol"
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2 text-white text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const list = chatBannedWordsDraft
+                        .split(',')
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+                      const r = await adminUpdateGlobalChatConfig(
+                        { bannedWords: list },
+                        `Simpan ${list.length} kata terlarang`
+                      );
+                      notifyChatCfg(r.message);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs"
+                  >
+                    Simpan Filter
+                  </button>
+                </div>
+              </div>
+
+              {/* Welcome Greeting Editor */}
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-bold block">
+                  Editor Teks Sambutan Akun Baru (&quot;Admin Utama Bank Nusantara&quot;):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={chatWelcomeDraft}
+                    onChange={(e) => setChatWelcomeDraft(e.target.value)}
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2 text-white text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const r = await adminUpdateGlobalChatConfig(
+                        { customWelcomeText: chatWelcomeDraft.trim() },
+                        'Update teks sambutan akun baru'
+                      );
+                      notifyChatCfg(r.message);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs"
+                  >
+                    Simpan
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Customer Chat Badges + Official Admin Amplop Hadiah */}
+            <div className="lg:col-span-6 p-5 rounded-3xl bg-slate-950 border border-amber-500/40 space-y-4">
+              {/* Customer Badges */}
+              <div className="space-y-2.5 border-b border-slate-800 pb-4">
+                <h4 className="font-black text-white text-sm flex items-center gap-2">
+                  <Award className="w-4 h-4 text-amber-400" />
+                  <span>Berikan Lencana Khusus Chat Nasabah</span>
+                </h4>
+                <select
+                  value={badgeTargetAccId}
+                  onChange={(e) => setBadgeTargetAccId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-white text-xs font-semibold"
+                >
+                  {accounts.map((acc) => (
+                    <option key={acc.id} value={acc.id}>
+                      {acc.fullName} (Rek {acc.accountNumber}){acc.chatCustomBadge ? ` — [${acc.chatCustomBadge.toUpperCase()}]` : ''}
+                    </option>
+                  ))}
+                </select>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {(
+                    [
+                      { val: 'verified', label: 'Terverifikasi' },
+                      { val: 'vip', label: 'VIP' },
+                      { val: 'sultan', label: 'SULTAN' },
+                      { val: null, label: 'Hapus Badge' },
+                    ] as Array<{ val: ChatCustomBadgeTier | null; label: string }>
+                  ).map((b) => (
+                    <button
+                      key={String(b.val)}
+                      type="button"
+                      disabled={!badgeTargetAccId}
+                      onClick={() => {
+                        const r = adminSetCustomerChatBadge(badgeTargetAccId, b.val);
+                        notifyChatCfg(r.message);
+                      }}
+                      className="py-2 px-2 rounded-xl bg-slate-900 hover:bg-amber-500 hover:text-slate-950 border border-slate-700 text-slate-200 font-extrabold text-[11px] transition-colors"
+                    >
+                      {b.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Official Admin Amplop Hadiah (Red Packet) */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h4 className="font-black text-white text-sm flex items-center gap-2">
+                    <Gift className="w-4 h-4 text-rose-400" />
+                    <span>Sebar Amplop Hadiah Resmi Admin ke Chat Global</span>
+                  </h4>
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold">
+                    Wajib PIN Admin
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {(
+                    [
+                      { id: 'uang', label: 'Uang (Rp)' },
+                      { id: 'coin', label: 'Coin' },
+                      { id: 'diamond', label: 'Diamond' },
+                    ] as const
+                  ).map((k) => (
+                    <button
+                      key={k.id}
+                      type="button"
+                      onClick={() => {
+                        setAdminRpAssetKind(k.id);
+                        setAdminRpTotal(k.id === 'uang' ? '100000' : '50');
+                      }}
+                      className={`py-2 rounded-xl border text-xs font-extrabold ${
+                        adminRpAssetKind === k.id
+                          ? 'bg-rose-950/70 border-rose-500 text-rose-200'
+                          : 'bg-slate-900 border-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {k.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Total Hadiah</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={adminRpTotal}
+                      onChange={(e) => setAdminRpTotal(e.target.value.replace(/[^\d]/g, ''))}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-white font-mono tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Kuota Orang</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={adminRpQuota}
+                      onChange={(e) => setAdminRpQuota(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-white font-mono tabular-nums"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Mode Bagi</label>
+                    <select
+                      value={adminRpMode}
+                      onChange={(e) => setAdminRpMode(e.target.value as ChatRedPacketMode)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-white font-bold"
+                    >
+                      <option value="fastest_biggest">Tercepat Terbesar</option>
+                      <option value="random">Acak DANA</option>
+                      <option value="equal">Merata</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={adminRpNote}
+                    onChange={(e) => setAdminRpNote(e.target.value)}
+                    placeholder="Ucapan amplop hadiah resmi..."
+                    className="flex-1 bg-slate-900 border border-slate-700 rounded-xl p-2 text-white text-xs"
+                  />
+                  <button
+                    type="button"
+                    disabled={redPacketTotalNum < redPacketQuotaNum || redPacketTotalNum < 1}
+                    onClick={() => setShowAdminRpPinModal(true)}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 disabled:opacity-45 text-slate-950 font-black text-xs shrink-0 flex items-center gap-1.5"
+                  >
+                    <Gift className="w-3.5 h-3.5" />
+                    <span>Kirim Amplop</span>
+                  </button>
+                </div>
+                {senderAcct && (
+                  <p className="text-[10px] text-slate-400 font-mono tabular-nums">
+                    Saldo Pengirim ({senderAcct.fullName}):{' '}
+                    {adminRpAssetKind === 'uang'
+                      ? isUnlimitedNumber(senderAcct.balance)
+                        ? 'Rp ∞'
+                        : formatRupiah(senderAcct.balance)
+                      : adminRpAssetKind === 'coin'
+                        ? isUnlimitedNumber(senderAcct.spinCoins || 0)
+                          ? '∞ Coin'
+                          : `${(senderAcct.spinCoins || 0).toLocaleString('id-ID')} Coin`
+                        : isUnlimitedNumber(senderAcct.diamonds || 0)
+                          ? '∞ Diamond'
+                          : `${(senderAcct.diamonds || 0).toLocaleString('id-ID')} Diamond`}
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -4387,9 +5258,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                             </span>
                             <button
                               type="button"
-                              onClick={() => deleteGlobalChatMessage(msg.id)}
+                              onClick={() => void deleteGlobalChatMessage(msg.id, { asAdminModeration: true })}
                               className="text-slate-500 hover:text-rose-400 cursor-pointer"
-                              title="Hapus pesan"
+                              title="Hapus pesan (Moderasi Admin)"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -4405,8 +5276,33 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               </div>
             </div>
           </div>
+
+          <PinPromptModal
+            isOpen={showAdminRpPinModal}
+            targetAccountId={senderAcct?.id || 'acc-admin'}
+            targetAccountName={senderAcct?.fullName || 'Admin Bank Nusantara'}
+            expectedPin={senderAcct?.pin || '159357'}
+            onCancel={() => setShowAdminRpPinModal(false)}
+            onSuccess={async (pin) => {
+              setShowAdminRpPinModal(false);
+              const res = await createChatRedPacket({
+                scope: 'global',
+                assetKind: adminRpAssetKind,
+                totalAmount: redPacketTotalNum,
+                quota: redPacketQuotaNum,
+                mode: adminRpMode,
+                pin: pin || senderAcct?.pin || '159357',
+                note: adminRpNote.trim() || 'Amplop Hadiah Resmi Admin',
+                isOfficialAdmin: true,
+              });
+              notifyChatCfg(res.message);
+            }}
+            title="Konfirmasi PIN Amplop Hadiah Resmi Admin"
+            description="Masukkan PIN 6 digit kartu pengirim untuk menyebar Amplop Hadiah ke Chat Global."
+          />
         </div>
-      )}
+        );
+      })()}
 
       {/* ================= ADMIN TAB 0: TINJAUAN KEUANGAN WAJIB ADMIN ================= */}
       {activeAdminTab === 'finance' && (

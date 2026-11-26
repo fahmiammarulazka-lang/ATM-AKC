@@ -321,9 +321,18 @@ export interface BankAccount {
   dismissedWarningMap?: Record<string, number>;
   // Kontak nasabah tersimpan untuk Chat Privat (sinkron Cloud per akun)
   savedChatContacts?: PrivateChatContact[];
-  // Pesan berbintang / bookmark & grup yang dibisukan notifikasinya (sinkron Cloud per akun)
+  // Pesan berbintang / bookmark, pesan dihapus untuk saya sendiri & grup yang dibisukan notifikasinya (sinkron Cloud per akun)
   bookmarkedChatIds?: string[];
+  hiddenChatMessageIds?: string[];
   mutedGroupIds?: string[];
+  // Chat v15.41.49: Sambutan akun baru 1x, Lencana Khusus Admin, Pin/Arsip ruang, Blokir, DND, & Opsi tombol Enter
+  hasSeenChatWelcome?: boolean;
+  chatCustomBadge?: ChatCustomBadgeTier | null;
+  pinnedChatRoomKeys?: string[];
+  archivedChatRoomKeys?: string[];
+  blockedChatAccountIds?: string[];
+  chatDndEnabled?: boolean;
+  enterKeySendsMessage?: boolean;
 }
 
 export interface DebtHistoryEntry {
@@ -518,6 +527,147 @@ export interface ChatTypingStateEntry {
   expiresAtMs: number;
 }
 
+export type ChatAssetKind = 'uang' | 'coin' | 'diamond';
+export type ChatRedPacketMode = 'fastest_biggest' | 'random' | 'equal';
+export type ChatCustomBadgeTier = 'verified' | 'vip' | 'sultan';
+export type ChatAdminDivision = 'CS Resmi' | 'Tim Keamanan' | 'Pimpinan' | string;
+
+export interface ChatImageAttachment {
+  dataUrl: string;
+  fileName?: string;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+}
+
+export interface ChatVoiceAttachment {
+  dataUrl: string;
+  durationSec: number;
+  mimeType?: string;
+}
+
+export interface ChatContactAttachment {
+  accountId: string;
+  accountNumber: string;
+  userId16?: string;
+  fullName: string;
+  cardTier?: CardTier;
+  isVerified?: boolean;
+}
+
+export interface ChatRedPacketClaim {
+  accountId: string;
+  accountNumber?: string;
+  accountName: string;
+  amount: number;
+  claimedAt: string;
+  claimedAtMs: number;
+  rank: number;
+}
+
+export interface ChatRedPacketData {
+  id: string;
+  creatorAccountId: string;
+  creatorName: string;
+  senderRole?: 'admin' | 'customer';
+  assetKind: ChatAssetKind;
+  totalAmount: number;
+  remainingAmount: number;
+  quota: number;
+  remainingQuota: number;
+  mode: ChatRedPacketMode;
+  note?: string;
+  claims: ChatRedPacketClaim[];
+  status: 'active' | 'exhausted';
+  isOfficialAdmin?: boolean;
+  createdAt?: string;
+  createdAtMs: number;
+}
+
+export interface ChatSplitBillData {
+  id: string;
+  creatorAccountId: string;
+  creatorName: string;
+  title: string;
+  assetKind: ChatAssetKind;
+  totalAmount: number;
+  perPersonAmount: number;
+  participantAccountIds: string[];
+  paidByAccountIdMap: Record<
+    string,
+    { accountName: string; paidAt: string; paidAtMs: number; amount?: number; referenceNo?: string }
+  >;
+  createdAt?: string;
+  createdAtMs: number;
+}
+
+export interface ChatBillReminderData {
+  id: string;
+  title: string;
+  assetKind: ChatAssetKind;
+  amount: number;
+  dueDateLabel: string;
+  note?: string;
+}
+
+export interface ChatReportEntry {
+  id: string;
+  scope: 'global' | 'private';
+  roomScope?: 'global' | 'private';
+  roomKey: string;
+  messageId: string;
+  messagePreview: string;
+  reportedAccountId?: string;
+  reportedName: string;
+  reportedAccountNumber?: string;
+  reporterAccountId: string;
+  reporterName: string;
+  reason: string;
+  status: 'pending' | 'reviewed' | 'dismissed';
+  resolutionNote?: string;
+  adminNote?: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  createdAt: string;
+  createdAtMs: number;
+}
+
+export interface ScheduledChatAnnouncement {
+  id: string;
+  text: string;
+  scheduledAtMs: number;
+  isPinned?: boolean;
+  showPopupOnAllPhones?: boolean;
+  adminDivisionLabel?: string;
+  createdBy: string;
+  sent?: boolean;
+  sentAtMs?: number;
+}
+
+export interface ChatFeatureFlags {
+  chatSystemDisabled?: boolean;
+  disableGlobalChat?: boolean;
+  disablePrivateChat?: boolean;
+  disableGroupChat?: boolean;
+  disableCreateGroup?: boolean;
+  disableAssetTransfers?: boolean;
+  disableRedPacket?: boolean;
+  disableSplitBill?: boolean;
+  disableImages?: boolean;
+  disableVoiceNotes?: boolean;
+  disablePolls?: boolean;
+  disableReactions?: boolean;
+  disableMessageEdit?: boolean;
+  disableChatSystemNotifications?: boolean;
+  disableWelcomeGreeting?: boolean;
+}
+
+export interface ChatAntiSpamConfig {
+  enabled: boolean;
+  maxMessagesPer10s: number;
+  blockExternalLinks: boolean;
+}
+
 export interface GlobalChatMessage {
   id: string;
   senderName: string;
@@ -527,6 +677,8 @@ export interface GlobalChatMessage {
   senderUserId16?: string;
   senderCardTier?: CardTier;
   isVerified?: boolean;
+  adminDivisionLabel?: ChatAdminDivision;
+  senderCustomBadge?: ChatCustomBadgeTier | null;
   title: string;
   text: string;
   timestamp: string;
@@ -534,6 +686,7 @@ export interface GlobalChatMessage {
   updatedAtMs?: number;
   editedAt?: string;
   editedAtMs?: number;
+  expiresAtMs?: number;
   isPinned?: boolean;
   isOfficialAnnouncement?: boolean;
   isAdminHighlight?: boolean;
@@ -544,6 +697,10 @@ export interface GlobalChatMessage {
   poll?: ChatPollData;
   forwardedFrom?: ChatForwardInfo;
   mentions?: string[];
+  imageAttachment?: ChatImageAttachment;
+  voiceAttachment?: ChatVoiceAttachment;
+  contactAttachment?: ChatContactAttachment;
+  redPacket?: ChatRedPacketData;
 }
 
 export interface GlobalChatConfig {
@@ -554,6 +711,12 @@ export interface GlobalChatConfig {
   bannedWords?: string[];
   bannedWordMode?: 'censor' | 'block';
   adminHighlightDefault?: boolean;
+  featureFlags?: ChatFeatureFlags;
+  maintenanceNotice?: string;
+  customWelcomeText?: string;
+  activeAdminDivision?: ChatAdminDivision;
+  antiSpamConfig?: ChatAntiSpamConfig;
+  scheduledAnnouncements?: ScheduledChatAnnouncement[];
   updatedAtMs: number;
 }
 
@@ -1083,6 +1246,8 @@ export interface ChatMessage {
   senderName: string;
   senderRole?: 'admin' | 'customer';
   senderCardTier?: CardTier;
+  adminDivisionLabel?: ChatAdminDivision;
+  senderCustomBadge?: ChatCustomBadgeTier | null;
   recipientAccountId?: string;
   recipientAccount: string;
   receiverAccount?: string;
@@ -1094,6 +1259,7 @@ export interface ChatMessage {
   updatedAtMs?: number;
   editedAt?: string;
   editedAtMs?: number;
+  expiresAtMs?: number;
   replyToId?: string;
   replyToSender?: string;
   replyToPreview?: string;
@@ -1104,17 +1270,26 @@ export interface ChatMessage {
   poll?: ChatPollData;
   forwardedFrom?: ChatForwardInfo;
   mentions?: string[];
+  imageAttachment?: ChatImageAttachment;
+  voiceAttachment?: ChatVoiceAttachment;
+  contactAttachment?: ChatContactAttachment;
+  redPacket?: ChatRedPacketData;
+  splitBill?: ChatSplitBillData;
+  billReminder?: ChatBillReminderData;
   transferAttachment?: {
+    assetKind?: ChatAssetKind;
     amount: number;
     referenceNo: string;
     note?: string;
     isRequest?: boolean;
-    status?: 'pending' | 'paid';
+    status?: 'pending' | 'paid' | 'rejected';
     targetAccountNumber?: string;
     targetName?: string;
     paidByAccountId?: string;
     paidByName?: string;
     paidAt?: string;
+    rejectedAt?: string;
+    rejectedByName?: string;
   };
 }
 
@@ -2454,7 +2629,8 @@ export type AdminDeletableCollectionKey =
   | 'banPresets'
   | 'suggestions'
   | 'privateChats'
-  | 'privateChatGroups';
+  | 'privateChatGroups'
+  | 'chatReports';
 
 export type DeletedAdminItemIdsMap = Partial<Record<AdminDeletableCollectionKey, string[]>>;
 

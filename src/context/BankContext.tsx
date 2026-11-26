@@ -233,6 +233,21 @@ import {
   ChatTypingStateEntry,
   PrivateChatContact,
   PrivateChatGroup,
+  ChatAssetKind,
+  ChatRedPacketMode,
+  ChatCustomBadgeTier,
+  ChatAdminDivision,
+  ChatImageAttachment,
+  ChatVoiceAttachment,
+  ChatContactAttachment,
+  ChatRedPacketClaim,
+  ChatRedPacketData,
+  ChatSplitBillData,
+  ChatBillReminderData,
+  ChatReportEntry,
+  ScheduledChatAnnouncement,
+  ChatFeatureFlags,
+  ChatAntiSpamConfig,
   SuggestionStatus,
   SuggestionPriority,
   SuggestionReward,
@@ -429,17 +444,28 @@ interface SendChatInput {
   poll?: ChatPollData;
   forwardedFrom?: ChatForwardInfo;
   mentions?: string[];
+  imageAttachment?: ChatImageAttachment;
+  voiceAttachment?: ChatVoiceAttachment;
+  contactAttachment?: ChatContactAttachment;
+  billReminder?: ChatBillReminderData;
+  redPacket?: ChatRedPacketData;
+  splitBill?: ChatSplitBillData;
+  expiresAtMs?: number;
+  adminDivisionLabel?: ChatAdminDivision;
   transferAttachment?: {
     amount: number;
+    assetKind?: ChatAssetKind;
     referenceNo: string;
     note?: string;
     isRequest?: boolean;
-    status?: 'pending' | 'paid';
+    status?: 'pending' | 'paid' | 'rejected';
     targetAccountNumber?: string;
     targetName?: string;
     paidByAccountId?: string;
     paidByName?: string;
     paidAt?: string;
+    rejectedByName?: string;
+    rejectedAt?: string;
   };
 }
 
@@ -566,6 +592,7 @@ interface BankContextType {
   globalChats: GlobalChatMessage[];
   globalChatConfig: GlobalChatConfig;
   chatModerationLogs: ChatModerationLog[];
+  chatReports: ChatReportEntry[];
   chatTypingMap: Record<string, ChatTypingStateEntry[]>;
   emitChatTyping: (roomKey: string) => void;
   refreshChatSyncNow: () => Promise<{ success: boolean; message: string }>;
@@ -582,6 +609,12 @@ interface BankContextType {
     poll?: ChatPollData;
     forwardedFrom?: ChatForwardInfo;
     mentions?: string[];
+    imageAttachment?: ChatImageAttachment;
+    voiceAttachment?: ChatVoiceAttachment;
+    contactAttachment?: ChatContactAttachment;
+    redPacket?: ChatRedPacketData;
+    expiresAtMs?: number;
+    adminDivisionLabel?: ChatAdminDivision;
   }) => Promise<{ success: boolean; message: string }>;
   editGlobalChatMessage: (
     id: string,
@@ -598,6 +631,25 @@ interface BankContextType {
     partial: Partial<GlobalChatConfig>,
     logDetail?: string
   ) => Promise<{ success: boolean; message: string }>;
+  adminUpdateChatFeatureFlags: (
+    partial: Partial<ChatFeatureFlags>,
+    logDetail?: string
+  ) => Promise<{ success: boolean; message: string }>;
+  adminSetCustomerChatBadge: (
+    accountId: string,
+    tier: ChatCustomBadgeTier | null
+  ) => { success: boolean; message: string };
+  adminBroadcastToAllPrivateDms: (
+    text: string,
+    senderName?: string
+  ) => Promise<{ success: boolean; message: string; sentCount: number }>;
+  adminScheduleAnnouncement: (input: {
+    text: string;
+    scheduledAtMs: number;
+    showPopupOnAllPhones?: boolean;
+    isPinned?: boolean;
+  }) => Promise<{ success: boolean; message: string }>;
+  adminDeleteScheduledAnnouncement: (id: string) => Promise<void>;
   adminMuteGlobalChatUser: (input: {
     accountId: string;
     accountName: string;
@@ -618,13 +670,16 @@ interface BankContextType {
     targetName: string,
     reason: string
   ) => Promise<{ success: boolean; message: string }>;
-  deleteGlobalChatMessage: (id: string) => Promise<void>;
+  deleteGlobalChatMessage: (
+    id: string,
+    options?: { asAdminModeration?: boolean }
+  ) => Promise<{ success: boolean; message: string }>;
   clearGlobalChatMessages: () => Promise<void>;
   isGlobalChatModalOpen: boolean;
   setIsGlobalChatModalOpen: (open: boolean) => void;
   connectedDevicesCount: number;
 
-  // Chat Privat (Kontak Nasabah 3 Kolom + Grup Privat + Unread Counter + Read Receipts + Edit + Reaksi + Poll)
+  // Chat Privat (Kontak Nasabah 3 Kolom + Grup Privat + Multi-Asset + Amplop Kaget + Split Bill)
   privateChatGroups: PrivateChatGroup[];
   chatLastReadMap: Record<string, number>;
   markChatRoomRead: (roomKey: string) => void;
@@ -638,6 +693,67 @@ interface BankContextType {
   }) => { success: boolean; message: string; contact?: PrivateChatContact };
   removePrivateChatContact: (targetAccountId: string) => { success: boolean; message: string };
   markChatRequestPaid: (messageId: string, paidByName?: string) => Promise<void>;
+  rejectChatTransferRequest: (messageId: string) => Promise<{ success: boolean; message: string }>;
+  sendChatAssetTransfer: (input: {
+    targetAccountId?: string;
+    recipientAccount: string;
+    recipientName: string;
+    groupId?: string;
+    assetKind: ChatAssetKind;
+    amount: number;
+    pin: string;
+    note?: string;
+  }) => Promise<{ success: boolean; message: string }>;
+  payChatTransferRequest: (
+    messageId: string,
+    pin: string
+  ) => Promise<{ success: boolean; message: string }>;
+  createChatRedPacket: (input: {
+    scope: 'global' | 'group';
+    groupId?: string;
+    assetKind: ChatAssetKind;
+    totalAmount: number;
+    quota: number;
+    mode: ChatRedPacketMode;
+    pin: string;
+    note?: string;
+    isOfficialAdmin?: boolean;
+  }) => Promise<{ success: boolean; message: string }>;
+  claimChatRedPacket: (input: {
+    scope: 'global' | 'private';
+    messageId: string;
+  }) => Promise<{ success: boolean; message: string; claimedAmount?: number }>;
+  createChatSplitBill: (input: {
+    groupId: string;
+    title: string;
+    assetKind: ChatAssetKind;
+    totalAmount: number;
+    participantAccountIds: string[];
+  }) => Promise<{ success: boolean; message: string }>;
+  payChatSplitBill: (
+    messageId: string,
+    pin: string
+  ) => Promise<{ success: boolean; message: string }>;
+  submitChatReport: (input: {
+    scope: 'global' | 'private';
+    messageId: string;
+    roomKey: string;
+    reportedAccountId?: string;
+    reportedName: string;
+    messagePreview: string;
+    reason: string;
+  }) => Promise<{ success: boolean; message: string }>;
+  adminResolveChatReport: (
+    id: string,
+    status: 'reviewed' | 'dismissed',
+    note?: string
+  ) => Promise<{ success: boolean; message: string }>;
+  markChatWelcomeSeen: () => void;
+  togglePinChatRoom: (roomKey: string) => { pinned: boolean; message: string };
+  toggleArchiveChatRoom: (roomKey: string) => { archived: boolean; message: string };
+  toggleBlockChatAccount: (accountId: string, name?: string) => { blocked: boolean; message: string };
+  toggleChatDnd: () => { dnd: boolean; message: string };
+  toggleEnterKeyPreference: () => { enterSends: boolean; message: string };
   editPrivateChatMessage: (
     id: string,
     newText: string
@@ -651,6 +767,7 @@ interface BankContextType {
   ) => Promise<{ success: boolean; message: string }>;
   markPrivateMessagesRead: (messageIds: string[]) => Promise<void>;
   toggleBookmarkChatMessage: (messageId: string) => { bookmarked: boolean; message: string };
+  hideChatMessageForMe: (messageId: string) => { success: boolean; message: string };
   toggleMutePrivateGroup: (groupId: string) => { muted: boolean; message: string };
   createPrivateChatGroup: (input: {
     name: string;
@@ -3380,34 +3497,108 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dismissedReceiptsByAccount
   );
   dismissedReceiptsByAccountRef.current = dismissedReceiptsByAccount;
-  const [globalChats, setGlobalChats] = useState<GlobalChatMessage[]>([
-    {
-      id: 'gchat-welcome-1',
-      senderName: 'Admin Utama Bank Nusantara',
-      senderRole: 'admin',
-      senderAccount: '9999999999',
-      isVerified: true,
-      title: 'Pengumuman Resmi Admin',
-      text: 'Selamat datang di Chat Global & Priv Bank Nusantara! Semua nasabah kini bisa saling menyapa di Chat Global, serta menambahkan nasabah atau membuat grup tertutup di tab Chat Privat.',
-      timestamp: new Date().toISOString(),
-      createdAtMs: Date.now(),
-      isPinned: true,
-      isOfficialAnnouncement: true,
-    },
-  ]);
-  const [globalChatConfig, setGlobalChatConfig] = useState<GlobalChatConfig>({
+  const DEFAULT_CHAT_FEATURE_FLAGS: ChatFeatureFlags = {
+    chatSystemDisabled: false,
+    disableGlobalChat: false,
+    disablePrivateChat: false,
+    disableGroupChat: false,
+    disableCreateGroup: false,
+    disableAssetTransfers: false,
+    disableRedPacket: false,
+    disableSplitBill: false,
+    disableImages: false,
+    disableVoiceNotes: false,
+    disablePolls: false,
+    disableReactions: false,
+    disableMessageEdit: false,
+    disableChatSystemNotifications: false,
+    disableWelcomeGreeting: false,
+  };
+
+  const DEFAULT_CHAT_ANTI_SPAM: ChatAntiSpamConfig = {
+    enabled: false,
+    maxMessagesPer10s: 5,
+    blockExternalLinks: false,
+  };
+
+  const DEFAULT_GLOBAL_CHAT_CONFIG: GlobalChatConfig = {
     adminOnlyLock: false,
     cooldownMs: 2500,
     mutedUsers: {},
     bannedWords: [],
     bannedWordMode: 'censor',
     adminHighlightDefault: true,
+    featureFlags: { ...DEFAULT_CHAT_FEATURE_FLAGS },
+    maintenanceNotice:
+      'Layanan Chat Global & Privat Bank Nusantara sedang dalam pemeliharaan sementara oleh Admin. Silakan coba kembali beberapa saat lagi.',
+    customWelcomeText:
+      'Selamat datang di Chat Global & Priv Bank Nusantara! Semua nasabah kini bisa saling menyapa di Chat Global, berbagi Amplop Kaget Uang/Coin/Diamond, serta menambahkan nasabah atau membuat grup tertutup di tab Chat Privat.',
+    activeAdminDivision: 'CS Resmi',
+    antiSpamConfig: { ...DEFAULT_CHAT_ANTI_SPAM },
+    scheduledAnnouncements: [],
     updatedAtMs: Date.now(),
-  });
+  };
+
+  const normalizeGlobalChatConfig = (
+    incCfg?: Partial<GlobalChatConfig> | null,
+    prevCfg?: GlobalChatConfig | null
+  ): GlobalChatConfig => {
+    const base = prevCfg || DEFAULT_GLOBAL_CHAT_CONFIG;
+    if (!incCfg || typeof incCfg !== 'object') return base;
+    return {
+      adminOnlyLock:
+        incCfg.adminOnlyLock !== undefined ? Boolean(incCfg.adminOnlyLock) : Boolean(base.adminOnlyLock),
+      cooldownMs:
+        incCfg.cooldownMs !== undefined
+          ? Math.max(0, Number(incCfg.cooldownMs) || 0)
+          : Math.max(0, Number(base.cooldownMs ?? 2500) || 0),
+      lockedBy: incCfg.lockedBy ? String(incCfg.lockedBy) : base.lockedBy,
+      mutedUsers:
+        incCfg.mutedUsers && typeof incCfg.mutedUsers === 'object'
+          ? incCfg.mutedUsers
+          : base.mutedUsers || {},
+      bannedWords: Array.isArray(incCfg.bannedWords) ? incCfg.bannedWords : base.bannedWords || [],
+      bannedWordMode:
+        incCfg.bannedWordMode === 'block' || incCfg.bannedWordMode === 'censor'
+          ? incCfg.bannedWordMode
+          : base.bannedWordMode || 'censor',
+      adminHighlightDefault:
+        typeof incCfg.adminHighlightDefault === 'boolean'
+          ? incCfg.adminHighlightDefault
+          : base.adminHighlightDefault ?? true,
+      featureFlags: {
+        ...DEFAULT_CHAT_FEATURE_FLAGS,
+        ...(base.featureFlags || {}),
+        ...(incCfg.featureFlags && typeof incCfg.featureFlags === 'object' ? incCfg.featureFlags : {}),
+      },
+      maintenanceNotice:
+        typeof incCfg.maintenanceNotice === 'string'
+          ? incCfg.maintenanceNotice
+          : base.maintenanceNotice || DEFAULT_GLOBAL_CHAT_CONFIG.maintenanceNotice,
+      customWelcomeText:
+        typeof incCfg.customWelcomeText === 'string'
+          ? incCfg.customWelcomeText
+          : base.customWelcomeText || DEFAULT_GLOBAL_CHAT_CONFIG.customWelcomeText,
+      activeAdminDivision: incCfg.activeAdminDivision || base.activeAdminDivision || 'CS Resmi',
+      antiSpamConfig: {
+        ...DEFAULT_CHAT_ANTI_SPAM,
+        ...(base.antiSpamConfig || {}),
+        ...(incCfg.antiSpamConfig && typeof incCfg.antiSpamConfig === 'object' ? incCfg.antiSpamConfig : {}),
+      },
+      scheduledAnnouncements: Array.isArray(incCfg.scheduledAnnouncements)
+        ? incCfg.scheduledAnnouncements
+        : base.scheduledAnnouncements || [],
+      updatedAtMs: Number(incCfg.updatedAtMs) || Date.now(),
+    };
+  };
+
+  const [globalChats, setGlobalChats] = useState<GlobalChatMessage[]>([]);
+  const [globalChatConfig, setGlobalChatConfig] = useState<GlobalChatConfig>(DEFAULT_GLOBAL_CHAT_CONFIG);
   const globalChatConfigRef = useRef<GlobalChatConfig>(globalChatConfig);
   globalChatConfigRef.current = globalChatConfig;
 
   const [chatModerationLogs, setChatModerationLogs] = useState<ChatModerationLog[]>([]);
+  const [chatReports, setChatReports] = useState<ChatReportEntry[]>([]);
   const [chatTypingMap, setChatTypingMap] = useState<Record<string, ChatTypingStateEntry[]>>({});
   const lastTypingEmitMsRef = useRef<number>(0);
 
@@ -3429,6 +3620,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
   const seenPrivateChatIdsRef = useRef<Set<string>>(new Set());
   const globalChatLocalLastSentRef = useRef<number>(0);
+  const antiSpamTimestampsRef = useRef<number[]>([]);
 
   const toCloudSafeChatKey = (prefix: string, rawId: string) =>
     `${prefix}${String(rawId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
@@ -3449,6 +3641,49 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const getDeletedChatIdSet = (kind: 'globalChats' | 'privateChats' | 'privateChatGroups'): Set<string> => {
     const arr = deletedAdminItemIdsRef.current?.[kind];
     return new Set(Array.isArray(arr) ? arr.map((x) => String(x)) : []);
+  };
+
+  const mergeRedPacketData = (
+    a?: ChatRedPacketData,
+    b?: ChatRedPacketData
+  ): ChatRedPacketData | undefined => {
+    if (!a && !b) return undefined;
+    const base = b || a!;
+    const other = a || b!;
+    const claimMap = new Map<string, ChatRedPacketClaim>();
+    [...(other.claims || []), ...(base.claims || [])].forEach((c) => {
+      if (!c?.accountId) return;
+      if (!claimMap.has(c.accountId)) claimMap.set(c.accountId, c);
+    });
+    const claims = Array.from(claimMap.values()).sort((x, y) => x.claimedAtMs - y.claimedAtMs);
+    const totalClaimed = claims.reduce((acc, c) => acc + Math.max(0, Number(c.amount) || 0), 0);
+    const remainingAmount = Math.max(0, base.totalAmount - totalClaimed);
+    const remainingQuota = Math.max(0, base.quota - claims.length);
+    const status = remainingQuota <= 0 || remainingAmount <= 0 ? 'exhausted' : 'active';
+    return {
+      ...base,
+      claims,
+      remainingAmount,
+      remainingQuota,
+      status,
+    };
+  };
+
+  const mergeSplitBillData = (
+    a?: ChatSplitBillData,
+    b?: ChatSplitBillData
+  ): ChatSplitBillData | undefined => {
+    if (!a && !b) return undefined;
+    const base = b || a!;
+    const other = a || b!;
+    const mergedPaid: Record<string, { accountName: string; paidAt: string; paidAtMs: number }> = {
+      ...(other.paidByAccountIdMap || {}),
+      ...(base.paidByAccountIdMap || {}),
+    };
+    return {
+      ...base,
+      paidByAccountIdMap: mergedPaid,
+    };
   };
 
   const mergeGlobalChatsUnion = (
@@ -3473,6 +3708,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ...winner,
         reactions: winner.reactions || loser.reactions,
         poll: winner.poll || loser.poll,
+        redPacket: mergeRedPacketData(loser.redPacket, winner.redPacket),
       });
     };
     prev.forEach(put);
@@ -3509,12 +3745,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         existing.readBy || item.readBy
           ? { ...(existing.readBy || {}), ...(item.readBy || {}) }
           : undefined;
+      const isPaid = existing.transferAttachment?.status === 'paid' || item.transferAttachment?.status === 'paid';
+      const isRejected = !isPaid && (existing.transferAttachment?.status === 'rejected' || item.transferAttachment?.status === 'rejected');
       const mergedAttachment =
         winner.transferAttachment || loser.transferAttachment
           ? {
               ...(loser.transferAttachment || {}),
               ...(winner.transferAttachment || {}),
-              ...(existing.transferAttachment?.status === 'paid' || item.transferAttachment?.status === 'paid'
+              ...(isPaid
                 ? {
                     status: 'paid' as const,
                     paidByAccountId:
@@ -3522,7 +3760,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                     paidByName: winner.transferAttachment?.paidByName || loser.transferAttachment?.paidByName,
                     paidAt: winner.transferAttachment?.paidAt || loser.transferAttachment?.paidAt,
                   }
-                : {}),
+                : isRejected
+                  ? {
+                      status: 'rejected' as const,
+                      rejectedByName:
+                        winner.transferAttachment?.rejectedByName || loser.transferAttachment?.rejectedByName,
+                      rejectedAt:
+                        winner.transferAttachment?.rejectedAt || loser.transferAttachment?.rejectedAt,
+                    }
+                  : {}),
             }
           : undefined;
       byId.set(item.id, {
@@ -3531,6 +3777,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         readBy: mergedReadBy,
         reactions: winner.reactions || loser.reactions,
         poll: winner.poll || loser.poll,
+        redPacket: mergeRedPacketData(loser.redPacket, winner.redPacket),
+        splitBill: mergeSplitBillData(loser.splitBill, winner.splitBill),
         transferAttachment: mergedAttachment as ChatMessage['transferAttachment'],
       });
     };
@@ -3570,7 +3818,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       | 'chat_global_messages'
       | 'chat_private_messages'
       | 'chat_private_groups'
-      | 'chat_moderation_logs',
+      | 'chat_moderation_logs'
+      | 'chat_reports',
     keyPrefix: string,
     itemId: string,
     value: unknown
@@ -5106,32 +5355,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       );
     }
     if (data.globalChatConfig && typeof data.globalChatConfig === 'object') {
-      const incCfg = data.globalChatConfig as Partial<GlobalChatConfig>;
-      const nextCfg: GlobalChatConfig = {
-        adminOnlyLock: Boolean(incCfg.adminOnlyLock),
-        cooldownMs: Math.max(0, Number(incCfg.cooldownMs ?? 2500) || 0),
-        lockedBy: incCfg.lockedBy ? String(incCfg.lockedBy) : undefined,
-        mutedUsers:
-          incCfg.mutedUsers && typeof incCfg.mutedUsers === 'object'
-            ? incCfg.mutedUsers
-            : globalChatConfigRef.current?.mutedUsers || {},
-        bannedWords: Array.isArray(incCfg.bannedWords)
-          ? incCfg.bannedWords
-          : globalChatConfigRef.current?.bannedWords || [],
-        bannedWordMode:
-          incCfg.bannedWordMode === 'block' || incCfg.bannedWordMode === 'censor'
-            ? incCfg.bannedWordMode
-            : globalChatConfigRef.current?.bannedWordMode || 'censor',
-        adminHighlightDefault:
-          typeof incCfg.adminHighlightDefault === 'boolean'
-            ? incCfg.adminHighlightDefault
-            : globalChatConfigRef.current?.adminHighlightDefault ?? true,
-        updatedAtMs: Number(incCfg.updatedAtMs) || Date.now(),
-      };
+      const nextCfg = normalizeGlobalChatConfig(
+        data.globalChatConfig as Partial<GlobalChatConfig>,
+        globalChatConfigRef.current
+      );
       if (nextCfg.updatedAtMs >= (globalChatConfigRef.current?.updatedAtMs || 0)) {
         globalChatConfigRef.current = nextCfg;
         setGlobalChatConfig(nextCfg);
       }
+    }
+    if (Array.isArray(data.chatReports)) {
+      setChatReports((prev) => {
+        const byId = new Map<string, ChatReportEntry>();
+        prev.forEach((r) => r?.id && byId.set(r.id, r));
+        (data.chatReports as ChatReportEntry[]).forEach((r) => r?.id && byId.set(r.id, r));
+        return Array.from(byId.values()).sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0)).slice(0, 200);
+      });
     }
     if (Array.isArray(data.privateChatGroups)) {
       setPrivateChatGroups((prev) => {
@@ -5227,6 +5466,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     adminHelpRequests?: AdminHelpRequestRecord[];
     websitePopups?: WebsiteSystemPopupNotification[];
     globalChats?: GlobalChatMessage[];
+    chatReports?: ChatReportEntry[];
     bugReports?: BugReportRecord[];
     deletedAdminItemIds?: DeletedAdminItemIdsMap;
     adminConfigRevisionMap?: Record<string, number>;
@@ -5425,6 +5665,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         : {}),
       ...(overrides?.privateChatGroups !== undefined
         ? { privateChatGroups: overrides.privateChatGroups.slice(0, 120) }
+        : {}),
+      ...(overrides?.chatReports !== undefined
+        ? { chatReports: overrides.chatReports.slice(0, 120) }
         : {}),
       ...(overrides?.bugReports !== undefined
         ? { bugReports: overrides.bugReports.slice(0, 60) }
@@ -7060,17 +7303,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (!docVal || typeof docVal !== 'object') return;
         const incTs = Number(docVal.updatedAtMs) || 0;
         if (incTs < (globalChatConfigRef.current?.updatedAtMs || 0)) return;
-        const nextCfg: GlobalChatConfig = {
-          adminOnlyLock: Boolean(docVal.adminOnlyLock),
-          cooldownMs: Math.max(0, Number(docVal.cooldownMs ?? 2500) || 0),
-          lockedBy: docVal.lockedBy ? String(docVal.lockedBy) : undefined,
-          mutedUsers:
-            docVal.mutedUsers && typeof docVal.mutedUsers === 'object' ? docVal.mutedUsers : {},
-          bannedWords: Array.isArray(docVal.bannedWords) ? docVal.bannedWords : [],
-          bannedWordMode: docVal.bannedWordMode === 'block' ? 'block' : 'censor',
-          adminHighlightDefault: docVal.adminHighlightDefault !== false,
-          updatedAtMs: incTs || Date.now(),
-        };
+        const nextCfg = normalizeGlobalChatConfig(
+          docVal as Partial<GlobalChatConfig>,
+          globalChatConfigRef.current
+        );
         globalChatConfigRef.current = nextCfg;
         setGlobalChatConfig(nextCfg);
       },
@@ -7095,7 +7331,25 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       () => {}
     );
 
-    // Cleanup expired typing indicators every 2s
+    const unsubChatReports = subscribeCloudDoc<Record<string, any>>(
+      'bank_state_v1',
+      'chat_reports',
+      (docVal) => {
+        const items = extractKeyedCloudEntries<ChatReportEntry>(docVal, 'r_');
+        if (items.length === 0) return;
+        setChatReports((prev) => {
+          const byId = new Map<string, ChatReportEntry>();
+          prev.forEach((r) => byId.set(r.id, r));
+          items.forEach((r) => byId.set(r.id, r));
+          return Array.from(byId.values())
+            .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0))
+            .slice(0, 200);
+        });
+      },
+      () => {}
+    );
+
+    // Cleanup expired typing indicators & expired disappearing chat messages every 2s
     const typingTimer = window.setInterval(() => {
       const now = Date.now();
       setChatTypingMap((prev) => {
@@ -7108,6 +7362,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         return changed ? next : prev;
       });
+      setGlobalChats((prev) =>
+        prev.some((m) => m.expiresAtMs && m.expiresAtMs <= now)
+          ? prev.filter((m) => !m.expiresAtMs || m.expiresAtMs > now)
+          : prev
+      );
+      setChats((prev) =>
+        prev.some((m) => m.expiresAtMs && m.expiresAtMs <= now)
+          ? prev.filter((m) => !m.expiresAtMs || m.expiresAtMs > now)
+          : prev
+      );
     }, 2000);
 
     return () => {
@@ -7117,6 +7381,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unsubPrivateGroups();
       unsubGlobalCfg();
       unsubModLogs();
+      unsubChatReports();
       window.clearInterval(typingTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -10977,32 +11242,24 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setBugReports(filterListByAdminTombstones('bugReports', data.bugReports));
         }
         if (data.globalChatConfig && typeof data.globalChatConfig === 'object') {
-          const incCfg = data.globalChatConfig as Partial<GlobalChatConfig>;
-          const nextCfg: GlobalChatConfig = {
-            adminOnlyLock: Boolean(incCfg.adminOnlyLock),
-            cooldownMs: Math.max(0, Number(incCfg.cooldownMs ?? 2500) || 0),
-            lockedBy: incCfg.lockedBy ? String(incCfg.lockedBy) : undefined,
-            mutedUsers:
-              incCfg.mutedUsers && typeof incCfg.mutedUsers === 'object'
-                ? incCfg.mutedUsers
-                : globalChatConfigRef.current?.mutedUsers || {},
-            bannedWords: Array.isArray(incCfg.bannedWords)
-              ? incCfg.bannedWords
-              : globalChatConfigRef.current?.bannedWords || [],
-            bannedWordMode:
-              incCfg.bannedWordMode === 'block' || incCfg.bannedWordMode === 'censor'
-                ? incCfg.bannedWordMode
-                : globalChatConfigRef.current?.bannedWordMode || 'censor',
-            adminHighlightDefault:
-              typeof incCfg.adminHighlightDefault === 'boolean'
-                ? incCfg.adminHighlightDefault
-                : globalChatConfigRef.current?.adminHighlightDefault ?? true,
-            updatedAtMs: Number(incCfg.updatedAtMs) || Date.now(),
-          };
+          const nextCfg = normalizeGlobalChatConfig(
+            data.globalChatConfig as Partial<GlobalChatConfig>,
+            globalChatConfigRef.current
+          );
           if (nextCfg.updatedAtMs >= (globalChatConfigRef.current?.updatedAtMs || 0)) {
             globalChatConfigRef.current = nextCfg;
             setGlobalChatConfig(nextCfg);
           }
+        }
+        if (Array.isArray(data.chatReports)) {
+          setChatReports((prev) => {
+            const byId = new Map<string, ChatReportEntry>();
+            prev.forEach((r) => r?.id && byId.set(r.id, r));
+            (data.chatReports as ChatReportEntry[]).forEach((r) => r?.id && byId.set(r.id, r));
+            return Array.from(byId.values())
+              .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0))
+              .slice(0, 200);
+          });
         }
         if (Array.isArray(data.chatModerationLogs) && data.chatModerationLogs.length > 0) {
           setChatModerationLogs((prev) => {
@@ -11431,32 +11688,24 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 );
               }
               if (msg.payload.globalChatConfig && typeof msg.payload.globalChatConfig === 'object') {
-                const incCfg = msg.payload.globalChatConfig as Partial<GlobalChatConfig>;
-                const nextCfg: GlobalChatConfig = {
-                  adminOnlyLock: Boolean(incCfg.adminOnlyLock),
-                  cooldownMs: Math.max(0, Number(incCfg.cooldownMs ?? 2500) || 0),
-                  lockedBy: incCfg.lockedBy ? String(incCfg.lockedBy) : undefined,
-                  mutedUsers:
-                    incCfg.mutedUsers && typeof incCfg.mutedUsers === 'object'
-                      ? incCfg.mutedUsers
-                      : globalChatConfigRef.current?.mutedUsers || {},
-                  bannedWords: Array.isArray(incCfg.bannedWords)
-                    ? incCfg.bannedWords
-                    : globalChatConfigRef.current?.bannedWords || [],
-                  bannedWordMode:
-                    incCfg.bannedWordMode === 'block' || incCfg.bannedWordMode === 'censor'
-                      ? incCfg.bannedWordMode
-                      : globalChatConfigRef.current?.bannedWordMode || 'censor',
-                  adminHighlightDefault:
-                    typeof incCfg.adminHighlightDefault === 'boolean'
-                      ? incCfg.adminHighlightDefault
-                      : globalChatConfigRef.current?.adminHighlightDefault ?? true,
-                  updatedAtMs: Number(incCfg.updatedAtMs) || Date.now(),
-                };
+                const nextCfg = normalizeGlobalChatConfig(
+                  msg.payload.globalChatConfig as Partial<GlobalChatConfig>,
+                  globalChatConfigRef.current
+                );
                 if (nextCfg.updatedAtMs >= (globalChatConfigRef.current?.updatedAtMs || 0)) {
                   globalChatConfigRef.current = nextCfg;
                   setGlobalChatConfig(nextCfg);
                 }
+              }
+              if (Array.isArray(msg.payload.chatReports)) {
+                setChatReports((prev) => {
+                  const byId = new Map<string, ChatReportEntry>();
+                  prev.forEach((r) => r?.id && byId.set(r.id, r));
+                  (msg.payload.chatReports as ChatReportEntry[]).forEach((r) => r?.id && byId.set(r.id, r));
+                  return Array.from(byId.values())
+                    .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0))
+                    .slice(0, 200);
+                });
               }
               if (Array.isArray(msg.payload.chatModerationLogs) && msg.payload.chatModerationLogs.length > 0) {
                 setChatModerationLogs((prev) => {
@@ -11902,11 +12151,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const updatedMsg: GlobalChatMessage = msg.payload.message;
               setGlobalChats((prev) => mergeGlobalChatsUnion(prev, [updatedMsg]));
             } else if (msg.type === 'global_chat:config' && msg.payload?.globalChatConfig) {
-              const incCfg = msg.payload.globalChatConfig as GlobalChatConfig;
-              if ((incCfg.updatedAtMs || 0) >= (globalChatConfigRef.current?.updatedAtMs || 0)) {
-                globalChatConfigRef.current = incCfg;
-                setGlobalChatConfig(incCfg);
+              const nextCfg = normalizeGlobalChatConfig(
+                msg.payload.globalChatConfig as Partial<GlobalChatConfig>,
+                globalChatConfigRef.current
+              );
+              if ((nextCfg.updatedAtMs || 0) >= (globalChatConfigRef.current?.updatedAtMs || 0)) {
+                globalChatConfigRef.current = nextCfg;
+                setGlobalChatConfig(nextCfg);
               }
+            } else if (
+              (msg.type === 'chat_report:new' || msg.type === 'chat_report:updated') &&
+              msg.payload?.report
+            ) {
+              const incRep = msg.payload.report as ChatReportEntry;
+              setChatReports((prev) => {
+                const rest = prev.filter((r) => r.id !== incRep.id);
+                return [incRep, ...rest].sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0)).slice(0, 200);
+              });
             } else if (msg.type === 'global_chat:delete' && msg.payload?.id) {
               recordDeletedAdminItemIds('globalChats', [String(msg.payload.id)]);
               setGlobalChats((prev) => prev.filter((m) => m.id !== msg.payload.id));
@@ -12180,25 +12441,34 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
         }
         if (data.globalChatConfig && typeof data.globalChatConfig === 'object') {
-          const incCfg = data.globalChatConfig as Partial<GlobalChatConfig>;
-          const nextCfg: GlobalChatConfig = {
-            ...globalChatConfigRef.current,
-            ...incCfg,
-            updatedAtMs: Number(incCfg.updatedAtMs) || Date.now(),
-          };
+          const nextCfg = normalizeGlobalChatConfig(
+            data.globalChatConfig as Partial<GlobalChatConfig>,
+            globalChatConfigRef.current
+          );
           if (nextCfg.updatedAtMs >= (globalChatConfigRef.current?.updatedAtMs || 0)) {
             globalChatConfigRef.current = nextCfg;
             setGlobalChatConfig(nextCfg);
           }
         }
+        if (Array.isArray(data.chatReports)) {
+          setChatReports((prev) => {
+            const byId = new Map<string, ChatReportEntry>();
+            prev.forEach((r) => r?.id && byId.set(r.id, r));
+            (data.chatReports as ChatReportEntry[]).forEach((r) => r?.id && byId.set(r.id, r));
+            return Array.from(byId.values())
+              .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0))
+              .slice(0, 200);
+          });
+        }
       }
-      const [tombDoc, gcDoc, pmDoc, grpDoc, cfgDoc, logDoc] = await Promise.all([
+      const [tombDoc, gcDoc, pmDoc, grpDoc, cfgDoc, logDoc, repDoc] = await Promise.all([
         readCloudDoc('bank_state_v1', 'chat_tombstones').catch(() => null),
         readCloudDoc('bank_state_v1', 'chat_global_messages').catch(() => null),
         readCloudDoc('bank_state_v1', 'chat_private_messages').catch(() => null),
         readCloudDoc('bank_state_v1', 'chat_private_groups').catch(() => null),
         readCloudDoc('bank_state_v1', 'chat_global_config').catch(() => null),
         readCloudDoc('bank_state_v1', 'chat_moderation_logs').catch(() => null),
+        readCloudDoc('bank_state_v1', 'chat_reports').catch(() => null),
       ]);
       if (tombDoc) {
         const entries = extractKeyedCloudEntries<{ id: string; kind: 'globalChats' | 'privateChats' | 'privateChatGroups' }>(tombDoc, 'd_');
@@ -12230,13 +12500,22 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (cfgDoc && typeof cfgDoc === 'object') {
         const incCfg = cfgDoc as Partial<GlobalChatConfig>;
         if ((Number(incCfg.updatedAtMs) || 0) >= (globalChatConfigRef.current?.updatedAtMs || 0)) {
-          const mergedCfg: GlobalChatConfig = {
-            ...globalChatConfigRef.current,
-            ...incCfg,
-            updatedAtMs: Number(incCfg.updatedAtMs) || Date.now(),
-          };
+          const mergedCfg = normalizeGlobalChatConfig(incCfg, globalChatConfigRef.current);
           globalChatConfigRef.current = mergedCfg;
           setGlobalChatConfig(mergedCfg);
+        }
+      }
+      if (repDoc) {
+        const reps = extractKeyedCloudEntries<ChatReportEntry>(repDoc, 'r_');
+        if (reps.length) {
+          setChatReports((prev) => {
+            const byId = new Map<string, ChatReportEntry>();
+            prev.forEach((r) => r?.id && byId.set(r.id, r));
+            reps.forEach((r) => r?.id && byId.set(r.id, r));
+            return Array.from(byId.values())
+              .sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0))
+              .slice(0, 200);
+          });
         }
       }
       if (logDoc) {
@@ -12284,6 +12563,43 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { ok: true, text: filtered };
   };
 
+  const isStrictChatMessageOwner = (
+    msg: { senderAccountId?: string; senderAccount?: string },
+    acc: BankAccount | null | undefined
+  ): boolean => {
+    if (!acc) return false;
+    if (msg.senderAccountId) return msg.senderAccountId === acc.id;
+    if (msg.senderAccount && acc.accountNumber) return msg.senderAccount === acc.accountNumber;
+    return false;
+  };
+
+  const getChatAssetBalance = (acc: BankAccount, kind: ChatAssetKind): number => {
+    if (kind === 'coin') return Math.max(0, Number(acc.spinCoins) || 0);
+    if (kind === 'diamond') return Math.max(0, Number(acc.diamonds) || 0);
+    return Math.max(0, Number(acc.balance) || 0);
+  };
+
+  const formatChatAssetValue = (amount: number, kind: ChatAssetKind): string => {
+    if (kind === 'coin') return `${Math.round(amount).toLocaleString('id-ID')} Coin`;
+    if (kind === 'diamond') return `${Math.round(amount).toLocaleString('id-ID')} Diamond`;
+    return formatRupiah(Math.round(amount));
+  };
+
+  const applyAccountAssetDelta = (
+    acc: BankAccount,
+    kind: ChatAssetKind,
+    delta: number
+  ): BankAccount => {
+    const curVal = getChatAssetBalance(acc, kind);
+    if (isUnlimitedNumber(curVal)) {
+      return acc;
+    }
+    const nextVal = Math.max(0, Math.round(curVal + delta));
+    if (kind === 'coin') return { ...acc, spinCoins: nextVal, accountUpdatedAtMs: Date.now() };
+    if (kind === 'diamond') return { ...acc, diamonds: nextVal, accountUpdatedAtMs: Date.now() };
+    return { ...acc, balance: nextVal, accountUpdatedAtMs: Date.now() };
+  };
+
   const sendGlobalChatMessage = async (input: {
     text: string;
     asAdmin?: boolean;
@@ -12297,9 +12613,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     poll?: ChatPollData;
     forwardedFrom?: ChatForwardInfo;
     mentions?: string[];
+    imageAttachment?: ChatImageAttachment;
+    voiceAttachment?: ChatVoiceAttachment;
+    contactAttachment?: ChatContactAttachment;
+    redPacket?: ChatRedPacketData;
+    expiresAtMs?: number;
+    adminDivisionLabel?: ChatAdminDivision;
   }): Promise<{ success: boolean; message: string }> => {
     const cleanText = input.text.trim();
-    if (!cleanText && !input.poll) {
+    if (!cleanText && !input.poll && !input.imageAttachment && !input.voiceAttachment && !input.contactAttachment && !input.redPacket) {
       return { success: false, message: 'Pesan Chat Global tidak boleh kosong!' };
     }
 
@@ -12313,7 +12635,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             activeAcc?.id === 'acc-admin'))
     );
 
+    const flags = globalChatConfigRef.current?.featureFlags;
     if (!isAdminSender) {
+      if (flags?.chatSystemDisabled) {
+        return { success: false, message: globalChatConfigRef.current?.maintenanceNotice || 'Layanan chat sedang dinonaktifkan sementara oleh Admin.' };
+      }
+      if (flags?.disableGlobalChat) {
+        return { success: false, message: 'Chat Global sedang dinonaktifkan sementara oleh Admin.' };
+      }
+      if (input.imageAttachment && flags?.disableImages) {
+        return { success: false, message: 'Fitur kirim foto sedang dinonaktifkan oleh Admin.' };
+      }
+      if (input.voiceAttachment && flags?.disableVoiceNotes) {
+        return { success: false, message: 'Fitur Voice Note sedang dinonaktifkan oleh Admin.' };
+      }
+      if (input.poll && flags?.disablePolls) {
+        return { success: false, message: 'Fitur Polling sedang dinonaktifkan oleh Admin.' };
+      }
+      if (input.redPacket && flags?.disableRedPacket) {
+        return { success: false, message: 'Fitur Amplop Kaget sedang dinonaktifkan oleh Admin.' };
+      }
       if (globalChatConfigRef.current?.adminOnlyLock) {
         return {
           success: false,
@@ -12336,6 +12677,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           };
         }
       }
+
+      const antiSpam = globalChatConfigRef.current?.antiSpamConfig;
+      if (antiSpam?.enabled) {
+        if (antiSpam.blockExternalLinks && /(https?:\/\/|www\.|\.[a-z]{2,}\/)/i.test(cleanText)) {
+          return {
+            success: false,
+            message: 'Anti-Spam: Pengiriman tautan eksternal di Chat Global diblokir oleh Admin.',
+          };
+        }
+        const nowBurst = Date.now();
+        antiSpamTimestampsRef.current = antiSpamTimestampsRef.current.filter((t) => nowBurst - t < 10_000);
+        if (antiSpamTimestampsRef.current.length >= Math.max(2, antiSpam.maxMessagesPer10s || 5)) {
+          return {
+            success: false,
+            message: `Anti-Spam: Maksimal ${antiSpam.maxMessagesPer10s || 5} pesan per 10 detik. Tunggu sebentar.`,
+          };
+        }
+        antiSpamTimestampsRef.current.push(nowBurst);
+      }
+
       const cooldownMs = Math.max(0, Number(globalChatConfigRef.current?.cooldownMs ?? 2500) || 0);
       const elapsed = Date.now() - globalChatLocalLastSentRef.current;
       if (cooldownMs > 0 && elapsed < cooldownMs) {
@@ -12369,6 +12730,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       senderAccount: activeAcc?.accountNumber || (isAdminSender ? '9999999999' : undefined),
       senderUserId16: activeAcc?.userId16,
       senderCardTier: activeAcc?.cardTier || (isAdminSender ? 'admin' : undefined),
+      senderCustomBadge: activeAcc?.chatCustomBadge || null,
+      adminDivisionLabel: isAdminSender
+        ? input.adminDivisionLabel || globalChatConfigRef.current?.activeAdminDivision || 'CS Resmi'
+        : undefined,
       isVerified: isAdminSender ? true : Boolean(activeAcc?.isVerified),
       title: isAdminSender ? 'Pesan dari Admin' : 'Chat Global Nasabah',
       text: filterResult.text,
@@ -12384,6 +12749,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       poll: input.poll,
       forwardedFrom: input.forwardedFrom,
       mentions: input.mentions,
+      imageAttachment: input.imageAttachment,
+      voiceAttachment: input.voiceAttachment,
+      contactAttachment: input.contactAttachment,
+      redPacket: input.redPacket,
+      expiresAtMs: input.expiresAtMs,
     };
 
     seenChatIdsRef.current.add(msgId);
@@ -12391,7 +12761,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     writeAtomicChatItemToCloud('chat_global_messages', 'm_', msgId, newMsg);
     flushMasterStateToCloud({ globalChats: mergeGlobalChatsUnion(globalChats, [newMsg]) });
 
-    const shouldShowPopup = isAdminSender && input.showPopupOnAllPhones === true;
+    const shouldShowPopup =
+      isAdminSender &&
+      input.showPopupOnAllPhones === true &&
+      !flags?.disableChatSystemNotifications;
     const popupId = `popup-gchat-${msgId}`;
     if (shouldShowPopup) {
       const adminPopup: WebsiteSystemPopupNotification = {
@@ -12821,20 +13194,200 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  const deleteGlobalChatMessage = async (id: string) => {
+  const deleteGlobalChatMessage = async (
+    id: string,
+    options?: { asAdminModeration?: boolean }
+  ): Promise<{ success: boolean; message: string }> => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
     const target = globalChats.find((m) => m.id === id);
+    if (!target) return { success: false, message: 'Pesan tidak ditemukan.' };
+    const isAdminUser = Boolean(
+      adminUnlockedRef.current ||
+        activeAcc?.cardTier === 'admin' ||
+        activeAcc?.isOfficialAdminAccount ||
+        activeAcc?.id === 'acc-admin'
+    );
+    const isOwner = isStrictChatMessageOwner(target, activeAcc);
+    if (!isOwner && !(options?.asAdminModeration === true && isAdminUser)) {
+      return {
+        success: false,
+        message: 'Hanya pengirim asli yang dapat menghapus pesan untuk semua orang.',
+      };
+    }
     const nextTombstones = recordDeletedAdminItemIds('globalChats', [id]);
     writeAtomicChatTombstonesToCloud('globalChats', [id]);
     const nextList = globalChats.filter((m) => m.id !== id);
     setGlobalChats(nextList);
     flushMasterStateToCloud({ globalChats: nextList, deletedAdminItemIds: nextTombstones });
     if (target) {
-      appendChatModerationLog('delete_msg', `Menghapus pesan milik ${target.senderName}`);
+      appendChatModerationLog(
+        'delete_msg',
+        options?.asAdminModeration && !isOwner
+          ? `Moderasi Admin: menghapus pelanggaran milik ${target.senderName}`
+          : `Pengirim menghapus pesan (${target.senderName})`
+      );
     }
     try {
       await fetch(`/api/global-chat/${encodeURIComponent(id)}`, { method: 'DELETE' });
     } catch { /* empty */ }
+    return {
+      success: true,
+      message:
+        options?.asAdminModeration && !isOwner
+          ? 'Pesan pelanggaran berhasil dihapus oleh Moderasi Admin.'
+          : 'Pesan dihapus untuk semua orang.',
+    };
   };
+
+  const adminUpdateChatFeatureFlags = async (
+    partial: Partial<ChatFeatureFlags>,
+    logDetail?: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const prevFlags = globalChatConfigRef.current?.featureFlags || DEFAULT_CHAT_FEATURE_FLAGS;
+    const nextFlags: ChatFeatureFlags = { ...DEFAULT_CHAT_FEATURE_FLAGS, ...prevFlags, ...partial };
+    return adminUpdateGlobalChatConfig(
+      { featureFlags: nextFlags },
+      logDetail || 'Memperbarui pengaturan saklar fitur Chat Lengkap'
+    );
+  };
+
+  const adminSetCustomerChatBadge = (
+    accountId: string,
+    tier: ChatCustomBadgeTier | null
+  ): { success: boolean; message: string } => {
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const targetAcc = pool.find((a) => a.id === accountId);
+    if (!targetAcc) return { success: false, message: 'Nasabah tidak ditemukan.' };
+    const updatedAccounts = pool.map((a) =>
+      a.id === accountId ? { ...a, chatCustomBadge: tier, accountUpdatedAtMs: Date.now() } : a
+    );
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+    flushMasterStateToCloud({ accounts: updatedAccounts });
+    return {
+      success: true,
+      message: tier
+        ? `Lencana "${tier.toUpperCase()}" disematkan ke ${targetAcc.fullName}.`
+        : `Lencana khusus ${targetAcc.fullName} dilepas.`,
+    };
+  };
+
+  const adminBroadcastToAllPrivateDms = async (
+    text: string,
+    senderName?: string
+  ): Promise<{ success: boolean; message: string; sentCount: number }> => {
+    const cleanText = text.trim();
+    if (!cleanText) return { success: false, message: 'Isi siaran tidak boleh kosong.', sentCount: 0 };
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const targets = pool.filter((a) => a.id !== activeAcc?.id && a.cardTier !== 'admin' && a.id !== 'acc-admin');
+    if (targets.length === 0) {
+      return { success: false, message: 'Belum ada nasabah terdaftar untuk dikirimi siaran DM.', sentCount: 0 };
+    }
+    const nowMs = Date.now();
+    const senderLabel = senderName?.trim() || activeAcc?.fullName || 'Admin Bank Nusantara';
+    const createdMsgs: ChatMessage[] = targets.map((t, idx) => ({
+      id: `pchat-bcast-${nowMs}-${idx}-${Math.floor(Math.random() * 1000)}`,
+      senderAccountId: activeAcc?.id || 'acc-admin',
+      senderAccount: activeAcc?.accountNumber || '9999999999',
+      senderName: senderLabel,
+      senderRole: 'admin',
+      senderCardTier: activeAcc?.cardTier || 'admin',
+      adminDivisionLabel: globalChatConfigRef.current?.activeAdminDivision || 'CS Resmi',
+      recipientAccountId: t.id,
+      recipientAccount: t.accountNumber,
+      recipientName: t.fullName,
+      text: `📢 [Siaran Resmi Admin]\n${cleanText}`,
+      timestamp: new Date(nowMs + idx).toISOString(),
+      createdAtMs: nowMs + idx,
+      updatedAtMs: nowMs + idx,
+    }));
+    createdMsgs.forEach((m) => {
+      seenPrivateChatIdsRef.current.add(m.id);
+      writeAtomicChatItemToCloud('chat_private_messages', 'm_', m.id, m);
+    });
+    const merged = mergePrivateChatsUnion(chats, createdMsgs);
+    setChats(merged);
+    flushMasterStateToCloud({ chats: merged });
+    createdMsgs.forEach((m) => {
+      void fetch('/api/private-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(m),
+      }).catch(() => {});
+    });
+    appendChatModerationLog('announcement', `Siaran DM massal ke ${createdMsgs.length} nasabah`);
+    return {
+      success: true,
+      message: `Siaran resmi berhasil dikirim ke Chat Privat ${createdMsgs.length} nasabah!`,
+      sentCount: createdMsgs.length,
+    };
+  };
+
+  const adminScheduleAnnouncement = async (input: {
+    text: string;
+    scheduledAtMs: number;
+    showPopupOnAllPhones?: boolean;
+    isPinned?: boolean;
+  }): Promise<{ success: boolean; message: string }> => {
+    const cleanText = input.text.trim();
+    if (!cleanText) return { success: false, message: 'Teks pengumuman terjadwal wajib diisi.' };
+    if (!input.scheduledAtMs || input.scheduledAtMs <= Date.now()) {
+      return { success: false, message: 'Waktu jadwal harus lebih besar dari waktu sekarang.' };
+    }
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    const entry: ScheduledChatAnnouncement = {
+      id: `sched-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      text: cleanText,
+      scheduledAtMs: input.scheduledAtMs,
+      showPopupOnAllPhones: Boolean(input.showPopupOnAllPhones),
+      isPinned: Boolean(input.isPinned),
+      createdBy: activeAcc?.fullName || 'Admin Bank Nusantara',
+      sent: false,
+    };
+    const nextList = [entry, ...(globalChatConfigRef.current?.scheduledAnnouncements || [])].slice(0, 30);
+    await adminUpdateGlobalChatConfig(
+      { scheduledAnnouncements: nextList },
+      `Menjadwalkan pengumuman otomatis (${new Date(input.scheduledAtMs).toLocaleTimeString('id-ID')})`
+    );
+    return { success: true, message: 'Pengumuman otomatis berhasil dijadwalkan!' };
+  };
+
+  const adminDeleteScheduledAnnouncement = async (id: string) => {
+    const nextList = (globalChatConfigRef.current?.scheduledAnnouncements || []).filter((s) => s.id !== id);
+    await adminUpdateGlobalChatConfig({ scheduledAnnouncements: nextList });
+  };
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+      const isCurrAdmin = Boolean(
+        adminUnlockedRef.current ||
+          activeAcc?.cardTier === 'admin' ||
+          activeAcc?.isOfficialAdminAccount ||
+          activeAcc?.id === 'acc-admin'
+      );
+      if (!isCurrAdmin) return;
+      const list = globalChatConfigRef.current?.scheduledAnnouncements || [];
+      const now = Date.now();
+      const due = list.filter((s) => !s.sent && s.scheduledAtMs <= now);
+      if (due.length === 0) return;
+      const updated = list.map((s) => (!s.sent && s.scheduledAtMs <= now ? { ...s, sent: true } : s));
+      void adminUpdateGlobalChatConfig({ scheduledAnnouncements: updated });
+      due.forEach((item) => {
+        void sendGlobalChatMessage({
+          text: item.text,
+          asAdmin: true,
+          senderName: item.createdBy || 'Admin Bank Nusantara',
+          showPopupOnAllPhones: item.showPopupOnAllPhones,
+          isPinned: item.isPinned,
+          isAdminHighlight: true,
+        });
+      });
+    }, 10_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const clearGlobalChatMessages = async () => {
     const allIds = globalChats.map((m) => m.id);
@@ -13070,19 +13623,787 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch { /* empty */ }
   };
 
+  const rejectChatTransferRequest = async (
+    messageId: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const target = chats.find((m) => m.id === messageId);
+    if (!target || !target.transferAttachment) {
+      return { success: false, message: 'Permintaan tidak ditemukan.' };
+    }
+    if (target.transferAttachment.status && target.transferAttachment.status !== 'pending') {
+      return { success: false, message: 'Permintaan ini sudah selesai diproses.' };
+    }
+    const nowMs = Date.now();
+    const rejectedAt = new Date(nowMs).toISOString();
+    const updatedMsg: ChatMessage = {
+      ...target,
+      updatedAtMs: nowMs,
+      transferAttachment: {
+        ...target.transferAttachment,
+        status: 'rejected',
+        rejectedByName: currentAccount.fullName,
+        rejectedAt,
+      },
+    };
+    setChats((prev) => mergePrivateChatsUnion(prev, [updatedMsg]));
+    writeAtomicChatItemToCloud('chat_private_messages', 'm_', messageId, updatedMsg);
+    try {
+      await fetch(`/api/private-chat/${encodeURIComponent(messageId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transferAttachment: updatedMsg.transferAttachment }),
+      });
+    } catch { /* empty */ }
+    return { success: true, message: 'Permintaan pembayaran telah ditolak.' };
+  };
+
+  const sendChatAssetTransfer = async (input: {
+    targetAccountId?: string;
+    recipientAccount: string;
+    recipientName: string;
+    groupId?: string;
+    assetKind: ChatAssetKind;
+    amount: number;
+    pin: string;
+    note?: string;
+  }): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    if (globalChatConfigRef.current?.featureFlags?.disableAssetTransfers) {
+      return { success: false, message: 'Fitur kirim Uang/Coin/Diamond via chat sedang dinonaktifkan Admin.' };
+    }
+    if (currentAccount.pin !== input.pin) {
+      playAtmSound('alert');
+      return { success: false, message: 'PIN 6 digit akun Anda salah!' };
+    }
+    const cleanAmt = Math.floor(Number(input.amount) || 0);
+    if (cleanAmt < 1) {
+      return { success: false, message: 'Nominal harus minimal 1.' };
+    }
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const senderAcc = pool.find((a) => a.id === currentAccount.id);
+    if (!senderAcc) return { success: false, message: 'Akun pengirim tidak ditemukan.' };
+    const senderBalance = getChatAssetBalance(senderAcc, input.assetKind);
+    if (!isUnlimitedNumber(senderBalance) && senderBalance < cleanAmt) {
+      playAtmSound('alert');
+      const assetLabel = input.assetKind === 'coin' ? 'Coin' : input.assetKind === 'diamond' ? 'Diamond' : 'Saldo Rupiah';
+      return {
+        success: false,
+        message: `${assetLabel} Anda tidak mencukupi! Tersedia: ${formatChatAssetValue(senderBalance, input.assetKind)}`,
+      };
+    }
+
+    const receiverAcc = pool.find(
+      (a) =>
+        (input.targetAccountId && a.id === input.targetAccountId) ||
+        a.accountNumber === input.recipientAccount
+    );
+    if (!receiverAcc) {
+      return { success: false, message: 'Akun penerima tidak ditemukan di Bank Nusantara.' };
+    }
+    if (receiverAcc.id === senderAcc.id) {
+      return { success: false, message: 'Tidak dapat mengirim aset ke akun sendiri.' };
+    }
+
+    const updatedAccounts = pool.map((a) => {
+      if (a.id === senderAcc.id) return applyAccountAssetDelta(a, input.assetKind, -cleanAmt);
+      if (a.id === receiverAcc.id) return applyAccountAssetDelta(a, input.assetKind, cleanAmt);
+      return a;
+    });
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+
+    const nowIso = new Date().toISOString();
+    const refNo = `CH${input.assetKind.toUpperCase()}${Date.now()}`;
+    const valueLabel = formatChatAssetValue(cleanAmt, input.assetKind);
+    const outTx: Transaction = {
+      id: `tx-ch-out-${Date.now()}`,
+      accountId: senderAcc.id,
+      type: 'chat_transfer',
+      title: `Kirim ${valueLabel} ke ${receiverAcc.fullName}`,
+      amount: cleanAmt,
+      senderAccount: senderAcc.accountNumber,
+      senderName: senderAcc.fullName,
+      recipientAccount: receiverAcc.accountNumber,
+      recipientName: receiverAcc.fullName,
+      description: input.note || `Transfer ${valueLabel} via Chat`,
+      status: 'success',
+      referenceNo: refNo,
+      timestamp: nowIso,
+      balanceDeducted: true,
+      category: 'transfer',
+    };
+    const inTx: Transaction = {
+      id: `tx-ch-in-${Date.now() + 1}`,
+      accountId: receiverAcc.id,
+      type: 'chat_transfer',
+      title: `Terima ${valueLabel} dari ${senderAcc.fullName}`,
+      amount: cleanAmt,
+      senderAccount: senderAcc.accountNumber,
+      senderName: senderAcc.fullName,
+      recipientAccount: receiverAcc.accountNumber,
+      recipientName: receiverAcc.fullName,
+      description: input.note || `Penerimaan ${valueLabel} via Chat`,
+      status: 'success',
+      referenceNo: refNo,
+      timestamp: nowIso,
+      category: 'transfer',
+    };
+    const nextTxs = [outTx, inTx, ...transactions];
+    setTransactions(nextTxs);
+
+    sendChatMessage({
+      recipientAccountId: input.groupId ? undefined : receiverAcc.id,
+      recipientAccount: input.groupId ? `group:${input.groupId}` : receiverAcc.accountNumber,
+      recipientName: input.groupId ? input.recipientName : receiverAcc.fullName,
+      groupId: input.groupId,
+      text: `💸 Mengirim ${valueLabel}${input.groupId ? ` untuk ${receiverAcc.fullName}` : ''}${input.note ? ` — "${input.note}"` : ''}`,
+      transferAttachment: {
+        amount: cleanAmt,
+        assetKind: input.assetKind,
+        referenceNo: refNo,
+        note: input.note || undefined,
+        isRequest: false,
+        status: 'paid',
+        targetAccountNumber: receiverAcc.accountNumber,
+        targetName: receiverAcc.fullName,
+        paidByAccountId: senderAcc.id,
+        paidByName: senderAcc.fullName,
+        paidAt: nowIso,
+      },
+    });
+
+    flushMasterStateToCloud({ accounts: updatedAccounts, transactions: nextTxs });
+    if (!globalChatConfigRef.current?.featureFlags?.disableChatSystemNotifications) {
+      addNotification('Kirim Aset Chat Berhasil', `Berhasil mengirim ${valueLabel} ke ${receiverAcc.fullName}.`, 'success', {
+        skipServerBroadcast: true,
+      });
+    }
+    playAtmSound('success');
+    return { success: true, message: `${valueLabel} berhasil dikirim ke ${receiverAcc.fullName}!` };
+  };
+
+  const payChatTransferRequest = async (
+    messageId: string,
+    pin: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const targetMsg = chats.find((m) => m.id === messageId);
+    if (!targetMsg || !targetMsg.transferAttachment) {
+      return { success: false, message: 'Permintaan pembayaran tidak ditemukan.' };
+    }
+    if (targetMsg.transferAttachment.status && targetMsg.transferAttachment.status !== 'pending') {
+      return { success: false, message: 'Permintaan ini sudah diproses sebelumnya.' };
+    }
+    if (currentAccount.pin !== pin) {
+      playAtmSound('alert');
+      return { success: false, message: 'PIN 6 digit Anda salah!' };
+    }
+    const kind: ChatAssetKind = targetMsg.transferAttachment.assetKind || 'uang';
+    const amt = Math.floor(Number(targetMsg.transferAttachment.amount) || 0);
+    if (amt < 1) return { success: false, message: 'Nominal tidak valid.' };
+
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const payerAcc = pool.find((a) => a.id === currentAccount.id);
+    const receiverAcc = pool.find(
+      (a) =>
+        (targetMsg.senderAccountId && a.id === targetMsg.senderAccountId) ||
+        a.accountNumber === targetMsg.senderAccount
+    );
+    if (!payerAcc || !receiverAcc) {
+      return { success: false, message: 'Akun pengirim atau penerima tidak ditemukan.' };
+    }
+    const payerBal = getChatAssetBalance(payerAcc, kind);
+    if (!isUnlimitedNumber(payerBal) && payerBal < amt) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Saldo tidak cukup untuk membayar ${formatChatAssetValue(amt, kind)}.`,
+      };
+    }
+
+    const updatedAccounts = pool.map((a) => {
+      if (a.id === payerAcc.id) return applyAccountAssetDelta(a, kind, -amt);
+      if (a.id === receiverAcc.id) return applyAccountAssetDelta(a, kind, amt);
+      return a;
+    });
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+    flushMasterStateToCloud({ accounts: updatedAccounts });
+
+    await markChatRequestPaid(targetMsg.id, payerAcc.fullName);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Berhasil membayar ${formatChatAssetValue(amt, kind)} ke ${receiverAcc.fullName}!`,
+    };
+  };
+
+  const createChatRedPacket = async (input: {
+    scope: 'global' | 'group';
+    groupId?: string;
+    assetKind: ChatAssetKind;
+    totalAmount: number;
+    quota: number;
+    mode: ChatRedPacketMode;
+    pin: string;
+    note?: string;
+    isOfficialAdmin?: boolean;
+  }): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    if (globalChatConfigRef.current?.featureFlags?.disableRedPacket) {
+      return { success: false, message: 'Fitur Amplop Kaget sedang dinonaktifkan Admin.' };
+    }
+    if (currentAccount.pin !== input.pin) {
+      playAtmSound('alert');
+      return { success: false, message: 'PIN 6 digit akun pengirim salah!' };
+    }
+    const totalAmt = Math.floor(Number(input.totalAmount) || 0);
+    const quota = Math.max(1, Math.min(100, Math.floor(Number(input.quota) || 1)));
+    if (totalAmt < quota) {
+      return {
+        success: false,
+        message: `Total nominal (${totalAmt}) minimal harus sama dengan jumlah kuota (${quota} orang) agar semua penerima kebagian.`,
+      };
+    }
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const senderAcc = pool.find((a) => a.id === currentAccount.id);
+    if (!senderAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const senderBal = getChatAssetBalance(senderAcc, input.assetKind);
+    if (!isUnlimitedNumber(senderBal) && senderBal < totalAmt) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Saldo tidak cukup untuk membuat Amplop Kaget! Tersedia: ${formatChatAssetValue(senderBal, input.assetKind)}`,
+      };
+    }
+
+    const updatedAccounts = pool.map((a) =>
+      a.id === senderAcc.id ? applyAccountAssetDelta(a, input.assetKind, -totalAmt) : a
+    );
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+
+    const nowMs = Date.now();
+    const packetId = `rp-${nowMs}-${Math.floor(Math.random() * 1000)}`;
+    const valueLabel = formatChatAssetValue(totalAmt, input.assetKind);
+    const packetData: ChatRedPacketData = {
+      id: packetId,
+      creatorAccountId: senderAcc.id,
+      creatorName: senderAcc.fullName,
+      assetKind: input.assetKind,
+      mode: input.mode,
+      totalAmount: totalAmt,
+      remainingAmount: totalAmt,
+      quota,
+      remainingQuota: quota,
+      note: input.note?.trim() || 'Amplop Kaget Nusantara — Siapa cepat dia dapat!',
+      claims: [],
+      status: 'active',
+      isOfficialAdmin: Boolean(input.isOfficialAdmin),
+      createdAtMs: nowMs,
+    };
+
+    const modeTitle =
+      input.mode === 'fastest_biggest'
+        ? 'Siapa Cepat Dapat Banyak'
+        : input.mode === 'random'
+          ? 'Acak ala DANA'
+          : 'Dibagi Merata';
+
+    if (input.scope === 'global') {
+      const res = await sendGlobalChatMessage({
+        text: `🧧 Amplop Kaget ${valueLabel} (${quota} Kuota • ${modeTitle})${packetData.note ? `\n"${packetData.note}"` : ''}`,
+        asAdmin: Boolean(input.isOfficialAdmin),
+        redPacket: packetData,
+      });
+      if (!res.success) {
+        // Revert balance if global chat send blocked (e.g. slow mode)
+        accountsRef.current = pool;
+        setAccounts(pool);
+        return res;
+      }
+    } else if (input.groupId) {
+      const grp = privateChatGroupsRef.current.find((g) => g.id === input.groupId);
+      sendChatMessage({
+        groupId: input.groupId,
+        recipientAccount: `group:${input.groupId}`,
+        recipientName: grp?.name || 'Grup Privat',
+        text: `🧧 Amplop Kaget ${valueLabel} (${quota} Kuota • ${modeTitle})${packetData.note ? `\n"${packetData.note}"` : ''}`,
+        redPacket: packetData,
+      });
+    }
+
+    const tx: Transaction = {
+      id: `tx-rp-create-${nowMs}`,
+      accountId: senderAcc.id,
+      type: 'chat_transfer',
+      title: `Buat Amplop Kaget ${valueLabel}`,
+      amount: totalAmt,
+      description: `${quota} Kuota (${modeTitle})`,
+      status: 'success',
+      referenceNo: packetId,
+      timestamp: new Date(nowMs).toISOString(),
+      balanceDeducted: true,
+      category: 'transfer',
+    };
+    const nextTxs = [tx, ...transactions];
+    setTransactions(nextTxs);
+    flushMasterStateToCloud({ accounts: updatedAccounts, transactions: nextTxs });
+    playAtmSound('success');
+    return { success: true, message: `Amplop Kaget ${valueLabel} (${quota} kuota) berhasil dibagikan!` };
+  };
+
+  const claimChatRedPacket = async (input: {
+    scope: 'global' | 'private';
+    messageId: string;
+  }): Promise<{ success: boolean; message: string; claimedAmount?: number }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    if (globalChatConfigRef.current?.featureFlags?.disableRedPacket) {
+      return { success: false, message: 'Fitur Amplop Kaget sedang dinonaktifkan Admin.' };
+    }
+    const targetMsg =
+      input.scope === 'global'
+        ? globalChats.find((m) => m.id === input.messageId)
+        : chats.find((m) => m.id === input.messageId);
+    if (!targetMsg || !targetMsg.redPacket) {
+      return { success: false, message: 'Amplop Kaget tidak ditemukan.' };
+    }
+    const rp = targetMsg.redPacket;
+    if (rp.claims.some((c) => c.accountId === currentAccount.id)) {
+      return { success: false, message: 'Anda sudah pernah mengklaim Amplop Kaget ini.' };
+    }
+    if (rp.status === 'exhausted' || rp.remainingQuota <= 0 || rp.remainingAmount <= 0) {
+      return { success: false, message: 'Maaf, kuota Amplop Kaget ini sudah habis diklaim!' };
+    }
+
+    const claimIdx = rp.claims.length;
+    const remSlots = rp.quota - claimIdx;
+    const remAmt = rp.remainingAmount;
+    let award = 1;
+
+    if (remSlots <= 1) {
+      award = remAmt;
+    } else if (rp.mode === 'equal') {
+      const base = Math.floor(rp.totalAmount / rp.quota);
+      const remainder = rp.totalAmount % rp.quota;
+      award = claimIdx < remainder ? base + 1 : base;
+      award = Math.min(remAmt - (remSlots - 1), Math.max(1, award));
+    } else if (rp.mode === 'fastest_biggest') {
+      let sumWeights = 0;
+      for (let k = claimIdx; k < rp.quota; k += 1) {
+        sumWeights += Math.pow(0.65, k);
+      }
+      const myWeight = Math.pow(0.65, claimIdx);
+      const rawShare = Math.round(remAmt * (myWeight / Math.max(0.0001, sumWeights)));
+      award = Math.max(1, Math.min(remAmt - (remSlots - 1), rawShare));
+    } else {
+      // random
+      const maxCap = Math.max(1, remAmt - (remSlots - 1));
+      const targetAvg = remAmt / remSlots;
+      const upper = Math.min(maxCap, Math.max(1, Math.floor(targetAvg * 1.9)));
+      const lower = Math.min(upper, Math.max(1, Math.floor(targetAvg * 0.45)));
+      award = lower + Math.floor(Math.random() * (upper - lower + 1));
+    }
+
+    const nowMs = Date.now();
+    const newClaim: ChatRedPacketClaim = {
+      accountId: currentAccount.id,
+      accountName: currentAccount.fullName,
+      amount: award,
+      claimedAt: new Date(nowMs).toISOString(),
+      claimedAtMs: nowMs,
+      rank: claimIdx + 1,
+    };
+    const nextClaims = [...rp.claims, newClaim];
+    const nextRemAmt = Math.max(0, remAmt - award);
+    const nextRemQuota = Math.max(0, rp.quota - nextClaims.length);
+    const nextRp: ChatRedPacketData = {
+      ...rp,
+      claims: nextClaims,
+      remainingAmount: nextRemAmt,
+      remainingQuota: nextRemQuota,
+      status: nextRemQuota <= 0 || nextRemAmt <= 0 ? 'exhausted' : 'active',
+    };
+
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const updatedAccounts = pool.map((a) =>
+      a.id === currentAccount.id ? applyAccountAssetDelta(a, rp.assetKind, award) : a
+    );
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+
+    const awardedLabel = formatChatAssetValue(award, rp.assetKind);
+    const claimTx: Transaction = {
+      id: `tx-rp-claim-${nowMs}`,
+      accountId: currentAccount.id,
+      type: 'chat_transfer',
+      title: `Klaim Amplop Kaget ${awardedLabel}`,
+      amount: award,
+      senderName: rp.creatorName,
+      description: `Urutan ke-${newClaim.rank} dari ${rp.quota} kuota`,
+      status: 'success',
+      referenceNo: rp.id,
+      timestamp: newClaim.claimedAt,
+      category: 'transfer',
+    };
+    const nextTxs = [claimTx, ...transactions];
+    setTransactions(nextTxs);
+
+    if (input.scope === 'global') {
+      const updatedMsg: GlobalChatMessage = {
+        ...(targetMsg as GlobalChatMessage),
+        redPacket: nextRp,
+        updatedAtMs: nowMs,
+      };
+      setGlobalChats((prev) => mergeGlobalChatsUnion(prev, [updatedMsg]));
+      writeAtomicChatItemToCloud('chat_global_messages', 'm_', updatedMsg.id, updatedMsg);
+      void fetch(`/api/global-chat/${encodeURIComponent(updatedMsg.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ redPacket: nextRp }),
+      }).catch(() => {});
+    } else {
+      const updatedMsg: ChatMessage = {
+        ...(targetMsg as ChatMessage),
+        redPacket: nextRp,
+        updatedAtMs: nowMs,
+      };
+      setChats((prev) => mergePrivateChatsUnion(prev, [updatedMsg]));
+      writeAtomicChatItemToCloud('chat_private_messages', 'm_', updatedMsg.id, updatedMsg);
+      void fetch(`/api/private-chat/${encodeURIComponent(updatedMsg.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ redPacket: nextRp }),
+      }).catch(() => {});
+    }
+
+    flushMasterStateToCloud({ accounts: updatedAccounts, transactions: nextTxs });
+    playAtmSound('success');
+    try {
+      confetti({ particleCount: 45, spread: 55, origin: { y: 0.7 } });
+    } catch { /* empty */ }
+    return {
+      success: true,
+      message: `Selamat! Anda urutan ke-#${newClaim.rank} & mendapat ${awardedLabel}!`,
+      claimedAmount: award,
+    };
+  };
+
+  const createChatSplitBill = async (input: {
+    groupId: string;
+    title: string;
+    assetKind: ChatAssetKind;
+    totalAmount: number;
+    participantAccountIds: string[];
+  }): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    if (globalChatConfigRef.current?.featureFlags?.disableSplitBill) {
+      return { success: false, message: 'Fitur Patungan Grup sedang dinonaktifkan Admin.' };
+    }
+    const grp = privateChatGroupsRef.current.find((g) => g.id === input.groupId);
+    if (!grp) return { success: false, message: 'Grup tidak ditemukan.' };
+    const cleanParticipants = Array.from(new Set(input.participantAccountIds.filter((id) => id !== currentAccount.id)));
+    if (cleanParticipants.length === 0) {
+      return { success: false, message: 'Pilih minimal 1 peserta patungan.' };
+    }
+    const totalAmt = Math.floor(Number(input.totalAmount) || 0);
+    if (totalAmt < cleanParticipants.length) {
+      return { success: false, message: 'Total patungan tidak valid.' };
+    }
+    const perPerson = Math.ceil(totalAmt / cleanParticipants.length);
+    const sb: ChatSplitBillData = {
+      id: `sb-${Date.now()}`,
+      creatorAccountId: currentAccount.id,
+      creatorName: currentAccount.fullName,
+      title: input.title.trim() || 'Patungan Grup',
+      assetKind: input.assetKind,
+      totalAmount: totalAmt,
+      perPersonAmount: perPerson,
+      participantAccountIds: cleanParticipants,
+      paidByAccountIdMap: {},
+      createdAtMs: Date.now(),
+    };
+    sendChatMessage({
+      groupId: grp.id,
+      recipientAccount: `group:${grp.id}`,
+      recipientName: grp.name,
+      text: `🧾 Patungan Grup: "${sb.title}" — ${formatChatAssetValue(perPerson, input.assetKind)} / orang (${cleanParticipants.length} peserta)`,
+      splitBill: sb,
+    });
+    playAtmSound('success');
+    return { success: true, message: 'Tagihan Patungan Grup berhasil dibuat!' };
+  };
+
+  const payChatSplitBill = async (
+    messageId: string,
+    pin: string
+  ): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    if (currentAccount.pin !== pin) {
+      playAtmSound('alert');
+      return { success: false, message: 'PIN 6 digit akun Anda salah!' };
+    }
+    const targetMsg = chats.find((m) => m.id === messageId);
+    if (!targetMsg || !targetMsg.splitBill) {
+      return { success: false, message: 'Data patungan tidak ditemukan.' };
+    }
+    const sb = targetMsg.splitBill;
+    if (sb.paidByAccountIdMap?.[currentAccount.id]) {
+      return { success: false, message: 'Anda sudah melunasi bagian patungan ini.' };
+    }
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const payerAcc = pool.find((a) => a.id === currentAccount.id);
+    const creatorAcc = pool.find((a) => a.id === sb.creatorAccountId);
+    if (!payerAcc || !creatorAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const payerBal = getChatAssetBalance(payerAcc, sb.assetKind);
+    if (!isUnlimitedNumber(payerBal) && payerBal < sb.perPersonAmount) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Saldo tidak mencukupi untuk membayar ${formatChatAssetValue(sb.perPersonAmount, sb.assetKind)}.`,
+      };
+    }
+
+    const updatedAccounts = pool.map((a) => {
+      if (a.id === payerAcc.id) return applyAccountAssetDelta(a, sb.assetKind, -sb.perPersonAmount);
+      if (a.id === creatorAcc.id) return applyAccountAssetDelta(a, sb.assetKind, sb.perPersonAmount);
+      return a;
+    });
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const nextSb: ChatSplitBillData = {
+      ...sb,
+      paidByAccountIdMap: {
+        ...(sb.paidByAccountIdMap || {}),
+        [payerAcc.id]: {
+          accountName: payerAcc.fullName,
+          paidAt: nowIso,
+          paidAtMs: nowMs,
+        },
+      },
+    };
+    const updatedMsg: ChatMessage = {
+      ...targetMsg,
+      splitBill: nextSb,
+      updatedAtMs: nowMs,
+    };
+    setChats((prev) => mergePrivateChatsUnion(prev, [updatedMsg]));
+    writeAtomicChatItemToCloud('chat_private_messages', 'm_', updatedMsg.id, updatedMsg);
+    flushMasterStateToCloud({ accounts: updatedAccounts });
+    void fetch(`/api/private-chat/${encodeURIComponent(updatedMsg.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ splitBill: nextSb }),
+    }).catch(() => {});
+
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Bagian patungan ${formatChatAssetValue(sb.perPersonAmount, sb.assetKind)} berhasil dibayar ke ${creatorAcc.fullName}!`,
+    };
+  };
+
+  const submitChatReport = async (input: {
+    scope: 'global' | 'private';
+    messageId: string;
+    roomKey: string;
+    reportedAccountId?: string;
+    reportedName: string;
+    messagePreview: string;
+    reason: string;
+  }): Promise<{ success: boolean; message: string }> => {
+    if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    const cleanReason = input.reason.trim();
+    if (!cleanReason) return { success: false, message: 'Alasan laporan wajib diisi.' };
+    const nowMs = Date.now();
+    const entry: ChatReportEntry = {
+      id: `crep-${nowMs}-${Math.floor(Math.random() * 1000)}`,
+      scope: input.scope,
+      messageId: input.messageId,
+      roomKey: input.roomKey,
+      reporterAccountId: currentAccount.id,
+      reporterName: currentAccount.fullName,
+      reportedAccountId: input.reportedAccountId,
+      reportedName: input.reportedName,
+      messagePreview: input.messagePreview.slice(0, 200),
+      reason: cleanReason.slice(0, 260),
+      status: 'pending',
+      createdAt: new Date(nowMs).toISOString(),
+      createdAtMs: nowMs,
+    };
+    setChatReports((prev) => [entry, ...prev].slice(0, 200));
+    writeAtomicChatItemToCloud('chat_reports', 'r_', entry.id, entry);
+    flushMasterStateToCloud({ chatReports: [entry, ...chatReports].slice(0, 120) });
+    void fetch('/api/chat-reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entry),
+    }).catch(() => {});
+    emitAdminTierNotification({
+      eventType: 'bug_report',
+      title: `🚩 Laporan Chat Baru: ${input.reportedName}`,
+      message: `${currentAccount.fullName} melaporkan: "${cleanReason}"`,
+      adminTargetTab: 'global_chat',
+      accountId: input.reportedAccountId,
+      referenceId: entry.id,
+    });
+    return { success: true, message: 'Laporan pesan berhasil dikirim ke Panel Admin.' };
+  };
+
+  const adminResolveChatReport = async (
+    id: string,
+    status: 'reviewed' | 'dismissed',
+    note?: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current);
+    let updatedEntry: ChatReportEntry | null = null;
+    const nextList = chatReports.map((r) => {
+      if (r.id !== id) return r;
+      updatedEntry = {
+        ...r,
+        status,
+        resolvedBy: activeAcc?.fullName || 'Admin Bank Nusantara',
+        resolvedAt: new Date().toISOString(),
+        resolutionNote: note?.trim() || undefined,
+      };
+      return updatedEntry;
+    });
+    setChatReports(nextList);
+    if (updatedEntry) {
+      writeAtomicChatItemToCloud('chat_reports', 'r_', id, updatedEntry);
+      flushMasterStateToCloud({ chatReports: nextList });
+      void fetch(`/api/chat-reports/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          resolvedBy: (updatedEntry as ChatReportEntry).resolvedBy,
+          resolvedAt: (updatedEntry as ChatReportEntry).resolvedAt,
+          resolutionNote: (updatedEntry as ChatReportEntry).resolutionNote,
+        }),
+      }).catch(() => {});
+    }
+    return { success: true, message: `Laporan chat ditandai sebagai ${status === 'reviewed' ? 'Ditindak' : 'Diabaikan'}.` };
+  };
+
+  const updateCurrentAccountChatPref = (updater: (acc: BankAccount) => BankAccount) => {
+    if (!currentAccount) return;
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const updatedAccounts = pool.map((a) => (a.id === currentAccount.id ? updater(a) : a));
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+    flushMasterStateToCloud({ accounts: updatedAccounts });
+  };
+
+  const markChatWelcomeSeen = () => {
+    if (!currentAccount || currentAccount.hasSeenChatWelcome) return;
+    updateCurrentAccountChatPref((a) => ({
+      ...a,
+      hasSeenChatWelcome: true,
+      accountUpdatedAtMs: Date.now(),
+    }));
+  };
+
+  const togglePinChatRoom = (roomKey: string): { pinned: boolean; message: string } => {
+    if (!currentAccount) return { pinned: false, message: 'Akun tidak aktif.' };
+    const existing = Array.isArray(currentAccount.pinnedChatRoomKeys) ? currentAccount.pinnedChatRoomKeys : [];
+    const exists = existing.includes(roomKey);
+    const nextList = exists ? existing.filter((k) => k !== roomKey) : [roomKey, ...existing];
+    updateCurrentAccountChatPref((a) => ({
+      ...a,
+      pinnedChatRoomKeys: nextList,
+      accountUpdatedAtMs: Date.now(),
+    }));
+    return {
+      pinned: !exists,
+      message: exists ? 'Sematkan ruang obrolan dilepas.' : 'Ruang obrolan disematkan di atas.',
+    };
+  };
+
+  const toggleArchiveChatRoom = (roomKey: string): { archived: boolean; message: string } => {
+    if (!currentAccount) return { archived: false, message: 'Akun tidak aktif.' };
+    const existing = Array.isArray(currentAccount.archivedChatRoomKeys) ? currentAccount.archivedChatRoomKeys : [];
+    const exists = existing.includes(roomKey);
+    const nextList = exists ? existing.filter((k) => k !== roomKey) : [roomKey, ...existing];
+    updateCurrentAccountChatPref((a) => ({
+      ...a,
+      archivedChatRoomKeys: nextList,
+      accountUpdatedAtMs: Date.now(),
+    }));
+    return {
+      archived: !exists,
+      message: exists ? 'Obrolan dikeluarkan dari arsip.' : 'Obrolan dipindahkan ke Arsip.',
+    };
+  };
+
+  const toggleBlockChatAccount = (
+    accountId: string,
+    name?: string
+  ): { blocked: boolean; message: string } => {
+    if (!currentAccount) return { blocked: false, message: 'Akun tidak aktif.' };
+    const existing = Array.isArray(currentAccount.blockedChatAccountIds) ? currentAccount.blockedChatAccountIds : [];
+    const exists = existing.includes(accountId);
+    const nextList = exists ? existing.filter((id) => id !== accountId) : [accountId, ...existing];
+    updateCurrentAccountChatPref((a) => ({
+      ...a,
+      blockedChatAccountIds: nextList,
+      accountUpdatedAtMs: Date.now(),
+    }));
+    return {
+      blocked: !exists,
+      message: exists
+        ? `${name || 'Nasabah'} dibuka blokirnya.`
+        : `${name || 'Nasabah'} diblokir di Chat Privat.`,
+    };
+  };
+
+  const toggleChatDnd = (): { dnd: boolean; message: string } => {
+    if (!currentAccount) return { dnd: false, message: 'Akun tidak aktif.' };
+    const next = !currentAccount.chatDndEnabled;
+    updateCurrentAccountChatPref((a) => ({
+      ...a,
+      chatDndEnabled: next,
+      accountUpdatedAtMs: Date.now(),
+    }));
+    return {
+      dnd: next,
+      message: next ? 'Mode Jangan Ganggu (DND) chat diaktifkan.' : 'Mode DND chat dimatikan.',
+    };
+  };
+
+  const toggleEnterKeyPreference = (): { enterSends: boolean; message: string } => {
+    if (!currentAccount) return { enterSends: false, message: 'Akun tidak aktif.' };
+    const next = !currentAccount.enterKeySendsMessage;
+    updateCurrentAccountChatPref((a) => ({
+      ...a,
+      enterKeySendsMessage: next,
+      accountUpdatedAtMs: Date.now(),
+    }));
+    return {
+      enterSends: next,
+      message: next
+        ? 'Preferensi pribadi: Enter kirim pesan, Shift+Enter baris baru.'
+        : 'Default: Enter baris baru, Ctrl+Enter kirim pesan.',
+    };
+  };
+
   const editPrivateChatMessage = async (
     id: string,
     newText: string
   ): Promise<{ success: boolean; message: string }> => {
     if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
+    if (globalChatConfigRef.current?.featureFlags?.disableMessageEdit) {
+      return { success: false, message: 'Fitur edit pesan sedang dinonaktifkan oleh Admin.' };
+    }
     const cleanText = newText.trim();
     if (!cleanText) return { success: false, message: 'Teks edit tidak boleh kosong.' };
     const target = chats.find((m) => m.id === id);
     if (!target) return { success: false, message: 'Pesan tidak ditemukan.' };
-    const isOwner =
-      (target.senderAccountId && target.senderAccountId === currentAccount.id) ||
-      target.senderAccount === currentAccount.accountNumber;
-    if (!isOwner) {
+    if (!isStrictChatMessageOwner(target, currentAccount)) {
       return { success: false, message: 'Anda hanya dapat mengedit pesan milik Anda sendiri.' };
     }
     const isAdminUser = Boolean(
@@ -13118,19 +14439,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!currentAccount) return { success: false, message: 'Akun tidak aktif.' };
     const target = chats.find((m) => m.id === id);
     if (!target) return { success: false, message: 'Pesan tidak ditemukan.' };
-    const isOwner =
-      (target.senderAccountId && target.senderAccountId === currentAccount.id) ||
-      target.senderAccount === currentAccount.accountNumber;
-    const grp = target.groupId
-      ? privateChatGroupsRef.current.find((g) => g.id === target.groupId)
-      : undefined;
-    const isGroupAdmin = Boolean(
-      grp &&
-        (grp.creatorAccountId === currentAccount.id ||
-          (grp.coAdminAccountIds || []).includes(currentAccount.id))
-    );
-    if (!isOwner && !isGroupAdmin && !adminUnlockedRef.current) {
-      return { success: false, message: 'Anda tidak memiliki izin menghapus pesan ini.' };
+    // Ketat hanya pengirim asli yang boleh Hapus untuk Semua Orang (perbaikan bug HP1 vs HP2!)
+    if (!isStrictChatMessageOwner(target, currentAccount)) {
+      return {
+        success: false,
+        message: 'Hanya pengirim asli pesan ini yang dapat menghapus untuk semua orang.',
+      };
     }
     const nextTombstones = recordDeletedAdminItemIds('privateChats', [id]);
     writeAtomicChatTombstonesToCloud('privateChats', [id]);
@@ -13140,7 +14454,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       await fetch(`/api/private-chat/${encodeURIComponent(id)}`, { method: 'DELETE' });
     } catch { /* empty */ }
-    return { success: true, message: 'Pesan dihapus permanen untuk semua peserta.' };
+    return { success: true, message: 'Pesan dihapus untuk semua orang.' };
   };
 
   const togglePrivateChatReaction = async (id: string, emoji: string) => {
@@ -13315,6 +14629,32 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       bookmarked: !exists,
       message: exists ? 'Bintang pesan dihapus.' : 'Pesan ditandai bintang (Bookmark).',
+    };
+  };
+
+  const hideChatMessageForMe = (
+    messageId: string
+  ): { success: boolean; message: string } => {
+    if (!currentAccount || !messageId) return { success: false, message: 'Akun tidak aktif.' };
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const existing = Array.isArray(currentAccount.hiddenChatMessageIds)
+      ? currentAccount.hiddenChatMessageIds
+      : [];
+    if (existing.includes(messageId)) {
+      return { success: true, message: 'Pesan sudah dihapus untuk Anda.' };
+    }
+    const nextList = [messageId, ...existing].slice(0, 1000);
+    const updatedAccounts = pool.map((a) =>
+      a.id === currentAccount.id
+        ? { ...a, hiddenChatMessageIds: nextList, accountUpdatedAtMs: Date.now() }
+        : a
+    );
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+    flushMasterStateToCloud({ accounts: updatedAccounts });
+    return {
+      success: true,
+      message: 'Pesan dihapus untuk Anda sendiri.',
     };
   };
 
@@ -18380,6 +19720,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       senderName: currentAccount.fullName,
       senderRole: isAdminSender ? 'admin' : 'customer',
       senderCardTier: currentAccount.cardTier,
+      senderCustomBadge: currentAccount.chatCustomBadge || null,
+      adminDivisionLabel: isAdminSender
+        ? input.adminDivisionLabel || globalChatConfigRef.current?.activeAdminDivision || 'CS Resmi'
+        : undefined,
       recipientAccountId: input.groupId ? undefined : input.recipientAccountId || targetAcc?.id,
       recipientAccount: input.groupId ? `group:${input.groupId}` : input.recipientAccount,
       recipientName: input.recipientName,
@@ -18395,6 +19739,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       poll: input.poll,
       forwardedFrom: input.forwardedFrom,
       mentions: input.mentions,
+      imageAttachment: input.imageAttachment,
+      voiceAttachment: input.voiceAttachment,
+      contactAttachment: input.contactAttachment,
+      billReminder: input.billReminder,
+      redPacket: input.redPacket,
+      splitBill: input.splitBill,
+      expiresAtMs: input.expiresAtMs,
     };
 
     seenPrivateChatIdsRef.current.add(newMsg.id);
@@ -36139,6 +37490,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminSimulateSpin10x5xDetection,
         globalChatConfig,
         chatModerationLogs,
+        chatReports,
         chatTypingMap,
         emitChatTyping,
         refreshChatSyncNow,
@@ -36148,6 +37500,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         togglePinGlobalChatMessage,
         toggleGlobalChatAdminLock,
         adminUpdateGlobalChatConfig,
+        adminUpdateChatFeatureFlags,
+        adminSetCustomerChatBadge,
+        adminBroadcastToAllPrivateDms,
+        adminScheduleAnnouncement,
+        adminDeleteScheduledAnnouncement,
         adminMuteGlobalChatUser,
         adminUnmuteGlobalChatUser,
         adminBulkDeleteUserGlobalChats,
@@ -36161,6 +37518,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         addPrivateChatContact,
         removePrivateChatContact,
         markChatRequestPaid,
+        rejectChatTransferRequest,
+        sendChatAssetTransfer,
+        payChatTransferRequest,
+        createChatRedPacket,
+        claimChatRedPacket,
+        createChatSplitBill,
+        payChatSplitBill,
+        submitChatReport,
+        adminResolveChatReport,
+        markChatWelcomeSeen,
+        togglePinChatRoom,
+        toggleArchiveChatRoom,
+        toggleBlockChatAccount,
+        toggleChatDnd,
+        toggleEnterKeyPreference,
         editPrivateChatMessage,
         deletePrivateChatMessage,
         togglePrivateChatReaction,
@@ -36168,6 +37540,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         togglePinPrivateChatMessage,
         markPrivateMessagesRead,
         toggleBookmarkChatMessage,
+        hideChatMessageForMe,
         toggleMutePrivateGroup,
         createPrivateChatGroup,
         updatePrivateChatGroupDetails,

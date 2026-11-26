@@ -187,7 +187,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v15.40.49';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v15.41.49';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -1211,6 +1211,27 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
+            {/* 1A-2. Chat Global & Priv (Tepat di sebelah kiri menu Keluarga) */}
+            {uiVisibilityConfig.navTabs.chat !== false && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('chat', e)}
+                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+                  activeView === 'chat'
+                    ? 'bg-blue-600 text-white font-bold shadow-sm'
+                    : 'text-slate-300 hover:text-white hover:bg-slate-900'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>Chat Global &amp; Priv</span>
+                {totalChatUnreadCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono tabular-nums text-[10px] font-black">
+                    {totalChatUnreadCount > 99 ? '99+' : totalChatUnreadCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             {/* 1B. Keluarga */}
             {uiVisibilityConfig.navTabs.family !== false && (
               <button
@@ -1336,26 +1357,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </button>
             )}
 
-            {/* 8. Chat Global & Priv */}
-            {uiVisibilityConfig.navTabs.chat !== false && (
-              <button
-                type="button"
-                onClick={(e) => handleSelectNavView('chat', e)}
-                className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
-                  activeView === 'chat'
-                    ? 'bg-blue-600 text-white font-bold shadow-sm'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-900'
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span>Chat Global &amp; Priv</span>
-                {totalChatUnreadCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono tabular-nums text-[10px] font-black">
-                    {totalChatUnreadCount > 99 ? '99+' : totalChatUnreadCount}
-                  </span>
-                )}
-              </button>
-            )}
 
             {/* 9. Mesin ATM */}
             {uiVisibilityConfig.navTabs.atm !== false && (

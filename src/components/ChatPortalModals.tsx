@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X,
@@ -38,18 +38,37 @@ import {
   Heart,
   Zap,
   Search,
+  Smile,
+  Keyboard,
+  Coins,
+  Gem,
+  Gift,
+  Receipt,
+  CalendarClock,
+  Flag,
+  ZoomIn,
+  Award,
+  UserCheck,
+  Wallet,
 } from 'lucide-react';
 import {
   BankAccount,
+  ChatAssetKind,
+  ChatBillReminderData,
+  ChatContactAttachment,
+  ChatCustomBadgeTier,
   ChatForwardInfo,
   ChatMessage,
   ChatModerationLog,
   ChatPollData,
+  ChatRedPacketData,
+  ChatRedPacketMode,
   GlobalChatConfig,
   GlobalChatMessage,
   PrivateChatContact,
   PrivateChatGroup,
 } from '../types/bank';
+import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
 
 export const CHAT_GROUP_ICON_OPTIONS = [
   { key: 'users', label: 'Komunitas', Icon: Users },
@@ -149,22 +168,22 @@ export const PortalModalShell: React.FC<PortalModalShellProps> = ({
       }}
     >
       <div
-        className={`w-full ${maxWidthClass} max-h-[92dvh] sm:max-h-[88dvh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150`}
+        className={`w-full ${maxWidthClass} max-h-[92dvh] sm:max-h-[88dvh] flex flex-col rounded-t-3xl sm:rounded-3xl bg-[#0b0f19] border border-slate-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150`}
       >
-        <div className="shrink-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/95">
+        <div className="shrink-0 flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-800 bg-[#0b0f19]/95">
           <div className="flex items-center gap-3 min-w-0">
             {icon && <div className="shrink-0">{icon}</div>}
             <div className="min-w-0">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white truncate">{title}</h3>
+              <h3 className="text-base font-bold text-white truncate">{title}</h3>
               {subtitle && (
-                <p className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{subtitle}</p>
+                <p className="text-xs text-slate-400 truncate mt-0.5">{subtitle}</p>
               )}
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors"
+            className="shrink-0 p-2 rounded-xl text-slate-500 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
             aria-label="Tutup modal"
           >
             <X className="w-5 h-5" />
@@ -176,7 +195,7 @@ export const PortalModalShell: React.FC<PortalModalShellProps> = ({
         </div>
 
         {footer && (
-          <div className="shrink-0 px-5 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/95">
+          <div className="shrink-0 px-5 py-3.5 border-t border-slate-800 bg-[#0b0f19]/95">
             {footer}
           </div>
         )}
@@ -277,7 +296,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-300 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors"
+            className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-colors"
           >
             Batal
           </button>
@@ -295,7 +314,7 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
     >
       <form onSubmit={handleConfirm} className="space-y-4">
         <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+          <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
             1. Nama Panggilan / Kontak <span className="font-normal normal-case text-slate-400">(Opsional)</span>
           </label>
           <input
@@ -304,13 +323,13 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
             onChange={(e) => setCustomName(e.target.value)}
             maxLength={60}
             placeholder="Contoh: Kak Budi / Admin Resmi"
-            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
               2. User ID (16 Digit)
             </label>
             <input
@@ -319,11 +338,11 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
               value={userIdInput}
               onChange={(e) => setUserIdInput(e.target.value.replace(/[^\d\s-]/g, ''))}
               placeholder="Masukkan User ID"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-sm font-mono text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
               3. No. Rekening
             </label>
             <input
@@ -332,12 +351,12 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
               value={accNoInput}
               onChange={(e) => setAccNoInput(e.target.value.replace(/[^\d\s-]/g, ''))}
               placeholder="Contoh: 1001234567"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-sm font-mono text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
         </div>
 
-        <p className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/70 rounded-xl px-3.5 py-2.5">
+        <p className="text-xs text-slate-400 bg-slate-800/70 rounded-xl px-3.5 py-2.5">
           Cukup isi <strong>salah satu</strong> antara User ID atau No. Rekening. Nasabah yang sudah disimpan otomatis muncul sebagai pilihan anggota saat membuat <strong>Grup Privat</strong>.
         </p>
 
@@ -346,40 +365,40 @@ export const AddContactModal: React.FC<AddContactModalProps> = ({
           <div
             className={`rounded-2xl p-3.5 border ${
               previewAccount.conflict || !previewAccount.account || isSelf
-                ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800'
-                : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
+                ? 'bg-rose-950/30 border-rose-800'
+                : 'bg-emerald-950/30 border-emerald-800'
             }`}
           >
             {previewAccount.conflict ? (
-              <p className="text-xs font-semibold text-rose-700 dark:text-rose-300">
+              <p className="text-xs font-semibold text-rose-300">
                 User ID dan No. Rekening merujuk ke dua akun berbeda. Cukup isi salah satu saja.
               </p>
             ) : !previewAccount.account ? (
-              <p className="text-xs font-semibold text-rose-700 dark:text-rose-300">
+              <p className="text-xs font-semibold text-rose-300">
                 Nasabah tidak ditemukan di database Bank Nusantara. Periksa kembali angka yang dimasukkan.
               </p>
             ) : isSelf ? (
-              <p className="text-xs font-semibold text-rose-700 dark:text-rose-300">
+              <p className="text-xs font-semibold text-rose-300">
                 Anda tidak dapat menambahkan rekening milik Anda sendiri.
               </p>
             ) : (
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                    <span className="text-sm font-bold text-white truncate">
                       {customName.trim() || previewAccount.account.fullName}
                     </span>
                     {previewAccount.account.cardTier === 'admin' && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-400/50">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-400/50">
                         <ShieldCheck className="w-3 h-3" /> ADMIN RESMI
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                  <p className="text-xs text-slate-300 mt-0.5">
                     Terdaftar: <strong>{previewAccount.account.fullName}</strong> • Rek {previewAccount.account.accountNumber}
                   </p>
                   {previewAccount.account.userId16 && (
-                    <p className="text-[11px] font-mono text-slate-500 dark:text-slate-400 mt-0.5">
+                    <p className="text-[11px] font-mono text-slate-400 mt-0.5">
                       ID: {previewAccount.account.userId16}
                     </p>
                   )}
@@ -479,14 +498,14 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       }
       footer={
         <div className="flex items-center justify-between gap-3">
-          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-            Dipilih: <strong className="text-slate-900 dark:text-white">{selectedIds.length}</strong> anggota (+ Anda)
+          <span className="text-xs font-semibold text-slate-400">
+            Dipilih: <strong className="text-white">{selectedIds.length}</strong> anggota (+ Anda)
           </span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 dark:text-slate-300 bg-slate-200/80 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700"
+              className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700"
             >
               Batal
             </button>
@@ -505,7 +524,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     >
       <div className="space-y-4">
         <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+          <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
             Nama Grup Privat <span className="text-rose-500">*</span>
           </label>
           <input
@@ -514,13 +533,13 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             onChange={(e) => setName(e.target.value)}
             maxLength={80}
             placeholder="Contoh: Grup Bisnis Keluarga / Arisan Nusantara"
-            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
               Deskripsi Grup <span className="font-normal normal-case text-slate-400">(Opsional)</span>
             </label>
             <input
@@ -529,11 +548,11 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
               onChange={(e) => setDescription(e.target.value)}
               maxLength={200}
               placeholder="Tujuan atau catatan singkat grup"
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
               Aturan Grup <span className="font-normal normal-case text-slate-400">(Opsional)</span>
             </label>
             <input
@@ -542,14 +561,14 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
               onChange={(e) => setRules(e.target.value)}
               maxLength={250}
               placeholder="Misal: Dilarang spam, gunakan bahasa sopan"
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
               Ikon Grup
             </label>
             <div className="grid grid-cols-3 gap-1.5">
@@ -560,8 +579,8 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   onClick={() => setIconKey(key)}
                   className={`flex flex-col items-center gap-1 py-2 px-1.5 rounded-xl border text-[11px] font-semibold transition-all ${
                     iconKey === key
-                      ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300'
-                      : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      ? 'border-indigo-500 bg-indigo-950/50 text-indigo-300'
+                      : 'border-slate-700 text-slate-400 hover:bg-slate-800'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
@@ -571,7 +590,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
               Warna Aksen
             </label>
             <div className="grid grid-cols-3 gap-1.5">
@@ -581,7 +600,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                   type="button"
                   onClick={() => setAccentColor(c.key)}
                   className={`flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-xl text-[11px] font-bold transition-all ${c.bgClass} ${
-                    accentColor === c.key ? `ring-2 ring-offset-2 dark:ring-offset-slate-900 ${c.ringClass}` : 'opacity-75 hover:opacity-100'
+                    accentColor === c.key ? `ring-2 ring-offset-slate-900 ${c.ringClass}` : 'opacity-75 hover:opacity-100'
                   }`}
                 >
                   {accentColor === c.key && <Check className="w-3.5 h-3.5" />}
@@ -595,28 +614,28 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
         {/* STRICT PRIVACY MEMBER PICKER: ONLY FROM SAVED CONTACTS */}
         <div>
           <div className="flex items-center justify-between gap-2 mb-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">
               Pilih Anggota dari Nasabah Tersimpan (Min. 1)
             </label>
             <button
               type="button"
               onClick={onOpenAddContactFirst}
-              className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline inline-flex items-center gap-1"
+              className="text-xs font-bold text-emerald-400 hover:underline inline-flex items-center gap-1"
             >
               <UserPlus className="w-3.5 h-3.5" /> Tambah Nasabah
             </button>
           </div>
 
           {savedContacts.length === 0 ? (
-            <div className="rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-6 text-center space-y-3">
-              <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-200/80 dark:bg-slate-800 text-slate-500 flex items-center justify-center">
+            <div className="rounded-2xl border-2 border-dashed border-slate-700 bg-slate-800/50 p-6 text-center space-y-3">
+              <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-800 text-slate-500 flex items-center justify-center">
                 <Users className="w-6 h-6" />
               </div>
               <div>
-                <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                <p className="text-sm font-bold text-slate-200">
                   Daftar Anggota Masih Kosong
                 </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-xs mx-auto">
+                <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto">
                   Demi privasi, Anda harus menambahkan nasabah menggunakan User ID atau No. Rekening terlebih dahulu sebelum memilihnya sebagai anggota grup.
                 </p>
               </div>
@@ -644,22 +663,22 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     onClick={() => toggleMember(memberId)}
                     className={`w-full flex items-center justify-between gap-3 p-3 rounded-2xl border text-left transition-all ${
                       isChecked
-                        ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40'
-                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800'
+                        ? 'border-indigo-500 bg-indigo-950/40'
+                        : 'border-slate-700 bg-slate-800/60 hover:bg-slate-800'
                     }`}
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                        <span className="text-sm font-bold text-white truncate">
                           {contact.customName || acc?.fullName || contact.registeredName}
                         </span>
                         {(acc?.cardTier === 'admin' || contact.cardTier === 'admin') && (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/20 text-amber-300">
                             <ShieldCheck className="w-3 h-3" /> ADMIN RESMI
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                      <p className="text-xs text-slate-400 truncate">
                         Rek {contact.targetAccountNumber}
                         {contact.customName ? ` • ${acc?.fullName || contact.registeredName}` : ''}
                       </p>
@@ -668,7 +687,7 @@ export const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                       className={`shrink-0 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${
                         isChecked
                           ? 'bg-indigo-600 border-indigo-600 text-white'
-                          : 'border-slate-300 dark:border-slate-600'
+                          : 'border-slate-600'
                       }`}
                     >
                       {isChecked && <Check className="w-4 h-4" />}
@@ -783,7 +802,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
           <button
             type="button"
             onClick={onLeaveGroup}
-            className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/50 hover:bg-amber-200 dark:hover:bg-amber-900/60 inline-flex items-center gap-1.5"
+            className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-300 bg-amber-950/50 hover:bg-amber-900/60 inline-flex items-center gap-1.5"
           >
             <LogOut className="w-3.5 h-3.5" /> Keluar Grup
           </button>
@@ -792,7 +811,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
               <button
                 type="button"
                 onClick={() => setConfirmDelete(true)}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/50 hover:bg-rose-200 inline-flex items-center gap-1.5"
+                className="px-3.5 py-2 rounded-xl text-xs font-bold text-rose-300 bg-rose-950/50 hover:bg-rose-900/70 inline-flex items-center gap-1.5"
               >
                 <Trash2 className="w-3.5 h-3.5" /> Hapus Grup
               </button>
@@ -801,7 +820,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setConfirmDelete(false)}
-                  className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                  className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300"
                 >
                   Batal
                 </button>
@@ -819,7 +838,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
       }
     >
       {/* Notification Mute Toggle */}
-      <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800/70">
+      <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-800/70">
         <div className="flex items-center gap-2.5 min-w-0">
           {isGroupMuted ? (
             <VolumeX className="w-5 h-5 text-amber-500 shrink-0" />
@@ -827,8 +846,8 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
             <Volume2 className="w-5 h-5 text-emerald-500 shrink-0" />
           )}
           <div className="min-w-0">
-            <p className="text-sm font-bold text-slate-900 dark:text-white">Notifikasi Suara Grup</p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
+            <p className="text-sm font-bold text-white">Notifikasi Suara Grup</p>
+            <p className="text-xs text-slate-400">
               {isGroupMuted ? 'Dibisukan sementara di akun Anda' : 'Aktif — bunyi beep saat pesan masuk'}
             </p>
           </div>
@@ -839,7 +858,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
           className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors ${
             isGroupMuted
               ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-              : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-300'
+              : 'bg-slate-700 text-slate-200 hover:bg-slate-700'
           }`}
         >
           {isGroupMuted ? 'Aktifkan' : 'Bisukan'}
@@ -847,8 +866,8 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
       </div>
 
       {/* Group Details & Rules */}
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
-        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+      <div className="rounded-2xl border border-slate-700 p-4 space-y-3">
+        <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
           <Info className="w-4 h-4" /> Identitas & Aturan Grup
         </div>
         {canManage ? (
@@ -859,7 +878,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
               onChange={(e) => setEditName(e.target.value)}
               maxLength={80}
               placeholder="Nama grup"
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
+              className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-sm text-white"
             />
             <textarea
               rows={2}
@@ -867,7 +886,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
               onChange={(e) => setEditDesc(e.target.value)}
               maxLength={240}
               placeholder="Deskripsi singkat grup..."
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white resize-none"
+              className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white resize-none"
             />
             <textarea
               rows={2}
@@ -875,7 +894,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
               onChange={(e) => setEditRules(e.target.value)}
               maxLength={320}
               placeholder="Aturan grup (opsional)..."
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white resize-none"
+              className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white resize-none"
             />
             <button
               type="button"
@@ -892,7 +911,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
             </button>
           </>
         ) : (
-          <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300">
+          <div className="space-y-2 text-xs text-slate-300">
             <p>
               <strong>Deskripsi:</strong> {group.description || 'Belum ada deskripsi grup.'}
             </p>
@@ -905,24 +924,24 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
 
       {/* Pinned Messages in Group */}
       {pinnedMessages.length > 0 && (
-        <div className="rounded-2xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/70 dark:bg-amber-950/25 p-3.5 space-y-2">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800 dark:text-amber-300">
+        <div className="rounded-2xl border border-amber-800/60 bg-amber-950/25 p-3.5 space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
             <Pin className="w-3.5 h-3.5" /> Pesan Disematkan ({pinnedMessages.length})
           </div>
           {pinnedMessages.map((pm) => (
             <div
               key={pm.id}
-              className="flex items-start justify-between gap-2 p-2 rounded-xl bg-white/80 dark:bg-slate-900/70 text-xs"
+              className="flex items-start justify-between gap-2 p-2 rounded-xl bg-[#0b0f19]/70 text-xs"
             >
               <div className="min-w-0">
-                <p className="font-bold text-slate-800 dark:text-slate-200 truncate">{pm.senderName}</p>
-                <p className="text-slate-600 dark:text-slate-400 line-clamp-2">{pm.text}</p>
+                <p className="font-bold text-slate-200 truncate">{pm.senderName}</p>
+                <p className="text-slate-400 line-clamp-2">{pm.text}</p>
               </div>
               {canManage && (
                 <button
                   type="button"
                   onClick={() => onUnpinMessage(pm.id)}
-                  className="shrink-0 p-1.5 rounded-lg text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50"
+                  className="shrink-0 p-1.5 rounded-lg text-amber-300 hover:bg-amber-900/50"
                   title="Lepas sematan"
                 >
                   <PinOff className="w-3.5 h-3.5" />
@@ -935,7 +954,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
 
       {/* Member List + Simpan Nasabah for unsaved members + Co-Admin controls */}
       <div className="space-y-2">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
           Daftar Anggota ({group.memberAccountIds.length})
         </p>
         <div className="space-y-2">
@@ -950,32 +969,32 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
             return (
               <div
                 key={memberId}
-                className="flex items-center justify-between gap-2 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60"
+                className="flex items-center justify-between gap-2 p-3 rounded-2xl border border-slate-700 bg-slate-800/60"
               >
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                    <span className="text-sm font-bold text-white truncate">
                       {isMe
                         ? `${currentAccount.fullName} (Anda)`
                         : savedContact?.customName || acc?.fullName || memberId}
                     </span>
                     {acc?.cardTier === 'admin' && (
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/20 text-amber-300">
                         <ShieldCheck className="w-3 h-3" /> ADMIN RESMI
                       </span>
                     )}
                     {memberIsCreator && (
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300">
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-900/60 text-indigo-300">
                         <Crown className="w-3 h-3" /> Pembuat
                       </span>
                     )}
                     {!memberIsCreator && memberIsCoAdmin && (
-                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 dark:bg-sky-900/60 text-sky-700 dark:text-sky-300">
+                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-900/60 text-sky-300">
                         Co-Admin
                       </span>
                     )}
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  <p className="text-[11px] text-slate-400">
                     {acc ? `Rek ${acc.accountNumber}` : 'Anggota Grup'}
                     {unsaved && ' • Belum Disimpan'}
                   </p>
@@ -1002,8 +1021,8 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                       }}
                       className={`px-2 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
                         memberIsCoAdmin
-                          ? 'border-sky-400 text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/40'
-                          : 'border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                          ? 'border-sky-400 text-sky-300 bg-sky-950/40'
+                          : 'border-slate-600 text-slate-300 hover:bg-slate-700'
                       }`}
                     >
                       {memberIsCoAdmin ? 'Cabut Co-Admin' : 'Jadikan Co-Admin'}
@@ -1013,7 +1032,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                     <button
                       type="button"
                       onClick={() => onRemoveMember(memberId)}
-                      className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/50"
+                      className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-950/50"
                       title="Keluarkan anggota"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -1027,8 +1046,8 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
       </div>
 
       {/* Add New Member in Info Grup: Saved Contacts + User ID / No. Rekening */}
-      <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
-        <p className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+      <div className="rounded-2xl border border-slate-700 p-4 space-y-3">
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
           Tambah Anggota Baru (Kontak Tersimpan / User ID / No. Rek)
         </p>
 
@@ -1039,7 +1058,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
                 key={c.id}
                 type="button"
                 onClick={() => onAddMember(c.targetAccountId)}
-                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 inline-flex items-center gap-1"
+                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-950/40 text-emerald-300 border border-emerald-800 hover:bg-emerald-900/60 inline-flex items-center gap-1"
               >
                 <Plus className="w-3.5 h-3.5" />
                 {c.customName || c.registeredName}
@@ -1055,7 +1074,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
             value={lookupInput}
             onChange={(e) => setLookupInput(e.target.value.replace(/[^\d]/g, ''))}
             placeholder="Ketik User ID (16 digit) atau No. Rekening..."
-            className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono text-slate-900 dark:text-white"
+            className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs font-mono text-white"
           />
           <button
             type="button"
@@ -1072,7 +1091,7 @@ export const GroupInfoModal: React.FC<GroupInfoModalProps> = ({
           </button>
         </div>
         {lookupInput.length >= 4 && (
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          <p className="text-[11px] text-slate-400">
             {lookupMatch
               ? group.memberAccountIds.includes(lookupMatch.id)
                 ? `${lookupMatch.fullName} sudah menjadi anggota grup ini.`
@@ -1146,7 +1165,7 @@ export const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 rounded-xl text-sm font-bold bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+            className="px-5 py-2 rounded-xl text-sm font-bold bg-slate-800 text-white"
           >
             Tutup
           </button>
@@ -1154,22 +1173,22 @@ export const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
       }
     >
       {/* Message preview */}
-      <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-        <p className="text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">
+      <div className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700">
+        <p className="text-xs font-bold text-slate-400 mb-1">
           {message.senderName} • {formatChatTimeShort(message.timestamp)}
         </p>
-        <p className="text-sm text-slate-900 dark:text-white whitespace-pre-wrap break-words">
+        <p className="text-sm text-white whitespace-pre-wrap break-words">
           {message.text || (message.poll ? `Polling: ${message.poll.question}` : 'Pesan')}
         </p>
       </div>
 
       {/* Sudah Membaca */}
       <div className="space-y-2">
-        <div className="flex items-center gap-1.5 text-xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider">
+        <div className="flex items-center gap-1.5 text-xs font-bold text-sky-400 uppercase tracking-wider">
           <CheckCheck className="w-4 h-4" /> Sudah Membaca ({readers.length})
         </div>
         {readers.length === 0 ? (
-          <p className="text-xs text-slate-500 dark:text-slate-400 italic py-2">
+          <p className="text-xs text-slate-400 italic py-2">
             Belum ada anggota lain yang membaca pesan ini.
           </p>
         ) : (
@@ -1177,15 +1196,15 @@ export const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
             {readers.map((r) => (
               <div
                 key={r.id}
-                className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200/70 dark:border-sky-800/50"
+                className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-sky-950/30 border border-sky-800/50"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{r.name}</p>
+                  <p className="text-sm font-bold text-white truncate">{r.name}</p>
                   {r.accountNumber && (
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">Rek {r.accountNumber}</p>
+                    <p className="text-[11px] text-slate-400">Rek {r.accountNumber}</p>
                   )}
                 </div>
-                <span className="shrink-0 text-xs font-semibold text-sky-700 dark:text-sky-300 inline-flex items-center gap-1">
+                <span className="shrink-0 text-xs font-semibold text-sky-300 inline-flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5" /> {formatChatDateTime(r.readAt)}
                 </span>
               </div>
@@ -1196,11 +1215,11 @@ export const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
 
       {/* Belum Membaca */}
       <div className="space-y-2">
-        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+        <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider">
           <Clock className="w-4 h-4" /> Belum Membaca ({unreadMembers.length})
         </div>
         {unreadMembers.length === 0 ? (
-          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 py-1">
+          <p className="text-xs font-semibold text-emerald-400 py-1">
             Semua anggota grup telah membaca pesan ini!
           </p>
         ) : (
@@ -1208,10 +1227,10 @@ export const ReadReceiptModal: React.FC<ReadReceiptModalProps> = ({
             {unreadMembers.map((u) => (
               <div
                 key={u.id}
-                className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700"
+                className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800/50 border border-slate-700"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{u.name}</p>
+                  <p className="text-sm font-semibold text-slate-200 truncate">{u.name}</p>
                   {u.accountNumber && (
                     <p className="text-[11px] text-slate-400">Rek {u.accountNumber}</p>
                   )}
@@ -1265,7 +1284,7 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
         </div>
       }
     >
-      <div className="p-3 rounded-2xl bg-slate-100 dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200 line-clamp-3">
+      <div className="p-3 rounded-2xl bg-slate-800 text-xs text-slate-200 line-clamp-3">
         {sourceText}
       </div>
 
@@ -1276,7 +1295,7 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Cari kontak atau grup tujuan..."
-          className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+          className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white"
         />
       </div>
 
@@ -1287,11 +1306,11 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
             void onForwardToGlobal();
             onClose();
           }}
-          className="w-full flex items-center justify-between gap-2 p-3 rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 text-left"
+          className="w-full flex items-center justify-between gap-2 p-3 rounded-2xl border border-emerald-800 bg-emerald-950/30 hover:bg-emerald-950/50 text-left"
         >
           <div>
-            <p className="text-sm font-bold text-emerald-900 dark:text-emerald-200">Chat Global Bank Nusantara</p>
-            <p className="text-[11px] text-emerald-700 dark:text-emerald-400">Teruskan ke ruang obrolan global</p>
+            <p className="text-sm font-bold text-emerald-200">Chat Global Bank Nusantara</p>
+            <p className="text-[11px] text-emerald-400">Teruskan ke ruang obrolan global</p>
           </div>
           <Send className="w-4 h-4 text-emerald-600" />
         </button>
@@ -1306,14 +1325,14 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
                 onForwardToGroup(grp);
                 onClose();
               }}
-              className="w-full flex items-center justify-between gap-2 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-left"
+              className="w-full flex items-center justify-between gap-2 p-3 rounded-2xl border border-slate-700 hover:bg-slate-800 text-left"
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${getChatGroupColorClass(grp.accentColor)}`}>
                   {renderChatGroupIcon(grp.iconKey, 'w-4 h-4')}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{grp.name}</p>
+                  <p className="text-sm font-bold text-white truncate">{grp.name}</p>
                   <p className="text-[11px] text-slate-500">Grup Privat • {grp.memberAccountIds.length} anggota</p>
                 </div>
               </div>
@@ -1336,10 +1355,10 @@ export const ForwardMessageModal: React.FC<ForwardMessageModalProps> = ({
                 onForwardToDm(c);
                 onClose();
               }}
-              className="w-full flex items-center justify-between gap-2 p-3 rounded-2xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-left"
+              className="w-full flex items-center justify-between gap-2 p-3 rounded-2xl border border-slate-700 hover:bg-slate-800 text-left"
             >
               <div className="min-w-0">
-                <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                <p className="text-sm font-bold text-white truncate">
                   {c.customName || c.registeredName}
                 </p>
                 <p className="text-[11px] text-slate-500">Chat Privat 1-on-1 • Rek {c.targetAccountNumber}</p>
@@ -1411,7 +1430,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300"
           >
             Batal
           </button>
@@ -1428,7 +1447,7 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
     >
       <div className="space-y-3">
         <div>
-          <label className="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-1">
+          <label className="block text-xs font-bold uppercase text-slate-400 mb-1">
             Pertanyaan Polling
           </label>
           <input
@@ -1437,12 +1456,12 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
             onChange={(e) => setQuestion(e.target.value)}
             maxLength={140}
             placeholder="Contoh: Jadwal kumpul minggu ini enaknya kapan?"
-            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-sm text-white"
           />
         </div>
 
         <div className="space-y-2">
-          <label className="block text-xs font-bold uppercase text-slate-500 dark:text-slate-400">
+          <label className="block text-xs font-bold uppercase text-slate-400">
             Pilihan Jawaban (Min. 2, Maks. 6)
           </label>
           {options.map((opt, idx) => (
@@ -1455,13 +1474,13 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
                 }
                 maxLength={80}
                 placeholder={`Opsi ${idx + 1}`}
-                className="flex-1 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
+                className="flex-1 px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-sm text-white"
               />
               {options.length > 2 && (
                 <button
                   type="button"
                   onClick={() => setOptions((prev) => prev.filter((_, i) => i !== idx))}
-                  className="p-2 rounded-xl text-rose-500 hover:bg-rose-100 dark:hover:bg-rose-950/40"
+                  className="p-2 rounded-xl text-rose-500 hover:bg-rose-950/40"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1472,14 +1491,14 @@ export const CreatePollModal: React.FC<CreatePollModalProps> = ({
             <button
               type="button"
               onClick={() => setOptions((prev) => [...prev, ''])}
-              className="text-xs font-bold text-violet-600 dark:text-violet-400 inline-flex items-center gap-1 hover:underline"
+              className="text-xs font-bold text-violet-400 inline-flex items-center gap-1 hover:underline"
             >
               <Plus className="w-3.5 h-3.5" /> Tambah Opsi
             </button>
           )}
         </div>
 
-        <label className="flex items-center gap-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer pt-1">
+        <label className="flex items-center gap-2.5 text-xs font-semibold text-slate-300 cursor-pointer pt-1">
           <input
             type="checkbox"
             checked={allowMultiple}
@@ -1533,7 +1552,7 @@ export const AdminWarnModal: React.FC<AdminWarnModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300"
           >
             Batal
           </button>
@@ -1555,7 +1574,7 @@ export const AdminWarnModal: React.FC<AdminWarnModalProps> = ({
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         placeholder="Tulis isi teguran resmi..."
-        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
+        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-sm text-white"
       />
     </PortalModalShell>
   );
@@ -1697,28 +1716,28 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
     >
       {/* Quick Stats Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/80">
+        <div className="p-2.5 rounded-xl bg-slate-800/80">
           <p className="text-[10px] font-bold uppercase text-slate-500">Total Pesan</p>
-          <p className="text-lg font-extrabold text-slate-900 dark:text-white">{globalChats.length}</p>
+          <p className="text-lg font-extrabold text-white">{globalChats.length}</p>
         </div>
-        <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30">
-          <p className="text-[10px] font-bold uppercase text-emerald-700 dark:text-emerald-400">Online</p>
-          <p className="text-lg font-extrabold text-emerald-700 dark:text-emerald-300">{connectedDevicesCount} HP</p>
+        <div className="p-2.5 rounded-xl bg-emerald-950/30">
+          <p className="text-[10px] font-bold uppercase text-emerald-400">Online</p>
+          <p className="text-lg font-extrabold text-emerald-300">{connectedDevicesCount} HP</p>
         </div>
-        <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30">
-          <p className="text-[10px] font-bold uppercase text-amber-700 dark:text-amber-400">Slow Mode</p>
-          <p className="text-lg font-extrabold text-amber-700 dark:text-amber-300">
+        <div className="p-2.5 rounded-xl bg-amber-950/30">
+          <p className="text-[10px] font-bold uppercase text-amber-400">Slow Mode</p>
+          <p className="text-lg font-extrabold text-amber-300">
             {globalChatConfig.cooldownMs > 0 ? `${Math.round(globalChatConfig.cooldownMs / 1000)} dtk` : 'Off'}
           </p>
         </div>
-        <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30">
-          <p className="text-[10px] font-bold uppercase text-rose-700 dark:text-rose-400">Di-Mute</p>
-          <p className="text-lg font-extrabold text-rose-700 dark:text-rose-300">{mutedEntries.length} Akun</p>
+        <div className="p-2.5 rounded-xl bg-rose-950/30">
+          <p className="text-[10px] font-bold uppercase text-rose-400">Di-Mute</p>
+          <p className="text-lg font-extrabold text-rose-300">{mutedEntries.length} Akun</p>
         </div>
       </div>
 
       {/* Sub Tabs */}
-      <div className="grid grid-cols-4 gap-1 p-1 rounded-2xl bg-slate-100 dark:bg-slate-800">
+      <div className="grid grid-cols-4 gap-1 p-1 rounded-2xl bg-slate-800">
         {[
           { id: 'broadcast' as const, label: 'Siaran', Icon: Megaphone },
           { id: 'moderation' as const, label: 'Moderasi', Icon: Ban },
@@ -1731,8 +1750,8 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
             onClick={() => setTab(id)}
             className={`py-2 px-2 rounded-xl text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-all ${
               tab === id
-                ? 'bg-white dark:bg-slate-900 text-amber-600 dark:text-amber-400 shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-[#0b0f19] text-amber-400 shadow-sm'
+                : 'text-slate-400 hover:text-white'
             }`}
           >
             <Icon className="w-3.5 h-3.5" />
@@ -1744,9 +1763,9 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
       {/* TAB 1: SIARAN & REKAP */}
       {tab === 'broadcast' && (
         <div className="space-y-4">
-          <div className="rounded-2xl border border-amber-300/70 dark:border-amber-700/60 bg-amber-50/60 dark:bg-amber-950/20 p-4 space-y-3">
+          <div className="rounded-2xl border border-amber-700/60 bg-amber-950/20 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-extrabold uppercase tracking-wider text-amber-800 dark:text-amber-300 inline-flex items-center gap-1.5">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-amber-300 inline-flex items-center gap-1.5">
                 <Megaphone className="w-4 h-4" /> Pengumuman / Broadcast Cepat Admin
               </span>
               <button
@@ -1765,9 +1784,9 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
               value={announceText}
               onChange={(e) => setAnnounceText(e.target.value)}
               placeholder="Tulis pengumuman resmi Admin untuk seluruh nasabah..."
-              className="w-full px-3.5 py-2.5 rounded-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-white"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-amber-700 bg-[#0b0f19] text-sm text-white"
             />
-            <div className="flex flex-wrap gap-3 text-xs font-semibold text-slate-700 dark:text-slate-300">
+            <div className="flex flex-wrap gap-3 text-xs font-semibold text-slate-300">
               <label className="inline-flex items-center gap-1.5 cursor-pointer">
                 <input
                   type="checkbox"
@@ -1819,23 +1838,23 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
             <button
               type="button"
               onClick={onCopyRecap}
-              className="py-2.5 px-3.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-xs font-bold text-slate-800 dark:text-slate-200 inline-flex items-center justify-center gap-2"
+              className="py-2.5 px-3.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-[#0b101c] text-xs font-bold text-slate-200 inline-flex items-center justify-center gap-2"
             >
               <Copy className="w-4 h-4 text-indigo-500" /> Salin Rekap Chat Global
             </button>
             <button
               type="button"
               onClick={onDownloadRecap}
-              className="py-2.5 px-3.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-xs font-bold text-slate-800 dark:text-slate-200 inline-flex items-center justify-center gap-2"
+              className="py-2.5 px-3.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-[#0b101c] text-xs font-bold text-slate-200 inline-flex items-center justify-center gap-2"
             >
               <Download className="w-4 h-4 text-emerald-500" /> Ekspor Rekap (.TXT)
             </button>
           </div>
 
-          <div className="rounded-2xl border border-rose-200 dark:border-rose-800/60 bg-rose-50/60 dark:bg-rose-950/20 p-3.5 flex items-center justify-between gap-3 flex-wrap">
+          <div className="rounded-2xl border border-rose-800/60 bg-rose-950/20 p-3.5 flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <p className="text-xs font-bold text-rose-800 dark:text-rose-300">Bersihkan Semua Chat Global</p>
-              <p className="text-[11px] text-rose-600 dark:text-rose-400">
+              <p className="text-xs font-bold text-rose-300">Bersihkan Semua Chat Global</p>
+              <p className="text-[11px] text-rose-400">
                 Menghapus permanen seluruh pesan di Chat Global pada semua perangkat.
               </p>
             </div>
@@ -1852,7 +1871,7 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setConfirmClearAll(false)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-200 dark:bg-slate-800"
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800"
                 >
                   Batal
                 </button>
@@ -1876,10 +1895,10 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
       {tab === 'moderation' && (
         <div className="space-y-4">
           {/* Lock & Slow Mode */}
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+          <div className="rounded-2xl border border-slate-700 p-4 space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-bold text-slate-900 dark:text-white">Mode Khusus Admin (Lock Global)</p>
+                <p className="text-xs font-bold text-white">Mode Khusus Admin (Lock Global)</p>
                 <p className="text-[11px] text-slate-500">Hanya Admin yang bisa mengirim pesan saat aktif</p>
               </div>
               <button
@@ -1897,7 +1916,7 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
             </div>
 
             <div>
-              <p className="text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
+              <p className="text-xs font-bold text-slate-300 mb-2">
                 Slow Mode (Jeda Antar Pesan Nasabah)
               </p>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
@@ -1911,7 +1930,7 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
                       className={`py-2 rounded-xl text-xs font-bold border transition-all ${
                         active
                           ? 'bg-amber-500 border-amber-500 text-slate-950'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          : 'border-slate-700 text-slate-300 hover:bg-slate-800'
                       }`}
                     >
                       {p.label}
@@ -1923,14 +1942,14 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
           </div>
 
           {/* Flexible Mute Form */}
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-700 p-4 space-y-3">
-            <p className="text-xs font-extrabold uppercase tracking-wider text-rose-600 dark:text-rose-400 inline-flex items-center gap-1.5">
+          <div className="rounded-2xl border border-slate-700 p-4 space-y-3">
+            <p className="text-xs font-extrabold uppercase tracking-wider text-rose-400 inline-flex items-center gap-1.5">
               <Ban className="w-4 h-4" /> Mute Nasabah (Durasi Bebas / Permanen)
             </p>
             <select
               value={muteTargetId}
               onChange={(e) => setMuteTargetId(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-900 dark:text-white"
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-xs font-semibold text-white"
             >
               <option value="">-- Pilih Nasabah yang akan di-Mute --</option>
               {prefillMuteTarget &&
@@ -1955,20 +1974,20 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
                 value={muteAmount}
                 onChange={(e) => setMuteAmount(e.target.value)}
                 placeholder="Angka durasi"
-                className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-900 dark:text-white disabled:opacity-40"
+                className="px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-sm font-bold text-white disabled:opacity-40"
               />
               <select
                 disabled={mutePermanent}
                 value={muteUnit}
                 onChange={(e) => setMuteUnit(e.target.value as 'seconds' | 'minutes' | 'hours' | 'days')}
-                className="px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-900 dark:text-white disabled:opacity-40"
+                className="px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs font-bold text-white disabled:opacity-40"
               >
                 <option value="seconds">Detik</option>
                 <option value="minutes">Menit</option>
                 <option value="hours">Jam</option>
                 <option value="days">Hari</option>
               </select>
-              <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-xs font-bold text-slate-700 dark:text-slate-200 cursor-pointer">
+              <label className="flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-700 bg-slate-800/70 text-xs font-bold text-slate-200 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={mutePermanent}
@@ -1984,7 +2003,7 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
               value={muteReason}
               onChange={(e) => setMuteReason(e.target.value)}
               placeholder="Alasan mute (opsional, misal: Spam berulang)"
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+              className="w-full px-3 py-2 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white"
             />
 
             <button
@@ -2020,13 +2039,13 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
               mutedEntries.map((m) => (
                 <div
                   key={m.accountId}
-                  className="flex items-center justify-between gap-2 p-3 rounded-xl border border-rose-200 dark:border-rose-800/50 bg-rose-50/50 dark:bg-rose-950/20"
+                  className="flex items-center justify-between gap-2 p-3 rounded-xl border border-rose-800/50 bg-rose-950/20"
                 >
                   <div className="min-w-0">
-                    <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                    <p className="text-xs font-bold text-white truncate">
                       {m.accountName} {m.accountNumber ? `(${m.accountNumber})` : ''}
                     </p>
-                    <p className="text-[11px] text-rose-700 dark:text-rose-300">
+                    <p className="text-[11px] text-rose-300">
                       Durasi: {m.durationLabel}
                       {m.mutedUntilMs && !m.isPermanent ? ` • s/d ${formatChatDateTime(new Date(m.mutedUntilMs).toISOString())}` : ''}
                       {m.reason ? ` • ${m.reason}` : ''}
@@ -2049,12 +2068,12 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
       {/* TAB 3: FILTER KATA TERLARANG */}
       {tab === 'filter' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80">
+          <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-800/80">
             <div>
-              <p className="text-xs font-bold text-slate-900 dark:text-white">Mode Tindakan Kata Terlarang</p>
+              <p className="text-xs font-bold text-white">Mode Tindakan Kata Terlarang</p>
               <p className="text-[11px] text-slate-500">Pilih sensor otomatis menjadi *** atau blokir pengiriman pesan</p>
             </div>
-            <div className="flex rounded-xl overflow-hidden border border-slate-300 dark:border-slate-700">
+            <div className="flex rounded-xl overflow-hidden border border-slate-700">
               <button
                 type="button"
                 onClick={() =>
@@ -2063,7 +2082,7 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
                 className={`px-3 py-1.5 text-xs font-bold ${
                   (globalChatConfig.bannedWordMode || 'censor') === 'censor'
                     ? 'bg-amber-500 text-slate-950'
-                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+                    : 'bg-[#0b0f19] text-slate-300'
                 }`}
               >
                 Sensor ***
@@ -2076,7 +2095,7 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
                 className={`px-3 py-1.5 text-xs font-bold ${
                   globalChatConfig.bannedWordMode === 'block'
                     ? 'bg-rose-600 text-white'
-                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+                    : 'bg-[#0b0f19] text-slate-300'
                 }`}
               >
                 Blokir
@@ -2096,7 +2115,7 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
                 }
               }}
               placeholder="Tambah kata terlarang (contoh: judol, spam)..."
-              className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white"
+              className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-xs text-white"
             />
             <button
               type="button"
@@ -2114,13 +2133,13 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
               (globalChatConfig.bannedWords || []).map((word) => (
                 <span
                   key={word}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs font-bold text-rose-700 dark:text-rose-300"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/40 border border-rose-800 text-xs font-bold text-rose-300"
                 >
                   {word}
                   <button
                     type="button"
                     onClick={() => handleRemoveBannedWord(word)}
-                    className="hover:text-rose-950 dark:hover:text-white"
+                    className="hover:text-white"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -2142,15 +2161,15 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
             moderationLogs.map((log) => (
               <div
                 key={log.id}
-                className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/50 flex items-start justify-between gap-2"
+                className="p-3 rounded-xl border border-slate-700 bg-slate-800/50 flex items-start justify-between gap-2"
               >
                 <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-900 dark:text-white">{log.detail}</p>
+                  <p className="text-xs font-bold text-white">{log.detail}</p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     Oleh <strong>{log.adminName}</strong> • {formatChatDateTime(log.timestamp)}
                   </p>
                 </div>
-                <span className="shrink-0 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+                <span className="shrink-0 px-2 py-0.5 rounded-md text-[10px] font-bold uppercase bg-slate-700 text-slate-200">
                   {log.action}
                 </span>
               </div>
@@ -2161,3 +2180,1549 @@ export const AdminModerationModal: React.FC<AdminModerationModalProps> = ({
     </PortalModalShell>
   );
 };
+
+// ==================== MODAL 9: PILIH EMOJI REAKSI (GBOARD + KATALOG LENGKAP) ====================
+const RECENT_EMOJIS_STORAGE_KEY = 'bn_chat_recent_reaction_emojis_v1';
+
+const EMOJI_CATEGORIES: Array<{ id: string; label: string; icon: string; emojis: string[] }> = [
+  {
+    id: 'smileys',
+    label: 'Ekspresi',
+    icon: '😀',
+    emojis: [
+      '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '🙃', '😉', '😊', '😇', '🥰', '😍', '🤩',
+      '😘', '😗', '😚', '😙', '🥲', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🫡',
+      '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '😮‍💨', '🤥', '😌', '😔', '😪', '🤤', '😴',
+      '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '🥸', '😎', '🤓',
+      '🧐', '😕', '🫤', '😟', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '🥹', '😦', '😧', '😨', '😰',
+      '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈',
+      '👿', '💀', '☠️', '💩', '🤡', '👻', '👽', '🤖', '🫶', '🫠',
+    ],
+  },
+  {
+    id: 'gestures',
+    label: 'Gestur',
+    icon: '👍',
+    emojis: [
+      '👍', '👎', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✍️', '💅', '🤳', '💪', '🦾', '🫰', '🫱', '🫲',
+      '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆',
+      '👇', '☝️', '🫵', '👊', '✊', '🤛', '🤜', '🫡', '🙆', '🙅', '🤷', '🤦', '🙇', '🙋', '💃', '🕺',
+    ],
+  },
+  {
+    id: 'hearts',
+    label: 'Hati & Simbol',
+    icon: '❤️',
+    emojis: [
+      '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❤️‍🔥', '❤️‍🩹', '❣️', '💕', '💞', '💓',
+      '💗', '💖', '💘', '💝', '💟', '🔥', '✨', '⭐', '🌟', '💫', '💥', '💢', '💯', '✅', '❌', '❗',
+      '❓', '‼️', '⁉️', '⚠️', '🔔', '🎉', '🎊', '🎈', '🏆', '🥇', '🥈', '🥉', '👑', '💎', '🚀', '⚡',
+    ],
+  },
+  {
+    id: 'finance',
+    label: 'Uang & Bisnis',
+    icon: '💰',
+    emojis: [
+      '💰', '💵', '💴', '💶', '💷', '🪙', '💳', '💸', '🏦', '🧾', '📈', '📉', '📊', '💼', '🤝', '🎯',
+      '🎁', '🛍️', '📦', '🛡️', '🔒', '🔑', '📱', '💻', '⌚', '📢', '📣', '📌', '📍', '📝', '📅', '⏰',
+    ],
+  },
+  {
+    id: 'food',
+    label: 'Makanan',
+    icon: '☕',
+    emojis: [
+      '☕', '🍵', '🧋', '🥤', '🧃', '🍺', '🥂', '🍽️', '🍚', '🍜', '🍝', '🍛', '🍲', '🍗', '🍖', '🍔',
+      '🍟', '🍕', '🌭', '🥪', '🌮', '🌯', '🍳', '🥞', '🧇', '🥐', '🍞', '🍩', '🍪', '🎂', '🍰', '🧁',
+      '🍫', '🍬', '🍭', '🍦', '🍧', '🍉', '🍌', '🍎', '🍇', '🍓', '🥑', '🌶️',
+    ],
+  },
+  {
+    id: 'nature',
+    label: 'Alam & Hewan',
+    icon: '🌸',
+    emojis: [
+      '🌸', '🌹', '🌺', '🌻', '🌷', '🍀', '🌿', '🌴', '🌳', '☀️', '🌤️', '⛅', '🌧️', '⛈️', '🌈', '❄️',
+      '🌙', '⭐', '🌊', '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐸',
+      '🐵', '🐔', '🐧', '🐦', '🦅', '🦉', '🦋', '🐝', '🐢', '🐬', '🐳', '🦖',
+    ],
+  },
+  {
+    id: 'flags',
+    label: 'Bendera & Lain',
+    icon: '🇮🇩',
+    emojis: [
+      '🇮🇩', '🇲🇾', '🇸🇬', '🇯🇵', '🇰🇷', '🇺🇸', '🇬🇧', '🇸🇦', '🇹🇷', '🇦🇺', '🇩🇪', '🇫🇷', '🇵🇸', '🌍', '✈️', '🚗',
+      '🏍️', '🚆', '⚽', '🏀', '🏸', '🎮', '🎵', '🎶', '🎬', '📸', '🎤', '🎧', '📚', '🎓', '🕌', '🏥',
+    ],
+  },
+];
+
+function extractGraphemes(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const IntlAny = Intl as unknown as {
+    Segmenter?: new (
+      locale?: string,
+      options?: { granularity: 'grapheme' | 'word' | 'sentence' }
+    ) => { segment: (input: string) => Iterable<{ segment: string }> };
+  };
+  if (typeof IntlAny.Segmenter === 'function') {
+    const seg = new IntlAny.Segmenter('id', { granularity: 'grapheme' });
+    return Array.from(seg.segment(trimmed), (s) => s.segment).filter((s) => s.trim().length > 0);
+  }
+  return Array.from(trimmed).filter((s) => s.trim().length > 0);
+}
+
+function isEmojiGrapheme(grapheme: string): boolean {
+  if (!grapheme) return false;
+  try {
+    if (/\p{Extended_Pictographic}/u.test(grapheme)) return true;
+    if (/[\u{1F1E6}-\u{1F1FF}]{2}/u.test(grapheme)) return true;
+  } catch {
+    // Fallback for older JS engines without Unicode property escapes
+    const code = grapheme.codePointAt(0) || 0;
+    if (code >= 0x2600) return true;
+  }
+  return false;
+}
+
+interface EmojiReactionModalProps {
+  open: boolean;
+  onClose: () => void;
+  onSelectEmoji: (emoji: string) => void;
+}
+
+export const EmojiReactionModal: React.FC<EmojiReactionModalProps> = ({
+  open,
+  onClose,
+  onSelectEmoji,
+}) => {
+  const [gboardValue, setGboardValue] = useState('');
+  const [isComposing, setIsComposing] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string>('smileys');
+  const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+  const gboardInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setGboardValue('');
+    try {
+      const raw = localStorage.getItem(RECENT_EMOJIS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setRecentEmojis(parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).slice(0, 16));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    const timer = window.setTimeout(() => {
+      gboardInputRef.current?.focus();
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  const commitEmoji = (emoji: string) => {
+    const clean = emoji.trim();
+    if (!clean) return;
+    try {
+      const nextRecent = [clean, ...recentEmojis.filter((e) => e !== clean)].slice(0, 16);
+      setRecentEmojis(nextRecent);
+      localStorage.setItem(RECENT_EMOJIS_STORAGE_KEY, JSON.stringify(nextRecent));
+    } catch {
+      /* ignore */
+    }
+    onSelectEmoji(clean);
+    onClose();
+  };
+
+  const handleGboardChange = (val: string) => {
+    setGboardValue(val);
+    if (isComposing) return;
+    const graphemes = extractGraphemes(val);
+    const emojiCandidate = graphemes.find((g) => isEmojiGrapheme(g));
+    if (emojiCandidate) {
+      commitEmoji(emojiCandidate);
+    }
+  };
+
+  const handleManualSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const graphemes = extractGraphemes(gboardValue);
+    if (graphemes.length === 0) return;
+    const picked = graphemes.find((g) => isEmojiGrapheme(g)) || graphemes[0];
+    commitEmoji(picked);
+  };
+
+  const currentCategory =
+    EMOJI_CATEGORIES.find((cat) => cat.id === activeCategory) || EMOJI_CATEGORIES[0];
+
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title="Pilih Reaksi Emoji"
+      subtitle="Bisa langsung pilih semua emoji dari Gboard / Keyboard HP atau katalog lengkap"
+      icon={
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-sm">
+          <Smile className="w-5 h-5" />
+        </div>
+      }
+      maxWidthClass="max-w-lg"
+    >
+      {/* Native Gboard / System Emoji Keyboard Input */}
+      <div className="p-3.5 rounded-2xl bg-[#05070c] border border-emerald-500/40 space-y-2.5">
+        <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
+          <Keyboard className="w-4 h-4 shrink-0" />
+          <span>Pilih Langsung dari Emoji Gboard / Keyboard</span>
+        </div>
+        <form onSubmit={handleManualSubmit} className="flex items-center gap-2">
+          <input
+            ref={gboardInputRef}
+            type="text"
+            value={gboardValue}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={(e) => {
+              setIsComposing(false);
+              const val = e.currentTarget.value;
+              const graphemes = extractGraphemes(val);
+              const emojiCandidate = graphemes.find((g) => isEmojiGrapheme(g));
+              if (emojiCandidate) {
+                commitEmoji(emojiCandidate);
+              }
+            }}
+            onChange={(e) => handleGboardChange(e.target.value)}
+            placeholder="Ketuk di sini, buka 😊 di Gboard lalu pilih emoji apa saja..."
+            className="flex-1 min-w-0 px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+          <button
+            type="submit"
+            disabled={!gboardValue.trim()}
+            className="shrink-0 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-extrabold transition-colors"
+          >
+            Pasang
+          </button>
+        </form>
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          Di HP: ketuk kotak di atas lalu tekan ikon emoji <strong className="text-slate-200">😊 di Gboard</strong> — semua emoji otomatis langsung terpasang saat diketuk. Di Laptop: tekan <strong className="text-slate-200">Win + .</strong> (Windows) atau <strong className="text-slate-200">Ctrl + Cmd + Spasi</strong> (Mac).
+        </p>
+      </div>
+
+      {/* Recently Used Emojis */}
+      {recentEmojis.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            Baru Dipakai
+          </p>
+          <div className="grid grid-cols-8 gap-1">
+            {recentEmojis.map((emoji) => (
+              <button
+                key={`recent-${emoji}`}
+                type="button"
+                onClick={() => commitEmoji(emoji)}
+                className="h-10 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xl flex items-center justify-center transition-transform active:scale-90 hover:scale-110"
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Built-in Categorized Emoji Catalog */}
+      <div className="space-y-2.5">
+        <div className="flex items-center gap-1 overflow-x-auto pb-1">
+          {EMOJI_CATEGORIES.map((cat) => (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => setActiveCategory(cat.id)}
+              className={`shrink-0 px-2.5 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 border transition-colors ${
+                activeCategory === cat.id
+                  ? 'bg-emerald-950/70 border-emerald-500/60 text-emerald-200'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+              }`}
+            >
+              <span>{cat.icon}</span>
+              <span>{cat.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-8 gap-1 max-h-56 overflow-y-auto pr-1">
+          {currentCategory.emojis.map((emoji, idx) => (
+            <button
+              key={`${currentCategory.id}-${idx}-${emoji}`}
+              type="button"
+              onClick={() => commitEmoji(emoji)}
+              className="h-10 rounded-xl hover:bg-slate-800 text-xl flex items-center justify-center transition-transform active:scale-90 hover:scale-115"
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      </div>
+    </PortalModalShell>
+  );
+};
+
+// =========================================================================
+// Helper format nilai aset (Uang Rp / Coin / Diamond)
+// =========================================================================
+export function formatModalAssetValue(amount: number, kind: ChatAssetKind): string {
+  if (isUnlimitedNumber(amount)) {
+    if (kind === 'coin') return '∞ Coin';
+    if (kind === 'diamond') return '∞ Diamond';
+    return 'Rp ∞ (Tak Terbatas)';
+  }
+  if (kind === 'coin') return `${Math.floor(amount).toLocaleString('id-ID')} Coin`;
+  if (kind === 'diamond') return `${Math.floor(amount).toLocaleString('id-ID')} Diamond`;
+  return formatRupiah(amount);
+}
+
+export function getModalAssetBalance(acc: BankAccount | null | undefined, kind: ChatAssetKind): number {
+  if (!acc) return 0;
+  if (kind === 'coin') return Number(acc.spinCoins || 0);
+  if (kind === 'diamond') return Number(acc.diamonds || 0);
+  return Number(acc.balance || 0);
+}
+
+// =========================================================================
+// 11. MultiAssetTransferModal (Kirim / Minta Uang, Coin, Diamond)
+// =========================================================================
+export interface MultiAssetTransferModalProps {
+  open: boolean;
+  onClose: () => void;
+  isRequestMode: boolean;
+  currentAccount: BankAccount;
+  accounts: BankAccount[];
+  isGroup: boolean;
+  group?: PrivateChatGroup | null;
+  dmPeerName?: string;
+  onConfirm: (payload: {
+    assetKind: ChatAssetKind;
+    amount: number;
+    note: string;
+    targetAccountId?: string;
+  }) => void;
+}
+
+export const MultiAssetTransferModal: React.FC<MultiAssetTransferModalProps> = ({
+  open,
+  onClose,
+  isRequestMode,
+  currentAccount,
+  accounts,
+  isGroup,
+  group,
+  dmPeerName,
+  onConfirm,
+}) => {
+  const [assetKind, setAssetKind] = useState<ChatAssetKind>('uang');
+  const [amountInput, setAmountInput] = useState('');
+  const [note, setNote] = useState('');
+  const [targetAccId, setTargetAccId] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setAssetKind('uang');
+      setAmountInput('');
+      setNote('');
+      if (isGroup && group) {
+        const firstOther = group.memberAccountIds.find((id) => id !== currentAccount.id) || '';
+        setTargetAccId(firstOther);
+      } else {
+        setTargetAccId('');
+      }
+    }
+  }, [open, isGroup, group, currentAccount.id]);
+
+  const numericAmt = Math.floor(Number(amountInput.replace(/[^\d]/g, '')) || 0);
+  const myBalance = getModalAssetBalance(currentAccount, assetKind);
+  const minAmt = assetKind === 'uang' ? 1000 : 1;
+  const insufficient = !isRequestMode && !isUnlimitedNumber(myBalance) && numericAmt > myBalance;
+  const invalidAmount = numericAmt < minAmt;
+  const missingTarget = !isRequestMode && isGroup && !targetAccId;
+
+  const assetCards: Array<{ id: ChatAssetKind; label: string; balanceLabel: string; icon: React.ReactNode }> = [
+    {
+      id: 'uang',
+      label: 'Uang (Rp)',
+      balanceLabel: formatModalAssetValue(currentAccount.balance, 'uang'),
+      icon: <Wallet className="w-4 h-4 text-emerald-400" />,
+    },
+    {
+      id: 'coin',
+      label: 'Coin Spin',
+      balanceLabel: formatModalAssetValue(currentAccount.spinCoins || 0, 'coin'),
+      icon: <Coins className="w-4 h-4 text-amber-400" />,
+    },
+    {
+      id: 'diamond',
+      label: 'Diamond',
+      balanceLabel: formatModalAssetValue(currentAccount.diamonds || 0, 'diamond'),
+      icon: <Gem className="w-4 h-4 text-cyan-400" />,
+    },
+  ];
+
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title={isRequestMode ? 'Minta Uang / Coin / Diamond' : 'Kirim Uang / Coin / Diamond'}
+      subtitle={isGroup && group ? `Grup: ${group.name}` : `Tujuan: ${dmPeerName || 'Nasabah'}`}
+      icon={
+        <div
+          className={`w-10 h-10 rounded-2xl flex items-center justify-center text-white ${
+            isRequestMode ? 'bg-amber-500 text-slate-950' : 'bg-emerald-600'
+          }`}
+        >
+          {assetKind === 'coin' ? (
+            <Coins className="w-5 h-5" />
+          ) : assetKind === 'diamond' ? (
+            <Gem className="w-5 h-5" />
+          ) : (
+            <Wallet className="w-5 h-5" />
+          )}
+        </div>
+      }
+      footer={
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={invalidAmount || insufficient || missingTarget}
+            onClick={() =>
+              onConfirm({
+                assetKind,
+                amount: numericAmt,
+                note: note.trim(),
+                targetAccountId: targetAccId || undefined,
+              })
+            }
+            className={`px-5 py-2 rounded-xl text-xs font-extrabold disabled:opacity-45 ${
+              isRequestMode
+                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+            }`}
+          >
+            {isRequestMode ? 'Kirim Permintaan' : 'Konfirmasi PIN Pengirim'}
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3.5">
+        <div>
+          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1.5">
+            Pilih Jenis Aset
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {assetCards.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setAssetKind(c.id)}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  assetKind === c.id
+                    ? 'bg-emerald-950/60 border-emerald-500 text-white'
+                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 text-xs font-extrabold">
+                  {c.icon}
+                  <span>{c.label}</span>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1 font-mono tabular-nums truncate">
+                  {c.balanceLabel}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {!isRequestMode && isGroup && group && (
+          <div>
+            <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+              Pilih Penerima di Grup
+            </label>
+            <select
+              value={targetAccId}
+              onChange={(e) => setTargetAccId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white"
+            >
+              {group.memberAccountIds
+                .filter((id) => id !== currentAccount.id)
+                .map((id) => {
+                  const acc = accounts.find((a) => a.id === id);
+                  return (
+                    <option key={id} value={id}>
+                      {acc?.fullName || id} {acc ? `(Rek ${acc.accountNumber})` : ''}
+                    </option>
+                  );
+                })}
+            </select>
+          </div>
+        )}
+
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="block text-[11px] font-bold uppercase text-slate-400">
+              Jumlah ({assetKind === 'uang' ? 'Minimal Rp 1.000' : 'Minimal 1'})
+            </label>
+            {!isRequestMode && (
+              <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                Saldo Anda: <strong className="text-slate-200">{formatModalAssetValue(myBalance, assetKind)}</strong>
+              </span>
+            )}
+          </div>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={amountInput}
+            onChange={(e) => setAmountInput(e.target.value.replace(/[^\d]/g, ''))}
+            placeholder={assetKind === 'uang' ? 'Contoh: 50000' : 'Contoh: 25'}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm font-bold font-mono tabular-nums text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+          {numericAmt > 0 && (
+            <p className={`text-xs font-bold mt-1 tabular-nums ${insufficient ? 'text-rose-400' : 'text-emerald-400'}`}>
+              {insufficient
+                ? `Saldo tidak cukup! Kekurangan: ${formatModalAssetValue(numericAmt - myBalance, assetKind)}`
+                : formatModalAssetValue(numericAmt, assetKind)}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+            Catatan <span className="font-normal normal-case">(Opsional)</span>
+          </label>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={120}
+            placeholder="Contoh: Bonus / Patungan / Hadiah"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white"
+          />
+        </div>
+      </div>
+    </PortalModalShell>
+  );
+};
+
+// =========================================================================
+// 12. CreateRedPacketModal (Amplop Kaget ala DANA)
+// =========================================================================
+export interface CreateRedPacketModalProps {
+  open: boolean;
+  onClose: () => void;
+  scope: 'global' | 'group';
+  groupName?: string;
+  currentAccount: BankAccount;
+  isOfficialAdmin?: boolean;
+  onConfirm: (payload: {
+    assetKind: ChatAssetKind;
+    totalAmount: number;
+    quota: number;
+    mode: ChatRedPacketMode;
+    note: string;
+    isOfficialAdmin: boolean;
+  }) => void;
+}
+
+export const CreateRedPacketModal: React.FC<CreateRedPacketModalProps> = ({
+  open,
+  onClose,
+  scope,
+  groupName,
+  currentAccount,
+  isOfficialAdmin = false,
+  onConfirm,
+}) => {
+  const [assetKind, setAssetKind] = useState<ChatAssetKind>('uang');
+  const [totalInput, setTotalInput] = useState('50000');
+  const [quotaInput, setQuotaInput] = useState('5');
+  const [mode, setMode] = useState<ChatRedPacketMode>('fastest_biggest');
+  const [note, setNote] = useState('Rezeki Nusantara! Siapa cepat dia dapat paling besar!');
+
+  useEffect(() => {
+    if (open) {
+      setAssetKind('uang');
+      setTotalInput('50000');
+      setQuotaInput('5');
+      setMode('fastest_biggest');
+      setNote('Rezeki Nusantara! Siapa cepat dia dapat paling besar!');
+    }
+  }, [open]);
+
+  const totalAmt = Math.floor(Number(totalInput.replace(/[^\d]/g, '')) || 0);
+  const quota = Math.max(1, Math.min(100, Math.floor(Number(quotaInput.replace(/[^\d]/g, '')) || 1)));
+  const myBalance = getModalAssetBalance(currentAccount, assetKind);
+  const insufficient = !isUnlimitedNumber(myBalance) && totalAmt > myBalance;
+  const tooSmallForQuota = totalAmt < quota;
+
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title="Buat Amplop Kaget ala DANA"
+      subtitle={scope === 'global' ? 'Sebar ke seluruh peserta Chat Global' : `Sebar ke Grup: ${groupName || 'Privat'}`}
+      icon={
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-rose-500 to-amber-500 text-white flex items-center justify-center shadow-sm">
+          <Gift className="w-5 h-5" />
+        </div>
+      }
+      footer={
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={insufficient || tooSmallForQuota || totalAmt < 1}
+            onClick={() =>
+              onConfirm({
+                assetKind,
+                totalAmount: totalAmt,
+                quota,
+                mode,
+                note: note.trim(),
+                isOfficialAdmin,
+              })
+            }
+            className="px-5 py-2 rounded-xl text-xs font-extrabold bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 disabled:opacity-45 text-slate-950"
+          >
+            Lanjut Konfirmasi PIN
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3.5">
+        <div className="grid grid-cols-3 gap-2">
+          {(
+            [
+              { id: 'uang', label: 'Uang (Rp)', val: currentAccount.balance },
+              { id: 'coin', label: 'Coin', val: currentAccount.spinCoins || 0 },
+              { id: 'diamond', label: 'Diamond', val: currentAccount.diamonds || 0 },
+            ] as const
+          ).map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              onClick={() => {
+                setAssetKind(a.id);
+                setTotalInput(a.id === 'uang' ? '50000' : '25');
+              }}
+              className={`p-2.5 rounded-xl border text-left transition-all ${
+                assetKind === a.id
+                  ? 'bg-rose-950/60 border-rose-500 text-white'
+                  : 'bg-slate-900 border-slate-800 text-slate-300'
+              }`}
+            >
+              <p className="text-xs font-extrabold">{a.label}</p>
+              <p className="text-[10px] text-slate-400 font-mono tabular-nums truncate mt-0.5">
+                {formatModalAssetValue(a.val, a.id)}
+              </p>
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+              Total Isi Amplop
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={totalInput}
+              onChange={(e) => setTotalInput(e.target.value.replace(/[^\d]/g, ''))}
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm font-bold font-mono tabular-nums text-white"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+              Batas Kuota (1–100 org)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={quotaInput}
+              onChange={(e) => setQuotaInput(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm font-bold font-mono tabular-nums text-white"
+            />
+          </div>
+        </div>
+
+        <div className="text-xs font-semibold tabular-nums">
+          {insufficient ? (
+            <p className="text-rose-400">
+              Saldo Anda tidak cukup! Tersedia: {formatModalAssetValue(myBalance, assetKind)}
+            </p>
+          ) : tooSmallForQuota ? (
+            <p className="text-rose-400">
+              Total isi minimal sama dengan kuota ({quota}) agar semua pemenang mendapat minimal 1.
+            </p>
+          ) : (
+            <p className="text-amber-300">
+              Total potong dari saldo Anda: <strong>{formatModalAssetValue(totalAmt, assetKind)}</strong>
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1.5">
+            Mode Pembagian
+          </label>
+          <div className="space-y-1.5">
+            {(
+              [
+                {
+                  id: 'fastest_biggest',
+                  title: 'Siapa Cepat Dapat Lebih Banyak',
+                  desc: 'Pengklaim tercepat dapat porsi paling besar secara bertingkat.',
+                },
+                {
+                  id: 'random',
+                  title: 'Acak ala DANA Kaget',
+                  desc: 'Nominal tiap orang diacak secara adil & penuh kejutan.',
+                },
+                {
+                  id: 'equal',
+                  title: 'Dibagi Merata',
+                  desc: 'Semua penerima mendapat nominal sama (sisa masuk ke pengklaim awal).',
+                },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setMode(m.id)}
+                className={`w-full p-2.5 rounded-xl border text-left transition-all ${
+                  mode === m.id
+                    ? 'bg-amber-950/50 border-amber-500 text-amber-100'
+                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                <p className="text-xs font-extrabold">{m.title}</p>
+                <p className="text-[11px] opacity-80 mt-0.5">{m.desc}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+            Ucapan Amplop Kaget
+          </label>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={120}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white"
+          />
+        </div>
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          Amplop Kaget aktif terus sampai seluruh kuota habis diklaim dan tidak dapat dibatalkan setelah dikirim.
+        </p>
+      </div>
+    </PortalModalShell>
+  );
+};
+
+// =========================================================================
+// 13. RedPacketDetailModal (Papan Peringkat Penerima Amplop Kaget)
+// =========================================================================
+export const RedPacketDetailModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  redPacket: ChatRedPacketData | null;
+}> = ({ open, onClose, redPacket }) => {
+  if (!redPacket) return null;
+  const sortedClaims = [...redPacket.claims].sort((a, b) => (a.rank || 0) - (b.rank || 0));
+  const modeLabel =
+    redPacket.mode === 'fastest_biggest'
+      ? 'Siapa Cepat Dapat Lebih Banyak'
+      : redPacket.mode === 'random'
+        ? 'Acak ala DANA Kaget'
+        : 'Dibagi Merata';
+
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title="Detail & Pemenang Amplop Kaget"
+      subtitle={`Dari ${redPacket.creatorName} • Mode: ${modeLabel}`}
+      icon={
+        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-rose-500 to-amber-500 text-white flex items-center justify-center">
+          <Gift className="w-5 h-5" />
+        </div>
+      }
+      footer={
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-200"
+          >
+            Tutup
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-2 p-3 rounded-2xl bg-[#05070c] border border-slate-800 tabular-nums">
+          <div>
+            <p className="text-[10px] uppercase text-slate-400 font-bold">Total / Tersisa</p>
+            <p className="text-xs font-extrabold text-amber-300 mt-0.5">
+              {formatModalAssetValue(redPacket.remainingAmount, redPacket.assetKind)} /{' '}
+              {formatModalAssetValue(redPacket.totalAmount, redPacket.assetKind)}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase text-slate-400 font-bold">Kuota Klaim</p>
+            <p className="text-xs font-extrabold text-emerald-300 mt-0.5">
+              {redPacket.claims.length} / {redPacket.quota} Penerima
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+          {sortedClaims.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-6">
+              Belum ada yang membuka Amplop Kaget ini.
+            </p>
+          ) : (
+            sortedClaims.map((c) => (
+              <div
+                key={c.accountId}
+                className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900 border border-slate-800"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span
+                    className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black shrink-0 ${
+                      c.rank === 1
+                        ? 'bg-amber-400 text-slate-950'
+                        : c.rank === 2
+                          ? 'bg-slate-300 text-slate-950'
+                          : 'bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    #{c.rank}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-white truncate">{c.accountName}</p>
+                    <p className="text-[10px] text-slate-400">{formatChatTimeShort(c.claimedAt)}</p>
+                  </div>
+                </div>
+                <span className="text-xs font-black text-emerald-400 font-mono tabular-nums shrink-0">
+                  +{formatModalAssetValue(c.amount, redPacket.assetKind)}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </PortalModalShell>
+  );
+};
+
+// =========================================================================
+// 14. CreateSplitBillModal (Patungan Grup Multi-Aset)
+// =========================================================================
+export const CreateSplitBillModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  group: PrivateChatGroup | null;
+  currentAccountId: string;
+  accounts: BankAccount[];
+  onCreate: (payload: {
+    title: string;
+    assetKind: ChatAssetKind;
+    totalAmount: number;
+    participantAccountIds: string[];
+  }) => void;
+}> = ({ open, onClose, group, currentAccountId, accounts, onCreate }) => {
+  const [title, setTitle] = useState('Patungan Makan & Kopi');
+  const [assetKind, setAssetKind] = useState<ChatAssetKind>('uang');
+  const [totalInput, setTotalInput] = useState('100000');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (open && group) {
+      setTitle('Patungan Grup');
+      setAssetKind('uang');
+      setTotalInput('100000');
+      setSelectedIds(group.memberAccountIds.filter((id) => id !== currentAccountId));
+    }
+  }, [open, group, currentAccountId]);
+
+  if (!group) return null;
+  const members = group.memberAccountIds.filter((id) => id !== currentAccountId);
+  const totalAmt = Math.floor(Number(totalInput.replace(/[^\d]/g, '')) || 0);
+  const perPerson = selectedIds.length > 0 ? Math.ceil(totalAmt / selectedIds.length) : 0;
+
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title="Buat Patungan Grup (Split Bill)"
+      subtitle={`Grup: ${group.name} • Dukung Uang, Coin & Diamond`}
+      icon={
+        <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center">
+          <Receipt className="w-5 h-5" />
+        </div>
+      }
+      footer={
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={selectedIds.length === 0 || totalAmt < selectedIds.length}
+            onClick={() => {
+              onCreate({
+                title: title.trim() || 'Patungan Grup',
+                assetKind,
+                totalAmount: totalAmt,
+                participantAccountIds: selectedIds,
+              });
+              onClose();
+            }}
+            className="px-5 py-2 rounded-xl text-xs font-extrabold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-45 text-white"
+          >
+            Kirim Tagihan Patungan
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <div>
+          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+            Judul Patungan
+          </label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={80}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white"
+          />
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          {(['uang', 'coin', 'diamond'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => {
+                setAssetKind(k);
+                setTotalInput(k === 'uang' ? '100000' : '20');
+              }}
+              className={`py-2 px-3 rounded-xl border text-xs font-extrabold ${
+                assetKind === k
+                  ? 'bg-indigo-950/70 border-indigo-500 text-indigo-200'
+                  : 'bg-slate-900 border-slate-800 text-slate-400'
+              }`}
+            >
+              {k === 'uang' ? 'Uang (Rp)' : k === 'coin' ? 'Coin' : 'Diamond'}
+            </button>
+          ))}
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+            Total Tagihan Patungan
+          </label>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={totalInput}
+            onChange={(e) => setTotalInput(e.target.value.replace(/[^\d]/g, ''))}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm font-bold font-mono tabular-nums text-white"
+          />
+          {selectedIds.length > 0 && totalAmt > 0 && (
+            <p className="text-xs font-bold text-indigo-300 mt-1 tabular-nums">
+              Masing-masing ({selectedIds.length} anggota): {formatModalAssetValue(perPerson, assetKind)}
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-[11px] font-bold uppercase text-slate-400 mb-1">
+            Pilih Peserta ({selectedIds.length}/{members.length})
+          </label>
+          <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+            {members.map((id) => {
+              const acc = accounts.find((a) => a.id === id);
+              const checked = selectedIds.includes(id);
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() =>
+                    setSelectedIds((prev) =>
+                      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+                    )
+                  }
+                  className={`w-full px-3 py-2 rounded-xl border flex items-center justify-between text-left text-xs ${
+                    checked
+                      ? 'bg-indigo-950/50 border-indigo-500 text-white'
+                      : 'bg-slate-900 border-slate-800 text-slate-300'
+                  }`}
+                >
+                  <span className="font-bold truncate">{acc?.fullName || id}</span>
+                  {checked && <Check className="w-4 h-4 text-indigo-400 shrink-0" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </PortalModalShell>
+  );
+};
+
+// =========================================================================
+// 15. SendContactCardModal (Bagikan Kartu Kontak Nasabah)
+// =========================================================================
+export const SendContactCardModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  savedContacts: PrivateChatContact[];
+  accounts: BankAccount[];
+  onSelectContact: (contact: ChatContactAttachment) => void;
+}> = ({ open, onClose, savedContacts, accounts, onSelectContact }) => {
+  const [search, setSearch] = useState('');
+  const list = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return savedContacts.filter(
+      (c) =>
+        !q ||
+        (c.customName || c.registeredName).toLowerCase().includes(q) ||
+        c.targetAccountNumber.includes(q)
+    );
+  }, [savedContacts, search]);
+
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title="Bagikan Kartu Kontak Nasabah"
+      subtitle="Pilih nasabah tersimpan untuk dibagikan sebagai kartu kontak interaktif"
+      icon={
+        <div className="w-10 h-10 rounded-2xl bg-cyan-600 text-white flex items-center justify-center">
+          <UserCheck className="w-5 h-5" />
+        </div>
+      }
+      footer={
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300"
+          >
+            Tutup
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Cari nama atau no. rekening..."
+          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white"
+        />
+        <div className="max-h-64 overflow-y-auto space-y-1.5">
+          {list.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-6">
+              Belum ada kontak tersimpan yang cocok.
+            </p>
+          ) : (
+            list.map((c) => {
+              const acc = accounts.find((a) => a.id === c.targetAccountId);
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    onSelectContact({
+                      accountId: c.targetAccountId,
+                      accountNumber: acc?.accountNumber || c.targetAccountNumber,
+                      userId16: acc?.userId16 || c.targetUserId16,
+                      fullName: acc?.fullName || c.customName || c.registeredName,
+                      cardTier: acc?.cardTier || c.cardTier,
+                      isVerified: Boolean(acc?.isVerified),
+                    });
+                    onClose();
+                  }}
+                  className="w-full p-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-left flex items-center justify-between gap-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-extrabold text-white truncate">
+                      {c.customName || c.registeredName}
+                    </p>
+                    <p className="text-[11px] font-mono text-slate-400">{c.targetAccountNumber}</p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-lg bg-cyan-950/60 text-cyan-300 text-[11px] font-bold">
+                    Bagikan
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </PortalModalShell>
+  );
+};
+
+// =========================================================================
+// 16. BillReminderModal (Pengingat Tagihan di Chat Privat)
+// =========================================================================
+export const BillReminderModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (reminder: ChatBillReminderData) => void;
+}> = ({ open, onClose, onSubmit }) => {
+  const [title, setTitle] = useState('Pengingat Bayar Tagihan');
+  const [assetKind, setAssetKind] = useState<ChatAssetKind>('uang');
+  const [amountInput, setAmountInput] = useState('50000');
+  const [dueDate, setDueDate] = useState('Hari ini pukul 20.00 WIB');
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setTitle('Pengingat Tagihan');
+      setAssetKind('uang');
+      setAmountInput('50000');
+      setDueDate('Hari ini pukul 20.00 WIB');
+      setNote('');
+    }
+  }, [open]);
+
+  const amt = Math.floor(Number(amountInput.replace(/[^\d]/g, '')) || 0);
+
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title="Kirim Pengingat Tagihan"
+      subtitle="Kirim kartu pengingat jadwal pembayaran ke ruang obrolan"
+      icon={
+        <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center">
+          <CalendarClock className="w-5 h-5" />
+        </div>
+      }
+      footer={
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={!title.trim() || amt < 1}
+            onClick={() => {
+              onSubmit({
+                id: `rem-${Date.now()}`,
+                title: title.trim(),
+                assetKind,
+                amount: amt,
+                dueDateLabel: dueDate.trim() || 'Segera',
+                note: note.trim() || undefined,
+              });
+              onClose();
+            }}
+            className="px-5 py-2 rounded-xl text-xs font-extrabold bg-amber-500 hover:bg-amber-400 disabled:opacity-45 text-slate-950"
+          >
+            Kirim Pengingat
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Judul tagihan / pengingat"
+          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white"
+        />
+        <div className="grid grid-cols-3 gap-2">
+          {(['uang', 'coin', 'diamond'] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setAssetKind(k)}
+              className={`py-2 rounded-xl border text-xs font-extrabold ${
+                assetKind === k
+                  ? 'bg-amber-950/60 border-amber-500 text-amber-200'
+                  : 'bg-slate-900 border-slate-800 text-slate-400'
+              }`}
+            >
+              {k === 'uang' ? 'Uang (Rp)' : k === 'coin' ? 'Coin' : 'Diamond'}
+            </button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-2.5">
+          <input
+            type="text"
+            inputMode="numeric"
+            value={amountInput}
+            onChange={(e) => setAmountInput(e.target.value.replace(/[^\d]/g, ''))}
+            placeholder="Nominal"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm font-mono tabular-nums text-white"
+          />
+          <input
+            type="text"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+            placeholder="Batas waktu"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white"
+          />
+        </div>
+        <input
+          type="text"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="Catatan tambahan (opsional)"
+          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white"
+        />
+      </div>
+    </PortalModalShell>
+  );
+};
+
+// =========================================================================
+// 17. ReportMessageModal (Laporkan Pesan ke Panel Admin)
+// =========================================================================
+export const ReportMessageModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  targetName: string;
+  messagePreview: string;
+  onSubmit: (reason: string) => void;
+}> = ({ open, onClose, targetName, messagePreview, onSubmit }) => {
+  const [reason, setReason] = useState('Spam / Promosi Terlarang');
+  const presets = [
+    'Spam / Promosi Terlarang',
+    'Penipuan / Phishing',
+    'Kata Kasar / Pelecehan',
+    'Konten Tidak Pantas',
+  ];
+
+  useEffect(() => {
+    if (open) setReason('Spam / Promosi Terlarang');
+  }, [open]);
+
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title="Laporkan Pesan ke Admin"
+      subtitle={`Pelapor mengirim laporan resmi atas pesan dari ${targetName}`}
+      icon={
+        <div className="w-10 h-10 rounded-2xl bg-rose-600 text-white flex items-center justify-center">
+          <Flag className="w-5 h-5" />
+        </div>
+      }
+      footer={
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 text-slate-300"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={!reason.trim()}
+            onClick={() => {
+              onSubmit(reason.trim());
+              onClose();
+            }}
+            className="px-5 py-2 rounded-xl text-xs font-extrabold bg-rose-600 hover:bg-rose-500 text-white"
+          >
+            Kirim Laporan ke Admin
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300">
+          <p className="text-[10px] font-bold uppercase text-slate-400 mb-1">Cuplikan Pesan</p>
+          <p className="line-clamp-3 break-words">{messagePreview || '(Lampiran)'}</p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {presets.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setReason(p)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                reason === p
+                  ? 'bg-rose-950/70 border-rose-500 text-rose-200'
+                  : 'bg-slate-900 border-slate-800 text-slate-300'
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <textarea
+          rows={3}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Jelaskan alasan pelaporan..."
+          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-900 text-sm text-white"
+        />
+      </div>
+    </PortalModalShell>
+  );
+};
+
+// =========================================================================
+// 18. ImageLightboxModal (Zoom Gambar Chat)
+// =========================================================================
+export const ImageLightboxModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  imageUrl: string;
+  fileName?: string;
+}> = ({ open, onClose, imageUrl, fileName }) => {
+  if (!open || !imageUrl) return null;
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[10000] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between w-full text-white gap-4">
+          <span className="text-xs font-bold truncate flex items-center gap-1.5">
+            <ZoomIn className="w-4 h-4 text-emerald-400" />
+            {fileName || 'Pratinjau Gambar'}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <img
+          src={imageUrl}
+          alt={fileName || 'Lampiran Gambar'}
+          className="max-w-full max-h-[82vh] rounded-2xl border border-slate-700 object-contain shadow-2xl"
+        />
+      </div>
+    </div>,
+    document.body
+  );
+};
+
+// =========================================================================
+// 19. ReactionVotersModal (Lihat Siapa Saja yang Memberi Reaksi Emoji)
+// =========================================================================
+export const ReactionVotersModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  reactions: Record<string, string[]>;
+  accounts: BankAccount[];
+}> = ({ open, onClose, reactions, accounts }) => {
+  const entries = Object.entries(reactions || {}).filter(([, ids]) => Array.isArray(ids) && ids.length > 0);
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title="Daftar Pemberi Reaksi Emoji"
+      subtitle="Lihat siapa saja yang menanggapi pesan ini"
+      icon={
+        <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center">
+          <Smile className="w-5 h-5" />
+        </div>
+      }
+      footer={
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-200"
+          >
+            Tutup
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+        {entries.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-6">Belum ada reaksi.</p>
+        ) : (
+          entries.map(([emoji, ids]) => (
+            <div key={emoji} className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs font-extrabold text-white">
+                <span className="text-base">{emoji}</span>
+                <span className="text-slate-400">{ids.length} orang</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {ids.map((id) => {
+                  const acc = accounts.find((a) => a.id === id);
+                  return (
+                    <span
+                      key={id}
+                      className="px-2 py-1 rounded-lg bg-slate-800 text-[11px] font-semibold text-slate-200"
+                    >
+                      {acc?.fullName || id}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </PortalModalShell>
+  );
+};
+
+// =========================================================================
+// 20. AdminQuickAccountModal (Kendali Akun Cepat Admin dari Chat Bubble)
+// =========================================================================
+export const AdminQuickAccountModal: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  account: BankAccount | null;
+  onSetBadge: (badge: ChatCustomBadgeTier | null) => void;
+  onOpenMute: () => void;
+  onOpenWarn: () => void;
+}> = ({ open, onClose, account, onSetBadge, onOpenMute, onOpenWarn }) => {
+  if (!account) return null;
+  return (
+    <PortalModalShell
+      open={open}
+      onClose={onClose}
+      title="Kendali Cepat Nasabah (Admin)"
+      subtitle={`${account.fullName} • Rek ${account.accountNumber}`}
+      icon={
+        <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center">
+          <Award className="w-5 h-5" />
+        </div>
+      }
+      footer={
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-800 text-slate-200"
+          >
+            Tutup
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-[#05070c] border border-slate-800 tabular-nums">
+          <div>
+            <p className="text-[10px] uppercase text-slate-400 font-bold">Saldo Rp</p>
+            <p className="text-xs font-black text-emerald-300 truncate">
+              {formatModalAssetValue(account.balance, 'uang')}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase text-slate-400 font-bold">Coin</p>
+            <p className="text-xs font-black text-amber-300 truncate">
+              {formatModalAssetValue(account.spinCoins || 0, 'coin')}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase text-slate-400 font-bold">Diamond</p>
+            <p className="text-xs font-black text-cyan-300 truncate">
+              {formatModalAssetValue(account.diamonds || 0, 'diamond')}
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[11px] font-bold uppercase text-slate-400 mb-1.5">
+            Atur Lencana Khusus Chat Nasabah
+          </p>
+          <div className="grid grid-cols-4 gap-1.5">
+            {(
+              [
+                { val: 'verified', label: 'Terverifikasi' },
+                { val: 'vip', label: 'VIP' },
+                { val: 'sultan', label: 'SULTAN' },
+                { val: null, label: 'Hapus' },
+              ] as const
+            ).map((b) => (
+              <button
+                key={String(b.val)}
+                type="button"
+                onClick={() => onSetBadge(b.val)}
+                className={`py-2 px-2 rounded-xl border text-[11px] font-extrabold ${
+                  (account.chatCustomBadge || null) === b.val
+                    ? 'bg-amber-500 text-slate-950 border-amber-400'
+                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                {b.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onOpenMute();
+            }}
+            className="py-2.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/70 border border-rose-700 text-rose-200 text-xs font-extrabold flex items-center justify-center gap-1.5"
+          >
+            <Ban className="w-4 h-4" /> Mute Nasabah
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onClose();
+              onOpenWarn();
+            }}
+            className="py-2.5 rounded-xl bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700 text-amber-200 text-xs font-extrabold flex items-center justify-center gap-1.5"
+          >
+            <AlertTriangle className="w-4 h-4" /> Tegur Resmi
+          </button>
+        </div>
+      </div>
+    </PortalModalShell>
+  );
+};
+
+

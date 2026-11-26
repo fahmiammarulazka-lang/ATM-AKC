@@ -30,6 +30,8 @@ export interface ServerGlobalChatMessage {
   senderUserId16?: string;
   senderCardTier?: string;
   isVerified?: boolean;
+  adminDivisionLabel?: string;
+  senderCustomBadge?: string | null;
   title: string;
   text: string;
   timestamp: string;
@@ -37,6 +39,7 @@ export interface ServerGlobalChatMessage {
   updatedAtMs?: number;
   editedAt?: string;
   editedAtMs?: number;
+  expiresAtMs?: number;
   isPinned?: boolean;
   isOfficialAnnouncement?: boolean;
   isAdminHighlight?: boolean;
@@ -47,6 +50,9 @@ export interface ServerGlobalChatMessage {
   poll?: Record<string, unknown>;
   forwardedFrom?: Record<string, unknown>;
   mentions?: string[];
+  imageAttachment?: Record<string, unknown>;
+  voiceAttachment?: Record<string, unknown>;
+  redPacket?: Record<string, unknown>;
 }
 
 export interface ServerGlobalChatConfig {
@@ -57,6 +63,12 @@ export interface ServerGlobalChatConfig {
   bannedWords?: string[];
   bannedWordMode?: 'censor' | 'block';
   adminHighlightDefault?: boolean;
+  featureFlags?: Record<string, boolean>;
+  maintenanceNotice?: string;
+  customWelcomeText?: string;
+  activeAdminDivision?: string;
+  antiSpamConfig?: { enabled: boolean; maxMessagesPer10s: number; blockExternalLinks: boolean };
+  scheduledAnnouncements?: Array<Record<string, unknown>>;
   updatedAtMs: number;
 }
 
@@ -67,6 +79,8 @@ export interface ServerPrivateChatMessage {
   senderName: string;
   senderRole?: 'admin' | 'customer';
   senderCardTier?: string;
+  adminDivisionLabel?: string;
+  senderCustomBadge?: string | null;
   recipientAccountId?: string;
   recipientAccount: string;
   receiverAccount?: string;
@@ -78,6 +92,7 @@ export interface ServerPrivateChatMessage {
   updatedAtMs?: number;
   editedAt?: string;
   editedAtMs?: number;
+  expiresAtMs?: number;
   replyToId?: string;
   replyToSender?: string;
   replyToPreview?: string;
@@ -88,7 +103,35 @@ export interface ServerPrivateChatMessage {
   poll?: Record<string, unknown>;
   forwardedFrom?: Record<string, unknown>;
   mentions?: string[];
+  imageAttachment?: Record<string, unknown>;
+  voiceAttachment?: Record<string, unknown>;
+  contactAttachment?: Record<string, unknown>;
+  redPacket?: Record<string, unknown>;
+  splitBill?: Record<string, unknown>;
+  billReminder?: Record<string, unknown>;
   transferAttachment?: Record<string, unknown>;
+}
+
+export interface ServerChatReportEntry {
+  id: string;
+  scope: 'global' | 'private';
+  roomScope?: 'global' | 'private';
+  roomKey: string;
+  messageId: string;
+  messagePreview: string;
+  reportedAccountId?: string;
+  reportedName: string;
+  reportedAccountNumber?: string;
+  reporterAccountId: string;
+  reporterName: string;
+  reason: string;
+  status: 'pending' | 'reviewed' | 'dismissed';
+  resolutionNote?: string;
+  adminNote?: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  createdAt: string;
+  createdAtMs: number;
 }
 
 export interface ServerPrivateChatGroup {
@@ -217,6 +260,7 @@ interface PersistedGlobalState {
   privateChatMessages: ServerPrivateChatMessage[];
   privateChatGroups: ServerPrivateChatGroup[];
   chatModerationLogs: ServerChatModerationLog[];
+  chatReports: ServerChatReportEntry[];
   websitePopups: ServerPopupNotification[];
   bugReports: ServerBugReport[];
   suggestions: ServerSuggestionRecord[];
@@ -266,11 +310,20 @@ const DEFAULT_STATE: PersistedGlobalState = {
     bannedWords: [],
     bannedWordMode: 'censor',
     adminHighlightDefault: true,
+    featureFlags: {},
+    maintenanceNotice:
+      'Layanan Chat Global & Priv sedang dinonaktifkan sementara oleh Admin untuk pemeliharaan sistem. Silakan coba kembali beberapa saat lagi.',
+    customWelcomeText:
+      'Selamat datang di Chat Global & Priv Bank Nusantara! Semua nasabah kini bisa saling menyapa di Chat Global, berbagi Amplop Kaget, serta menambahkan nasabah atau membuat grup tertutup di tab Chat Privat.',
+    activeAdminDivision: 'CS Resmi',
+    antiSpamConfig: { enabled: true, maxMessagesPer10s: 5, blockExternalLinks: false },
+    scheduledAnnouncements: [],
     updatedAtMs: Date.now(),
   },
   privateChatMessages: [],
   privateChatGroups: [],
   chatModerationLogs: [],
+  chatReports: [],
   websitePopups: [],
   bugReports: [
     {
@@ -338,12 +391,36 @@ function loadPersistedState(): PersistedGlobalState {
                   : [],
                 bannedWordMode: parsed.globalChatConfig.bannedWordMode === 'block' ? 'block' : 'censor',
                 adminHighlightDefault: parsed.globalChatConfig.adminHighlightDefault !== false,
+                featureFlags:
+                  parsed.globalChatConfig.featureFlags && typeof parsed.globalChatConfig.featureFlags === 'object'
+                    ? parsed.globalChatConfig.featureFlags
+                    : {},
+                maintenanceNotice:
+                  typeof parsed.globalChatConfig.maintenanceNotice === 'string'
+                    ? parsed.globalChatConfig.maintenanceNotice
+                    : DEFAULT_STATE.globalChatConfig.maintenanceNotice,
+                customWelcomeText:
+                  typeof parsed.globalChatConfig.customWelcomeText === 'string'
+                    ? parsed.globalChatConfig.customWelcomeText
+                    : DEFAULT_STATE.globalChatConfig.customWelcomeText,
+                activeAdminDivision:
+                  typeof parsed.globalChatConfig.activeAdminDivision === 'string'
+                    ? parsed.globalChatConfig.activeAdminDivision
+                    : 'CS Resmi',
+                antiSpamConfig:
+                  parsed.globalChatConfig.antiSpamConfig && typeof parsed.globalChatConfig.antiSpamConfig === 'object'
+                    ? parsed.globalChatConfig.antiSpamConfig
+                    : DEFAULT_STATE.globalChatConfig.antiSpamConfig,
+                scheduledAnnouncements: Array.isArray(parsed.globalChatConfig.scheduledAnnouncements)
+                  ? parsed.globalChatConfig.scheduledAnnouncements
+                  : [],
                 updatedAtMs: Number(parsed.globalChatConfig.updatedAtMs) || Date.now(),
               }
             : DEFAULT_STATE.globalChatConfig,
         privateChatMessages: Array.isArray(parsed.privateChatMessages) ? parsed.privateChatMessages : [],
         privateChatGroups: Array.isArray(parsed.privateChatGroups) ? parsed.privateChatGroups : [],
         chatModerationLogs: Array.isArray(parsed.chatModerationLogs) ? parsed.chatModerationLogs : [],
+        chatReports: Array.isArray(parsed.chatReports) ? parsed.chatReports : [],
         websitePopups: Array.isArray(parsed.websitePopups) ? parsed.websitePopups : [],
         bugReports: Array.isArray(parsed.bugReports) ? parsed.bugReports : DEFAULT_STATE.bugReports,
         suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
@@ -503,6 +580,7 @@ async function startServer() {
             privateChatMessages: serverState.privateChatMessages,
             privateChatGroups: serverState.privateChatGroups,
             chatModerationLogs: serverState.chatModerationLogs,
+            chatReports: serverState.chatReports,
             websitePopups: serverState.websitePopups,
             bugReports: serverState.bugReports,
             suggestions: serverState.suggestions,
@@ -843,6 +921,7 @@ async function startServer() {
 
   // Track per-sender anti-spam cooldown for non-Admin Global Chat messages
   const globalChatLastSentMs = new Map<string, number>();
+  const globalChatBurstTimesMs = new Map<string, number[]>();
 
   // Global Chat terbuka untuk semua nasabah & Admin (Admin punya lencana khusus, anti-spam & mode khusus Admin opsional)
   function handleNewGlobalChat(input: {
@@ -854,10 +933,13 @@ async function startServer() {
     senderUserId16?: string;
     senderCardTier?: string;
     isVerified?: boolean;
+    adminDivisionLabel?: string;
+    senderCustomBadge?: string | null;
     title?: string;
     text: string;
     timestamp?: string;
     createdAtMs?: number;
+    expiresAtMs?: number;
     isPinned?: boolean;
     isOfficialAnnouncement?: boolean;
     isAdminHighlight?: boolean;
@@ -868,15 +950,36 @@ async function startServer() {
     poll?: Record<string, unknown>;
     forwardedFrom?: { originalSenderName: string; sourceRoomLabel?: string };
     mentions?: string[];
+    imageAttachment?: Record<string, unknown>;
+    voiceAttachment?: Record<string, unknown>;
+    redPacket?: Record<string, unknown>;
     showPopupOnAllPhones?: boolean;
   }): { message?: ServerGlobalChatMessage; popup?: ServerPopupNotification | null; error?: string } | null {
     const cleanText = String(input.text || '').trim();
-    if (!cleanText) return { error: 'Pesan Chat Global tidak boleh kosong.' };
+    if (!cleanText && !input.poll && !input.imageAttachment && !input.voiceAttachment && !input.redPacket) {
+      return { error: 'Pesan Chat Global tidak boleh kosong.' };
+    }
     const isAdminSender = input.senderRole === 'admin';
+    const flags = serverState.globalChatConfig?.featureFlags || {};
 
     let processedText = cleanText;
 
     if (!isAdminSender) {
+      if (flags.chatSystemDisabled || flags.disableGlobalChat) {
+        return { error: 'Fitur Chat Global sedang dinonaktifkan sementara oleh Admin.' };
+      }
+      if (input.imageAttachment && flags.disableImages) {
+        return { error: 'Pengiriman gambar di chat sedang dinonaktifkan oleh Admin.' };
+      }
+      if (input.voiceAttachment && flags.disableVoiceNotes) {
+        return { error: 'Pengiriman pesan suara sedang dinonaktifkan oleh Admin.' };
+      }
+      if (input.poll && flags.disablePolls) {
+        return { error: 'Fitur Polling sedang dinonaktifkan oleh Admin.' };
+      }
+      if (input.redPacket && flags.disableRedPacket) {
+        return { error: 'Fitur Amplop Kaget sedang dinonaktifkan oleh Admin.' };
+      }
       if (serverState.globalChatConfig?.adminOnlyLock) {
         return { error: 'Ruang Chat Global sedang dalam Mode Khusus Admin sementara.' };
       }
@@ -901,6 +1004,22 @@ async function startServer() {
               : `Akun Anda sedang dibisukan di Chat Global (${mutedEntry.durationLabel || 'sementara'})${reasonSuffix}.`,
           };
         }
+      }
+
+      // Anti-Spam Burst & Link check
+      const antiSpam = serverState.globalChatConfig?.antiSpamConfig;
+      if (antiSpam?.enabled) {
+        if (antiSpam.blockExternalLinks && /(https?:\/\/|www\.|\.[a-z]{2,}\/)/i.test(processedText)) {
+          return { error: 'Anti-Spam: Pengiriman tautan/link eksternal dinonaktifkan oleh Admin.' };
+        }
+        const senderKey = String(input.senderAccountId || input.senderAccount || input.senderName || 'anon');
+        const nowBurst = Date.now();
+        const prevTimes = (globalChatBurstTimesMs.get(senderKey) || []).filter((t) => nowBurst - t < 10_000);
+        const maxPer10s = Math.max(2, Number(antiSpam.maxMessagesPer10s) || 5);
+        if (prevTimes.length >= maxPer10s) {
+          return { error: `Anti-Spam Otomatis: Terlalu banyak pesan dalam 10 detik (maks ${maxPer10s}).` };
+        }
+        globalChatBurstTimesMs.set(senderKey, [...prevTimes, nowBurst]);
       }
 
       // Check Banned Words filter
@@ -948,11 +1067,14 @@ async function startServer() {
       senderUserId16: input.senderUserId16 ? String(input.senderUserId16) : undefined,
       senderCardTier: input.senderCardTier ? String(input.senderCardTier) : undefined,
       isVerified: isAdminSender ? true : Boolean(input.isVerified),
+      adminDivisionLabel: isAdminSender && input.adminDivisionLabel ? String(input.adminDivisionLabel).slice(0, 40) : undefined,
+      senderCustomBadge: input.senderCustomBadge ? String(input.senderCustomBadge) : null,
       title: isAdminSender ? String(input.title || 'Pesan dari Admin') : 'Chat Global Nasabah',
-      text: processedText.slice(0, 1200),
+      text: processedText.slice(0, 1500),
       timestamp: input.timestamp || new Date(nowMs).toISOString(),
       createdAtMs: Number(input.createdAtMs) || nowMs,
       updatedAtMs: nowMs,
+      expiresAtMs: Number(input.expiresAtMs) > nowMs ? Number(input.expiresAtMs) : undefined,
       isPinned: isAdminSender ? Boolean(input.isPinned) : false,
       isOfficialAnnouncement: isAdminSender ? Boolean(input.isOfficialAnnouncement ?? input.showPopupOnAllPhones) : false,
       isAdminHighlight: isAdminSender ? Boolean(input.isAdminHighlight ?? serverState.globalChatConfig?.adminHighlightDefault ?? true) : false,
@@ -963,6 +1085,9 @@ async function startServer() {
       poll: input.poll && typeof input.poll === 'object' ? input.poll : undefined,
       forwardedFrom: input.forwardedFrom && typeof input.forwardedFrom === 'object' ? input.forwardedFrom : undefined,
       mentions: Array.isArray(input.mentions) ? input.mentions.map((x) => String(x)).slice(0, 20) : undefined,
+      imageAttachment: input.imageAttachment && typeof input.imageAttachment === 'object' ? input.imageAttachment : undefined,
+      voiceAttachment: input.voiceAttachment && typeof input.voiceAttachment === 'object' ? input.voiceAttachment : undefined,
+      redPacket: input.redPacket && typeof input.redPacket === 'object' ? input.redPacket : undefined,
     };
 
     serverState.globalChats = [newMsg, ...serverState.globalChats].slice(0, 300);
@@ -1001,7 +1126,25 @@ async function startServer() {
 
   function handleNewPrivateChatMessage(input: Partial<ServerPrivateChatMessage>) {
     const cleanText = String(input.text || '').trim();
-    if (!cleanText && !input.transferAttachment && !input.poll) return null;
+    if (
+      !cleanText &&
+      !input.transferAttachment &&
+      !input.poll &&
+      !input.imageAttachment &&
+      !input.voiceAttachment &&
+      !input.contactAttachment &&
+      !input.redPacket &&
+      !input.splitBill &&
+      !input.billReminder
+    ) {
+      return null;
+    }
+    const flags = serverState.globalChatConfig?.featureFlags || {};
+    const isAdminSender = input.senderRole === 'admin';
+    if (!isAdminSender) {
+      if (flags.chatSystemDisabled || flags.disablePrivateChat) return null;
+      if (input.groupId && flags.disableGroupChat) return null;
+    }
     const msgId = input.id || `pchat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const existing = serverState.privateChatMessages.find((m) => m.id === msgId);
     if (existing) return existing;
@@ -1012,8 +1155,10 @@ async function startServer() {
       senderAccountId: input.senderAccountId ? String(input.senderAccountId) : undefined,
       senderAccount: String(input.senderAccount || ''),
       senderName: String(input.senderName || 'Nasabah').slice(0, 80),
-      senderRole: input.senderRole === 'admin' ? 'admin' : 'customer',
+      senderRole: isAdminSender ? 'admin' : 'customer',
       senderCardTier: input.senderCardTier ? String(input.senderCardTier) : undefined,
+      adminDivisionLabel: isAdminSender && input.adminDivisionLabel ? String(input.adminDivisionLabel).slice(0, 40) : undefined,
+      senderCustomBadge: input.senderCustomBadge ? String(input.senderCustomBadge) : null,
       recipientAccountId: input.recipientAccountId ? String(input.recipientAccountId) : undefined,
       recipientAccount: String(input.recipientAccount || ''),
       receiverAccount: input.receiverAccount ? String(input.receiverAccount) : undefined,
@@ -1023,6 +1168,7 @@ async function startServer() {
       timestamp: input.timestamp || new Date(nowMs).toISOString(),
       createdAtMs: Number(input.createdAtMs) || nowMs,
       updatedAtMs: nowMs,
+      expiresAtMs: Number(input.expiresAtMs) > nowMs ? Number(input.expiresAtMs) : undefined,
       replyToId: input.replyToId ? String(input.replyToId) : undefined,
       replyToSender: input.replyToSender ? String(input.replyToSender).slice(0, 80) : undefined,
       replyToPreview: input.replyToPreview ? String(input.replyToPreview).slice(0, 140) : undefined,
@@ -1033,6 +1179,12 @@ async function startServer() {
       poll: input.poll && typeof input.poll === 'object' ? input.poll : undefined,
       forwardedFrom: input.forwardedFrom && typeof input.forwardedFrom === 'object' ? input.forwardedFrom : undefined,
       mentions: Array.isArray(input.mentions) ? input.mentions.map((x) => String(x)).slice(0, 20) : undefined,
+      imageAttachment: input.imageAttachment && typeof input.imageAttachment === 'object' ? input.imageAttachment : undefined,
+      voiceAttachment: input.voiceAttachment && typeof input.voiceAttachment === 'object' ? input.voiceAttachment : undefined,
+      contactAttachment: input.contactAttachment && typeof input.contactAttachment === 'object' ? input.contactAttachment : undefined,
+      redPacket: input.redPacket && typeof input.redPacket === 'object' ? input.redPacket : undefined,
+      splitBill: input.splitBill && typeof input.splitBill === 'object' ? input.splitBill : undefined,
+      billReminder: input.billReminder && typeof input.billReminder === 'object' ? input.billReminder : undefined,
       transferAttachment:
         input.transferAttachment && typeof input.transferAttachment === 'object'
           ? input.transferAttachment
@@ -1229,6 +1381,7 @@ async function startServer() {
       privateChatMessages: serverState.privateChatMessages,
       privateChatGroups: serverState.privateChatGroups,
       chatModerationLogs: serverState.chatModerationLogs,
+      chatReports: serverState.chatReports,
       websitePopups: serverState.websitePopups,
       bugReports: serverState.bugReports,
       suggestions: serverState.suggestions,
@@ -1814,11 +1967,31 @@ async function startServer() {
     let updatedMsg: ServerGlobalChatMessage | null = null;
     serverState.globalChats = serverState.globalChats.map((m) => {
       if (m.id !== targetId) return m;
+      let nextRedPacket = m.redPacket;
+      if (req.body?.redPacket && typeof req.body.redPacket === 'object') {
+        const incRp = req.body.redPacket as Record<string, unknown>;
+        const prevClaims = Array.isArray((m.redPacket as Record<string, unknown> | undefined)?.claims)
+          ? ((m.redPacket as Record<string, unknown>).claims as Array<{ accountId: string }>)
+          : [];
+        const incClaims = Array.isArray(incRp.claims) ? (incRp.claims as Array<{ accountId: string }>) : [];
+        const byAcc = new Map<string, { accountId: string; amount?: number }>();
+        prevClaims.forEach((c) => c?.accountId && byAcc.set(c.accountId, c as { accountId: string; amount?: number }));
+        incClaims.forEach((c) => c?.accountId && !byAcc.has(c.accountId) && byAcc.set(c.accountId, c as { accountId: string; amount?: number }));
+        const mergedClaims = Array.from(byAcc.values());
+        const totalAmt = Number(incRp.totalAmount ?? (m.redPacket as Record<string, unknown> | undefined)?.totalAmount ?? 0);
+        const claimedSum = mergedClaims.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+        nextRedPacket = {
+          ...(m.redPacket || {}),
+          ...incRp,
+          claims: mergedClaims,
+          remainingAmount: Math.max(0, totalAmt - claimedSum),
+        };
+      }
       const next: ServerGlobalChatMessage = {
         ...m,
         ...(typeof req.body?.text === 'string' && req.body.text.trim()
           ? {
-              text: req.body.text.trim().slice(0, 1200),
+              text: req.body.text.trim().slice(0, 1500),
               editedAt: req.body?.editedAt || new Date(nowMs).toISOString(),
               editedAtMs: Number(req.body?.editedAtMs) || nowMs,
             }
@@ -1830,6 +2003,7 @@ async function startServer() {
         ...(req.body?.poll && typeof req.body.poll === 'object'
           ? { poll: req.body.poll as Record<string, unknown> }
           : {}),
+        ...(nextRedPacket ? { redPacket: nextRedPacket } : {}),
         updatedAtMs: nowMs,
       };
       updatedMsg = next;
@@ -1897,6 +2071,29 @@ async function startServer() {
         typeof req.body?.adminHighlightDefault === 'boolean'
           ? req.body.adminHighlightDefault
           : serverState.globalChatConfig?.adminHighlightDefault ?? true,
+      featureFlags:
+        req.body?.featureFlags && typeof req.body.featureFlags === 'object'
+          ? { ...(serverState.globalChatConfig?.featureFlags || {}), ...(req.body.featureFlags as Record<string, boolean>) }
+          : serverState.globalChatConfig?.featureFlags || {},
+      maintenanceNotice:
+        typeof req.body?.maintenanceNotice === 'string'
+          ? req.body.maintenanceNotice
+          : serverState.globalChatConfig?.maintenanceNotice,
+      customWelcomeText:
+        typeof req.body?.customWelcomeText === 'string'
+          ? req.body.customWelcomeText
+          : serverState.globalChatConfig?.customWelcomeText,
+      activeAdminDivision:
+        typeof req.body?.activeAdminDivision === 'string'
+          ? req.body.activeAdminDivision
+          : serverState.globalChatConfig?.activeAdminDivision,
+      antiSpamConfig:
+        req.body?.antiSpamConfig && typeof req.body.antiSpamConfig === 'object'
+          ? (req.body.antiSpamConfig as { enabled: boolean; maxMessagesPer10s: number; blockExternalLinks: boolean })
+          : serverState.globalChatConfig?.antiSpamConfig,
+      scheduledAnnouncements: Array.isArray(req.body?.scheduledAnnouncements)
+        ? (req.body.scheduledAnnouncements as Array<Record<string, unknown>>)
+        : serverState.globalChatConfig?.scheduledAnnouncements || [],
       updatedAtMs: Date.now(),
     };
     savePersistedState();
@@ -2002,15 +2199,92 @@ async function startServer() {
       privateChatMessages: serverState.privateChatMessages,
       privateChatGroups: serverState.privateChatGroups,
       chatModerationLogs: serverState.chatModerationLogs,
+      chatReports: serverState.chatReports,
       deletedAdminItemIds: serverState.deletedAdminItemIds || {},
       lastUpdated: serverState.lastUpdated,
     });
   });
 
+  app.post('/api/chat-reports', (req, res) => {
+    const id = String(req.body?.id || `crep-${Date.now()}-${Math.floor(Math.random() * 1000)}`);
+    if (!req.body?.messageId || !req.body?.reporterAccountId) {
+      res.status(400).json({ success: false, message: 'Data laporan pesan tidak lengkap.' });
+      return;
+    }
+    const existing = serverState.chatReports.find((r) => r.id === id);
+    if (existing) {
+      res.json({ success: true, report: existing, chatReports: serverState.chatReports });
+      return;
+    }
+    const resolvedScope =
+      req.body.scope === 'private' || req.body.roomScope === 'private' ? 'private' : 'global';
+    const entry: ServerChatReportEntry = {
+      id,
+      scope: resolvedScope,
+      roomScope: resolvedScope,
+      roomKey: String(req.body.roomKey || 'global'),
+      messageId: String(req.body.messageId),
+      messagePreview: String(req.body.messagePreview || '').slice(0, 300),
+      reportedAccountId: req.body.reportedAccountId ? String(req.body.reportedAccountId) : undefined,
+      reportedName: String(req.body.reportedName || 'Nasabah').slice(0, 80),
+      reportedAccountNumber: req.body.reportedAccountNumber ? String(req.body.reportedAccountNumber) : undefined,
+      reporterAccountId: String(req.body.reporterAccountId),
+      reporterName: String(req.body.reporterName || 'Nasabah').slice(0, 80),
+      reason: String(req.body.reason || 'Melanggar aturan').slice(0, 300),
+      status: 'pending',
+      createdAt: req.body.createdAt || new Date().toISOString(),
+      createdAtMs: Number(req.body.createdAtMs) || Date.now(),
+    };
+    serverState.chatReports = [entry, ...serverState.chatReports].slice(0, 200);
+    savePersistedState();
+    broadcastToAll({
+      type: 'chat_report:new',
+      payload: { report: entry, lastUpdated: serverState.lastUpdated },
+    });
+    res.json({ success: true, report: entry, chatReports: serverState.chatReports });
+  });
+
+  app.patch('/api/chat-reports/:id', (req, res) => {
+    const targetId = String(req.params.id || '');
+    let updated: ServerChatReportEntry | null = null;
+    serverState.chatReports = serverState.chatReports.map((r) => {
+      if (r.id !== targetId) return r;
+      const incomingStatus = req.body?.status;
+      const mappedStatus: 'pending' | 'reviewed' | 'dismissed' =
+        incomingStatus === 'reviewed' || incomingStatus === 'resolved'
+          ? 'reviewed'
+          : incomingStatus === 'dismissed'
+            ? 'dismissed'
+            : r.status;
+      updated = {
+        ...r,
+        status: mappedStatus,
+        resolutionNote:
+          req.body?.resolutionNote !== undefined
+            ? String(req.body.resolutionNote)
+            : req.body?.adminNote !== undefined
+              ? String(req.body.adminNote)
+              : r.resolutionNote,
+        adminNote: req.body?.adminNote !== undefined ? String(req.body.adminNote) : r.adminNote,
+        resolvedBy: req.body?.resolvedBy !== undefined ? String(req.body.resolvedBy) : r.resolvedBy,
+        resolvedAt: req.body?.resolvedAt || new Date().toISOString(),
+      };
+      return updated;
+    });
+    savePersistedState();
+    if (updated) {
+      broadcastToAll({
+        type: 'chat_report:updated',
+        payload: { report: updated, lastUpdated: serverState.lastUpdated },
+      });
+    }
+    res.json({ success: Boolean(updated), report: updated, chatReports: serverState.chatReports });
+  });
+
   app.post('/api/private-chat', (req, res) => {
     const created = handleNewPrivateChatMessage(req.body || {});
     if (!created) {
-      res.status(400).json({ success: false, message: 'Isi pesan chat privat tidak boleh kosong.' });
+      res.status(400).json({ success: false, message: 'Isi pesan chat privat tidak boleh kosong atau fitur sedang dinonaktifkan Admin.' });
       return;
     }
     res.json({ success: true, message: created, privateChatMessages: serverState.privateChatMessages });
@@ -2080,6 +2354,37 @@ async function startServer() {
           req.body?.readBy && typeof req.body.readBy === 'object'
             ? { ...(m.readBy || {}), ...(req.body.readBy as Record<string, { accountId: string; accountName: string; readAt: string; readAtMs: number }>) }
             : m.readBy;
+        let nextRedPacket = m.redPacket;
+        if (req.body?.redPacket && typeof req.body.redPacket === 'object') {
+          const incRp = req.body.redPacket as Record<string, unknown>;
+          const prevClaims = Array.isArray((m.redPacket as Record<string, unknown> | undefined)?.claims)
+            ? ((m.redPacket as Record<string, unknown>).claims as Array<{ accountId: string }>)
+            : [];
+          const incClaims = Array.isArray(incRp.claims) ? (incRp.claims as Array<{ accountId: string }>) : [];
+          const byAcc = new Map<string, { accountId: string; amount?: number }>();
+          prevClaims.forEach((c) => c?.accountId && byAcc.set(c.accountId, c as { accountId: string; amount?: number }));
+          incClaims.forEach((c) => c?.accountId && !byAcc.has(c.accountId) && byAcc.set(c.accountId, c as { accountId: string; amount?: number }));
+          const mergedClaims = Array.from(byAcc.values());
+          const totalAmt = Number(incRp.totalAmount ?? (m.redPacket as Record<string, unknown> | undefined)?.totalAmount ?? 0);
+          const claimedSum = mergedClaims.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+          nextRedPacket = {
+            ...(m.redPacket || {}),
+            ...incRp,
+            claims: mergedClaims,
+            remainingAmount: Math.max(0, totalAmt - claimedSum),
+          };
+        }
+        let nextSplitBill = m.splitBill;
+        if (req.body?.splitBill && typeof req.body.splitBill === 'object') {
+          const incSb = req.body.splitBill as Record<string, unknown>;
+          const prevPaid = ((m.splitBill as Record<string, unknown> | undefined)?.paidByAccountIdMap as Record<string, unknown>) || {};
+          const incPaid = (incSb.paidByAccountIdMap as Record<string, unknown>) || {};
+          nextSplitBill = {
+            ...(m.splitBill || {}),
+            ...incSb,
+            paidByAccountIdMap: { ...prevPaid, ...incPaid },
+          };
+        }
         updatedMsg = {
           ...m,
           ...(typeof req.body?.text === 'string' && req.body.text.trim()
@@ -2099,6 +2404,8 @@ async function startServer() {
             : {}),
           ...(mergedReadBy ? { readBy: mergedReadBy } : {}),
           ...(nextAttachment ? { transferAttachment: nextAttachment } : {}),
+          ...(nextRedPacket ? { redPacket: nextRedPacket } : {}),
+          ...(nextSplitBill ? { splitBill: nextSplitBill } : {}),
           updatedAtMs: nowMs,
         };
         return updatedMsg;

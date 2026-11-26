@@ -3081,6 +3081,37 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v15-41-49',
+    version: 'v15.41.49',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v15.41.49 (Format S): Kirim Uang/Coin/Diamond + Amplop Kaget ala DANA, Enter Baris Baru & Ctrl+Enter Kirim, Hapus Ketat Milik Sendiri, Posisi Tab Chat Kiri Keluarga & Pusat Kendali Chat Admin Lengkap',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 23:59 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 23:59 WIB',
+    description:
+      'Pembaruan v15.41.49 menyinkronkan posisi tombol Chat Global & Priv tepat di sebelah kiri menu Keluarga, menghadirkan pengiriman multi-aset (Uang Rp, Coin, Diamond) lengkap dengan Amplop Kaget ala DANA (3 mode pembagian + kuota + konfirmasi PIN 6 digit pengirim & potong saldo pengirim Nasabah/Admin), perilaku mengetik Enter baris baru & Ctrl+Enter kirim pesan (kotak ketik auto-lebar 5 baris + lipat pesan panjang >12 baris + opsi tukar pribadi), perbaikan ketat hak Hapus untuk Semua Orang khusus pengirim asli pesan, sambutan akun baru 1x, serta Pusat Kendali & Saklar Satuan/Total Chat lengkap di Panel Admin.',
+    highlights: [
+      'Multi-Aset Uang, Coin & Diamond + Amplop Kaget ala DANA: Kirim, Minta (Terima/Tolak), Patungan Grup, dan Amplop Kaget (Siapa Cepat Dapat Lebih Banyak, Acak, & Merata) mendukung Uang (Rp), Coin, dan Diamond untuk Nasabah & Admin — memotong saldo akun pengirim masing-masing dengan verifikasi PIN kartu 6 digit.',
+      'Enter Baris Baru & Ctrl+Enter Kirim Pesan: Tekan Enter/Shift+Enter untuk pindah ke baris baru dan Ctrl+Enter (atau tombol Kirim layar) untuk mengirim di Chat Global, Chat Privat, Reply, dan Edit; kotak ketik melebar otomatis hingga 5 baris, pesan >12 baris dilipat rapi, plus opsi pribadi untuk menukar perilaku Enter.',
+      'Keamanan Hapus Pesan Ketat (Anti-Hapus Lintas HP): Tombol "Hapus untuk Semua Orang" pada gelembung pesan kini hanya muncul dan berlaku untuk pengirim asli pesan tersebut; pesan nasabah lain hanya menampilkan "Hapus untuk Saya Sendiri" (Admin tetap dapat menindak pelanggaran di Chat Global).',
+      'Posisi Menu & Pusat Pengaturan Chat Admin Lengkap: Tombol Chat Global & Priv dipindah tepat di sebelah kiri menu Keluarga; Panel Admin kini memiliki saklar satuan untuk setiap fitur chat, penutupan sementara chat dengan halaman pengumuman khusus, Laporan Masuk, Anti-Spam otomatis, Broadcast DM massal, Jadwal Pengumuman, Editor Sambutan Akun Baru, dan Lencana Khusus Nasabah.',
+      'Fitur Komunikasi Modern & Produktivitas: Pengiriman Foto terkompresi + Lightbox, Pesan Suara (Voice Note), Balasan Cepat, Pemilih Reaksi + Daftar Pemberi Reaksi, Pesan Menghilang Otomatis, Pin & Arsip Ruang, Mode Jangan Ganggu (DND), Kartu Kontak, Pengingat Tagihan, serta Ekspor Rekap Chat (.txt).',
+    ],
+    changes: [
+      'Multi-Aset Uang, Coin & Diamond + Amplop Kaget ala DANA: Kirim, Minta (Terima/Tolak), Patungan Grup, dan Amplop Kaget (Siapa Cepat Dapat Lebih Banyak, Acak, & Merata) mendukung Uang (Rp), Coin, dan Diamond untuk Nasabah & Admin — memotong saldo akun pengirim masing-masing dengan verifikasi PIN kartu 6 digit.',
+      'Enter Baris Baru & Ctrl+Enter Kirim Pesan: Tekan Enter/Shift+Enter untuk pindah ke baris baru dan Ctrl+Enter (atau tombol Kirim layar) untuk mengirim di Chat Global, Chat Privat, Reply, dan Edit; kotak ketik melebar otomatis hingga 5 baris, pesan >12 baris dilipat rapi, plus opsi pribadi untuk menukar perilaku Enter.',
+      'Keamanan Hapus Pesan Ketat (Anti-Hapus Lintas HP): Tombol "Hapus untuk Semua Orang" pada gelembung pesan kini hanya muncul dan berlaku untuk pengirim asli pesan tersebut; pesan nasabah lain hanya menampilkan "Hapus untuk Saya Sendiri" (Admin tetap dapat menindak pelanggaran di Chat Global).',
+      'Posisi Menu & Pusat Pengaturan Chat Admin Lengkap: Tombol Chat Global & Priv dipindah tepat di sebelah kiri menu Keluarga; Panel Admin kini memiliki saklar satuan untuk setiap fitur chat, penutupan sementara chat dengan halaman pengumuman khusus, Laporan Masuk, Anti-Spam otomatis, Broadcast DM massal, Jadwal Pengumuman, Editor Sambutan Akun Baru, dan Lencana Khusus Nasabah.',
+      'Fitur Komunikasi Modern & Produktivitas: Pengiriman Foto terkompresi + Lightbox, Pesan Suara (Voice Note), Balasan Cepat, Pemilih Reaksi + Daftar Pemberi Reaksi, Pesan Menghilang Otomatis, Pin & Arsip Ruang, Mode Jangan Ganggu (DND), Kartu Kontak, Pengingat Tagihan, serta Ekspor Rekap Chat (.txt).',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-26T00:05:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v15-40-49',
     version: 'v15.40.49',
     releaseType: 'minor',
@@ -3105,8 +3136,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Privasi Ketat Buat Grup Baru + Fitur Nasabah Lengkap: Buat Grup Baru hanya menampilkan daftar nasabah tersimpan (kosong dulu + tombol Tambah Nasabah Dulu), dilengkapi Info Dibaca khusus Grup (nama + jam dibaca & daftar belum baca), centang biru DM, Edit Pesan 15 menit, Reaksi Emoji, Polling Grup, Mention @nama, Sedang Mengetik, Bookmark Bintang, Teruskan Pesan, & status Online/Last Seen.',
       'Suite Moderasi & Siaran Admin Chat Global: Gelembung emas elegan + lencana ADMIN RESMI + Mode Sorotan, Mute Fleksibel (Detik/Menit/Jam/Hari/Permanen + Buka Mute), Slow Mode preset (Off–60d), Filter Kata Terlarang (Sensor ***/Blokir), Multi-Pin Pengumuman + Pop-up, Tegur Langsung, Hapus Massal pesan 1 user, Polling Resmi, Log Moderasi Admin, dan Salin/Ekspor Rekap (.txt).',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-25T22:55:00.000Z',
     isAutoDetected: true,
