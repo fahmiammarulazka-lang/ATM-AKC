@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   PieChart,
   TrendingUp,
@@ -34,6 +34,7 @@ import {
   getMonthKeyFromTimestamp,
 } from '../utils/budgetUtils';
 import type { BudgetCategory, BudgetCategoryColor, BudgetCategoryIcon } from '../types/bank';
+import { MonthlyCategoryBarChart } from './MonthlyCategoryBarChart';
 
 const CategoryIcon: React.FC<{ icon: BudgetCategoryIcon; className?: string }> = ({
   icon,
@@ -83,6 +84,7 @@ export const BudgetingWorkspace: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'bank' | 'manual'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('__ALL__');
+  const ledgerRef = useRef<HTMLDivElement | null>(null);
 
   // Modals & Feedback
   const [feedbackBanner, setFeedbackBanner] = useState<{ ok: boolean; text: string } | null>(null);
@@ -551,6 +553,24 @@ export const BudgetingWorkspace: React.FC = () => {
         </div>
       </div>
 
+      {/* Recharts Monthly Category Spending Comparison Bar Chart */}
+      <MonthlyCategoryBarChart
+        accountId={accountId}
+        selectedMonth={selectedMonth}
+        budgetCategories={budgetCategories}
+        transactions={transactions}
+        manualExpenses={manualExpenses}
+        budgetTxCategoryMap={budgetTxCategoryMap}
+        activeCategoryFilter={categoryFilter}
+        sourceFilter={sourceFilter}
+        onChangeSourceFilter={setSourceFilter}
+        onSelectCategory={(catId) => setCategoryFilter(catId)}
+        onScrollToLedger={() =>
+          ledgerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+        onOpenManualExpense={(presetCatId) => openManualExpenseModal(presetCatId)}
+      />
+
       {/* Visualizations Row: Donut Breakdown + Daily Trend Line */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
         {/* Donut Chart */}
@@ -945,7 +965,10 @@ export const BudgetingWorkspace: React.FC = () => {
       </div>
 
       {/* Unified Expense Ledger (Auto Mutasi + Manual) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+      <div
+        ref={ledgerRef}
+        className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 scroll-mt-20"
+      >
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div>
             <h2 className="text-base font-bold text-white">Rincian Pengeluaran Bulanan</h2>
