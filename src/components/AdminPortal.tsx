@@ -4190,7 +4190,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           { key: 'disableRedPacket', label: 'Matikan Amplop Kaget', desc: 'Kunci buat & klaim Amplop Kaget ala DANA' },
           { key: 'disableSplitBill', label: 'Matikan Patungan Grup', desc: 'Kunci fitur patungan Split Bill di grup' },
           { key: 'disableImages', label: 'Matikan Kirim Foto', desc: 'Nonaktifkan upload foto di seluruh ruang chat' },
-          { key: 'disableVoiceNotes', label: 'Matikan Voice Note', desc: 'Nonaktifkan rekam & kirim pesan suara' },
+          { key: 'disableVideos', label: 'Matikan Kirim Video', desc: 'Nonaktifkan kirim video dari galeri di seluruh chat' },
+          { key: 'disableVoiceNotes', label: 'Matikan Voice Note & Audio', desc: 'Nonaktifkan rekam suara & kirim file audio HP' },
           { key: 'disablePolls', label: 'Matikan Polling / Voting', desc: 'Kunci pembuatan & voting polling chat' },
           { key: 'disableReactions', label: 'Matikan Reaksi Emoji', desc: 'Nonaktifkan reaksi emoji pada bubble chat' },
           { key: 'disableMessageEdit', label: 'Matikan Edit Pesan', desc: 'Kunci tombol Edit Pesan milik nasabah' },
@@ -4271,7 +4272,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 <div className="flex items-center gap-2">
                   <ShieldAlert className="w-5 h-5 text-rose-400" />
                   <h4 className="font-black text-white text-sm sm:text-base">
-                    Saklar Utama Penutupan Chat &amp; Kontrol 14 Fitur Chat Satuan
+                    Saklar Utama Penutupan Chat &amp; Kontrol 15 Fitur Chat Satuan
                   </h4>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">
@@ -4311,6 +4312,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                       disableRedPacket: false,
                       disableSplitBill: false,
                       disableImages: false,
+                      disableVideos: false,
                       disableVoiceNotes: false,
                       disablePolls: false,
                       disableReactions: false,
@@ -4318,7 +4320,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                       disableChatSystemNotifications: false,
                       disableWelcomeGreeting: false,
                     };
-                    const r = await adminUpdateChatFeatureFlags(resetFlags, 'Aktifkan Semua 14 Fitur Chat');
+                    const r = await adminUpdateChatFeatureFlags(resetFlags, 'Aktifkan Semua 15 Fitur Chat');
                     notifyChatCfg(r.message);
                   }}
                   className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 font-bold text-xs cursor-pointer"
@@ -4688,6 +4690,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   <option value={15000}>Slow Mode: 15 Detik</option>
                   <option value={30000}>Slow Mode: 30 Detik</option>
                   <option value={60000}>Slow Mode: 60 Detik</option>
+                </select>
+
+                <select
+                  value={globalChatConfig.maxVoiceDurationSec ?? 600}
+                  onChange={async (e) => {
+                    const sec = Number(e.target.value);
+                    const r = await adminUpdateGlobalChatConfig(
+                      { maxVoiceDurationSec: sec },
+                      `Atur Batas Durasi Voice Note & Audio ${sec} Detik`
+                    );
+                    notifyChatCfg(r.message);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-900 border border-cyan-500/40 text-cyan-300 font-bold text-xs"
+                  title="Batas maksimal durasi rekaman Voice Note & file audio"
+                >
+                  <option value={60}>Maks Voice: 60 Detik (1m)</option>
+                  <option value={180}>Maks Voice: 180 Detik (3m)</option>
+                  <option value={300}>Maks Voice: 300 Detik (5m)</option>
+                  <option value={600}>Maks Voice: 600 Detik (10m)</option>
                 </select>
 
                 <select

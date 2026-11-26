@@ -1,9 +1,8 @@
 /**
- * Bank Nusantara — Chat Global & Priv (v15.41.49)
- * - Sinkronisasi lintas perangkat Anti-Timpa (Union-Merge + Penyimpanan Terpisah Per-ID Cloud & Server + Tombstone Registry)
- * - Composer Enter = Baris Baru, Ctrl+Enter = Kirim/Simpan Edit (otomatis melebar hingga 5 baris + opsi tukar pribadi)
- * - Hapus untuk Semua Orang ketat hanya milik pengirim asli pesan (HP1/HP2 fix)
- * - Multi-aset Uang (Rp), Coin, Diamond untuk Kirim/Minta, Patungan Grup, & Amplop Kaget ala DANA (Siapa Cepat Banyak, Acak, Merata)
+ * Bank Nusantara — Chat Global & Priv (v15.42.49)
+ * - Pratinjau Foto & Video + Keterangan sebelum terkirim + kompresi video otomatis
+ * - Voice Note & File Audio Memori HP hingga 600 detik + Pemutar kustom (Waveform scrub, 1x/1.5x/2x, Volume)
+ * - Header & Composer 1-on-1, Grup, dan Global rapi dengan Menu Titik Tiga (⋮) & Lampiran (+)
  */
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
@@ -31,6 +30,7 @@ import {
   Sparkles,
   RefreshCw,
   MoreHorizontal,
+  MoreVertical,
   Eye,
   Copy,
   Star,
@@ -49,6 +49,8 @@ import {
   Coins,
   Gem,
   Image as ImageIcon,
+  Film,
+  FileAudio,
   Mic,
   Square,
   Flag,
@@ -70,10 +72,14 @@ import {
   ChatAssetKind,
   ChatCustomBadgeTier,
   ChatForwardInfo,
+  ChatImageAttachment,
+  ChatMediaAttachmentItem,
   ChatMessage,
   ChatPollData,
   ChatRedPacketData,
   ChatRedPacketMode,
+  ChatVideoAttachment,
+  ChatVoiceAttachment,
   GlobalChatMessage,
   PrivateChatContact,
   PrivateChatGroup,
@@ -93,7 +99,6 @@ import {
   EmojiReactionModal,
   ForwardMessageModal,
   GroupInfoModal,
-  ImageLightboxModal,
   MultiAssetTransferModal,
   ReactionVotersModal,
   ReadReceiptModal,
@@ -106,6 +111,22 @@ import {
   getChatGroupColorClass,
   renderChatGroupIcon,
 } from './ChatPortalModals';
+import {
+  CustomVoicePlayer,
+  EnhancedMediaLightboxModal,
+  MediaPreviewModal,
+  VoiceStagingModal,
+} from './ChatMediaComponents';
+import {
+  compressChatImageFileToBlob,
+  compressVideoIfOversized,
+  extractAudioDurationAndPeaks,
+  formatMediaDuration,
+  inspectVideoFileMetadata,
+  uploadChatMediaToServer,
+  type StagedChatMediaDraft,
+  type StagedChatVoiceDraft,
+} from '../utils/chatMediaUtils';
 
 type MainChatTab = 'global' | 'private';
 type PrivateFilter = 'all' | 'dm' | 'group' | 'archived';
@@ -176,50 +197,6 @@ const CollapsibleChatBody: React.FC<{ text: string }> = ({ text }) => {
     </div>
   );
 };
-
-async function compressChatImageFile(file: File): Promise<{
-  dataUrl: string;
-  fileName: string;
-  sizeBytes: number;
-  width: number;
-  height: number;
-}> {
-  const bitmapUrl = URL.createObjectURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const i = new Image();
-      i.onload = () => resolve(i);
-      i.onerror = reject;
-      i.src = bitmapUrl;
-    });
-    const maxDim = 720;
-    const scale = Math.min(1, maxDim / Math.max(img.width || 1, img.height || 1));
-    const targetW = Math.max(1, Math.round(img.width * scale));
-    const targetH = Math.max(1, Math.round(img.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = targetW;
-    canvas.height = targetH;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas tidak tersedia');
-    ctx.drawImage(img, 0, 0, targetW, targetH);
-
-    let quality = 0.72;
-    let dataUrl = canvas.toDataURL('image/jpeg', quality);
-    while (dataUrl.length > 88000 && quality > 0.35) {
-      quality -= 0.1;
-      dataUrl = canvas.toDataURL('image/jpeg', quality);
-    }
-    return {
-      dataUrl,
-      fileName: file.name,
-      sizeBytes: Math.round((dataUrl.length * 3) / 4),
-      width: targetW,
-      height: targetH,
-    };
-  } finally {
-    URL.revokeObjectURL(bitmapUrl);
-  }
-}
 
 export const NusantaraChat: React.FC = () => {
   const {
@@ -296,14 +273,36 @@ export const NusantaraChat: React.FC = () => {
   const [draftByRoom, setDraftByRoom] = useState<Record<string, string>>({});
   const globalTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const privateTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const globalImageInputRef = useRef<HTMLInputElement | null>(null);
-  const privateImageInputRef = useRef<HTMLInputElement | null>(null);
+  const globalMediaInputRef = useRef<HTMLInputElement | null>(null);
+  const privateMediaInputRef = useRef<HTMLInputElement | null>(null);
+  const globalAudioInputRef = useRef<HTMLInputElement | null>(null);
+  const privateAudioInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Photo/Video & Voice/Audio staging modals (never auto-send immediately!)
+  const [mediaPreviewState, setMediaPreviewState] = useState<{
+    scope: 'global' | 'private';
+    items: StagedChatMediaDraft[];
+    caption: string;
+  } | null>(null);
+  const [mediaSending, setMediaSending] = useState(false);
+  const [mediaProgressText, setMediaProgressText] = useState<string | null>(null);
+  const [voiceStagingState, setVoiceStagingState] = useState<{
+    scope: 'global' | 'private';
+    draft: StagedChatVoiceDraft;
+    caption: string;
+  } | null>(null);
+  const [voiceSending, setVoiceSending] = useState(false);
 
   // Voice Note recording
   const [recordingScope, setRecordingScope] = useState<'global' | 'private' | null>(null);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
+
+  // Unified 3-dot Header Menu, Composer `+` Menu & Sidebar Row 3-dot Menu
+  const [openHeaderMenuScope, setOpenHeaderMenuScope] = useState<'global' | 'private' | null>(null);
+  const [openComposerPlusScope, setOpenComposerPlusScope] = useState<'global' | 'private' | null>(null);
+  const [openSidebarItemMenuKey, setOpenSidebarItemMenuKey] = useState<string | null>(null);
 
   // Disappearing message timer (seconds: 0 | 60 | 3600 | 86400)
   const [disappearSec, setDisappearSec] = useState<0 | 60 | 3600 | 86400>(0);
@@ -378,7 +377,12 @@ export const NusantaraChat: React.FC = () => {
     reportedName: string;
     messagePreview: string;
   } | null>(null);
-  const [lightboxImage, setLightboxImage] = useState<{ url: string; fileName?: string } | null>(null);
+  const [lightboxMedia, setLightboxMedia] = useState<{
+    kind: 'image' | 'video';
+    url: string;
+    fileName?: string;
+    caption?: string;
+  } | null>(null);
   const [reactionVotersTarget, setReactionVotersTarget] = useState<Record<string, string[]> | null>(null);
   const [adminQuickAcc, setAdminQuickAcc] = useState<BankAccount | null>(null);
 
@@ -497,10 +501,21 @@ export const NusantaraChat: React.FC = () => {
   const isRedPacketLockedFlag = !isAdminUser && Boolean(featureFlags.disableRedPacket);
   const isSplitBillLockedFlag = !isAdminUser && Boolean(featureFlags.disableSplitBill);
   const isImageLockedFlag = !isAdminUser && Boolean(featureFlags.disableImages);
+  const isVideoLockedFlag = !isAdminUser && Boolean(featureFlags.disableVideos);
   const isVoiceLockedFlag = !isAdminUser && Boolean(featureFlags.disableVoiceNotes);
   const isPollLockedFlag = !isAdminUser && Boolean(featureFlags.disablePolls);
   const isReactionLockedFlag = !isAdminUser && Boolean(featureFlags.disableReactions);
   const isEditLockedFlag = !isAdminUser && Boolean(featureFlags.disableMessageEdit);
+  const maxVoiceDurationSec = Math.max(
+    15,
+    Math.min(600, Math.round(Number(globalChatConfig.maxVoiceDurationSec ?? 600) || 600))
+  );
+  const unifiedMediaAccept =
+    !isImageLockedFlag && !isVideoLockedFlag
+      ? 'image/*,video/*'
+      : !isImageLockedFlag
+        ? 'image/*'
+        : 'video/*';
 
   // Auto-resize active textarea up to 5 lines (~128px) then internal scroll
   useEffect(() => {
@@ -510,7 +525,7 @@ export const NusantaraChat: React.FC = () => {
     el.style.height = `${Math.min(128, Math.max(42, el.scrollHeight))}px`;
   }, [activeDraftText, mainTab, activeTarget?.id]);
 
-  // Voice recording duration ticker (auto-stop at 30s)
+  // Voice recording duration ticker (auto-stop at Admin maxVoiceDurationSec, default 600s)
   useEffect(() => {
     if (!recordingScope) {
       setRecordingSeconds(0);
@@ -518,25 +533,30 @@ export const NusantaraChat: React.FC = () => {
     }
     const timer = window.setInterval(() => {
       setRecordingSeconds((prev) => {
-        if (prev >= 29) {
+        if (prev >= maxVoiceDurationSec - 1) {
           if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
             mediaRecorderRef.current.stop();
           }
-          return 30;
+          return maxVoiceDurationSec;
         }
         return prev + 1;
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [recordingScope]);
+  }, [recordingScope, maxVoiceDurationSec]);
 
-  // Close `···` menu when clicking outside
+  // Close popovers (`···` message menu, header `⋮`, composer `+`, sidebar `⋮`) on outside click
   useEffect(() => {
-    if (!openMenuMsgId) return;
-    const close = () => setOpenMenuMsgId(null);
+    if (!openMenuMsgId && !openHeaderMenuScope && !openComposerPlusScope && !openSidebarItemMenuKey) return;
+    const close = () => {
+      setOpenMenuMsgId(null);
+      setOpenHeaderMenuScope(null);
+      setOpenComposerPlusScope(null);
+      setOpenSidebarItemMenuKey(null);
+    };
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
-  }, [openMenuMsgId]);
+  }, [openMenuMsgId, openHeaderMenuScope, openComposerPlusScope, openSidebarItemMenuKey]);
 
   // Cooldown tick
   useEffect(() => {
@@ -710,13 +730,19 @@ export const NusantaraChat: React.FC = () => {
             ? `Amplop Kaget ${formatModalAssetValue(m.redPacket.totalAmount, m.redPacket.assetKind)}`
             : m.splitBill
               ? `Patungan: ${m.splitBill.title}`
-              : m.imageAttachment
-                ? '📷 Foto'
-                : m.voiceAttachment
-                  ? '🎤 Pesan Suara'
-                  : m.poll
-                    ? `Polling: ${m.poll.question}`
-                    : m.text;
+              : m.mediaAttachments && m.mediaAttachments.length > 0
+                ? m.mediaAttachments.some((a) => a.kind === 'video')
+                  ? `🎬 Video (${m.mediaAttachments.length})`
+                  : `📷 Foto (${m.mediaAttachments.length})`
+                : m.videoAttachment
+                  ? '🎬 Video'
+                  : m.imageAttachment
+                    ? '📷 Foto'
+                    : m.voiceAttachment
+                      ? `🎤 Suara (${formatMediaDuration(m.voiceAttachment.durationSec)})`
+                      : m.poll
+                        ? `Polling: ${m.poll.question}`
+                        : m.text;
       }
 
       if (!isFromMe) {
@@ -1040,36 +1066,249 @@ export const NusantaraChat: React.FC = () => {
     // Otherwise allow default newline behavior (works on mobile Enter & Shift+Enter)
   };
 
-  // Image pick & send compressed
-  const handleImageFilePicked = async (
+  // Stage Foto & Video (NEVER auto-send immediately — opens Preview Modal with caption!)
+  const openUnifiedMediaPicker = (scope: 'global' | 'private') => {
+    setOpenComposerPlusScope(null);
+    if (isImageLockedFlag && isVideoLockedFlag) {
+      showToast('Kirim Foto & Video sedang dinonaktifkan sementara oleh Admin.', 'error');
+      return;
+    }
+    if (scope === 'global') globalMediaInputRef.current?.click();
+    else privateMediaInputRef.current?.click();
+  };
+
+  const openDeviceAudioPicker = (scope: 'global' | 'private') => {
+    setOpenComposerPlusScope(null);
+    if (isVoiceLockedFlag) {
+      showToast('Pesan suara & kirim file audio sedang dinonaktifkan Admin.', 'error');
+      return;
+    }
+    if (scope === 'global') globalAudioInputRef.current?.click();
+    else privateAudioInputRef.current?.click();
+  };
+
+  const buildStagedDraftFromFile = async (file: File): Promise<StagedChatMediaDraft | null> => {
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|webm|mov|mkv|m4v|3gp)$/i.test(file.name);
+    const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp|heic)$/i.test(file.name);
+    if (!isVideo && !isImage) {
+      showToast(`File "${file.name}" bukan format foto atau video yang didukung.`, 'error');
+      return null;
+    }
+    if (isVideo && isVideoLockedFlag) {
+      showToast('Kirim Video sedang dinonaktifkan oleh Admin.', 'error');
+      return null;
+    }
+    if (isImage && isImageLockedFlag) {
+      showToast('Kirim Foto sedang dinonaktifkan oleh Admin.', 'error');
+      return null;
+    }
+    const previewUrl = URL.createObjectURL(file);
+    if (isVideo) {
+      try {
+        const meta = await inspectVideoFileMetadata(file);
+        return {
+          id: `stmedia-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+          kind: 'video',
+          file,
+          previewUrl,
+          thumbnailDataUrl: meta.thumbnailDataUrl,
+          fileName: file.name,
+          mimeType: file.type || 'video/mp4',
+          sizeBytes: file.size,
+          width: meta.width,
+          height: meta.height,
+          durationSec: meta.durationSec,
+        };
+      } catch (err) {
+        URL.revokeObjectURL(previewUrl);
+        showToast(err instanceof Error ? err.message : 'Gagal membaca metadata video.', 'error');
+        return null;
+      }
+    }
+    return {
+      id: `stmedia-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      kind: 'image',
+      file,
+      previewUrl,
+      fileName: file.name,
+      mimeType: file.type || 'image/jpeg',
+      sizeBytes: file.size,
+    };
+  };
+
+  const handleMediaFilesPicked = async (
     e: React.ChangeEvent<HTMLInputElement>,
     scope: 'global' | 'private'
   ) => {
-    const file = e.target.files?.[0];
+    const files = e.target.files ? Array.from(e.target.files) : [];
     e.target.value = '';
-    if (!file) return;
-    if (isImageLockedFlag) {
-      showToast('Kirim foto di chat sedang dinonaktifkan Admin.', 'error');
-      return;
+    if (files.length === 0) return;
+
+    const drafts: StagedChatMediaDraft[] = [];
+    for (const file of files.slice(0, 10)) {
+      const item = await buildStagedDraftFromFile(file);
+      if (item) drafts.push(item);
     }
+    if (drafts.length === 0) return;
+
+    setMediaPreviewState((prev) => ({
+      scope,
+      items: prev && prev.scope === scope ? [...prev.items, ...drafts].slice(0, 10) : drafts,
+      caption: prev?.caption ?? (activeDraftText.trim() || ''),
+    }));
+  };
+
+  const handleAddMorePreviewMedia = async (filesList: FileList | null) => {
+    if (!filesList || !mediaPreviewState) return;
+    const files = Array.from(filesList);
+    const added: StagedChatMediaDraft[] = [];
+    for (const file of files.slice(0, Math.max(0, 10 - mediaPreviewState.items.length))) {
+      const item = await buildStagedDraftFromFile(file);
+      if (item) added.push(item);
+    }
+    if (added.length === 0) return;
+    setMediaPreviewState((prev) =>
+      prev ? { ...prev, items: [...prev.items, ...added].slice(0, 10) } : null
+    );
+  };
+
+  const handleReplacePreviewMedia = async (index: number, file: File | null) => {
+    if (!file || !mediaPreviewState) return;
+    const item = await buildStagedDraftFromFile(file);
+    if (!item) return;
+    setMediaPreviewState((prev) => {
+      if (!prev) return null;
+      const old = prev.items[index];
+      if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
+      const next = [...prev.items];
+      next[index] = item;
+      return { ...prev, items: next };
+    });
+  };
+
+  const handleRemovePreviewMedia = (index: number) => {
+    setMediaPreviewState((prev) => {
+      if (!prev) return null;
+      const old = prev.items[index];
+      if (old?.previewUrl) URL.revokeObjectURL(old.previewUrl);
+      const next = prev.items.filter((_, idx) => idx !== index);
+      if (next.length === 0) return null;
+      return { ...prev, items: next };
+    });
+  };
+
+  const handleCancelMediaPreview = () => {
+    if (mediaPreviewState) {
+      mediaPreviewState.items.forEach((it) => {
+        if (it.previewUrl) URL.revokeObjectURL(it.previewUrl);
+      });
+    }
+    setMediaPreviewState(null);
+    setMediaProgressText(null);
+  };
+
+  const handleConfirmSendMediaPreview = async () => {
+    if (!mediaPreviewState || mediaPreviewState.items.length === 0 || mediaSending) return;
+    const { scope, items, caption } = mediaPreviewState;
+    setMediaSending(true);
     try {
-      const compressed = await compressChatImageFile(file);
+      const uploadedItems: ChatMediaAttachmentItem[] = [];
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        if (item.kind === 'image') {
+          setMediaProgressText(`Mengompres & mengunggah foto ${i + 1}/${items.length}...`);
+          const comp = await compressChatImageFileToBlob(item.file);
+          const up = await uploadChatMediaToServer(comp.blob, comp.fileName, comp.mimeType);
+          uploadedItems.push({
+            id: item.id,
+            kind: 'image',
+            url: up.url,
+            dataUrl: up.dataUrl,
+            fileName: comp.fileName,
+            mimeType: up.mimeType,
+            width: comp.width,
+            height: comp.height,
+            sizeBytes: up.sizeBytes,
+          });
+        } else {
+          setMediaProgressText(`Mengamankan ukuran video ${i + 1}/${items.length}...`);
+          const compVid = await compressVideoIfOversized(
+            item.file,
+            {
+              durationSec: item.durationSec || 1,
+              width: item.width || 720,
+              height: item.height || 1280,
+              thumbnailDataUrl: item.thumbnailDataUrl,
+            },
+            (pct) => {
+              setMediaProgressText(`Mengompres video ${i + 1}/${items.length} (${pct}%)...`);
+            }
+          );
+          setMediaProgressText(`Mengunggah video ${i + 1}/${items.length}...`);
+          const up = await uploadChatMediaToServer(compVid.blob, item.fileName, compVid.mimeType);
+          uploadedItems.push({
+            id: item.id,
+            kind: 'video',
+            url: up.url || up.dataUrl || '',
+            thumbnailDataUrl: item.thumbnailDataUrl,
+            fileName: item.fileName,
+            mimeType: up.mimeType,
+            durationSec: compVid.durationSec,
+            width: compVid.width,
+            height: compVid.height,
+            sizeBytes: up.sizeBytes,
+          });
+        }
+      }
+
+      const singleImage: ChatImageAttachment | undefined =
+        uploadedItems.length === 1 && uploadedItems[0].kind === 'image'
+          ? {
+              url: uploadedItems[0].url,
+              dataUrl: uploadedItems[0].dataUrl,
+              fileName: uploadedItems[0].fileName,
+              mimeType: uploadedItems[0].mimeType,
+              width: uploadedItems[0].width,
+              height: uploadedItems[0].height,
+              sizeBytes: uploadedItems[0].sizeBytes,
+            }
+          : undefined;
+      const singleVideo: ChatVideoAttachment | undefined =
+        uploadedItems.length === 1 && uploadedItems[0].kind === 'video'
+          ? {
+              url: uploadedItems[0].url || uploadedItems[0].dataUrl || '',
+              thumbnailDataUrl: uploadedItems[0].thumbnailDataUrl,
+              fileName: uploadedItems[0].fileName,
+              mimeType: uploadedItems[0].mimeType,
+              durationSec: uploadedItems[0].durationSec,
+              width: uploadedItems[0].width,
+              height: uploadedItems[0].height,
+              sizeBytes: uploadedItems[0].sizeBytes,
+            }
+          : undefined;
+
+      const cleanCaption = caption.trim();
       if (scope === 'global') {
         const res = await sendGlobalChatMessage({
-          text: activeDraftText.trim() || '',
+          text: cleanCaption,
           asAdmin: isAdminUser,
-          imageAttachment: compressed,
+          imageAttachment: singleImage,
+          videoAttachment: singleVideo,
+          mediaAttachments: uploadedItems.length > 1 ? uploadedItems : undefined,
           expiresAtMs: getExpiryTimestamp(),
         });
-        showToast(res.success ? 'Foto terkirim ke Chat Global!' : res.message, res.success ? 'success' : 'error');
+        showToast(res.success ? `${uploadedItems.length} media terkirim ke Chat Global!` : res.message, res.success ? 'success' : 'error');
+        if (!res.success) return;
       } else if (activeTarget) {
         if (activeTarget.type === 'group' && activeGroup) {
           sendChatMessage({
             groupId: activeGroup.id,
             recipientAccount: `group:${activeGroup.id}`,
             recipientName: activeGroup.name,
-            text: activeDraftText.trim() || '',
-            imageAttachment: compressed,
+            text: cleanCaption,
+            imageAttachment: singleImage,
+            videoAttachment: singleVideo,
+            mediaAttachments: uploadedItems.length > 1 ? uploadedItems : undefined,
             expiresAtMs: getExpiryTimestamp(),
           });
         } else if (activeDmItem) {
@@ -1077,20 +1316,27 @@ export const NusantaraChat: React.FC = () => {
             recipientAccountId: activeDmItem.peerAccountId,
             recipientAccount: activeDmItem.peerAccountNumber,
             recipientName: activeDmItem.displayName,
-            text: activeDraftText.trim() || '',
-            imageAttachment: compressed,
+            text: cleanCaption,
+            imageAttachment: singleImage,
+            videoAttachment: singleVideo,
+            mediaAttachments: uploadedItems.length > 1 ? uploadedItems : undefined,
             expiresAtMs: getExpiryTimestamp(),
           });
         }
-        showToast('Foto terkirim!', 'success');
+        showToast(`${uploadedItems.length} media berhasil dikirim!`, 'success');
       }
+
       setDraftByRoom((prev) => ({ ...prev, [activeRoomKey]: '' }));
-    } catch {
-      showToast('Gagal memproses foto. Coba gambar lain yang lebih kecil.', 'error');
+      handleCancelMediaPreview();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal mengirim foto/video.', 'error');
+    } finally {
+      setMediaSending(false);
+      setMediaProgressText(null);
     }
   };
 
-  // Voice Note start/stop
+  // Voice Note start/stop (up to Admin maxVoiceDurationSec, default 600s) -> stages in VoiceStagingModal
   const handleToggleVoiceRecord = async (scope: 'global' | 'private') => {
     if (isVoiceLockedFlag) {
       showToast('Pesan suara (Voice Note) sedang dinonaktifkan Admin.', 'error');
@@ -1109,62 +1355,277 @@ export const NusantaraChat: React.FC = () => {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const preferredAudioMime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : '';
+      const recorder = new MediaRecorder(
+        stream,
+        preferredAudioMime ? { mimeType: preferredAudioMime, audioBitsPerSecond: 48_000 } : { audioBitsPerSecond: 48_000 }
+      );
       recordingChunksRef.current = [];
       const startedAt = Date.now();
       recorder.ondataavailable = (ev) => {
         if (ev.data.size > 0) recordingChunksRef.current.push(ev.data);
       };
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
-        const durationSec = Math.max(1, Math.min(30, Math.round((Date.now() - startedAt) / 1000)));
+        const elapsedSec = Math.max(1, Math.min(maxVoiceDurationSec, Math.round((Date.now() - startedAt) / 1000)));
         const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const dataUrl = String(reader.result || '');
-          if (!dataUrl || dataUrl.length > 140000) {
-            showToast('Rekaman suara terlalu panjang/besar untuk dikirim.', 'error');
-            return;
-          }
-          const voiceAttachment = { dataUrl, durationSec, mimeType: blob.type };
-          if (scope === 'global') {
-            const res = await sendGlobalChatMessage({
-              text: '',
-              asAdmin: isAdminUser,
-              voiceAttachment,
-              expiresAtMs: getExpiryTimestamp(),
-            });
-            showToast(res.success ? 'Voice Note terkirim!' : res.message, res.success ? 'success' : 'error');
-          } else if (activeTarget?.type === 'group' && activeGroup) {
-            sendChatMessage({
-              groupId: activeGroup.id,
-              recipientAccount: `group:${activeGroup.id}`,
-              recipientName: activeGroup.name,
-              text: '',
-              voiceAttachment,
-              expiresAtMs: getExpiryTimestamp(),
-            });
-            showToast('Voice Note terkirim ke grup!', 'success');
-          } else if (activeDmItem) {
-            sendChatMessage({
-              recipientAccountId: activeDmItem.peerAccountId,
-              recipientAccount: activeDmItem.peerAccountNumber,
-              recipientName: activeDmItem.displayName,
-              text: '',
-              voiceAttachment,
-              expiresAtMs: getExpiryTimestamp(),
-            });
-            showToast('Voice Note terkirim!', 'success');
-          }
-        };
-        reader.readAsDataURL(blob);
+        if (blob.size < 100) {
+          showToast('Rekaman suara terlalu singkat atau kosong.', 'error');
+          return;
+        }
+        const analyzed = await extractAudioDurationAndPeaks(blob);
+        const durationSec = Math.max(1, Math.min(maxVoiceDurationSec, analyzed.durationSec || elapsedSec));
+        const previewUrl = URL.createObjectURL(blob);
+        setVoiceStagingState({
+          scope,
+          draft: {
+            sourceKind: 'recorded',
+            blob,
+            previewUrl,
+            fileName: `voice-note-${Date.now()}.webm`,
+            mimeType: blob.type || 'audio/webm',
+            durationSec,
+            sizeBytes: blob.size,
+            waveformPeaks: analyzed.waveformPeaks,
+          },
+          caption: activeDraftText.trim() || '',
+        });
       };
       mediaRecorderRef.current = recorder;
-      recorder.start();
+      recorder.start(500);
       setRecordingScope(scope);
     } catch {
       showToast('Izin mikrofon ditolak atau tidak tersedia.', 'error');
     }
+  };
+
+  // Device Audio / Music file picker -> stages in VoiceStagingModal
+  const handleAudioFilePicked = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    scope: 'global' | 'private'
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (isVoiceLockedFlag) {
+      showToast('Pengiriman pesan suara & audio sedang dinonaktifkan Admin.', 'error');
+      return;
+    }
+    if (file.size > 21 * 1024 * 1024) {
+      showToast('Ukuran file audio maksimal 21 MB agar lancar dikirim.', 'error');
+      return;
+    }
+    try {
+      const analyzed = await extractAudioDurationAndPeaks(file);
+      if (analyzed.durationSec > maxVoiceDurationSec) {
+        showToast(
+          `Durasi audio (${formatMediaDuration(analyzed.durationSec)}) melebihi batas Admin (${formatMediaDuration(maxVoiceDurationSec)}).`,
+          'error'
+        );
+        return;
+      }
+      const previewUrl = URL.createObjectURL(file);
+      setVoiceStagingState({
+        scope,
+        draft: {
+          sourceKind: 'file',
+          blob: file,
+          previewUrl,
+          fileName: file.name,
+          mimeType: file.type || 'audio/mpeg',
+          durationSec: analyzed.durationSec,
+          sizeBytes: file.size,
+          waveformPeaks: analyzed.waveformPeaks,
+        },
+        caption: activeDraftText.trim() || '',
+      });
+    } catch {
+      showToast('Gagal memproses file audio dari memori perangkat.', 'error');
+    }
+  };
+
+  const handleCancelVoiceStaging = () => {
+    if (voiceStagingState?.draft.previewUrl) {
+      URL.revokeObjectURL(voiceStagingState.draft.previewUrl);
+    }
+    setVoiceStagingState(null);
+  };
+
+  const handleConfirmSendVoiceStaging = async () => {
+    if (!voiceStagingState || voiceSending) return;
+    const { scope, draft, caption } = voiceStagingState;
+    setVoiceSending(true);
+    try {
+      const uploaded = await uploadChatMediaToServer(draft.blob, draft.fileName, draft.mimeType);
+      const voiceAttachment: ChatVoiceAttachment = {
+        url: uploaded.url,
+        dataUrl: uploaded.dataUrl,
+        fileName: draft.sourceKind === 'file' ? draft.fileName : undefined,
+        durationSec: draft.durationSec,
+        mimeType: uploaded.mimeType,
+        sizeBytes: uploaded.sizeBytes,
+        waveformPeaks: draft.waveformPeaks,
+      };
+      const cleanCaption = caption.trim();
+
+      if (scope === 'global') {
+        const res = await sendGlobalChatMessage({
+          text: cleanCaption,
+          asAdmin: isAdminUser,
+          voiceAttachment,
+          expiresAtMs: getExpiryTimestamp(),
+        });
+        showToast(res.success ? 'Voice Note terkirim!' : res.message, res.success ? 'success' : 'error');
+        if (!res.success) return;
+      } else if (activeTarget?.type === 'group' && activeGroup) {
+        sendChatMessage({
+          groupId: activeGroup.id,
+          recipientAccount: `group:${activeGroup.id}`,
+          recipientName: activeGroup.name,
+          text: cleanCaption,
+          voiceAttachment,
+          expiresAtMs: getExpiryTimestamp(),
+        });
+        showToast('Voice Note terkirim ke grup!', 'success');
+      } else if (activeDmItem) {
+        sendChatMessage({
+          recipientAccountId: activeDmItem.peerAccountId,
+          recipientAccount: activeDmItem.peerAccountNumber,
+          recipientName: activeDmItem.displayName,
+          text: cleanCaption,
+          voiceAttachment,
+          expiresAtMs: getExpiryTimestamp(),
+        });
+        showToast('Voice Note terkirim!', 'success');
+      }
+
+      setDraftByRoom((prev) => ({ ...prev, [activeRoomKey]: '' }));
+      handleCancelVoiceStaging();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Gagal mengirim Voice Note.', 'error');
+    } finally {
+      setVoiceSending(false);
+    }
+  };
+
+  const renderMessageMediaAttachmentBlock = (
+    msg: Pick<GlobalChatMessage | ChatMessage, 'imageAttachment' | 'videoAttachment' | 'mediaAttachments' | 'voiceAttachment' | 'text'>,
+    isMine: boolean
+  ) => {
+    const items: ChatMediaAttachmentItem[] =
+      msg.mediaAttachments && msg.mediaAttachments.length > 0
+        ? msg.mediaAttachments
+        : [
+            ...(msg.imageAttachment
+              ? [
+                  {
+                    id: 'img-single',
+                    kind: 'image' as const,
+                    url: msg.imageAttachment.url,
+                    dataUrl: msg.imageAttachment.dataUrl,
+                    fileName: msg.imageAttachment.fileName,
+                    mimeType: msg.imageAttachment.mimeType,
+                  },
+                ]
+              : []),
+            ...(msg.videoAttachment
+              ? [
+                  {
+                    id: 'vid-single',
+                    kind: 'video' as const,
+                    url: msg.videoAttachment.url,
+                    dataUrl: msg.videoAttachment.dataUrl,
+                    thumbnailDataUrl: msg.videoAttachment.thumbnailDataUrl,
+                    fileName: msg.videoAttachment.fileName,
+                    mimeType: msg.videoAttachment.mimeType,
+                    durationSec: msg.videoAttachment.durationSec,
+                  },
+                ]
+              : []),
+          ];
+
+    const voiceSrc = msg.voiceAttachment?.url || msg.voiceAttachment?.dataUrl || '';
+
+    return (
+      <>
+        {items.length > 0 && (
+          <div className={`mb-2 grid gap-1.5 ${items.length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {items.map((item) => {
+              const mediaSrc = item.url || item.dataUrl || '';
+              if (!mediaSrc) return null;
+              if (item.kind === 'video') {
+                return (
+                  <div
+                    key={item.id}
+                    className="relative rounded-xl overflow-hidden border border-white/15 bg-black/60"
+                  >
+                    <video
+                      src={mediaSrc}
+                      poster={item.thumbnailDataUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className={`w-full object-contain ${items.length > 1 ? 'max-h-40' : 'max-h-64'}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setLightboxMedia({
+                          kind: 'video',
+                          url: mediaSrc,
+                          fileName: item.fileName,
+                          caption: msg.text,
+                        })
+                      }
+                      className="absolute top-1.5 right-1.5 px-2 py-0.5 rounded-lg bg-slate-950/80 hover:bg-slate-900 text-[10px] font-bold text-white border border-white/15"
+                    >
+                      Layar Penuh
+                    </button>
+                  </div>
+                );
+              }
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() =>
+                    setLightboxMedia({
+                      kind: 'image',
+                      url: mediaSrc,
+                      fileName: item.fileName,
+                      caption: msg.text,
+                    })
+                  }
+                  className="block rounded-xl overflow-hidden border border-white/15 max-w-full bg-black/20"
+                >
+                  <img
+                    src={mediaSrc}
+                    alt={item.fileName || 'Foto Chat'}
+                    className={`w-full object-cover ${items.length > 1 ? 'h-36' : 'max-h-64 w-auto'}`}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {msg.voiceAttachment && voiceSrc && (
+          <div className="mb-2">
+            <CustomVoicePlayer
+              src={voiceSrc}
+              durationSec={msg.voiceAttachment.durationSec}
+              waveformPeaks={msg.voiceAttachment.waveformPeaks}
+              fileName={msg.voiceAttachment.fileName}
+              isMine={isMine}
+            />
+          </div>
+        )}
+      </>
+    );
   };
 
   const handleAddContactSubmit = (input: {
@@ -1816,7 +2277,7 @@ export const NusantaraChat: React.FC = () => {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex items-center gap-1.5 relative">
                 {!isAdminUser && (
                   <button
                     type="button"
@@ -1825,7 +2286,7 @@ export const NusantaraChat: React.FC = () => {
                     title="Chat langsung dengan Admin Resmi Bank Nusantara"
                   >
                     <Headphones className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">Hubungi Admin</span>
+                    <span className="hidden sm:inline">Admin</span>
                   </button>
                 )}
                 <button
@@ -1852,34 +2313,119 @@ export const NusantaraChat: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setGlobalBookmarkedOnly((v) => !v)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenHeaderMenuScope((prev) => (prev === 'global' ? null : 'global'));
+                  }}
                   className={`p-2 rounded-xl text-xs font-bold transition-colors ${
-                    globalBookmarkedOnly
-                      ? 'bg-amber-500 text-slate-950'
+                    openHeaderMenuScope === 'global'
+                      ? 'bg-emerald-600 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                   }`}
-                  title="Filter pesan berbintang (Bookmark)"
+                  title="Menu Titik Tiga Chat Global"
                 >
-                  <Star className="w-4 h-4" />
+                  <MoreVertical className="w-4 h-4" />
                 </button>
-                <button
-                  type="button"
-                  onClick={handleDownloadGlobalRecap}
-                  className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700"
-                  title="Unduh Rekap Chat Global (.txt)"
-                >
-                  <Download className="w-4 h-4" />
-                </button>
-                {isAdminUser && (
-                  <button
-                    type="button"
-                    disabled={isPollLockedFlag}
-                    onClick={() => setPollModalScope('global')}
-                    className="p-2 rounded-xl bg-violet-950/50 text-violet-300 hover:bg-violet-900/70 disabled:opacity-40"
-                    title="Buat Polling Resmi Admin"
+
+                {openHeaderMenuScope === 'global' && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute right-0 top-full mt-2 w-64 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-1.5 z-50 text-xs"
                   >
-                    <BarChart2 className="w-4 h-4" />
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGlobalBookmarkedOnly((v) => !v);
+                        setOpenHeaderMenuScope(null);
+                      }}
+                      className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 text-slate-200"
+                    >
+                      <span className="inline-flex items-center gap-2.5 font-semibold">
+                        <Star className={`w-4 h-4 ${globalBookmarkedOnly ? 'text-amber-400 fill-amber-400' : 'text-amber-300'}`} />
+                        <span>{globalBookmarkedOnly ? 'Tampilkan Semua Pesan' : 'Filter Pesan Berbintang'}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleDownloadGlobalRecap();
+                        setOpenHeaderMenuScope(null);
+                      }}
+                      className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                    >
+                      <Download className="w-4 h-4 text-cyan-400" />
+                      <span>Ekspor Rekap Chat Global (.txt)</span>
+                    </button>
+                    <div className="my-1 border-t border-slate-800" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenHeaderMenuScope(null);
+                        if (isRedPacketLockedFlag) {
+                          showToast('Amplop Kaget sedang dinonaktifkan oleh Admin.', 'error');
+                          return;
+                        }
+                        setRedPacketModalScope('global');
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                        isRedPacketLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-2.5 font-semibold">
+                        <Gift className="w-4 h-4 text-rose-400" />
+                        <span>Kirim Amplop Kaget</span>
+                      </span>
+                      {isRedPacketLockedFlag && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400">
+                          <Lock className="w-3 h-3" /> Nonaktif Admin
+                        </span>
+                      )}
+                    </button>
+                    {isAdminUser && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpenHeaderMenuScope(null);
+                          if (isPollLockedFlag) {
+                            showToast('Fitur Polling sedang dinonaktifkan oleh Admin.', 'error');
+                            return;
+                          }
+                          setPollModalScope('global');
+                        }}
+                        className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                          isPollLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-2.5 font-semibold">
+                          <BarChart2 className="w-4 h-4 text-violet-400" />
+                          <span>Buat Polling Resmi Admin</span>
+                        </span>
+                        {isPollLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                      </button>
+                    )}
+                    <div className="my-1 border-t border-slate-800" />
+                    <div className="px-3.5 py-2 space-y-1.5">
+                      <p className="text-[10px] font-bold uppercase text-slate-400 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5" /> Timer Pesan Hilang Otomatis
+                      </p>
+                      <div className="grid grid-cols-4 gap-1">
+                        {([0, 60, 3600, 86400] as const).map((sec) => (
+                          <button
+                            key={sec}
+                            type="button"
+                            onClick={() => setDisappearSec(sec)}
+                            className={`py-1 rounded-lg text-[10px] font-bold ${
+                              disappearSec === sec
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                            }`}
+                          >
+                            {sec === 0 ? 'Off' : sec === 60 ? '1m' : sec === 3600 ? '1j' : '24j'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             </div>
@@ -2180,38 +2726,8 @@ export const NusantaraChat: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Image Attachment */}
-                        {msg.imageAttachment && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setLightboxImage({
-                                url: msg.imageAttachment!.dataUrl,
-                                fileName: msg.imageAttachment!.fileName,
-                              })
-                            }
-                            className="block mb-2 rounded-xl overflow-hidden border border-white/15 max-w-full"
-                          >
-                            <img
-                              src={msg.imageAttachment.dataUrl}
-                              alt={msg.imageAttachment.fileName || 'Foto Chat'}
-                              className="max-h-56 w-auto object-cover"
-                            />
-                          </button>
-                        )}
-
-                        {/* Voice Attachment */}
-                        {msg.voiceAttachment && (
-                          <div className="mb-2 p-2 rounded-xl bg-black/30 border border-white/10 space-y-1">
-                            <div className="flex items-center justify-between text-[10px] font-bold opacity-85">
-                              <span className="inline-flex items-center gap-1">
-                                <Mic className="w-3 h-3" /> Pesan Suara
-                              </span>
-                              <span className="tabular-nums">{msg.voiceAttachment.durationSec}d</span>
-                            </div>
-                            <audio controls src={msg.voiceAttachment.dataUrl} className="w-full h-8 max-w-[230px]" />
-                          </div>
-                        )}
+                        {/* Photo / Multi-Media / Video + Custom Voice Player */}
+                        {renderMessageMediaAttachmentBlock(msg, isStrictOwner)}
 
                         {/* Collapsible Formatted Body Text */}
                         {msg.text && <CollapsibleChatBody text={msg.text} />}
@@ -2534,13 +3050,21 @@ export const NusantaraChat: React.FC = () => {
 
           {/* Global Composer */}
           <div className="shrink-0 p-3 border-t border-slate-800 bg-[#0b0f19] relative space-y-2">
-            {/* Hidden image input */}
+            {/* Hidden unified Foto/Video & Device Audio pickers */}
             <input
-              ref={globalImageInputRef}
+              ref={globalMediaInputRef}
               type="file"
-              accept="image/*"
+              accept={unifiedMediaAccept}
+              multiple
               className="hidden"
-              onChange={(e) => void handleImageFilePicked(e, 'global')}
+              onChange={(e) => void handleMediaFilesPicked(e, 'global')}
+            />
+            <input
+              ref={globalAudioInputRef}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              onChange={(e) => void handleAudioFilePicked(e, 'global')}
             />
 
             {/* Mention Autocomplete Dropdown */}
@@ -2585,59 +3109,147 @@ export const NusantaraChat: React.FC = () => {
               </div>
             )}
 
-            {/* Quick Toolbar + Quick Reply Chips */}
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Quick Reply Chips + `+` Attachment Popover */}
+            {openComposerPlusScope === 'global' && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="absolute bottom-full left-3 mb-2 w-72 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-2 z-40 text-xs"
+              >
+                <p className="px-3.5 pb-1.5 text-[10px] font-extrabold uppercase text-slate-400">
+                  Lampiran &amp; Fitur Chat Global
+                </p>
                 <button
                   type="button"
-                  disabled={isImageLockedFlag || (!isAdminUser && globalChatConfig.adminOnlyLock)}
-                  onClick={() => globalImageInputRef.current?.click()}
-                  className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300"
-                  title={isImageLockedFlag ? 'Kirim foto dinonaktifkan Admin' : 'Kirim Foto'}
-                >
-                  <ImageIcon className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  disabled={isVoiceLockedFlag || (!isAdminUser && globalChatConfig.adminOnlyLock)}
-                  onClick={() => void handleToggleVoiceRecord('global')}
-                  className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold inline-flex items-center gap-1 disabled:opacity-40 ${
-                    recordingScope === 'global'
-                      ? 'bg-rose-600 text-white animate-pulse'
-                      : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                  onClick={() => openUnifiedMediaPicker('global')}
+                  className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                    isImageLockedFlag && isVideoLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
                   }`}
-                  title={isVoiceLockedFlag ? 'Pesan suara dinonaktifkan Admin' : 'Rekam Pesan Suara'}
                 >
-                  {recordingScope === 'global' ? <Square className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                  <span>{recordingScope === 'global' ? `Stop (${recordingSeconds}d)` : 'Suara'}</span>
+                  <span className="inline-flex items-center gap-2.5 font-semibold">
+                    <ImageIcon className="w-4 h-4 text-emerald-400" />
+                    <span>Foto atau Video (Pratinjau)</span>
+                  </span>
+                  {isImageLockedFlag && isVideoLockedFlag ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 font-bold">
+                      <Lock className="w-3 h-3" /> Nonaktif
+                    </span>
+                  ) : isVideoLockedFlag ? (
+                    <span className="text-[10px] text-amber-300 font-bold">Foto saja</span>
+                  ) : null}
                 </button>
-                <select
-                  value={disappearSec}
-                  onChange={(e) => setDisappearSec(Number(e.target.value) as 0 | 60 | 3600 | 86400)}
-                  className="px-2 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold text-slate-300"
-                  title="Timer pesan sementara"
+                <button
+                  type="button"
+                  onClick={() => openDeviceAudioPicker('global')}
+                  className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                    isVoiceLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                  }`}
                 >
-                  <option value={0}>Timer: Off</option>
-                  <option value={60}>Hilang 1m</option>
-                  <option value={3600}>Hilang 1j</option>
-                  <option value={86400}>Hilang 24j</option>
-                </select>
+                  <span className="inline-flex items-center gap-2.5 font-semibold">
+                    <FileAudio className="w-4 h-4 text-cyan-400" />
+                    <span>Audio / Musik HP ({formatMediaDuration(maxVoiceDurationSec)})</span>
+                  </span>
+                  {isVoiceLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenComposerPlusScope(null);
+                    if (isRedPacketLockedFlag) {
+                      showToast('Amplop Kaget dinonaktifkan oleh Admin.', 'error');
+                      return;
+                    }
+                    setRedPacketModalScope('global');
+                  }}
+                  className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                    isRedPacketLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-2.5 font-semibold">
+                    <Gift className="w-4 h-4 text-rose-400" />
+                    <span>Kirim Amplop Kaget</span>
+                  </span>
+                  {isRedPacketLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                </button>
+                <div className="my-1 border-t border-slate-800" />
+                <div className="px-3.5 py-1.5 space-y-1.5">
+                  <span className="text-[10px] font-bold text-slate-400 block">Timer Pesan Hilang</span>
+                  <div className="grid grid-cols-4 gap-1">
+                    {([0, 60, 3600, 86400] as const).map((sec) => (
+                      <button
+                        key={sec}
+                        type="button"
+                        onClick={() => setDisappearSec(sec)}
+                        className={`py-1 rounded-lg text-[10px] font-bold ${
+                          disappearSec === sec
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        }`}
+                      >
+                        {sec === 0 ? 'Off' : sec === 60 ? '1m' : sec === 3600 ? '1j' : '24j'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div className="hidden sm:flex items-center gap-1 overflow-x-auto">
-                {QUICK_REPLY_CHIPS.map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => setActiveDraftText(activeDraftText ? `${activeDraftText} ${chip}` : chip)}
-                    className="px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-[10px] font-semibold text-slate-300 shrink-0"
-                  >
-                    {chip}
-                  </button>
-                ))}
-              </div>
+            )}
+
+            <div className="hidden sm:flex items-center gap-1 overflow-x-auto pb-0.5">
+              {QUICK_REPLY_CHIPS.map((chip) => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => setActiveDraftText(activeDraftText ? `${activeDraftText} ${chip}` : chip)}
+                  className="px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-[10px] font-semibold text-slate-300 shrink-0"
+                >
+                  {chip}
+                </button>
+              ))}
+              {disappearSec > 0 && (
+                <span className="ml-auto text-[10px] font-bold text-amber-300 shrink-0">
+                  Timer aktif: {disappearSec === 60 ? '1m' : disappearSec === 3600 ? '1j' : '24j'}
+                </span>
+              )}
             </div>
 
             <form onSubmit={handleSendGlobal} className="flex items-end gap-2 min-w-0">
+              <button
+                type="button"
+                disabled={!isAdminUser && globalChatConfig.adminOnlyLock}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpenComposerPlusScope((prev) => (prev === 'global' ? null : 'global'));
+                }}
+                className={`shrink-0 w-10 h-10 rounded-2xl flex items-center justify-center transition-colors disabled:opacity-40 ${
+                  openComposerPlusScope === 'global'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                }`}
+                title="Lampiran (Foto/Video, Audio HP, Amplop Kaget, Timer)"
+              >
+                <Plus className={`w-5 h-5 transition-transform ${openComposerPlusScope === 'global' ? 'rotate-45' : ''}`} />
+              </button>
+              <button
+                type="button"
+                disabled={isVoiceLockedFlag || (!isAdminUser && globalChatConfig.adminOnlyLock)}
+                onClick={() => void handleToggleVoiceRecord('global')}
+                className={`shrink-0 h-10 px-3 rounded-2xl text-[11px] font-bold inline-flex items-center gap-1.5 disabled:opacity-40 ${
+                  recordingScope === 'global'
+                    ? 'bg-rose-600 text-white animate-pulse'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                }`}
+                title={
+                  isVoiceLockedFlag
+                    ? 'Pesan suara dinonaktifkan Admin'
+                    : `Rekam Voice Note (maks ${formatMediaDuration(maxVoiceDurationSec)})`
+                }
+              >
+                {recordingScope === 'global' ? <Square className="w-3.5 h-3.5" /> : <Mic className="w-4 h-4" />}
+                {recordingScope === 'global' && (
+                  <span className="font-mono tabular-nums">
+                    {formatMediaDuration(recordingSeconds)} / {formatMediaDuration(maxVoiceDurationSec)}
+                  </span>
+                )}
+              </button>
               <textarea
                 ref={globalTextareaRef}
                 rows={1}
@@ -2794,53 +3406,131 @@ export const NusantaraChat: React.FC = () => {
                     return !isMine && (m.createdAtMs || Date.parse(m.timestamp || '')) > lastRead;
                   }).length;
                   const isMuted = mutedGroupIdSet.has(grp.id);
-                  const isPinned = pinnedRoomKeySet.has(`group:${grp.id}`);
+                  const rowKey = `group:${grp.id}`;
+                  const isPinned = pinnedRoomKeySet.has(rowKey);
+                  const isArchived = archivedRoomKeySet.has(rowKey);
+                  const menuOpen = openSidebarItemMenuKey === rowKey;
 
                   return (
-                    <button
-                      key={grp.id}
-                      type="button"
-                      onClick={() => {
-                        setActiveTarget({ type: 'group', id: grp.id });
-                        setPrivateReplyTarget(null);
-                        setPrivateEditTarget(null);
-                      }}
-                      className={`w-full flex items-center gap-3 p-3 rounded-2xl text-left transition-all border ${
-                        isSelected
-                          ? 'bg-indigo-950/50 border-indigo-700'
-                          : 'bg-[#0b0f19]/70 border-transparent hover:bg-slate-800/70'
-                      }`}
-                    >
-                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${getChatGroupColorClass(grp.accentColor)}`}>
-                        {renderChatGroupIcon(grp.iconKey, 'w-5 h-5')}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="text-sm font-bold text-white truncate flex items-center gap-1">
-                            {isPinned && <Pin className="w-3 h-3 text-amber-400 shrink-0" />}
-                            {grp.name}
-                            {isMuted && <VolumeX className="w-3 h-3 text-slate-400 shrink-0" />}
-                          </span>
-                          {lastMsg && (
-                            <span className="text-[10px] text-slate-400 shrink-0">
-                              {formatChatTimeShort(lastMsg.timestamp)}
-                            </span>
-                          )}
+                    <div key={grp.id} className="relative group">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTarget({ type: 'group', id: grp.id });
+                          setPrivateReplyTarget(null);
+                          setPrivateEditTarget(null);
+                          setOpenSidebarItemMenuKey(null);
+                        }}
+                        className={`w-full flex items-center gap-3 p-3 pr-9 rounded-2xl text-left transition-all border ${
+                          isSelected
+                            ? 'bg-indigo-950/50 border-indigo-700'
+                            : 'bg-[#0b0f19]/70 border-transparent hover:bg-slate-800/70'
+                        }`}
+                      >
+                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${getChatGroupColorClass(grp.accentColor)}`}>
+                          {renderChatGroupIcon(grp.iconKey, 'w-5 h-5')}
                         </div>
-                        <div className="flex items-center justify-between gap-2 mt-0.5">
-                          <p className="text-xs text-slate-400 truncate">
-                            {lastMsg
-                              ? `${lastMsg.senderName}: ${lastMsg.text || (lastMsg.redPacket ? 'Amplop Kaget' : 'Lampiran')}`
-                              : `${grp.memberAccountIds.length} anggota`}
-                          </p>
-                          {unread > 0 && (
-                            <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-indigo-600 text-white">
-                              {unread}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="text-sm font-bold text-white truncate flex items-center gap-1">
+                              {isPinned && <Pin className="w-3 h-3 text-amber-400 shrink-0" />}
+                              {grp.name}
+                              {isMuted && <VolumeX className="w-3 h-3 text-slate-400 shrink-0" />}
                             </span>
-                          )}
+                            {lastMsg && (
+                              <span className="text-[10px] text-slate-400 shrink-0">
+                                {formatChatTimeShort(lastMsg.timestamp)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between gap-2 mt-0.5">
+                            <p className="text-xs text-slate-400 truncate">
+                              {lastMsg
+                                ? `${lastMsg.senderName}: ${lastMsg.text || (lastMsg.redPacket ? 'Amplop Kaget' : 'Lampiran')}`
+                                : `${grp.memberAccountIds.length} anggota`}
+                            </p>
+                            {unread > 0 && (
+                              <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-indigo-600 text-white">
+                                {unread}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenSidebarItemMenuKey((prev) => (prev === rowKey ? null : rowKey));
+                        }}
+                        className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-xl transition-opacity ${
+                          menuOpen
+                            ? 'opacity-100 bg-indigo-600 text-white'
+                            : 'opacity-80 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 bg-slate-800/90 hover:bg-slate-700 text-slate-300'
+                        }`}
+                        title="Opsi Grup"
+                      >
+                        <MoreVertical className="w-3.5 h-3.5" />
+                      </button>
+
+                      {menuOpen && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute right-2 top-full mt-1 w-52 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-1.5 z-50 text-xs"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = togglePinChatRoom(rowKey);
+                              showToast(r.message, 'info');
+                              setOpenSidebarItemMenuKey(null);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center gap-2 text-slate-200 font-semibold"
+                          >
+                            {isPinned ? <PinOff className="w-3.5 h-3.5 text-amber-400" /> : <Pin className="w-3.5 h-3.5 text-amber-300" />}
+                            <span>{isPinned ? 'Lepas Sematan Grup' : 'Sematkan Grup'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = toggleArchiveChatRoom(rowKey);
+                              showToast(r.message, 'info');
+                              setOpenSidebarItemMenuKey(null);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center gap-2 text-slate-200 font-semibold"
+                          >
+                            <Archive className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>{isArchived ? 'Keluarkan dari Arsip' : 'Arsipkan Grup'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = toggleMutePrivateGroup(grp.id);
+                              showToast(r.message, 'info');
+                              setOpenSidebarItemMenuKey(null);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center gap-2 text-slate-200 font-semibold"
+                          >
+                            {isMuted ? <Bell className="w-3.5 h-3.5 text-emerald-400" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
+                            <span>{isMuted ? 'Bunyikan Notif Grup' : 'Bisukan Notif Grup'}</span>
+                          </button>
+                          <div className="my-1 border-t border-slate-800" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveTarget({ type: 'group', id: grp.id });
+                              setShowGroupInfoModal(true);
+                              setOpenSidebarItemMenuKey(null);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center gap-2 text-indigo-300 font-semibold"
+                          >
+                            <Info className="w-3.5 h-3.5" />
+                            <span>Info &amp; Anggota Grup</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
 
@@ -2849,88 +3539,188 @@ export const NusantaraChat: React.FC = () => {
                 filteredDmItems.map((dm) => {
                   const isSelected = activeTarget?.type === 'dm' && activeTarget.id === dm.peerAccountId;
                   const presence = getPresenceStatusLabel(dm.peerAccountId);
-                  const isPinned = pinnedRoomKeySet.has(`dm:${dm.peerAccountId}`);
+                  const rowKey = `dm:${dm.peerAccountId}`;
+                  const isPinned = pinnedRoomKeySet.has(rowKey);
+                  const isArchived = archivedRoomKeySet.has(rowKey);
                   const isBlocked = blockedAccountIdSet.has(dm.peerAccountId);
+                  const menuOpen = openSidebarItemMenuKey === rowKey;
 
                   return (
-                    <button
-                      key={dm.peerAccountId}
-                      type="button"
-                      onClick={() => {
-                        setActiveTarget({
-                          type: 'dm',
-                          id: dm.peerAccountId,
-                          accountNumber: dm.peerAccountNumber,
-                        });
-                        setPrivateReplyTarget(null);
-                        setPrivateEditTarget(null);
-                      }}
-                      className={`w-full flex items-center gap-3 p-3 rounded-2xl text-left transition-all border ${
-                        isSelected
-                          ? 'bg-emerald-950/50 border-emerald-700'
-                          : 'bg-[#0b0f19]/70 border-transparent hover:bg-slate-800/70'
-                      }`}
-                    >
-                      <div className="relative shrink-0">
+                    <div key={dm.peerAccountId} className="relative group">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveTarget({
+                            type: 'dm',
+                            id: dm.peerAccountId,
+                            accountNumber: dm.peerAccountNumber,
+                          });
+                          setPrivateReplyTarget(null);
+                          setPrivateEditTarget(null);
+                          setOpenSidebarItemMenuKey(null);
+                        }}
+                        className={`w-full flex items-center gap-3 p-3 pr-9 rounded-2xl text-left transition-all border ${
+                          isSelected
+                            ? 'bg-emerald-950/50 border-emerald-700'
+                            : 'bg-[#0b0f19]/70 border-transparent hover:bg-slate-800/70'
+                        }`}
+                      >
+                        <div className="relative shrink-0">
+                          <div
+                            className={`w-10 h-10 rounded-2xl flex items-center justify-center font-extrabold text-sm ${
+                              dm.isAdminPeer
+                                ? 'bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-950'
+                                : 'bg-slate-800 text-slate-200'
+                            }`}
+                          >
+                            {dm.displayName.charAt(0).toUpperCase()}
+                          </div>
+                          {presence.online && !isBlocked && (
+                            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="text-sm font-bold text-white truncate inline-flex items-center gap-1">
+                              {isPinned && <Pin className="w-3 h-3 text-amber-400 shrink-0" />}
+                              {dm.isSaved ? dm.displayName : dm.peerAccountNumber}
+                            </span>
+                            {dm.lastMessageTime && (
+                              <span className="text-[10px] text-slate-400 shrink-0">
+                                {formatChatTimeShort(dm.lastMessageTime)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                            {dm.isAdminPeer && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/20 text-amber-300">
+                                <ShieldCheck className="w-2.5 h-2.5" /> ADMIN RESMI
+                              </span>
+                            )}
+                            {isBlocked && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-950 text-rose-300 border border-rose-700">
+                                Diblokir
+                              </span>
+                            )}
+                            {!dm.isSaved && (
+                              <>
+                                <span className="text-[10px] font-semibold text-slate-300 truncate max-w-[110px]">
+                                  {dm.registeredName}
+                                </span>
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-950/60 text-amber-300 border border-amber-700">
+                                  Belum Disimpan
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between gap-2 mt-0.5">
+                            <p className="text-xs text-slate-400 truncate">
+                              {dm.lastMessageText}
+                            </p>
+                            {dm.unreadCount > 0 && (
+                              <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-600 text-white">
+                                {dm.unreadCount}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenSidebarItemMenuKey((prev) => (prev === rowKey ? null : rowKey));
+                        }}
+                        className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-1.5 rounded-xl transition-opacity ${
+                          menuOpen
+                            ? 'opacity-100 bg-emerald-600 text-white'
+                            : 'opacity-80 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 bg-slate-800/90 hover:bg-slate-700 text-slate-300'
+                        }`}
+                        title="Opsi Percakapan 1-on-1"
+                      >
+                        <MoreVertical className="w-3.5 h-3.5" />
+                      </button>
+
+                      {menuOpen && (
                         <div
-                          className={`w-10 h-10 rounded-2xl flex items-center justify-center font-extrabold text-sm ${
-                            dm.isAdminPeer
-                              ? 'bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-950'
-                              : 'bg-slate-800 text-slate-200'
-                          }`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute right-2 top-full mt-1 w-52 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-1.5 z-50 text-xs"
                         >
-                          {dm.displayName.charAt(0).toUpperCase()}
-                        </div>
-                        {presence.online && !isBlocked && (
-                          <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="text-sm font-bold text-white truncate inline-flex items-center gap-1">
-                            {isPinned && <Pin className="w-3 h-3 text-amber-400 shrink-0" />}
-                            {dm.isSaved ? dm.displayName : dm.peerAccountNumber}
-                          </span>
-                          {dm.lastMessageTime && (
-                            <span className="text-[10px] text-slate-400 shrink-0">
-                              {formatChatTimeShort(dm.lastMessageTime)}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                          {dm.isAdminPeer && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/20 text-amber-300">
-                              <ShieldCheck className="w-2.5 h-2.5" /> ADMIN RESMI
-                            </span>
-                          )}
-                          {isBlocked && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-rose-950 text-rose-300 border border-rose-700">
-                              Diblokir
-                            </span>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = togglePinChatRoom(rowKey);
+                              showToast(r.message, 'info');
+                              setOpenSidebarItemMenuKey(null);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center gap-2 text-slate-200 font-semibold"
+                          >
+                            {isPinned ? <PinOff className="w-3.5 h-3.5 text-amber-400" /> : <Pin className="w-3.5 h-3.5 text-amber-300" />}
+                            <span>{isPinned ? 'Lepas Sematan' : 'Sematkan Kontak'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = toggleArchiveChatRoom(rowKey);
+                              showToast(r.message, 'info');
+                              setOpenSidebarItemMenuKey(null);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center gap-2 text-slate-200 font-semibold"
+                          >
+                            <Archive className="w-3.5 h-3.5 text-indigo-400" />
+                            <span>{isArchived ? 'Keluarkan dari Arsip' : 'Arsipkan Chat'}</span>
+                          </button>
+                          <div className="my-1 border-t border-slate-800" />
                           {!dm.isSaved && (
-                            <>
-                              <span className="text-[10px] font-semibold text-slate-300 truncate max-w-[110px]">
-                                {dm.registeredName}
-                              </span>
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-amber-950/60 text-amber-300 border border-amber-700">
-                                Belum Disimpan
-                              </span>
-                            </>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAddContactModalState({
+                                  open: true,
+                                  prefill: {
+                                    userId: dm.peerUserId16,
+                                    accountNumber: dm.peerAccountNumber,
+                                    isQuickSave: true,
+                                  },
+                                });
+                                setOpenSidebarItemMenuKey(null);
+                              }}
+                              className="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center gap-2 text-emerald-300 font-semibold"
+                            >
+                              <UserPlus className="w-3.5 h-3.5" />
+                              <span>Simpan Kontak</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = toggleBlockChatAccount(dm.peerAccountId, dm.displayName);
+                              showToast(r.message, 'info');
+                              setOpenSidebarItemMenuKey(null);
+                            }}
+                            className="w-full px-3 py-2 text-left hover:bg-slate-800 flex items-center gap-2 text-amber-300 font-semibold"
+                          >
+                            <Ban className="w-3.5 h-3.5" />
+                            <span>{isBlocked ? 'Buka Blokir Kontak' : 'Blokir Kontak'}</span>
+                          </button>
+                          {dm.isSaved && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const r = removePrivateChatContact(dm.peerAccountId);
+                                showToast(r.message, 'info');
+                                setOpenSidebarItemMenuKey(null);
+                              }}
+                              className="w-full px-3 py-2 text-left hover:bg-rose-950/50 flex items-center gap-2 text-rose-400 font-semibold"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Hapus Kontak</span>
+                            </button>
                           )}
                         </div>
-                        <div className="flex items-center justify-between gap-2 mt-0.5">
-                          <p className="text-xs text-slate-400 truncate">
-                            {dm.lastMessageText}
-                          </p>
-                          {dm.unreadCount > 0 && (
-                            <span className="shrink-0 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-600 text-white">
-                              {dm.unreadCount}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
+                      )}
+                    </div>
                   );
                 })}
 
@@ -3017,211 +3807,389 @@ export const NusantaraChat: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-400 truncate">
-                          {activeTarget.type === 'group' && activeGroup
-                            ? `${activeGroup.memberAccountIds.length} anggota • ${activeGroupOnlineCount} online`
-                            : getPresenceStatusLabel(activeDmItem?.peerAccountId).label}
+                        <p className="text-[11px] text-slate-400 truncate flex items-center gap-1.5 flex-wrap">
+                          {activeTarget.type === 'group' && activeGroup ? (
+                            <span>
+                              {activeGroup.memberAccountIds.length} anggota · {activeGroupOnlineCount} online
+                            </span>
+                          ) : activeDmBlocked ? (
+                            <span className="text-rose-400 font-semibold">Kontak diblokir</span>
+                          ) : (
+                            <span>{getPresenceStatusLabel(activeDmItem?.peerAccountId).label}</span>
+                          )}
+                          {disappearSec > 0 && (
+                            <span className="px-1.5 py-0.2 rounded bg-amber-950/60 border border-amber-700/60 text-amber-300 text-[10px] font-bold">
+                              Timer {disappearSec === 60 ? '1m' : disappearSec === 3600 ? '1j' : '24j'}
+                            </span>
+                          )}
+                          {pinnedRoomKeySet.has(activeRoomKey) && (
+                            <span className="px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-300 text-[10px] font-bold">
+                              Disematkan
+                            </span>
+                          )}
+                          {activeTarget.type === 'dm' && activeDmItem && !activeDmItem.isSaved && (
+                            <span className="px-1.5 py-0.2 rounded bg-slate-800 text-amber-300 text-[10px] font-bold">
+                              Belum Disimpan
+                            </span>
+                          )}
                         </p>
                       </div>
                     </div>
 
-                    {/* Header Right Action Buttons */}
-                    <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                      {activeTarget.type === 'dm' && activeDmItem && !activeDmItem.isSaved && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setAddContactModalState({
-                              open: true,
-                              prefill: {
-                                userId: activeDmItem.peerUserId16,
-                                accountNumber: activeDmItem.peerAccountNumber,
-                                isQuickSave: true,
-                              },
-                            })
-                          }
-                          className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-1 shadow-sm"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Simpan</span>
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        disabled={isAssetLockedFlag}
-                        onClick={() => {
-                          setIsRequestAssetMode(false);
-                          setShowAssetModal(true);
-                        }}
-                        className="p-2 rounded-xl bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/70 disabled:opacity-40"
-                        title={isAssetLockedFlag ? 'Kirim Uang/Coin/Diamond dinonaktifkan Admin' : 'Kirim Uang / Coin / Diamond'}
-                      >
-                        <DollarSign className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isAssetLockedFlag}
-                        onClick={() => {
-                          setIsRequestAssetMode(true);
-                          setShowAssetModal(true);
-                        }}
-                        className="p-2 rounded-xl bg-amber-950/60 text-amber-300 hover:bg-amber-900/60 disabled:opacity-40"
-                        title={isAssetLockedFlag ? 'Minta Uang/Coin/Diamond dinonaktifkan Admin' : 'Minta Uang / Coin / Diamond'}
-                      >
-                        <HandCoins className="w-4 h-4" />
-                      </button>
-
-                      {activeTarget.type === 'group' && (
-                        <>
-                          <button
-                            type="button"
-                            disabled={isRedPacketLockedFlag}
-                            onClick={() => setRedPacketModalScope('group')}
-                            className="p-2 rounded-xl bg-rose-950/60 text-rose-300 hover:bg-rose-900/70 disabled:opacity-40"
-                            title={isRedPacketLockedFlag ? 'Amplop Kaget dinonaktifkan Admin' : 'Kirim Amplop Kaget Grup'}
-                          >
-                            <Gift className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isSplitBillLockedFlag}
-                            onClick={() => setShowSplitBillModal(true)}
-                            className="p-2 rounded-xl bg-indigo-950/60 text-indigo-300 hover:bg-indigo-900/70 disabled:opacity-40"
-                            title={isSplitBillLockedFlag ? 'Patungan dinonaktifkan Admin' : 'Patungan Grup (Split Bill)'}
-                          >
-                            <Receipt className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isPollLockedFlag}
-                            onClick={() => setPollModalScope('group')}
-                            className="p-2 rounded-xl bg-violet-950/60 text-violet-300 hover:bg-violet-900/70 disabled:opacity-40"
-                            title={isPollLockedFlag ? 'Polling dinonaktifkan Admin' : 'Buat Polling Grup'}
-                          >
-                            <BarChart2 className="w-4 h-4" />
-                          </button>
-                        </>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => setShowContactCardModal(true)}
-                        className="p-2 rounded-xl bg-cyan-950/60 text-cyan-300 hover:bg-cyan-900/70"
-                        title="Bagikan Kartu Kontak Nasabah"
-                      >
-                        <UserCheck className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowBillReminderModal(true)}
-                        className="p-2 rounded-xl bg-amber-950/50 text-amber-300 hover:bg-amber-900/60"
-                        title="Kirim Pengingat Tagihan"
-                      >
-                        <CalendarClock className="w-4 h-4" />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const r = togglePinChatRoom(activeRoomKey);
-                          showToast(r.message, 'info');
-                        }}
-                        className={`p-2 rounded-xl ${
-                          pinnedRoomKeySet.has(activeRoomKey)
-                            ? 'bg-amber-500 text-slate-950'
-                            : 'bg-slate-800 text-slate-300'
-                        }`}
-                        title={pinnedRoomKeySet.has(activeRoomKey) ? 'Lepas Pin Ruang Chat' : 'Sematkan Ruang Chat'}
-                      >
-                        <Pin className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const r = toggleArchiveChatRoom(activeRoomKey);
-                          showToast(r.message, 'info');
-                        }}
-                        className={`p-2 rounded-xl ${
-                          archivedRoomKeySet.has(activeRoomKey)
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-800 text-slate-300'
-                        }`}
-                        title={archivedRoomKeySet.has(activeRoomKey) ? 'Keluarkan dari Arsip' : 'Arsipkan Ruang Chat'}
-                      >
-                        <Archive className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleDownloadPrivateRecap}
-                        className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700"
-                        title="Ekspor percakapan (.txt)"
-                      >
-                        <Download className="w-4 h-4" />
-                      </button>
+                    {/* Clean Header Right Actions: Cari + Kirim Uang/Aset + Menu Titik Tiga (⋮) */}
+                    <div className="flex items-center gap-1.5 shrink-0 relative">
                       <button
                         type="button"
                         onClick={() => setPrivateRoomSearchOpen((v) => !v)}
-                        className={`p-2 rounded-xl ${
+                        className={`p-2 rounded-xl transition-colors ${
                           privateRoomSearchOpen
                             ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-800 text-slate-300'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                         }`}
-                        title="Cari di ruang chat ini"
+                        title="Cari pesan di ruang chat ini"
                       >
                         <Search className="w-4 h-4" />
                       </button>
+
                       <button
                         type="button"
-                        onClick={() => setPrivateBookmarkedOnly((v) => !v)}
-                        className={`p-2 rounded-xl ${
-                          privateBookmarkedOnly
-                            ? 'bg-amber-500 text-slate-950'
-                            : 'bg-slate-800 text-slate-300'
+                        onClick={() => {
+                          if (isAssetLockedFlag) {
+                            showToast('Kirim Uang / Coin / Diamond dinonaktifkan sementara oleh Admin.', 'error');
+                            return;
+                          }
+                          setIsRequestAssetMode(false);
+                          setShowAssetModal(true);
+                        }}
+                        className={`px-2.5 py-2 rounded-xl text-[11px] font-extrabold inline-flex items-center gap-1 transition-colors ${
+                          isAssetLockedFlag
+                            ? 'bg-slate-800 text-slate-400 opacity-60'
+                            : 'bg-emerald-950/70 hover:bg-emerald-900/80 border border-emerald-700/60 text-emerald-300'
                         }`}
-                        title="Filter pesan berbintang"
+                        title={
+                          isAssetLockedFlag
+                            ? 'Dinonaktifkan Admin'
+                            : 'Kirim Uang / Coin / Diamond'
+                        }
                       >
-                        <Star className="w-4 h-4" />
+                        {isAssetLockedFlag ? <Lock className="w-3.5 h-3.5 text-amber-400" /> : <DollarSign className="w-4 h-4" />}
+                        <span className="hidden sm:inline">Kirim Uang</span>
                       </button>
-                      {activeTarget.type === 'group' && (
-                        <button
-                          type="button"
-                          onClick={() => setShowGroupInfoModal(true)}
-                          className="p-2 rounded-xl bg-indigo-950/60 text-indigo-300 hover:bg-indigo-900/70"
-                          title="Info & Pengaturan Grup"
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenHeaderMenuScope((prev) => (prev === 'private' ? null : 'private'));
+                        }}
+                        className={`p-2 rounded-xl transition-colors ${
+                          openHeaderMenuScope === 'private'
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        }`}
+                        title="Menu Titik Tiga Ruang Chat"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+
+                      {openHeaderMenuScope === 'private' && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute right-0 top-full mt-2 w-72 max-h-[75vh] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-1.5 z-50 text-xs"
                         >
-                          <Info className="w-4 h-4" />
-                        </button>
-                      )}
-                      {activeTarget.type === 'dm' && activeDmItem && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const r = toggleBlockChatAccount(activeDmItem.peerAccountId, activeDmItem.displayName);
-                            showToast(r.message, 'info');
-                          }}
-                          className={`p-2 rounded-xl ${
-                            activeDmBlocked
-                              ? 'bg-rose-600 text-white'
-                              : 'bg-slate-800 text-rose-400 hover:bg-rose-950/60'
-                          }`}
-                          title={activeDmBlocked ? 'Buka Blokir Kontak' : 'Blokir Kontak'}
-                        >
-                          <Ban className="w-4 h-4" />
-                        </button>
-                      )}
-                      {activeTarget.type === 'dm' && activeDmItem?.isSaved && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const r = removePrivateChatContact(activeDmItem.peerAccountId);
-                            showToast(r.message, 'info');
-                          }}
-                          className="p-2 rounded-xl bg-rose-950/50 text-rose-400 hover:bg-rose-900/70"
-                          title="Hapus dari daftar kontak tersimpan"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                          {/* Section 1: Pencarian, Bintang & Ekspor */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPrivateRoomSearchOpen((v) => !v);
+                              setOpenHeaderMenuScope(null);
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                          >
+                            <Search className="w-4 h-4 text-sky-400" />
+                            <span>{privateRoomSearchOpen ? 'Tutup Cari Pesan' : 'Cari Pesan'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPrivateBookmarkedOnly((v) => !v);
+                              setOpenHeaderMenuScope(null);
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                          >
+                            <Star className={`w-4 h-4 ${privateBookmarkedOnly ? 'text-amber-400 fill-amber-400' : 'text-amber-300'}`} />
+                            <span>{privateBookmarkedOnly ? 'Tampilkan Semua Pesan' : 'Pesan Berbintang'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleDownloadPrivateRecap();
+                              setOpenHeaderMenuScope(null);
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                          >
+                            <Download className="w-4 h-4 text-cyan-400" />
+                            <span>Ekspor Rekap Chat (.txt)</span>
+                          </button>
+
+                          <div className="my-1 border-t border-slate-800" />
+
+                          {/* Section 2: Transaksi, Kartu & Fitur Ruang */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenHeaderMenuScope(null);
+                              if (isAssetLockedFlag) {
+                                showToast('Kirim Uang/Coin/Diamond dinonaktifkan Admin.', 'error');
+                                return;
+                              }
+                              setIsRequestAssetMode(false);
+                              setShowAssetModal(true);
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 font-semibold ${
+                              isAssetLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                            }`}
+                          >
+                            <span className="inline-flex items-center gap-2.5">
+                              <DollarSign className="w-4 h-4 text-emerald-400" />
+                              <span>Kirim Uang, Coin &amp; Diamond</span>
+                            </span>
+                            {isAssetLockedFlag && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 font-bold">
+                                <Lock className="w-3 h-3" /> Nonaktif
+                              </span>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenHeaderMenuScope(null);
+                              if (isAssetLockedFlag) {
+                                showToast('Minta Uang/Coin/Diamond dinonaktifkan Admin.', 'error');
+                                return;
+                              }
+                              setIsRequestAssetMode(true);
+                              setShowAssetModal(true);
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 font-semibold ${
+                              isAssetLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                            }`}
+                          >
+                            <span className="inline-flex items-center gap-2.5">
+                              <HandCoins className="w-4 h-4 text-amber-400" />
+                              <span>Minta Uang, Coin &amp; Diamond</span>
+                            </span>
+                            {isAssetLockedFlag && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 font-bold">
+                                <Lock className="w-3 h-3" /> Nonaktif
+                              </span>
+                            )}
+                          </button>
+
+                          {activeTarget.type === 'group' && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenHeaderMenuScope(null);
+                                  if (isRedPacketLockedFlag) {
+                                    showToast('Amplop Kaget dinonaktifkan Admin.', 'error');
+                                    return;
+                                  }
+                                  setRedPacketModalScope('group');
+                                }}
+                                className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 font-semibold ${
+                                  isRedPacketLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                                }`}
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <Gift className="w-4 h-4 text-rose-400" />
+                                  <span>Kirim Amplop Kaget Grup</span>
+                                </span>
+                                {isRedPacketLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenHeaderMenuScope(null);
+                                  if (isSplitBillLockedFlag) {
+                                    showToast('Patungan Grup dinonaktifkan Admin.', 'error');
+                                    return;
+                                  }
+                                  setShowSplitBillModal(true);
+                                }}
+                                className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 font-semibold ${
+                                  isSplitBillLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                                }`}
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <Receipt className="w-4 h-4 text-indigo-400" />
+                                  <span>Patungan Grup (Split Bill)</span>
+                                </span>
+                                {isSplitBillLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenHeaderMenuScope(null);
+                                  if (isPollLockedFlag) {
+                                    showToast('Polling dinonaktifkan Admin.', 'error');
+                                    return;
+                                  }
+                                  setPollModalScope('group');
+                                }}
+                                className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 font-semibold ${
+                                  isPollLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                                }`}
+                              >
+                                <span className="inline-flex items-center gap-2.5">
+                                  <BarChart2 className="w-4 h-4 text-violet-400" />
+                                  <span>Buat Polling Grup</span>
+                                </span>
+                                {isPollLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                              </button>
+                            </>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenHeaderMenuScope(null);
+                              setShowContactCardModal(true);
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                          >
+                            <UserCheck className="w-4 h-4 text-cyan-400" />
+                            <span>Bagikan Kartu Kontak</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenHeaderMenuScope(null);
+                              setShowBillReminderModal(true);
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                          >
+                            <CalendarClock className="w-4 h-4 text-amber-300" />
+                            <span>Pengingat Tagihan</span>
+                          </button>
+
+                          <div className="my-1 border-t border-slate-800" />
+
+                          {/* Section 3: Pin, Arsip & Timer Pesan Hilang */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = togglePinChatRoom(activeRoomKey);
+                              showToast(r.message, 'info');
+                              setOpenHeaderMenuScope(null);
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                          >
+                            <Pin className={`w-4 h-4 ${pinnedRoomKeySet.has(activeRoomKey) ? 'text-amber-400' : 'text-slate-300'}`} />
+                            <span>{pinnedRoomKeySet.has(activeRoomKey) ? 'Lepas Pin Ruang Chat' : 'Pin Ruang Chat'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const r = toggleArchiveChatRoom(activeRoomKey);
+                              showToast(r.message, 'info');
+                              setOpenHeaderMenuScope(null);
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                          >
+                            <Archive className="w-4 h-4 text-indigo-400" />
+                            <span>{archivedRoomKeySet.has(activeRoomKey) ? 'Keluarkan dari Arsip' : 'Arsipkan Chat'}</span>
+                          </button>
+                          <div className="px-3.5 py-2 space-y-1.5">
+                            <span className="text-[10px] font-bold text-slate-400 inline-flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-amber-300" />
+                              Timer Pesan Hilang
+                            </span>
+                            <div className="grid grid-cols-4 gap-1">
+                              {([0, 60, 3600, 86400] as const).map((sec) => (
+                                <button
+                                  key={sec}
+                                  type="button"
+                                  onClick={() => setDisappearSec(sec)}
+                                  className={`py-1 rounded-lg text-[10px] font-bold ${
+                                    disappearSec === sec
+                                      ? 'bg-indigo-600 text-white'
+                                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                  }`}
+                                >
+                                  {sec === 0 ? 'Off' : sec === 60 ? '1m' : sec === 3600 ? '1j' : '24j'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="my-1 border-t border-slate-800" />
+
+                          {/* Section 4: Info Grup ATAU Aksi Kontak 1-on-1 */}
+                          {activeTarget.type === 'group' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenHeaderMenuScope(null);
+                                setShowGroupInfoModal(true);
+                              }}
+                              className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-indigo-300 font-semibold"
+                            >
+                              <Info className="w-4 h-4" />
+                              <span>Info &amp; Pengaturan Grup</span>
+                            </button>
+                          ) : activeDmItem ? (
+                            <>
+                              {!activeDmItem.isSaved && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenHeaderMenuScope(null);
+                                    setAddContactModalState({
+                                      open: true,
+                                      prefill: {
+                                        userId: activeDmItem.peerUserId16,
+                                        accountNumber: activeDmItem.peerAccountNumber,
+                                        isQuickSave: true,
+                                      },
+                                    });
+                                  }}
+                                  className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-emerald-300 font-semibold"
+                                >
+                                  <UserPlus className="w-4 h-4" />
+                                  <span>Simpan Kontak Nasabah</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const r = toggleBlockChatAccount(activeDmItem.peerAccountId, activeDmItem.displayName);
+                                  showToast(r.message, 'info');
+                                  setOpenHeaderMenuScope(null);
+                                }}
+                                className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-amber-300 font-semibold"
+                              >
+                                <Ban className="w-4 h-4" />
+                                <span>{activeDmBlocked ? 'Buka Blokir Kontak' : 'Blokir Kontak'}</span>
+                              </button>
+                              {activeDmItem.isSaved && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const r = removePrivateChatContact(activeDmItem.peerAccountId);
+                                    showToast(r.message, 'info');
+                                    setOpenHeaderMenuScope(null);
+                                  }}
+                                  className="w-full px-3.5 py-2.5 text-left hover:bg-rose-950/50 flex items-center gap-2.5 text-rose-400 font-semibold"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  <span>Hapus Kontak Tersimpan</span>
+                                </button>
+                              )}
+                            </>
+                          ) : null}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -3675,38 +4643,8 @@ export const NusantaraChat: React.FC = () => {
                                 </div>
                               )}
 
-                              {/* Image Attachment */}
-                              {msg.imageAttachment && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setLightboxImage({
-                                      url: msg.imageAttachment!.dataUrl,
-                                      fileName: msg.imageAttachment!.fileName,
-                                    })
-                                  }
-                                  className="block mb-2 rounded-xl overflow-hidden border border-white/15 max-w-full"
-                                >
-                                  <img
-                                    src={msg.imageAttachment.dataUrl}
-                                    alt={msg.imageAttachment.fileName || 'Foto Chat'}
-                                    className="max-h-56 w-auto object-cover"
-                                  />
-                                </button>
-                              )}
-
-                              {/* Voice Attachment */}
-                              {msg.voiceAttachment && (
-                                <div className="mb-2 p-2 rounded-xl bg-black/30 border border-white/10 space-y-1">
-                                  <div className="flex items-center justify-between text-[10px] font-bold opacity-85">
-                                    <span className="inline-flex items-center gap-1">
-                                      <Mic className="w-3 h-3" /> Pesan Suara
-                                    </span>
-                                    <span className="tabular-nums">{msg.voiceAttachment.durationSec}d</span>
-                                  </div>
-                                  <audio controls src={msg.voiceAttachment.dataUrl} className="w-full h-8 max-w-[230px]" />
-                                </div>
-                              )}
+                              {/* Photo / Video (Multi or Single) + Custom Interactive Voice Player */}
+                              {renderMessageMediaAttachmentBlock(msg, isStrictOwner)}
 
                               {msg.text && <CollapsibleChatBody text={msg.text} />}
 
@@ -4012,12 +4950,21 @@ export const NusantaraChat: React.FC = () => {
 
                 {/* Private Composer */}
                 <div className="shrink-0 p-3 border-t border-slate-800 bg-[#0b0f19] relative space-y-2">
+                  {/* Hidden Unified Foto/Video & Device Audio pickers */}
                   <input
-                    ref={privateImageInputRef}
+                    ref={privateMediaInputRef}
                     type="file"
-                    accept="image/*"
+                    accept={unifiedMediaAccept}
+                    multiple
                     className="hidden"
-                    onChange={(e) => void handleImageFilePicked(e, 'private')}
+                    onChange={(e) => void handleMediaFilesPicked(e, 'private')}
+                  />
+                  <input
+                    ref={privateAudioInputRef}
+                    type="file"
+                    accept="audio/*"
+                    className="hidden"
+                    onChange={(e) => void handleAudioFilePicked(e, 'private')}
                   />
 
                   {mentionCandidates.length > 0 && (
@@ -4080,58 +5027,260 @@ export const NusantaraChat: React.FC = () => {
                     </div>
                   ) : (
                     <>
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                      {/* Composer `+` Attachment Popover */}
+                      {openComposerPlusScope === 'private' && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute bottom-full left-3 mb-2 w-72 max-h-[68vh] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl py-2 z-40 text-xs"
+                        >
+                          <p className="px-3.5 pb-1.5 text-[10px] font-extrabold uppercase text-slate-400">
+                            Lampiran &amp; Fitur {activeTarget.type === 'group' ? 'Grup Privat' : 'Chat 1-on-1'}
+                          </p>
                           <button
                             type="button"
-                            disabled={isImageLockedFlag}
-                            onClick={() => privateImageInputRef.current?.click()}
-                            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300"
-                            title={isImageLockedFlag ? 'Kirim foto dinonaktifkan Admin' : 'Kirim Foto'}
-                          >
-                            <ImageIcon className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isVoiceLockedFlag}
-                            onClick={() => void handleToggleVoiceRecord('private')}
-                            className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold inline-flex items-center gap-1 disabled:opacity-40 ${
-                              recordingScope === 'private'
-                                ? 'bg-rose-600 text-white animate-pulse'
-                                : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                            onClick={() => openUnifiedMediaPicker('private')}
+                            className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                              isImageLockedFlag && isVideoLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
                             }`}
-                            title={isVoiceLockedFlag ? 'Pesan suara dinonaktifkan Admin' : 'Rekam Pesan Suara'}
                           >
-                            {recordingScope === 'private' ? <Square className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                            <span>{recordingScope === 'private' ? `Stop (${recordingSeconds}d)` : 'Suara'}</span>
+                            <span className="inline-flex items-center gap-2.5 font-semibold">
+                              <ImageIcon className="w-4 h-4 text-emerald-400" />
+                              <span>Foto atau Video (Pratinjau)</span>
+                            </span>
+                            {isImageLockedFlag && isVideoLockedFlag ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-amber-400 font-bold">
+                                <Lock className="w-3 h-3" /> Nonaktif
+                              </span>
+                            ) : isVideoLockedFlag ? (
+                              <span className="text-[10px] text-amber-300 font-bold">Foto saja</span>
+                            ) : null}
                           </button>
-                          <select
-                            value={disappearSec}
-                            onChange={(e) => setDisappearSec(Number(e.target.value) as 0 | 60 | 3600 | 86400)}
-                            className="px-2 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-[11px] font-bold text-slate-300"
-                            title="Timer pesan sementara"
+                          <button
+                            type="button"
+                            onClick={() => openDeviceAudioPicker('private')}
+                            className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                              isVoiceLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                            }`}
                           >
-                            <option value={0}>Timer: Off</option>
-                            <option value={60}>Hilang 1m</option>
-                            <option value={3600}>Hilang 1j</option>
-                            <option value={86400}>Hilang 24j</option>
-                          </select>
+                            <span className="inline-flex items-center gap-2.5 font-semibold">
+                              <FileAudio className="w-4 h-4 text-cyan-400" />
+                              <span>Audio / Musik HP ({formatMediaDuration(maxVoiceDurationSec)})</span>
+                            </span>
+                            {isVoiceLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                          </button>
+
+                          <div className="my-1 border-t border-slate-800" />
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenComposerPlusScope(null);
+                              if (isAssetLockedFlag) {
+                                showToast('Kirim Uang/Coin/Diamond dinonaktifkan Admin.', 'error');
+                                return;
+                              }
+                              setIsRequestAssetMode(false);
+                              setShowAssetModal(true);
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                              isAssetLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                            }`}
+                          >
+                            <span className="inline-flex items-center gap-2.5 font-semibold">
+                              <DollarSign className="w-4 h-4 text-emerald-400" />
+                              <span>Kirim Uang, Coin &amp; Diamond</span>
+                            </span>
+                            {isAssetLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenComposerPlusScope(null);
+                              if (isAssetLockedFlag) {
+                                showToast('Minta Uang/Coin/Diamond dinonaktifkan Admin.', 'error');
+                                return;
+                              }
+                              setIsRequestAssetMode(true);
+                              setShowAssetModal(true);
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                              isAssetLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                            }`}
+                          >
+                            <span className="inline-flex items-center gap-2.5 font-semibold">
+                              <HandCoins className="w-4 h-4 text-amber-400" />
+                              <span>Minta Uang, Coin &amp; Diamond</span>
+                            </span>
+                            {isAssetLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                          </button>
+
+                          {activeTarget.type === 'group' && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenComposerPlusScope(null);
+                                  if (isRedPacketLockedFlag) {
+                                    showToast('Amplop Kaget dinonaktifkan Admin.', 'error');
+                                    return;
+                                  }
+                                  setRedPacketModalScope('group');
+                                }}
+                                className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                                  isRedPacketLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                                }`}
+                              >
+                                <span className="inline-flex items-center gap-2.5 font-semibold">
+                                  <Gift className="w-4 h-4 text-rose-400" />
+                                  <span>Amplop Kaget Grup</span>
+                                </span>
+                                {isRedPacketLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenComposerPlusScope(null);
+                                  if (isSplitBillLockedFlag) {
+                                    showToast('Patungan Grup dinonaktifkan Admin.', 'error');
+                                    return;
+                                  }
+                                  setShowSplitBillModal(true);
+                                }}
+                                className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                                  isSplitBillLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                                }`}
+                              >
+                                <span className="inline-flex items-center gap-2.5 font-semibold">
+                                  <Receipt className="w-4 h-4 text-indigo-400" />
+                                  <span>Patungan Grup</span>
+                                </span>
+                                {isSplitBillLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpenComposerPlusScope(null);
+                                  if (isPollLockedFlag) {
+                                    showToast('Polling dinonaktifkan Admin.', 'error');
+                                    return;
+                                  }
+                                  setPollModalScope('group');
+                                }}
+                                className={`w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center justify-between gap-2 ${
+                                  isPollLockedFlag ? 'opacity-55 text-slate-400' : 'text-slate-200'
+                                }`}
+                              >
+                                <span className="inline-flex items-center gap-2.5 font-semibold">
+                                  <BarChart2 className="w-4 h-4 text-violet-400" />
+                                  <span>Buat Polling Grup</span>
+                                </span>
+                                {isPollLockedFlag && <Lock className="w-3 h-3 text-amber-400" />}
+                              </button>
+                            </>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenComposerPlusScope(null);
+                              setShowContactCardModal(true);
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                          >
+                            <UserCheck className="w-4 h-4 text-cyan-400" />
+                            <span>Bagikan Kartu Kontak</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenComposerPlusScope(null);
+                              setShowBillReminderModal(true);
+                            }}
+                            className="w-full px-3.5 py-2.5 text-left hover:bg-slate-800 flex items-center gap-2.5 text-slate-200 font-semibold"
+                          >
+                            <CalendarClock className="w-4 h-4 text-amber-300" />
+                            <span>Pengingat Tagihan</span>
+                          </button>
+
+                          <div className="my-1 border-t border-slate-800" />
+                          <div className="px-3.5 py-1.5 space-y-1.5">
+                            <span className="text-[10px] font-bold text-slate-400 block">Timer Pesan Hilang</span>
+                            <div className="grid grid-cols-4 gap-1">
+                              {([0, 60, 3600, 86400] as const).map((sec) => (
+                                <button
+                                  key={sec}
+                                  type="button"
+                                  onClick={() => setDisappearSec(sec)}
+                                  className={`py-1 rounded-lg text-[10px] font-bold ${
+                                    disappearSec === sec
+                                      ? 'bg-indigo-600 text-white'
+                                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                                  }`}
+                                >
+                                  {sec === 0 ? 'Off' : sec === 60 ? '1m' : sec === 3600 ? '1j' : '24j'}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         </div>
-                        <div className="hidden sm:flex items-center gap-1 overflow-x-auto">
-                          {QUICK_REPLY_CHIPS.map((chip) => (
-                            <button
-                              key={chip}
-                              type="button"
-                              onClick={() => setActiveDraftText(activeDraftText ? `${activeDraftText} ${chip}` : chip)}
-                              className="px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-[10px] font-semibold text-slate-300 shrink-0"
-                            >
-                              {chip}
-                            </button>
-                          ))}
-                        </div>
+                      )}
+
+                      <div className="hidden sm:flex items-center gap-1 overflow-x-auto pb-0.5">
+                        {QUICK_REPLY_CHIPS.map((chip) => (
+                          <button
+                            key={chip}
+                            type="button"
+                            onClick={() => setActiveDraftText(activeDraftText ? `${activeDraftText} ${chip}` : chip)}
+                            className="px-2 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-[10px] font-semibold text-slate-300 shrink-0"
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                        {disappearSec > 0 && (
+                          <span className="ml-auto text-[10px] font-bold text-amber-300 shrink-0">
+                            Timer aktif: {disappearSec === 60 ? '1m' : disappearSec === 3600 ? '1j' : '24j'}
+                          </span>
+                        )}
                       </div>
 
                       <form onSubmit={handleSendPrivate} className="flex items-end gap-2 min-w-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenComposerPlusScope((prev) => (prev === 'private' ? null : 'private'));
+                          }}
+                          className={`shrink-0 w-10 h-10 rounded-2xl flex items-center justify-center transition-colors ${
+                            openComposerPlusScope === 'private'
+                              ? 'bg-indigo-600 text-white'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                          }`}
+                          title="Lampiran (Foto/Video, Audio HP, Kirim Aset, Kartu Kontak, Timer)"
+                        >
+                          <Plus className={`w-5 h-5 transition-transform ${openComposerPlusScope === 'private' ? 'rotate-45' : ''}`} />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isVoiceLockedFlag}
+                          onClick={() => void handleToggleVoiceRecord('private')}
+                          className={`shrink-0 h-10 px-3 rounded-2xl text-[11px] font-bold inline-flex items-center gap-1.5 disabled:opacity-40 ${
+                            recordingScope === 'private'
+                              ? 'bg-rose-600 text-white animate-pulse'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                          }`}
+                          title={
+                            isVoiceLockedFlag
+                              ? 'Pesan suara dinonaktifkan Admin'
+                              : `Rekam Voice Note (maks ${formatMediaDuration(maxVoiceDurationSec)})`
+                          }
+                        >
+                          {recordingScope === 'private' ? <Square className="w-3.5 h-3.5" /> : <Mic className="w-4 h-4" />}
+                          {recordingScope === 'private' && (
+                            <span className="font-mono tabular-nums">
+                              {formatMediaDuration(recordingSeconds)} / {formatMediaDuration(maxVoiceDurationSec)}
+                            </span>
+                          )}
+                        </button>
                         <textarea
                           ref={privateTextareaRef}
                           rows={1}
@@ -4560,11 +5709,74 @@ export const NusantaraChat: React.FC = () => {
         }}
       />
 
-      <ImageLightboxModal
-        open={Boolean(lightboxImage)}
-        onClose={() => setLightboxImage(null)}
-        imageUrl={lightboxImage?.url || ''}
-        fileName={lightboxImage?.fileName}
+      <MediaPreviewModal
+        open={Boolean(mediaPreviewState)}
+        items={mediaPreviewState?.items || []}
+        caption={mediaPreviewState?.caption || ''}
+        onChangeCaption={(val) =>
+          setMediaPreviewState((prev) => (prev ? { ...prev, caption: val } : null))
+        }
+        onAddMoreFiles={(files) => void handleAddMorePreviewMedia(files)}
+        onReplaceActiveFile={(idx, file) => void handleReplacePreviewMedia(idx, file)}
+        onRemoveItem={handleRemovePreviewMedia}
+        onCancel={handleCancelMediaPreview}
+        onSend={() => void handleConfirmSendMediaPreview()}
+        isSending={mediaSending}
+        progressText={mediaProgressText}
+        roomLabel={
+          mediaPreviewState?.scope === 'global'
+            ? 'Chat Global'
+            : activeTarget?.type === 'group' && activeGroup
+              ? `Grup ${activeGroup.name}`
+              : activeDmItem?.isSaved
+                ? activeDmItem.displayName
+                : activeDmItem?.registeredName || activeDmItem?.peerAccountNumber || 'Chat Privat'
+        }
+        enterKeySends={enterKeySends}
+        disableImages={isImageLockedFlag}
+        disableVideos={isVideoLockedFlag}
+      />
+
+      <VoiceStagingModal
+        open={Boolean(voiceStagingState)}
+        draft={voiceStagingState?.draft || null}
+        caption={voiceStagingState?.caption || ''}
+        onChangeCaption={(val) =>
+          setVoiceStagingState((prev) => (prev ? { ...prev, caption: val } : null))
+        }
+        onRetryOrPickAnother={() => {
+          if (!voiceStagingState) return;
+          const targetScope = voiceStagingState.scope;
+          const isFile = voiceStagingState.draft.sourceKind === 'file';
+          handleCancelVoiceStaging();
+          if (isFile) {
+            openDeviceAudioPicker(targetScope);
+          } else {
+            void handleToggleVoiceRecord(targetScope);
+          }
+        }}
+        onCancel={handleCancelVoiceStaging}
+        onSend={() => void handleConfirmSendVoiceStaging()}
+        isSending={voiceSending}
+        roomLabel={
+          voiceStagingState?.scope === 'global'
+            ? 'Chat Global'
+            : activeTarget?.type === 'group' && activeGroup
+              ? `Grup ${activeGroup.name}`
+              : activeDmItem?.isSaved
+                ? activeDmItem.displayName
+                : activeDmItem?.registeredName || activeDmItem?.peerAccountNumber || 'Chat Privat'
+        }
+        enterKeySends={enterKeySends}
+      />
+
+      <EnhancedMediaLightboxModal
+        open={Boolean(lightboxMedia)}
+        kind={lightboxMedia?.kind || 'image'}
+        url={lightboxMedia?.url || ''}
+        fileName={lightboxMedia?.fileName}
+        caption={lightboxMedia?.caption}
+        onClose={() => setLightboxMedia(null)}
       />
 
       <ReactionVotersModal

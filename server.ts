@@ -20,6 +20,18 @@ const PORT = 3000;
 const STATE_FILE = path.join(__dirname, '.bank-global-state.json');
 const DB_FILE = path.join(__dirname, '.bank-database.json');
 const DB_TEMP_FILE = path.join(__dirname, '.bank-database.json.tmp');
+const CHAT_MEDIA_DIR = path.join(__dirname, '.chat-media');
+
+function ensureChatMediaDir() {
+  try {
+    if (!fs.existsSync(CHAT_MEDIA_DIR)) {
+      fs.mkdirSync(CHAT_MEDIA_DIR, { recursive: true });
+    }
+  } catch {
+    // ignore
+  }
+}
+ensureChatMediaDir();
 
 export interface ServerGlobalChatMessage {
   id: string;
@@ -51,6 +63,8 @@ export interface ServerGlobalChatMessage {
   forwardedFrom?: Record<string, unknown>;
   mentions?: string[];
   imageAttachment?: Record<string, unknown>;
+  videoAttachment?: Record<string, unknown>;
+  mediaAttachments?: Array<Record<string, unknown>>;
   voiceAttachment?: Record<string, unknown>;
   redPacket?: Record<string, unknown>;
 }
@@ -58,6 +72,7 @@ export interface ServerGlobalChatMessage {
 export interface ServerGlobalChatConfig {
   adminOnlyLock: boolean;
   cooldownMs: number;
+  maxVoiceDurationSec?: number;
   lockedBy?: string;
   mutedUsers?: Record<string, Record<string, unknown>>;
   bannedWords?: string[];
@@ -104,6 +119,8 @@ export interface ServerPrivateChatMessage {
   forwardedFrom?: Record<string, unknown>;
   mentions?: string[];
   imageAttachment?: Record<string, unknown>;
+  videoAttachment?: Record<string, unknown>;
+  mediaAttachments?: Array<Record<string, unknown>>;
   voiceAttachment?: Record<string, unknown>;
   contactAttachment?: Record<string, unknown>;
   redPacket?: Record<string, unknown>;
@@ -306,6 +323,7 @@ const DEFAULT_STATE: PersistedGlobalState = {
   globalChatConfig: {
     adminOnlyLock: false,
     cooldownMs: 2500,
+    maxVoiceDurationSec: 600,
     mutedUsers: {},
     bannedWords: [],
     bannedWordMode: 'censor',
@@ -951,12 +969,15 @@ async function startServer() {
     forwardedFrom?: { originalSenderName: string; sourceRoomLabel?: string };
     mentions?: string[];
     imageAttachment?: Record<string, unknown>;
+    videoAttachment?: Record<string, unknown>;
+    mediaAttachments?: Array<Record<string, unknown>>;
     voiceAttachment?: Record<string, unknown>;
     redPacket?: Record<string, unknown>;
     showPopupOnAllPhones?: boolean;
   }): { message?: ServerGlobalChatMessage; popup?: ServerPopupNotification | null; error?: string } | null {
     const cleanText = String(input.text || '').trim();
-    if (!cleanText && !input.poll && !input.imageAttachment && !input.voiceAttachment && !input.redPacket) {
+    const hasMediaArray = Array.isArray(input.mediaAttachments) && input.mediaAttachments.length > 0;
+    if (!cleanText && !input.poll && !input.imageAttachment && !input.videoAttachment && !hasMediaArray && !input.voiceAttachment && !input.redPacket) {
       return { error: 'Pesan Chat Global tidak boleh kosong.' };
     }
     const isAdminSender = input.senderRole === 'admin';
@@ -968,8 +989,17 @@ async function startServer() {
       if (flags.chatSystemDisabled || flags.disableGlobalChat) {
         return { error: 'Fitur Chat Global sedang dinonaktifkan sementara oleh Admin.' };
       }
-      if (input.imageAttachment && flags.disableImages) {
-        return { error: 'Pengiriman gambar di chat sedang dinonaktifkan oleh Admin.' };
+      const hasImageMedia =
+        Boolean(input.imageAttachment) ||
+        (hasMediaArray && input.mediaAttachments!.some((m) => m?.kind === 'image'));
+      const hasVideoMedia =
+        Boolean(input.videoAttachment) ||
+        (hasMediaArray && input.mediaAttachments!.some((m) => m?.kind === 'video'));
+      if (hasImageMedia && flags.disableImages) {
+        return { error: 'Pengiriman foto di chat sedang dinonaktifkan oleh Admin.' };
+      }
+      if (hasVideoMedia && flags.disableVideos) {
+        return { error: 'Pengiriman video di chat sedang dinonaktifkan oleh Admin.' };
       }
       if (input.voiceAttachment && flags.disableVoiceNotes) {
         return { error: 'Pengiriman pesan suara sedang dinonaktifkan oleh Admin.' };
@@ -1086,6 +1116,8 @@ async function startServer() {
       forwardedFrom: input.forwardedFrom && typeof input.forwardedFrom === 'object' ? input.forwardedFrom : undefined,
       mentions: Array.isArray(input.mentions) ? input.mentions.map((x) => String(x)).slice(0, 20) : undefined,
       imageAttachment: input.imageAttachment && typeof input.imageAttachment === 'object' ? input.imageAttachment : undefined,
+      videoAttachment: input.videoAttachment && typeof input.videoAttachment === 'object' ? input.videoAttachment : undefined,
+      mediaAttachments: Array.isArray(input.mediaAttachments) ? input.mediaAttachments.slice(0, 12) : undefined,
       voiceAttachment: input.voiceAttachment && typeof input.voiceAttachment === 'object' ? input.voiceAttachment : undefined,
       redPacket: input.redPacket && typeof input.redPacket === 'object' ? input.redPacket : undefined,
     };
@@ -1126,11 +1158,14 @@ async function startServer() {
 
   function handleNewPrivateChatMessage(input: Partial<ServerPrivateChatMessage>) {
     const cleanText = String(input.text || '').trim();
+    const hasMediaArray = Array.isArray(input.mediaAttachments) && input.mediaAttachments.length > 0;
     if (
       !cleanText &&
       !input.transferAttachment &&
       !input.poll &&
       !input.imageAttachment &&
+      !input.videoAttachment &&
+      !hasMediaArray &&
       !input.voiceAttachment &&
       !input.contactAttachment &&
       !input.redPacket &&
@@ -1144,6 +1179,15 @@ async function startServer() {
     if (!isAdminSender) {
       if (flags.chatSystemDisabled || flags.disablePrivateChat) return null;
       if (input.groupId && flags.disableGroupChat) return null;
+      const hasImageMedia =
+        Boolean(input.imageAttachment) ||
+        (hasMediaArray && input.mediaAttachments!.some((m) => m?.kind === 'image'));
+      const hasVideoMedia =
+        Boolean(input.videoAttachment) ||
+        (hasMediaArray && input.mediaAttachments!.some((m) => m?.kind === 'video'));
+      if (hasImageMedia && flags.disableImages) return null;
+      if (hasVideoMedia && flags.disableVideos) return null;
+      if (input.voiceAttachment && flags.disableVoiceNotes) return null;
     }
     const msgId = input.id || `pchat-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const existing = serverState.privateChatMessages.find((m) => m.id === msgId);
@@ -1180,6 +1224,8 @@ async function startServer() {
       forwardedFrom: input.forwardedFrom && typeof input.forwardedFrom === 'object' ? input.forwardedFrom : undefined,
       mentions: Array.isArray(input.mentions) ? input.mentions.map((x) => String(x)).slice(0, 20) : undefined,
       imageAttachment: input.imageAttachment && typeof input.imageAttachment === 'object' ? input.imageAttachment : undefined,
+      videoAttachment: input.videoAttachment && typeof input.videoAttachment === 'object' ? input.videoAttachment : undefined,
+      mediaAttachments: Array.isArray(input.mediaAttachments) ? input.mediaAttachments.slice(0, 12) : undefined,
       voiceAttachment: input.voiceAttachment && typeof input.voiceAttachment === 'object' ? input.voiceAttachment : undefined,
       contactAttachment: input.contactAttachment && typeof input.contactAttachment === 'object' ? input.contactAttachment : undefined,
       redPacket: input.redPacket && typeof input.redPacket === 'object' ? input.redPacket : undefined,
@@ -2051,10 +2097,15 @@ async function startServer() {
       req.body?.cooldownMs !== undefined
         ? Math.max(0, Math.min(120000, Number(req.body.cooldownMs) || 0))
         : serverState.globalChatConfig?.cooldownMs ?? 2500;
+    const nextMaxVoiceDurationSec =
+      req.body?.maxVoiceDurationSec !== undefined
+        ? Math.max(15, Math.min(600, Math.round(Number(req.body.maxVoiceDurationSec) || 600)))
+        : serverState.globalChatConfig?.maxVoiceDurationSec ?? 600;
     serverState.globalChatConfig = {
       ...serverState.globalChatConfig,
       adminOnlyLock: nextLocked,
       cooldownMs: nextCooldown,
+      maxVoiceDurationSec: nextMaxVoiceDurationSec,
       lockedBy: req.body?.lockedBy !== undefined ? String(req.body.lockedBy || '') || undefined : serverState.globalChatConfig?.lockedBy,
       mutedUsers:
         req.body?.mutedUsers && typeof req.body.mutedUsers === 'object'
@@ -2188,6 +2239,140 @@ async function startServer() {
       },
     });
     res.json({ success: true, globalChats: [] });
+  });
+
+  // ==================== CHAT MEDIA STREAMING STORE (HTTP 206 RANGE) ====================
+  app.post('/api/chat-media', (req, res) => {
+    try {
+      ensureChatMediaDir();
+      const rawDataUrl = typeof req.body?.dataUrl === 'string' ? req.body.dataUrl : '';
+      let mimeType = typeof req.body?.mimeType === 'string' ? req.body.mimeType.trim().toLowerCase() : '';
+      let base64Body = '';
+
+      if (rawDataUrl.startsWith('data:')) {
+        const commaIdx = rawDataUrl.indexOf(',');
+        if (commaIdx === -1) {
+          res.status(400).json({ success: false, message: 'Format media dataUrl tidak valid.' });
+          return;
+        }
+        const header = rawDataUrl.slice(5, commaIdx);
+        const extractedMime = header.split(';')[0]?.trim().toLowerCase() || '';
+        if (extractedMime) mimeType = extractedMime;
+        base64Body = rawDataUrl.slice(commaIdx + 1);
+      } else if (typeof req.body?.base64 === 'string') {
+        base64Body = req.body.base64;
+      }
+
+      if (!base64Body) {
+        res.status(400).json({ success: false, message: 'Payload media kosong.' });
+        return;
+      }
+      if (!/^(image|video|audio)\/[a-z0-9.+-]+$/i.test(mimeType)) {
+        res.status(400).json({ success: false, message: 'Tipe file media tidak didukung.' });
+        return;
+      }
+
+      const buffer = Buffer.from(base64Body, 'base64');
+      if (!buffer.length || buffer.length > 22 * 1024 * 1024) {
+        res.status(413).json({
+          success: false,
+          message: 'Ukuran media melebihi batas aman server (maks 22 MB setelah kompresi).',
+        });
+        return;
+      }
+
+      const mediaId = `cm_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
+      const binPath = path.join(CHAT_MEDIA_DIR, `${mediaId}.bin`);
+      const metaPath = path.join(CHAT_MEDIA_DIR, `${mediaId}.meta.json`);
+      const fileName = String(req.body?.fileName || mediaId).replace(/[^\w.\-() ]+/g, '_').slice(0, 120);
+
+      fs.writeFileSync(binPath, buffer);
+      fs.writeFileSync(
+        metaPath,
+        JSON.stringify({
+          mediaId,
+          mimeType,
+          fileName,
+          sizeBytes: buffer.length,
+          createdAtMs: Date.now(),
+        })
+      );
+
+      res.json({
+        success: true,
+        mediaId,
+        url: `/api/chat-media/${mediaId}`,
+        mimeType,
+        sizeBytes: buffer.length,
+        fileName,
+      });
+    } catch {
+      res.status(500).json({ success: false, message: 'Gagal menyimpan media chat di server.' });
+    }
+  });
+
+  app.get('/api/chat-media/:mediaId', (req, res) => {
+    try {
+      const mediaId = String(req.params.mediaId || '').trim();
+      if (!/^[a-zA-Z0-9_-]{6,80}$/.test(mediaId)) {
+        res.status(400).json({ success: false, message: 'ID media tidak valid.' });
+        return;
+      }
+      const binPath = path.join(CHAT_MEDIA_DIR, `${mediaId}.bin`);
+      const metaPath = path.join(CHAT_MEDIA_DIR, `${mediaId}.meta.json`);
+      if (!fs.existsSync(binPath)) {
+        res.status(404).json({ success: false, message: 'Media tidak ditemukan.' });
+        return;
+      }
+
+      let mimeType = 'application/octet-stream';
+      if (fs.existsSync(metaPath)) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as { mimeType?: string };
+          if (parsed.mimeType) mimeType = parsed.mimeType;
+        } catch {
+          // ignore
+        }
+      }
+
+      const stat = fs.statSync(binPath);
+      const totalSize = stat.size;
+      const rangeHeader = req.headers.range;
+
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+
+      if (rangeHeader) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(String(rangeHeader).trim());
+        if (!match) {
+          res.status(416).setHeader('Content-Range', `bytes */${totalSize}`).end();
+          return;
+        }
+        const start = match[1] ? parseInt(match[1], 10) : 0;
+        const end = match[2] ? Math.min(parseInt(match[2], 10), totalSize - 1) : totalSize - 1;
+        if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= totalSize) {
+          res.status(416).setHeader('Content-Range', `bytes */${totalSize}`).end();
+          return;
+        }
+        const chunkSize = end - start + 1;
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': mimeType,
+        });
+        fs.createReadStream(binPath, { start, end }).pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Length': totalSize,
+          'Content-Type': mimeType,
+          'Accept-Ranges': 'bytes',
+        });
+        fs.createReadStream(binPath).pipe(res);
+      }
+    } catch {
+      res.status(500).json({ success: false, message: 'Gagal membaca media chat.' });
+    }
   });
 
   // ==================== PRIVATE CHAT & GROUPS API ====================

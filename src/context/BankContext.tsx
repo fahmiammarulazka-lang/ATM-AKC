@@ -238,6 +238,8 @@ import {
   ChatCustomBadgeTier,
   ChatAdminDivision,
   ChatImageAttachment,
+  ChatVideoAttachment,
+  ChatMediaAttachmentItem,
   ChatVoiceAttachment,
   ChatContactAttachment,
   ChatRedPacketClaim,
@@ -445,6 +447,8 @@ interface SendChatInput {
   forwardedFrom?: ChatForwardInfo;
   mentions?: string[];
   imageAttachment?: ChatImageAttachment;
+  videoAttachment?: ChatVideoAttachment;
+  mediaAttachments?: ChatMediaAttachmentItem[];
   voiceAttachment?: ChatVoiceAttachment;
   contactAttachment?: ChatContactAttachment;
   billReminder?: ChatBillReminderData;
@@ -610,6 +614,8 @@ interface BankContextType {
     forwardedFrom?: ChatForwardInfo;
     mentions?: string[];
     imageAttachment?: ChatImageAttachment;
+    videoAttachment?: ChatVideoAttachment;
+    mediaAttachments?: ChatMediaAttachmentItem[];
     voiceAttachment?: ChatVoiceAttachment;
     contactAttachment?: ChatContactAttachment;
     redPacket?: ChatRedPacketData;
@@ -3507,6 +3513,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     disableRedPacket: false,
     disableSplitBill: false,
     disableImages: false,
+    disableVideos: false,
     disableVoiceNotes: false,
     disablePolls: false,
     disableReactions: false,
@@ -3524,6 +3531,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const DEFAULT_GLOBAL_CHAT_CONFIG: GlobalChatConfig = {
     adminOnlyLock: false,
     cooldownMs: 2500,
+    maxVoiceDurationSec: 600,
     mutedUsers: {},
     bannedWords: [],
     bannedWordMode: 'censor',
@@ -3552,6 +3560,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         incCfg.cooldownMs !== undefined
           ? Math.max(0, Number(incCfg.cooldownMs) || 0)
           : Math.max(0, Number(base.cooldownMs ?? 2500) || 0),
+      maxVoiceDurationSec:
+        incCfg.maxVoiceDurationSec !== undefined
+          ? Math.max(15, Math.min(600, Math.round(Number(incCfg.maxVoiceDurationSec) || 600)))
+          : Math.max(15, Math.min(600, Math.round(Number(base.maxVoiceDurationSec ?? 600) || 600))),
       lockedBy: incCfg.lockedBy ? String(incCfg.lockedBy) : base.lockedBy,
       mutedUsers:
         incCfg.mutedUsers && typeof incCfg.mutedUsers === 'object'
@@ -3813,6 +3825,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       .slice(0, 200);
   };
 
+  const sanitizeChatPayloadForCloud = (val: unknown): unknown => {
+    if (!val || typeof val !== 'object') return val;
+    const obj = { ...(val as Record<string, unknown>) };
+    const stripLargeDataUrl = (att: unknown) => {
+      if (!att || typeof att !== 'object') return att;
+      const copy = { ...(att as Record<string, unknown>) };
+      if (typeof copy.url === 'string' && copy.url && typeof copy.dataUrl === 'string' && copy.dataUrl.length > 120_000) {
+        delete copy.dataUrl;
+      }
+      return copy;
+    };
+    if (obj.imageAttachment) obj.imageAttachment = stripLargeDataUrl(obj.imageAttachment);
+    if (obj.videoAttachment) obj.videoAttachment = stripLargeDataUrl(obj.videoAttachment);
+    if (obj.voiceAttachment) obj.voiceAttachment = stripLargeDataUrl(obj.voiceAttachment);
+    if (Array.isArray(obj.mediaAttachments)) {
+      obj.mediaAttachments = obj.mediaAttachments.map(stripLargeDataUrl);
+    }
+    return obj;
+  };
+
   const writeAtomicChatItemToCloud = (
     docId:
       | 'chat_global_messages'
@@ -3825,11 +3857,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     value: unknown
   ) => {
     const safeKey = toCloudSafeChatKey(keyPrefix, itemId);
+    const cloudValue = sanitizeChatPayloadForCloud(value);
     void writeCloudDoc(
       'bank_state_v1',
       docId,
       sanitizeForFirestore({
-        [safeKey]: value,
+        [safeKey]: cloudValue,
         updatedAtMs: Date.now(),
       }) as Record<string, unknown>,
       { merge: true }
@@ -5600,7 +5633,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 (c) =>
                   isNotBotAccountNum(c.senderAccount) && isNotBotAccountNum(c.recipientAccount)
               )
-              .slice(-250),
+              .slice(-250)
+              .map((c) => sanitizeChatPayloadForCloud(c)),
           }
         : {}),
       ...(overrides?.cardUpgrades !== undefined
@@ -5658,7 +5692,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         ? { adminHelpRequests: overrides.adminHelpRequests }
         : {}),
       ...(overrides?.globalChats !== undefined
-        ? { globalChats: overrides.globalChats.slice(0, 150) }
+        ? {
+            globalChats: overrides.globalChats
+              .slice(0, 150)
+              .map((g) => sanitizeChatPayloadForCloud(g)),
+          }
         : {}),
       ...(overrides?.globalChatConfig !== undefined
         ? { globalChatConfig: overrides.globalChatConfig }
@@ -12614,6 +12652,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     forwardedFrom?: ChatForwardInfo;
     mentions?: string[];
     imageAttachment?: ChatImageAttachment;
+    videoAttachment?: ChatVideoAttachment;
+    mediaAttachments?: ChatMediaAttachmentItem[];
     voiceAttachment?: ChatVoiceAttachment;
     contactAttachment?: ChatContactAttachment;
     redPacket?: ChatRedPacketData;
@@ -12621,7 +12661,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     adminDivisionLabel?: ChatAdminDivision;
   }): Promise<{ success: boolean; message: string }> => {
     const cleanText = input.text.trim();
-    if (!cleanText && !input.poll && !input.imageAttachment && !input.voiceAttachment && !input.contactAttachment && !input.redPacket) {
+    const hasMediaArr = Array.isArray(input.mediaAttachments) && input.mediaAttachments.length > 0;
+    if (!cleanText && !input.poll && !input.imageAttachment && !input.videoAttachment && !hasMediaArr && !input.voiceAttachment && !input.contactAttachment && !input.redPacket) {
       return { success: false, message: 'Pesan Chat Global tidak boleh kosong!' };
     }
 
@@ -12643,8 +12684,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (flags?.disableGlobalChat) {
         return { success: false, message: 'Chat Global sedang dinonaktifkan sementara oleh Admin.' };
       }
-      if (input.imageAttachment && flags?.disableImages) {
+      const hasImageMedia =
+        Boolean(input.imageAttachment) ||
+        (hasMediaArr && input.mediaAttachments!.some((m) => m.kind === 'image'));
+      const hasVideoMedia =
+        Boolean(input.videoAttachment) ||
+        (hasMediaArr && input.mediaAttachments!.some((m) => m.kind === 'video'));
+      if (hasImageMedia && flags?.disableImages) {
         return { success: false, message: 'Fitur kirim foto sedang dinonaktifkan oleh Admin.' };
+      }
+      if (hasVideoMedia && flags?.disableVideos) {
+        return { success: false, message: 'Fitur kirim video sedang dinonaktifkan oleh Admin.' };
       }
       if (input.voiceAttachment && flags?.disableVoiceNotes) {
         return { success: false, message: 'Fitur Voice Note sedang dinonaktifkan oleh Admin.' };
@@ -12750,6 +12800,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       forwardedFrom: input.forwardedFrom,
       mentions: input.mentions,
       imageAttachment: input.imageAttachment,
+      videoAttachment: input.videoAttachment,
+      mediaAttachments: input.mediaAttachments,
       voiceAttachment: input.voiceAttachment,
       contactAttachment: input.contactAttachment,
       redPacket: input.redPacket,
@@ -19740,6 +19792,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       forwardedFrom: input.forwardedFrom,
       mentions: input.mentions,
       imageAttachment: input.imageAttachment,
+      videoAttachment: input.videoAttachment,
+      mediaAttachments: input.mediaAttachments,
       voiceAttachment: input.voiceAttachment,
       contactAttachment: input.contactAttachment,
       billReminder: input.billReminder,

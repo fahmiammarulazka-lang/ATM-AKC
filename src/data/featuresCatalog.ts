@@ -3081,6 +3081,35 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v15-42-49',
+    version: 'v15.42.49',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v15.42.49 (Format S): Pratinjau Foto/Video + Keterangan, Voice Chat & Audio HP 600d Interaktif, serta Menu Titik Tiga Rapi Chat 1-on-1',
+    fullDate: 'Rabu, 25 November 2026 • Pukul 23:59 WIB',
+    dateText: 'Rabu, 25 November 2026 • Pukul 23:59 WIB',
+    description:
+      'Pembaruan v15.42.49 menghadirkan modal pratinjau penuh saat memilih banyak foto atau video lengkap dengan kompresi video otomatis dan kotak keterangan sebelum terkirim, pemutar Voice Note kustom dengan geser garis durasi, gelombang suara interaktif, kecepatan putar (1x/1.5x/2x), pengatur volume, batas rekam 600 detik (10 menit) serta kirim file audio/musik dari memori HP dengan pratinjau dengar ulang, serta perapian menyeluruh ruang Chat 1-on-1, Grup, dan Global melalui menu titik tiga header, menu titik tiga daftar kontak kiri, dan tombol lampiran (+).',
+    highlights: [
+      'Pratinjau Foto & Video + Keterangan Sebelum Kirim: Memilih foto maupun video dari satu pemilih terpadu kini membuka modal pratinjau terlebih dahulu untuk menambah/mengganti banyak file, kompresi video aman otomatis, dan menulis keterangan (Enter baris baru, Ctrl+Enter kirim).',
+      'Voice Chat & Audio Memori HP 600 Detik + Pemutar Kustom Interaktif: Rekam Voice Note hingga 600 detik (10 menit) atau pilih file audio/musik dari memori HP, ditahan di pratinjau untuk didengar ulang, digeser durasinya, dan ditambah keterangan; pemutar di chat mendukung geser durasi gelombang suara, kecepatan 1x/1.5x/2x, dan volume.',
+      'Menu Titik Tiga Rapi di Chat 1-on-1, Grup & Global: Header chat 1-on-1 kini super bersih (hanya status ringkas, Cari, Kirim Uang, & menu titik tiga bersekat ikon), tombol lampiran (+) rapi di samping kotak ketik, menu titik tiga pada daftar kontak kiri, serta penanda kunci Nonaktif Admin.',
+      'Kendali Media Panel Admin: Penambahan saklar khusus Nonaktifkan Kirim Video Chat dan pengaturan Batas Durasi Maksimal Voice Note (hingga 600 detik) langsung di Panel Admin.',
+    ],
+    changes: [
+      'Pratinjau Foto & Video + Keterangan Sebelum Kirim: Memilih foto maupun video dari satu pemilih terpadu kini membuka modal pratinjau terlebih dahulu untuk menambah/mengganti banyak file, kompresi video aman otomatis, dan menulis keterangan (Enter baris baru, Ctrl+Enter kirim).',
+      'Voice Chat & Audio Memori HP 600 Detik + Pemutar Kustom Interaktif: Rekam Voice Note hingga 600 detik (10 menit) atau pilih file audio/musik dari memori HP, ditahan di pratinjau untuk didengar ulang, digeser durasinya, dan ditambah keterangan; pemutar di chat mendukung geser durasi gelombang suara, kecepatan 1x/1.5x/2x, dan volume.',
+      'Menu Titik Tiga Rapi di Chat 1-on-1, Grup & Global: Header chat 1-on-1 kini super bersih (hanya status ringkas, Cari, Kirim Uang, & menu titik tiga bersekat ikon), tombol lampiran (+) rapi di samping kotak ketik, menu titik tiga pada daftar kontak kiri, serta penanda kunci Nonaktif Admin.',
+      'Kendali Media Panel Admin: Penambahan saklar khusus Nonaktifkan Kirim Video Chat dan pengaturan Batas Durasi Maksimal Voice Note (hingga 600 detik) langsung di Panel Admin.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-26T00:15:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v15-41-49',
     version: 'v15.41.49',
     releaseType: 'minor',
@@ -3105,8 +3134,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Posisi Menu & Pusat Pengaturan Chat Admin Lengkap: Tombol Chat Global & Priv dipindah tepat di sebelah kiri menu Keluarga; Panel Admin kini memiliki saklar satuan untuk setiap fitur chat, penutupan sementara chat dengan halaman pengumuman khusus, Laporan Masuk, Anti-Spam otomatis, Broadcast DM massal, Jadwal Pengumuman, Editor Sambutan Akun Baru, dan Lencana Khusus Nasabah.',
       'Fitur Komunikasi Modern & Produktivitas: Pengiriman Foto terkompresi + Lightbox, Pesan Suara (Voice Note), Balasan Cepat, Pemilih Reaksi + Daftar Pemberi Reaksi, Pesan Menghilang Otomatis, Pin & Arsip Ruang, Mode Jangan Ganggu (DND), Kartu Kontak, Pengingat Tagihan, serta Ekspor Rekap Chat (.txt).',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-26T00:05:00.000Z',
     isAutoDetected: true,

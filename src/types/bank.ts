@@ -533,17 +533,50 @@ export type ChatCustomBadgeTier = 'verified' | 'vip' | 'sultan';
 export type ChatAdminDivision = 'CS Resmi' | 'Tim Keamanan' | 'Pimpinan' | string;
 
 export interface ChatImageAttachment {
-  dataUrl: string;
+  dataUrl?: string;
+  url?: string;
   fileName?: string;
+  mimeType?: string;
   width?: number;
   height?: number;
   sizeBytes?: number;
 }
 
+export interface ChatVideoAttachment {
+  url: string;
+  dataUrl?: string;
+  thumbnailDataUrl?: string;
+  fileName?: string;
+  mimeType?: string;
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+}
+
+export interface ChatMediaAttachmentItem {
+  id: string;
+  kind: 'image' | 'video';
+  url?: string;
+  dataUrl?: string;
+  thumbnailDataUrl?: string;
+  fileName?: string;
+  mimeType?: string;
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+  caption?: string;
+}
+
 export interface ChatVoiceAttachment {
-  dataUrl: string;
+  dataUrl?: string;
+  url?: string;
+  fileName?: string;
   durationSec: number;
   mimeType?: string;
+  sizeBytes?: number;
+  waveformPeaks?: number[];
 }
 
 export interface ChatContactAttachment {
@@ -654,6 +687,7 @@ export interface ChatFeatureFlags {
   disableRedPacket?: boolean;
   disableSplitBill?: boolean;
   disableImages?: boolean;
+  disableVideos?: boolean;
   disableVoiceNotes?: boolean;
   disablePolls?: boolean;
   disableReactions?: boolean;
@@ -698,6 +732,8 @@ export interface GlobalChatMessage {
   forwardedFrom?: ChatForwardInfo;
   mentions?: string[];
   imageAttachment?: ChatImageAttachment;
+  videoAttachment?: ChatVideoAttachment;
+  mediaAttachments?: ChatMediaAttachmentItem[];
   voiceAttachment?: ChatVoiceAttachment;
   contactAttachment?: ChatContactAttachment;
   redPacket?: ChatRedPacketData;
@@ -706,6 +742,7 @@ export interface GlobalChatMessage {
 export interface GlobalChatConfig {
   adminOnlyLock: boolean;
   cooldownMs: number;
+  maxVoiceDurationSec?: number;
   lockedBy?: string;
   mutedUsers?: Record<string, GlobalChatMutedUser>;
   bannedWords?: string[];
@@ -1271,6 +1308,8 @@ export interface ChatMessage {
   forwardedFrom?: ChatForwardInfo;
   mentions?: string[];
   imageAttachment?: ChatImageAttachment;
+  videoAttachment?: ChatVideoAttachment;
+  mediaAttachments?: ChatMediaAttachmentItem[];
   voiceAttachment?: ChatVoiceAttachment;
   contactAttachment?: ChatContactAttachment;
   redPacket?: ChatRedPacketData;
