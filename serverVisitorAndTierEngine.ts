@@ -28,6 +28,8 @@ export const DEFAULT_VISITOR_ANALYTICS_STATE: ServerVisitorAnalyticsState = {
 
 const OFFLINE_TIMEOUT_MS = 45_000;
 const PRIMARY_OWNER_EMAIL = 'fahmiammarulazka@gmail.com';
+const SUPER_ADMIN_ACCOUNT_NUMBER = '1234567890';
+const SUPER_ADMIN_NAME_LOWER = 'azkaakc';
 
 function cleanStr(val: unknown, maxLen = 200): string {
   return String(val ?? '')
@@ -210,10 +212,16 @@ function makeLocationKey(city: string, region: string, country: string): string 
   return norm || 'unknown_loc';
 }
 
-function isProtectedOwnerTarget(accountId: string, accountEmail?: string, accountNumber?: string): boolean {
-  const em = cleanStr(accountEmail, 160).toLowerCase();
-  if (em === PRIMARY_OWNER_EMAIL) return true;
-  if (accountId === 'acc-oa-admin' || accountNumber === '9999999999') return true;
+function isProtectedOwnerTarget(
+  _accountId: string,
+  _accountEmail?: string,
+  accountNumber?: string,
+  accountName?: string
+): boolean {
+  const normAccNum = cleanStr(accountNumber, 40).replace(/\s+/g, '');
+  const normName = cleanStr(accountName, 120).toLowerCase();
+  if (normAccNum === SUPER_ADMIN_ACCOUNT_NUMBER) return true;
+  if (normName === SUPER_ADMIN_NAME_LOWER) return true;
   return false;
 }
 
@@ -841,12 +849,13 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
 
       if (!accountId) continue;
 
-      // Absolute Primary Owner Lock Protection
-      if (isProtectedOwnerTarget(accountId, accountEmail, accountNumber)) {
+      // Absolute Primary Owner Lock Protection (AzkaAKC • 1234567890)
+      if (isProtectedOwnerTarget(accountId, accountEmail, accountNumber, accountName)) {
         if (grantsInput.length === 1) {
           res.status(403).json({
             success: false,
-            message: 'Akun Super Admin Utama (Owner) terkunci mutlak dan tidak dapat diubah atau dibatasi.',
+            message:
+              'Akun Super Admin Utama AzkaAKC (1234567890) terkunci mutlak dan tidak dapat diubah atau dibatasi.',
           });
           return;
         }
@@ -1010,7 +1019,8 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
         isProtectedOwnerTarget(
           accId,
           String(grant.accountEmail || ''),
-          String(grant.accountNumber || '')
+          String(grant.accountNumber || ''),
+          String(grant.accountName || '')
         )
       ) {
         continue;
@@ -1082,12 +1092,14 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
       isProtectedOwnerTarget(
         accountId,
         String(grant?.accountEmail || ''),
-        String(grant?.accountNumber || '')
+        String(grant?.accountNumber || ''),
+        String(grant?.accountName || '')
       )
     ) {
       res.status(403).json({
         success: false,
-        message: 'Akun Super Admin Utama (Owner) terkunci mutlak dan tidak dapat dicabut.',
+        message:
+          'Akun Super Admin Utama AzkaAKC (1234567890) terkunci mutlak dan tidak dapat dicabut.',
       });
       return;
     }

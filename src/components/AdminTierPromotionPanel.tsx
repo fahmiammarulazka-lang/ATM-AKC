@@ -944,7 +944,7 @@ export const AdminTierPromotionPanel: React.FC<AdminTierPromotionPanelProps> = (
                 const grant = adminTierGrantsMap[acc.id];
                 const isTierAdmin =
                   isOwner || isAdminCardAccount(acc) || (grant && grant.status !== 'revoked');
-                const tierCfg = CARD_TIER_CONFIGS[acc.cardTier] || CARD_TIER_CONFIGS.silver;
+                const tierCfg = CARD_TIER_CONFIGS[acc.cardTier] || CARD_TIER_CONFIGS.regular;
                 const live = liveInfoByAccountId.get(acc.id);
                 const isChecked = selectedIds.includes(acc.id);
 
@@ -957,7 +957,7 @@ export const AdminTierPromotionPanel: React.FC<AdminTierPromotionPanelProps> = (
                   : 0;
 
                 const allowedLabelsPreview = isOwner
-                  ? ['Semua Tab (Owner Utama)']
+                  ? ['Semua Tab (Super Admin Utama)']
                   : grant && grant.status !== 'revoked'
                   ? grant.allowedTabs === 'ALL'
                     ? ['Semua Tab']
@@ -1089,7 +1089,7 @@ export const AdminTierPromotionPanel: React.FC<AdminTierPromotionPanelProps> = (
                         {isOwner ? (
                           <span className="text-amber-300 font-bold inline-flex items-center gap-1">
                             <Lock className="w-3 h-3" />
-                            Owner Utama (Terkunci)
+                            Super Admin Utama (Terkunci)
                           </span>
                         ) : grant?.isFrozen ? (
                           <span className="text-sky-300 font-semibold inline-flex items-center gap-1">

@@ -435,25 +435,30 @@ export interface AdminTierOfficialLetterPayload {
 }
 
 export const PRIMARY_OWNER_EMAIL = 'fahmiammarulazka@gmail.com';
+export const SUPER_ADMIN_ACCOUNT_NUMBER = '1234567890';
+export const SUPER_ADMIN_FULL_NAME = 'AzkaAKC';
 
 /**
  * Checks whether an account is the Primary System Owner / Super Admin Utama
- * whose Admin privileges are permanently locked and cannot be demoted or restricted.
+ * (AzkaAKC • No. Rek 1234567890) whose Admin privileges are permanently locked
+ * and cannot be demoted or restricted.
  */
 export function isPrimarySystemOwnerAccount(
   account?: Partial<BankAccount> | null,
   signedInEmail?: string | null
 ): boolean {
-  if (!account && !signedInEmail) return false;
-  const emailCandidates = [
-    account?.email,
-    signedInEmail,
-  ]
-    .filter(Boolean)
-    .map((e) => String(e).trim().toLowerCase());
+  if (!account) {
+    return Boolean(
+      signedInEmail &&
+        String(signedInEmail).trim().toLowerCase() === PRIMARY_OWNER_EMAIL
+    );
+  }
 
-  if (emailCandidates.includes(PRIMARY_OWNER_EMAIL)) return true;
-  if (account?.id === 'acc-oa-admin' || account?.accountNumber === '9999999999') return true;
+  const normalizedAccNum = String(account.accountNumber || '').replace(/\s+/g, '');
+  const normalizedName = String(account.fullName || '').trim().toLowerCase();
+
+  if (normalizedAccNum === SUPER_ADMIN_ACCOUNT_NUMBER) return true;
+  if (normalizedName === SUPER_ADMIN_FULL_NAME.toLowerCase()) return true;
   return false;
 }
 
@@ -495,7 +500,7 @@ export function resolveEffectiveAdminPermissions(params: {
       isFrozen: false,
       isExpired: false,
       isDeviceLockedOut: false,
-      customTitle: 'Super Admin Utama (Owner)',
+      customTitle: 'Super Admin Utama (AzkaAKC)',
       showCrownBadge: true,
       hideAdminStatus: false,
     };
