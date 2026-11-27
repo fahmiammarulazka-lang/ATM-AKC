@@ -23,7 +23,7 @@ export const SPIN_AURA_FRAMES: ProfileAvatarFrame[] = [
   {
     id: 'frame-spin-petir-cyber',
     label: 'Petir Cyber',
-    description: 'Kilatan petir neon biru-cyan berkecepatan tinggi',
+    description: 'Rangka cyber neon dengan kumparan Tesla & kilatan petir berkedip bergantian',
     ringClass: 'ring-[3px] ring-cyan-400 ring-offset-2 ring-offset-slate-950 aura-frame-petir-cyber',
     badgeColorClass: 'bg-cyan-500 text-slate-950',
     isSpinExclusive: true,
@@ -35,7 +35,7 @@ export const SPIN_AURA_FRAMES: ProfileAvatarFrame[] = [
   {
     id: 'frame-spin-api-naga',
     label: 'Api Naga',
-    description: 'Kobaran aura api naga merah-jingga menyala',
+    description: 'Tanduk & sayap naga bara dengan lidah api bergoyang serta percikan bara naik',
     ringClass: 'ring-[3px] ring-orange-500 ring-offset-2 ring-offset-slate-950 aura-frame-api-naga',
     badgeColorClass: 'bg-gradient-to-r from-orange-500 to-rose-600 text-white',
     isSpinExclusive: true,
@@ -47,7 +47,7 @@ export const SPIN_AURA_FRAMES: ProfileAvatarFrame[] = [
   {
     id: 'frame-spin-emas-imperial',
     label: 'Emas Imperial',
-    description: 'Kilau mahkota emas 24K kerajaan Nusantara',
+    description: 'Mahkota emas 24K & daun laurel kerajaan dengan kilau cahaya menyapu megah',
     ringClass: 'ring-[3px] ring-amber-400 ring-offset-2 ring-offset-slate-950 aura-frame-emas-imperial',
     badgeColorClass: 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950',
     isSpinExclusive: true,
@@ -59,7 +59,7 @@ export const SPIN_AURA_FRAMES: ProfileAvatarFrame[] = [
   {
     id: 'frame-spin-kristal-es',
     label: 'Kristal Es',
-    description: 'Pecahan kristal es abadi dengan pendar salju dingin',
+    description: 'Puncak prisma es berlian empat sudut dengan keping salju melayang lembut',
     ringClass: 'ring-[3px] ring-sky-300 ring-offset-2 ring-offset-slate-950 aura-frame-kristal-es',
     badgeColorClass: 'bg-gradient-to-r from-sky-300 to-indigo-400 text-slate-950',
     isSpinExclusive: true,
@@ -71,7 +71,7 @@ export const SPIN_AURA_FRAMES: ProfileAvatarFrame[] = [
   {
     id: 'frame-spin-galaksi-kosmik',
     label: 'Galaksi Kosmik',
-    description: 'Orbit nebula bintang ungu-magenta berputar abadi',
+    description: 'Cincin orbit planet Saturnus, bulan sabit & kabut nebula bernapas kosmik',
     ringClass: 'ring-[3px] ring-purple-400 ring-offset-2 ring-offset-slate-950 aura-frame-galaksi-kosmik',
     badgeColorClass: 'bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white',
     isSpinExclusive: true,

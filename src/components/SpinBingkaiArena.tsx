@@ -519,10 +519,11 @@ export const SpinBingkaiArena: React.FC<SpinBingkaiArenaProps> = ({ onOpenCoinSh
                 {/* CENTER STAGE SPOTLIGHT SHOWCASE */}
                 {stageFeaturedFrame ? (
                   <div className="relative py-6 px-8 flex flex-col items-center justify-center">
-                    <div
-                      className="w-36 h-40 sm:w-44 sm:h-48 bn-hex-clip p-[3px] bg-gradient-to-b from-amber-200 via-orange-500 to-red-700 shadow-[0_0_55px_rgba(239,68,68,0.8)] flex items-center justify-center"
-                    >
-                      <div className="w-full h-full bn-hex-clip bg-gradient-to-b from-red-600 via-rose-700 to-red-950 flex flex-col items-center justify-center p-3">
+                    <div className="relative w-40 h-44 sm:w-48 sm:h-52 flex items-center justify-center">
+                      <div className="w-full h-full bn-hex-clip p-[3px] bg-gradient-to-b from-amber-200 via-orange-500 to-red-700 shadow-[0_0_55px_rgba(239,68,68,0.8)] flex items-center justify-center">
+                        <div className="w-full h-full bn-hex-clip bg-gradient-to-b from-red-600 via-rose-700 to-red-950" />
+                      </div>
+                      <div className="absolute inset-0 flex items-center justify-center z-20">
                         <ProfileAvatarBadge
                           account={{
                             fullName: currentAccount.fullName,
@@ -531,6 +532,7 @@ export const SpinBingkaiArena: React.FC<SpinBingkaiArenaProps> = ({ onOpenCoinSh
                             avatarFrameId: stageFeaturedFrame.id,
                           }}
                           size="xl"
+                          stageHighlight
                         />
                       </div>
                     </div>
@@ -854,9 +856,9 @@ export const SpinBingkaiArena: React.FC<SpinBingkaiArenaProps> = ({ onOpenCoinSh
                           : 'bg-gradient-to-b from-amber-300 via-orange-500 to-red-700 shadow-[0_0_16px_rgba(220,38,38,0.65)]'
                       }`}
                     >
-                      <div className="w-full h-full bn-hex-clip bg-gradient-to-b from-red-500 via-red-600 to-rose-900 flex flex-col items-center justify-center px-1 py-1.5 text-center relative">
+                      <div className="w-full h-full bn-hex-clip bg-gradient-to-b from-red-500 via-red-600 to-rose-900 flex flex-col items-center justify-center px-1 pt-2 pb-1 text-center relative">
                         {/* Avatar Wearing This Living Aura Frame */}
-                        <div className="scale-[0.72] sm:scale-[0.88] origin-center -my-1">
+                        <div className="scale-[0.65] sm:scale-[0.78] origin-center -my-0.5">
                           <ProfileAvatarBadge
                             account={{
                               fullName: currentAccount.fullName,

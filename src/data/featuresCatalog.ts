@@ -3081,6 +3081,33 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-46-22',
+    version: 'v16.46.22',
+    releaseType: 'patch',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v16.46.22: Desain Unik 5 Bingkai Aura, Objek Tematik Berbeda & Animasi Gerak Tipis Hidup Organik Lintas Aplikasi',
+    fullDate: 'Sabtu, 28 November 2026 • Pukul 15:10 WIB',
+    dateText: 'Sabtu, 28 November 2026 • Pukul 15:10 WIB',
+    description:
+      'Pembaruan patch v16.46.22 memperkaya kelima Bingkai Aura Eksklusif Spin Bingkai dengan arsitektur bingkai yang berbeda-beda, objek tematik unik per bingkai, serta animasi gerak tipis organik (mengambang halus ±2px dan denyut napas lembut beritme 3–5 detik). Kini setiap partikel dan objek bergerak terpisah secara alami: Petir Cyber tampil dengan rangka cyber neon + kumparan Tesla + kilatan petir bergantian & getar mikro; Api Naga membawa tanduk & sayap naga dengan lidah api bergelombang serta bara api naik; Emas Imperial memancarkan mahkota 24K + daun laurel emas + kilau menyapu; Kristal Es berhiaskan 4 puncak prisma es tajam + salju melayang; dan Galaksi Kosmik menampilkan cincin astrolabe planet Saturnus mini + bulan sabit + kabut nebula bernapas. Seluruh efek aktif hingga ukuran kecil di PayChat, Navbar, dan Leaderboard dengan reaksi mengambang & pendar lebih terang saat di-hover serta tampil ekstra megah di Panggung Sorot Spin Bingkai.',
+    highlights: [
+      'Desain & Objek Berbeda untuk 5 Bingkai Aura: Masing-masing bingkai kini memiliki bentuk tepi dan objek SVG unik (Kumparan Tesla & Petir, Tanduk & Sayap Naga, Mahkota 24K & Daun Laurel, Puncak Prisma Es, serta Planet Saturnus & Bulan Sabit).',
+      'Animasi Gerak Tipis Hidup & Partikel Independen (3–5 Detik): Avatar mengambang lembut ±2px dan bernapas halus dengan ritme lambat organik, sementara tiap petir, lidah api, bara, kilau emas, salju, dan bintang bergerak terpisah.',
+      'Reaktif Saat Hover & Adaptif Semua Ukuran: Kursor hover mengangkat bingkai tipis dan menyalakan aura lebih terang; aktif hingga ikon kecil di PayChat, Navbar, dan Leaderboard serta tampil megah di Sorot Panggung Kemenangan.',
+    ],
+    changes: [
+      'Menambahkan arsitektur rangka SVG tematik dan objek unik terpisah pada ProfileAvatarBadge untuk ukuran sm (ringkas lembut), md/lg (penuh), dan xl/stageHighlight (panggung megah).',
+      'Menambahkan keyframes CSS compositor-only untuk mengambang tipis ±2px, getar mikro Petir Cyber, lidah api & bara naik Api Naga, kilau diagonal Emas Imperial, salju melayang Kristal Es, serta nebula bernapas & bob planet/bulan Galaksi Kosmik.',
+      'Menghubungkan stageHighlight pada layar perayaan STAGE_SPOTLIGHT_REVEAL dan menyesuaikan pemusatan klaster 5 heksagon merah di SpinBingkaiArena.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-28T08:10:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v16-46-21',
     version: 'v16.46.21',
     releaseType: 'minor',
@@ -3103,8 +3130,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Meningkatkan aura .aura-frame-* dan ProfileAvatarBadge (md/lg/xl) dengan cincin energi berputar multi-lapis serta partikel SVG animasi hidup, serta memasangnya di seluruh gelembung chat global, grup, DM, dan header PayChat.',
       'Memperbarui aturan default ke 1–20 Token & tukar 500 Token beserta migrasi otomatis konfigurasi lama (5–25 / 300 Token) di AdminPortal & BankContext, plus GlobalFloatingToastContainer 4 detik di pojok kanan atas.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Rilis Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-28T07:30:00.000Z',
     isAutoDetected: true,
