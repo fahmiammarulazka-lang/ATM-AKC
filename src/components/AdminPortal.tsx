@@ -2880,23 +2880,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               {/* Pengaturan Poin Loyalty, Auto-Streak Beku, Kartu Pemulihan & 100 Misi Harian */}
               <div className="rounded-2xl border border-amber-500/30 bg-slate-950/70 p-4 flex flex-col justify-between space-y-2">
                 <div>
-                  <h4 className="font-black text-amber-300">Ringkasan Sistem Loyalty &amp; Streak v16.43.00</h4>
+                  <h4 className="font-black text-amber-300">Ringkasan Sistem Loyalty &amp; Streak v16.43.10</h4>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Kelola harga Diamond Kartu Pemulihan ({loyaltyConfig.recoveryCardDiamondPrice ?? 25} Diamond), hari beku tahap 1–3, hingga {loyaltyConfig.activeDailyMissionCount ?? 100} misi aktif harian nyata, kurs tukar (Saldo Tunai, Coin, Voucher — tanpa Diamond), serta pulihkan/bekukan streak nasabah di panel lengkap di bawah ini.
+                    Kelola kurs paket tukar (Saldo Tunai, Coin, Voucher Naik Level + paket kustom), hadiah poin Auto-Streak, 100 misi harian, pencapaian, harga Kartu Pemulihan ({loyaltyConfig.recoveryCardDiamondPrice ?? 25} Diamond), dan kontrol streak nasabah di bawah ini.
                   </p>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
                   <div className="rounded-xl border border-slate-800 bg-slate-900 p-2">
                     <span className="text-slate-400 block text-[10px]">Misi Aktif</span>
-                    <strong className="text-amber-300 font-mono">{loyaltyConfig.activeDailyMissionCount ?? 100}</strong>
+                    <strong className="text-amber-300 font-mono tabular-nums">{loyaltyConfig.activeDailyMissionCount ?? 100}</strong>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-900 p-2">
                     <span className="text-slate-400 block text-[10px]">Kartu Pulih</span>
-                    <strong className="text-cyan-300 font-mono">{loyaltyConfig.recoveryCardDiamondPrice ?? 25} 💎</strong>
+                    <strong className="text-cyan-300 font-mono tabular-nums">{loyaltyConfig.recoveryCardDiamondPrice ?? 25} 💎</strong>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-900 p-2">
-                    <span className="text-slate-400 block text-[10px]">Kurs Tunai</span>
-                    <strong className="text-emerald-300 font-mono">Rp {(loyaltyConfig.rupiahPerPoint ?? 500).toLocaleString('id-ID')}</strong>
+                    <span className="text-slate-400 block text-[10px]">Paket Tunai</span>
+                    <strong className="text-emerald-300 font-mono tabular-nums">
+                      {loyaltyConfig.cashPackagePoints ?? 150}P = Rp {((loyaltyConfig.cashPackageAmount ?? 100_000) / 1000).toLocaleString('id-ID')}rb
+                    </strong>
                   </div>
                 </div>
               </div>

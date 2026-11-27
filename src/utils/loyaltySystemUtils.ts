@@ -1,11 +1,14 @@
 import {
   LoyaltyAccountState,
   LoyaltyAdminConfig,
+  LoyaltyCustomRedeemPackage,
   LoyaltyDailyMissionCategory,
+  LoyaltyRedeemTarget,
+  LoyaltyRedemptionRecord,
   LoyaltyStreakFreezeStage,
   Transaction,
 } from '../types/bank';
-import { UNLIMITED_BALANCE } from './bankUtils';
+import { formatRupiah, UNLIMITED_BALANCE } from './bankUtils';
 
 export const MANDATORY_TRANSFER_ADMIN_FEE_PERCENT = 5;
 
@@ -15,13 +18,33 @@ export function calculateMandatoryTransferFee(amount: number): number {
   return Math.max(1, Math.round(clean * (MANDATORY_TRANSFER_ADMIN_FEE_PERCENT / 100)));
 }
 
+export const DEFAULT_LOYALTY_EXCHANGE_RATES = {
+  cashPackagePoints: 150,
+  cashPackageAmount: 100_000,
+  cashRedeemEnabled: true,
+  coinPackagePoints: 100,
+  coinPackageAmount: 10,
+  coinRedeemEnabled: true,
+  voucherPackagePoints: 100,
+  voucherPackageAmount: 1,
+  voucherRedeemEnabled: true,
+} as const;
+
 export const DEFAULT_LOYALTY_ADMIN_CONFIG: LoyaltyAdminConfig = {
   enabled: true,
   dailyCheckInPoints: 25,
   streakBonus7DaysPoints: 150,
-  rupiahPerPoint: 500,
-  coinPer100Points: 15,
-  pointsPerLevelVoucher: 200,
+  ...DEFAULT_LOYALTY_EXCHANGE_RATES,
+  customRedeemPackages: [],
+  dailyRedeemLimitEnabled: false,
+  dailyRedeemMaxCount: 5,
+  achievementRewardOverrides: {},
+  rupiahPerPoint: Math.round(
+    DEFAULT_LOYALTY_EXCHANGE_RATES.cashPackageAmount /
+      DEFAULT_LOYALTY_EXCHANGE_RATES.cashPackagePoints
+  ),
+  coinPer100Points: DEFAULT_LOYALTY_EXCHANGE_RATES.coinPackageAmount,
+  pointsPerLevelVoucher: DEFAULT_LOYALTY_EXCHANGE_RATES.voucherPackagePoints,
   recoveryCardDiamondPrice: 25,
   freezeStage1Days: 1,
   freezeStage2Days: 2,
@@ -31,6 +54,34 @@ export const DEFAULT_LOYALTY_ADMIN_CONFIG: LoyaltyAdminConfig = {
   missionRewardMultiplier: 1,
   missionOverrides: {},
 };
+
+export function sanitizeCustomRedeemPackages(
+  raw?: LoyaltyCustomRedeemPackage[] | null
+): LoyaltyCustomRedeemPackage[] {
+  if (!Array.isArray(raw)) return [];
+  const validTargets: LoyaltyRedeemTarget[] = ['cash', 'coin', 'voucher'];
+  const seen = new Set<string>();
+  const result: LoyaltyCustomRedeemPackage[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const target = validTargets.includes(item.target) ? item.target : null;
+    if (!target) continue;
+    const id = String(item.id || '').trim();
+    const title = String(item.title || '').trim();
+    if (!id || !title || seen.has(id)) continue;
+    seen.add(id);
+    result.push({
+      id,
+      title,
+      description: item.description ? String(item.description).trim() : '',
+      target,
+      pointsCost: Math.max(1, Math.round(Number(item.pointsCost) || 100)),
+      rewardAmount: Math.max(1, Math.round(Number(item.rewardAmount) || 1)),
+      enabled: item.enabled !== false,
+    });
+  }
+  return result;
+}
 
 export function normalizeLoyaltyAdminConfig(
   raw?: Partial<LoyaltyAdminConfig> | null
@@ -45,6 +96,60 @@ export function normalizeLoyaltyAdminConfig(
     s3,
     Math.min(60, Math.round(Number(raw?.streakExpireAfterDays ?? s3) || s3))
   );
+
+  const cashPackagePoints = Math.max(
+    1,
+    Math.round(
+      Number(raw?.cashPackagePoints ?? DEFAULT_LOYALTY_EXCHANGE_RATES.cashPackagePoints) ||
+        DEFAULT_LOYALTY_EXCHANGE_RATES.cashPackagePoints
+    )
+  );
+  const cashPackageAmount = Math.max(
+    1_000,
+    Math.round(
+      Number(raw?.cashPackageAmount ?? DEFAULT_LOYALTY_EXCHANGE_RATES.cashPackageAmount) ||
+        DEFAULT_LOYALTY_EXCHANGE_RATES.cashPackageAmount
+    )
+  );
+  const coinPackagePoints = Math.max(
+    1,
+    Math.round(
+      Number(raw?.coinPackagePoints ?? DEFAULT_LOYALTY_EXCHANGE_RATES.coinPackagePoints) ||
+        DEFAULT_LOYALTY_EXCHANGE_RATES.coinPackagePoints
+    )
+  );
+  const coinPackageAmount = Math.max(
+    1,
+    Math.round(
+      Number(raw?.coinPackageAmount ?? DEFAULT_LOYALTY_EXCHANGE_RATES.coinPackageAmount) ||
+        DEFAULT_LOYALTY_EXCHANGE_RATES.coinPackageAmount
+    )
+  );
+  const voucherPackagePoints = Math.max(
+    1,
+    Math.round(
+      Number(raw?.voucherPackagePoints ?? DEFAULT_LOYALTY_EXCHANGE_RATES.voucherPackagePoints) ||
+        DEFAULT_LOYALTY_EXCHANGE_RATES.voucherPackagePoints
+    )
+  );
+  const voucherPackageAmount = Math.max(
+    1,
+    Math.round(
+      Number(raw?.voucherPackageAmount ?? DEFAULT_LOYALTY_EXCHANGE_RATES.voucherPackageAmount) ||
+        DEFAULT_LOYALTY_EXCHANGE_RATES.voucherPackageAmount
+    )
+  );
+
+  const achievementRewardOverrides: Record<string, number> = {};
+  if (raw?.achievementRewardOverrides && typeof raw.achievementRewardOverrides === 'object') {
+    for (const [k, v] of Object.entries(raw.achievementRewardOverrides)) {
+      const clean = Math.round(Number(v));
+      if (Number.isFinite(clean) && clean >= 0) {
+        achievementRewardOverrides[k] = clean;
+      }
+    }
+  }
+
   return {
     enabled: raw?.enabled !== false,
     dailyCheckInPoints: Math.max(1, Math.round(Number(raw?.dailyCheckInPoints ?? 25) || 25)),
@@ -52,12 +157,25 @@ export function normalizeLoyaltyAdminConfig(
       0,
       Math.round(Number(raw?.streakBonus7DaysPoints ?? 150) || 0)
     ),
-    rupiahPerPoint: Math.max(10, Math.round(Number(raw?.rupiahPerPoint ?? 500) || 500)),
-    coinPer100Points: Math.max(1, Math.round(Number(raw?.coinPer100Points ?? 15) || 15)),
-    pointsPerLevelVoucher: Math.max(
-      50,
-      Math.round(Number(raw?.pointsPerLevelVoucher ?? 200) || 200)
+    cashPackagePoints,
+    cashPackageAmount,
+    cashRedeemEnabled: raw?.cashRedeemEnabled !== false,
+    coinPackagePoints,
+    coinPackageAmount,
+    coinRedeemEnabled: raw?.coinRedeemEnabled !== false,
+    voucherPackagePoints,
+    voucherPackageAmount,
+    voucherRedeemEnabled: raw?.voucherRedeemEnabled !== false,
+    customRedeemPackages: sanitizeCustomRedeemPackages(raw?.customRedeemPackages),
+    dailyRedeemLimitEnabled: Boolean(raw?.dailyRedeemLimitEnabled),
+    dailyRedeemMaxCount: Math.max(
+      1,
+      Math.min(500, Math.round(Number(raw?.dailyRedeemMaxCount ?? 5) || 5))
     ),
+    achievementRewardOverrides,
+    rupiahPerPoint: Math.max(1, Math.round(cashPackageAmount / cashPackagePoints)),
+    coinPer100Points: Math.max(1, Math.round((coinPackageAmount / coinPackagePoints) * 100)),
+    pointsPerLevelVoucher: Math.max(1, Math.round(voucherPackagePoints / voucherPackageAmount)),
     recoveryCardDiamondPrice: Math.max(
       1,
       Math.round(Number(raw?.recoveryCardDiamondPrice ?? 25) || 25)
@@ -80,6 +198,162 @@ export function normalizeLoyaltyAdminConfig(
         : {},
     updatedAtMs: raw?.updatedAtMs,
   };
+}
+
+export interface ResolvedLoyaltyRedeemPackage {
+  id: string;
+  title: string;
+  description: string;
+  target: LoyaltyRedeemTarget;
+  pointsCost: number;
+  rewardAmount: number;
+  enabled: boolean;
+  isCustom: boolean;
+}
+
+export function formatLoyaltyRewardLabel(
+  target: LoyaltyRedeemTarget,
+  amount: number
+): string {
+  const clean = Math.max(0, Math.round(Number(amount) || 0));
+  if (target === 'cash') return formatRupiah(clean);
+  if (target === 'coin') return `${clean.toLocaleString('id-ID')} Coin`;
+  return `${clean.toLocaleString('id-ID')} Voucher Naik Level`;
+}
+
+export function getResolvedLoyaltyRedeemPackages(
+  rawConfig?: Partial<LoyaltyAdminConfig> | null
+): ResolvedLoyaltyRedeemPackage[] {
+  const cfg = normalizeLoyaltyAdminConfig(rawConfig);
+  const standardPackages: ResolvedLoyaltyRedeemPackage[] = [
+    {
+      id: 'std-cash',
+      title: 'Saldo Tunai',
+      description: 'Langsung masuk ke saldo utama rekening Bank Nusantara.',
+      target: 'cash',
+      pointsCost: cfg.cashPackagePoints || DEFAULT_LOYALTY_EXCHANGE_RATES.cashPackagePoints,
+      rewardAmount: cfg.cashPackageAmount || DEFAULT_LOYALTY_EXCHANGE_RATES.cashPackageAmount,
+      enabled: cfg.cashRedeemEnabled !== false,
+      isCustom: false,
+    },
+    {
+      id: 'std-coin',
+      title: 'Coin',
+      description: 'Masuk ke saldo Coin Spin Roda Keberuntungan & Game.',
+      target: 'coin',
+      pointsCost: cfg.coinPackagePoints || DEFAULT_LOYALTY_EXCHANGE_RATES.coinPackagePoints,
+      rewardAmount: cfg.coinPackageAmount || DEFAULT_LOYALTY_EXCHANGE_RATES.coinPackageAmount,
+      enabled: cfg.coinRedeemEnabled !== false,
+      isCustom: false,
+    },
+    {
+      id: 'std-voucher',
+      title: 'Voucher Naik Level',
+      description: 'Naikkan Level Pekerjaan instan tanpa biaya tunai.',
+      target: 'voucher',
+      pointsCost: cfg.voucherPackagePoints || DEFAULT_LOYALTY_EXCHANGE_RATES.voucherPackagePoints,
+      rewardAmount: cfg.voucherPackageAmount || DEFAULT_LOYALTY_EXCHANGE_RATES.voucherPackageAmount,
+      enabled: cfg.voucherRedeemEnabled !== false,
+      isCustom: false,
+    },
+  ];
+
+  const customPackages: ResolvedLoyaltyRedeemPackage[] = (cfg.customRedeemPackages || []).map(
+    (c) => ({
+      id: c.id,
+      title: c.title,
+      description:
+        c.description ||
+        (c.target === 'cash'
+          ? 'Paket kustom Saldo Tunai resmi dari Bank Nusantara.'
+          : c.target === 'coin'
+          ? 'Paket kustom Coin resmi dari Bank Nusantara.'
+          : 'Paket kustom Voucher Naik Level resmi dari Bank Nusantara.'),
+      target: c.target,
+      pointsCost: c.pointsCost,
+      rewardAmount: c.rewardAmount,
+      enabled: c.enabled !== false,
+      isCustom: true,
+    })
+  );
+
+  return [...standardPackages, ...customPackages];
+}
+
+export interface ExactPackageRedemptionCalculation {
+  packagesCount: number;
+  pointsSpent: number;
+  rawInputPoints: number;
+  remainderPoints: number;
+  rewardAmount: number;
+  rewardLabel: string;
+  maxAffordablePackages: number;
+  hasEnoughPoints: boolean;
+  remainingBalanceAfter: number;
+}
+
+export function calculateExactPackageRedemption(params: {
+  pkg: ResolvedLoyaltyRedeemPackage;
+  inputMode: 'multiplier' | 'points';
+  inputValue: number;
+  availablePoints: number;
+  isAdminCard: boolean;
+}): ExactPackageRedemptionCalculation {
+  const cost = Math.max(1, Math.round(params.pkg.pointsCost));
+  const rewardPerPkg = Math.max(1, Math.round(params.pkg.rewardAmount));
+  const cleanAvailable = Math.max(0, Math.floor(Number(params.availablePoints) || 0));
+  const cleanInput = Math.max(0, Math.floor(Number(params.inputValue) || 0));
+
+  let packagesCount = 0;
+  let pointsSpent = 0;
+  let rawInputPoints = 0;
+  let remainderPoints = 0;
+
+  if (params.inputMode === 'multiplier') {
+    packagesCount = cleanInput;
+    pointsSpent = packagesCount * cost;
+    rawInputPoints = pointsSpent;
+    remainderPoints = 0;
+  } else {
+    rawInputPoints = cleanInput;
+    packagesCount = Math.floor(rawInputPoints / cost);
+    pointsSpent = packagesCount * cost;
+    remainderPoints = rawInputPoints - pointsSpent;
+  }
+
+  const rewardAmount = packagesCount * rewardPerPkg;
+  const maxAffordablePackages = params.isAdminCard ? 10 : Math.floor(cleanAvailable / cost);
+  const hasEnoughPoints = params.isAdminCard
+    ? packagesCount > 0
+    : packagesCount > 0 && pointsSpent <= cleanAvailable;
+  const remainingBalanceAfter = params.isAdminCard
+    ? UNLIMITED_BALANCE
+    : Math.max(0, cleanAvailable - pointsSpent);
+
+  return {
+    packagesCount,
+    pointsSpent,
+    rawInputPoints,
+    remainderPoints,
+    rewardAmount,
+    rewardLabel: formatLoyaltyRewardLabel(params.pkg.target, rewardAmount),
+    maxAffordablePackages,
+    hasEnoughPoints,
+    remainingBalanceAfter,
+  };
+}
+
+export function getEffectiveAchievementRewardPoints(
+  achievementId: string,
+  defaultRewardPoints: number,
+  rawConfig?: Partial<LoyaltyAdminConfig> | null
+): number {
+  const cfg = normalizeLoyaltyAdminConfig(rawConfig);
+  const ov = cfg.achievementRewardOverrides?.[achievementId];
+  if (typeof ov === 'number' && Number.isFinite(ov) && ov >= 0) {
+    return Math.round(ov);
+  }
+  return Math.max(0, Math.round(defaultRewardPoints));
 }
 
 export function getWibDateString(nowMs: number = Date.now()): string {
@@ -136,6 +410,14 @@ export function ensureTodayLoyaltyAccountState(
         dailyClaimedMissionIds: Array.isArray(raw.dailyClaimedMissionIds)
           ? [...raw.dailyClaimedMissionIds]
           : [],
+        redemptionHistory: Array.isArray(raw.redemptionHistory)
+          ? (raw.redemptionHistory.slice(0, 50) as LoyaltyRedemptionRecord[])
+          : [],
+        dailyRedemptionDateWib: raw.dailyRedemptionDateWib || todayWib,
+        dailyRedemptionCount:
+          raw.dailyRedemptionDateWib === todayWib
+            ? Math.max(0, Math.round(Number(raw.dailyRedemptionCount ?? 0) || 0))
+            : 0,
         recoveryCards: Math.max(0, Math.round(Number(raw.recoveryCards ?? 0) || 0)),
         freezeStage: (raw.freezeStage ?? 0) as LoyaltyStreakFreezeStage,
         frozenStreakDays: Math.max(0, Math.round(Number(raw.frozenStreakDays ?? 0) || 0)),
@@ -153,16 +435,26 @@ export function ensureTodayLoyaltyAccountState(
         dailyActivityDateWib: todayWib,
         dailyCounters: {},
         dailyClaimedMissionIds: [],
+        dailyRedemptionDateWib: todayWib,
+        dailyRedemptionCount: 0,
+        redemptionHistory: [],
       };
 
-  if (base.dailyActivityDateWib !== todayWib) {
+  const resetRedemptionDaily = base.dailyRedemptionDateWib !== todayWib;
+  if (base.dailyActivityDateWib !== todayWib || resetRedemptionDaily) {
     return {
       ...base,
       dailyActivityDateWib: todayWib,
-      dailyCounters: {
-        online_visit: 1,
-      },
-      dailyClaimedMissionIds: [],
+      dailyCounters:
+        base.dailyActivityDateWib !== todayWib
+          ? {
+              online_visit: 1,
+            }
+          : base.dailyCounters,
+      dailyClaimedMissionIds:
+        base.dailyActivityDateWib !== todayWib ? [] : base.dailyClaimedMissionIds,
+      dailyRedemptionDateWib: todayWib,
+      dailyRedemptionCount: resetRedemptionDaily ? 0 : base.dailyRedemptionCount,
     };
   }
   return base;

@@ -35,6 +35,10 @@ import {
   RotateCcw,
   Link2,
   ArrowRight,
+  History,
+  X,
+  Camera,
+  ImageUp,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
@@ -43,19 +47,29 @@ import {
   DREAM_POCKET_PRESETS,
 } from '../data/socialAndBankingExtrasCatalog';
 import { DiamondText } from './DiamondIcon';
+import { QrisScannerModal } from './QrisScannerModal';
 import {
   LOYALTY_MISSION_CATEGORY_META,
   MANDATORY_TRANSFER_ADMIN_FEE_PERCENT,
+  ResolvedLoyaltyRedeemPackage,
+  calculateExactPackageRedemption,
   calculateMandatoryTransferFee,
   computeDailyTxActivityStats,
   computeStreakVisualSnapshot,
   ensureTodayLoyaltyAccountState,
   evaluateDailyLoyaltyMissionProgress,
+  formatLoyaltyRewardLabel,
+  getEffectiveAchievementRewardPoints,
   getEffectiveDailyLoyaltyMissions,
+  getResolvedLoyaltyRedeemPackages,
   getWibDateString,
   getWibResetCountdownText,
   normalizeLoyaltyAdminConfig,
 } from '../utils/loyaltySystemUtils';
+import {
+  isSelfQrisTransferTarget,
+  savePendingQrisTransfer,
+} from '../utils/qrisTransferUtils';
 import { LoyaltyDailyMissionCategory } from '../types/bank';
 
 export type MobileBankingExtraTabKey =
@@ -235,6 +249,10 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
   const [scanPayAmount, setScanPayAmount] = useState('');
   const [scanPayNote, setScanPayNote] = useState('');
   const [scanPayPin, setScanPayPin] = useState('');
+  const [qrisScannerModal, setQrisScannerModal] = useState<{
+    open: boolean;
+    mode: 'camera' | 'gallery';
+  }>({ open: false, mode: 'camera' });
 
   // State: Brankas & Freeze Kartu
   const [vaultAmount, setVaultAmount] = useState('');
@@ -242,7 +260,15 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
   const [freezePin, setFreezePin] = useState('');
 
   // State: Loyalty & 100 Misi Harian
-  const [redeemPointsInput, setRedeemPointsInput] = useState('200');
+  const [redeemDrafts, setRedeemDrafts] = useState<
+    Record<string, { mode: 'multiplier' | 'points'; value: string }>
+  >({});
+  const [pendingRedeemModal, setPendingRedeemModal] = useState<{
+    pkg: ResolvedLoyaltyRedeemPackage;
+    inputMode: 'multiplier' | 'points';
+    inputValue: number;
+  } | null>(null);
+  const [showAllRedeemHistory, setShowAllRedeemHistory] = useState<boolean>(false);
   const [recoveryBuyQty, setRecoveryBuyQty] = useState<number>(1);
   const [missionCategoryFilter, setMissionCategoryFilter] = useState<'all' | LoyaltyDailyMissionCategory>('all');
   const [missionStatusFilter, setMissionStatusFilter] = useState<'all' | 'ready' | 'in_progress' | 'claimed'>('all');
@@ -480,6 +506,59 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     showNotice({ success: true, message: 'Laporan analitik bulanan CSV berhasil diunduh!' });
   };
 
+  const isSelfScannedQris = Boolean(
+    currentAccount &&
+      parsedScanTarget.recipientAccount &&
+      isSelfQrisTransferTarget(
+        { recipientAccount: parsedScanTarget.recipientAccount },
+        currentAccount
+      )
+  );
+
+  const handleQrisModalDetected = (rawText: string, source: 'camera' | 'gallery') => {
+    setQrisScannerModal((prev) => ({ ...prev, open: false }));
+    setScanInputCode(rawText);
+    const detected = parseQrisTransferInput(rawText, accounts);
+    if (!detected.recipientAccount) {
+      showNotice({
+        success: false,
+        message: 'Kode QR yang dipindai bukan Link Transfer QRIS Pribadi Bank Nusantara.',
+      });
+      return;
+    }
+    if (
+      currentAccount &&
+      isSelfQrisTransferTarget({ recipientAccount: detected.recipientAccount }, currentAccount)
+    ) {
+      showNotice({
+        success: false,
+        message: `QRIS Pribadi ini milik rekening Anda sendiri (${currentAccount.fullName} · ${currentAccount.accountNumber}). Anda tidak dapat mentransfer ke rekening sendiri.`,
+      });
+      return;
+    }
+
+    savePendingQrisTransfer({
+      recipientAccount: detected.recipientAccount,
+      recipientBank: detected.recipientBank || 'Bank Nusantara',
+      recipientName: detected.recipientName,
+      amount: detected.amount > 0 ? detected.amount : undefined,
+      note: detected.note || 'Transfer via Scan QRIS Pribadi',
+      source,
+    });
+    window.dispatchEvent(
+      new CustomEvent('bn:qris-transfer', {
+        detail: {
+          recipientAccount: detected.recipientAccount,
+          recipientBank: detected.recipientBank || 'Bank Nusantara',
+          recipientName: detected.recipientName || '',
+          amount: detected.amount > 0 ? detected.amount : undefined,
+          note: detected.note || 'Transfer via Scan QRIS Pribadi',
+          source,
+        },
+      })
+    );
+  };
+
   const handleOpenScannedTransferPage = () => {
     if (!parsedScanTarget.recipientAccount) {
       showNotice({
@@ -488,6 +567,21 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
       });
       return;
     }
+    if (isSelfScannedQris) {
+      showNotice({
+        success: false,
+        message: `QRIS Pribadi ini milik rekening Anda sendiri (${currentAccount?.fullName} · ${currentAccount?.accountNumber}). Anda tidak dapat mentransfer ke rekening sendiri.`,
+      });
+      return;
+    }
+    savePendingQrisTransfer({
+      recipientAccount: parsedScanTarget.recipientAccount,
+      recipientBank: parsedScanTarget.recipientBank || 'Bank Nusantara',
+      recipientName: parsedScanTarget.recipientName,
+      amount: effectiveScanAmount > 0 ? effectiveScanAmount : undefined,
+      note: scanPayNote.trim() || parsedScanTarget.note || 'Transfer via Scan QRIS Pribadi',
+      source: 'manual',
+    });
     window.dispatchEvent(
       new CustomEvent('bn:qris-transfer', {
         detail: {
@@ -496,6 +590,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
           recipientName: parsedScanTarget.recipientName || '',
           amount: effectiveScanAmount > 0 ? effectiveScanAmount : undefined,
           note: scanPayNote.trim() || parsedScanTarget.note || 'Transfer via Scan QRIS Pribadi',
+          source: 'manual',
         },
       })
     );
@@ -505,6 +600,14 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     e.preventDefault();
     const targetAccount = parsedScanTarget.recipientAccount;
     const amountNum = effectiveScanAmount;
+
+    if (isSelfScannedQris) {
+      showNotice({
+        success: false,
+        message: `QRIS Pribadi ini milik rekening Anda sendiri (${currentAccount?.fullName} · ${currentAccount?.accountNumber}). Anda tidak dapat mentransfer ke rekening sendiri.`,
+      });
+      return;
+    }
 
     if (!targetAccount || amountNum < 1000) {
       showNotice({
@@ -861,9 +964,29 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
               </div>
             </div>
             <div className="space-y-3">
+              {/* Direct Camera & Gallery QR Scanner Triggers */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setQrisScannerModal({ open: true, mode: 'camera' })}
+                  className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-sky-500 hover:bg-sky-400 px-3.5 py-2.5 text-xs font-black text-slate-950 whitespace-nowrap cursor-pointer"
+                >
+                  <Camera className="h-4 w-4" />
+                  <span>Scan Kamera Langsung</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQrisScannerModal({ open: true, mode: 'gallery' })}
+                  className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/45 bg-emerald-500/15 hover:bg-emerald-500/25 px-3.5 py-2.5 text-xs font-black text-emerald-200 whitespace-nowrap cursor-pointer"
+                >
+                  <ImageUp className="h-4 w-4" />
+                  <span>Upload Gambar QR</span>
+                </button>
+              </div>
+
               <div>
                 <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                  Link Transfer QRIS / No. Rekening / User ID 16-digit
+                  Atau Tempel Link Transfer QRIS / No. Rekening / User ID 16-digit
                 </label>
                 <input
                   type="text"
@@ -874,7 +997,16 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                 />
               </div>
 
-              {parsedScanTarget.recipientAccount && (
+              {isSelfScannedQris && (
+                <div className="rounded-2xl border border-rose-500/50 bg-rose-950/60 p-3 text-xs text-rose-100 flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Ini adalah QRIS Pribadi milik rekening Anda sendiri.</strong> Anda tidak dapat melakukan transfer ke rekening sendiri — pindai QRIS milik nasabah lain.
+                  </span>
+                </div>
+              )}
+
+              {parsedScanTarget.recipientAccount && !isSelfScannedQris && (
                 <div className="rounded-2xl border border-sky-500/40 bg-sky-950/40 p-3 text-xs space-y-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sky-300 font-bold">Penerima Terdeteksi</span>
@@ -932,7 +1064,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                 />
               </div>
 
-              {effectiveScanAmount > 0 && (
+              {effectiveScanAmount > 0 && !isSelfScannedQris && (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-950/30 px-3.5 py-2.5 text-[11px] space-y-1">
                   <div className="flex justify-between text-slate-300">
                     <span>Nominal Kirim</span>
@@ -952,15 +1084,17 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <button
                   type="button"
+                  disabled={isSelfScannedQris}
                   onClick={handleOpenScannedTransferPage}
-                  className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white hover:bg-emerald-500 cursor-pointer"
+                  className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-black text-white hover:bg-emerald-500 disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
                 >
                   <ExternalLink className="h-4 w-4" />
                   <span>Lanjut ke Halaman Transfer</span>
                 </button>
                 <button
                   type="submit"
-                  className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-black text-white hover:bg-sky-500 cursor-pointer"
+                  disabled={isSelfScannedQris}
+                  className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-black text-white hover:bg-sky-500 disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
                 >
                   <ScanLine className="h-4 w-4" />
                   <span>Bayar Instan (+{MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}% Admin)</span>
@@ -968,6 +1102,13 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
               </div>
             </div>
           </form>
+
+          <QrisScannerModal
+            isOpen={qrisScannerModal.open}
+            initialMode={qrisScannerModal.mode}
+            onClose={() => setQrisScannerModal((prev) => ({ ...prev, open: false }))}
+            onDetected={handleQrisModalDetected}
+          />
         </div>
       )}
 
@@ -1056,20 +1197,69 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
 
       {/* ==================== 4. AUTO-STREAK ONLINE, KARTU PEMULIHAN, POIN LOYALTY & 100 MISI HARIAN NYATA ==================== */}
       {activeTab === 'loyalty' && (() => {
-        const redeemPts = Math.max(50, Math.round(Number(redeemPointsInput) || 200));
-        const estCash = redeemPts * (normalizedLoyaltyConfig.rupiahPerPoint || 500);
-        const estCoin = Math.max(
-          1,
-          Math.floor((redeemPts / 100) * (normalizedLoyaltyConfig.coinPer100Points || 15))
-        );
-        const estVoucher = Math.floor(
-          redeemPts / Math.max(50, normalizedLoyaltyConfig.pointsPerLevelVoucher || 200)
-        );
+        const resolvedPackages = getResolvedLoyaltyRedeemPackages(normalizedLoyaltyConfig);
+        const standardPackages = resolvedPackages.filter((p) => !p.isCustom);
+        const activeCustomPackages = resolvedPackages.filter((p) => p.isCustom && p.enabled);
+        const displayPackages = [...standardPackages, ...activeCustomPackages];
+        const todayRedeemCount = myLoyalty.dailyRedemptionCount || 0;
+        const dailyLimitReached =
+          !isAdminCard &&
+          Boolean(normalizedLoyaltyConfig.dailyRedeemLimitEnabled) &&
+          todayRedeemCount >= (normalizedLoyaltyConfig.dailyRedeemMaxCount || 5);
+        const redemptionHistory = myLoyalty.redemptionHistory || [];
+        const visibleHistory = showAllRedeemHistory
+          ? redemptionHistory
+          : redemptionHistory.slice(0, 5);
+
         const recPrice = normalizedLoyaltyConfig.recoveryCardDiamondPrice || 25;
         const recoveryStock = isAdminCard ? Number.MAX_SAFE_INTEGER : myLoyalty.recoveryCards || 0;
         const isFrozen3 = streakVisual.stage === 3;
         const isFrozen2 = streakVisual.stage === 2;
         const isFrozen1 = streakVisual.stage === 1;
+
+        const getDraft = (pkgId: string) =>
+          redeemDrafts[pkgId] || { mode: 'multiplier' as const, value: '1' };
+
+        const setDraft = (
+          pkgId: string,
+          next: { mode: 'multiplier' | 'points'; value: string }
+        ) => {
+          setRedeemDrafts((prev) => ({ ...prev, [pkgId]: next }));
+        };
+
+        const renderTargetIcon = (target: 'cash' | 'coin' | 'voucher', sizeClass = 'h-5 w-5') => {
+          if (target === 'cash') return <Banknote className={sizeClass} />;
+          if (target === 'coin') return <Coins className={sizeClass} />;
+          return <Ticket className={sizeClass} />;
+        };
+
+        const getTargetTheme = (target: 'cash' | 'coin' | 'voucher') => {
+          if (target === 'cash') {
+            return {
+              border: 'border-emerald-500/40',
+              iconWrap: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300',
+              accentText: 'text-emerald-300',
+              btnBg: 'bg-emerald-500 hover:bg-emerald-400 text-slate-950',
+              quickActive: 'border-emerald-400 bg-emerald-500/20 text-emerald-200',
+            };
+          }
+          if (target === 'coin') {
+            return {
+              border: 'border-amber-500/40',
+              iconWrap: 'bg-amber-500/15 border-amber-500/40 text-amber-300',
+              accentText: 'text-amber-300',
+              btnBg: 'bg-amber-400 hover:bg-amber-300 text-slate-950',
+              quickActive: 'border-amber-400 bg-amber-500/20 text-amber-200',
+            };
+          }
+          return {
+            border: 'border-violet-500/40',
+            iconWrap: 'bg-violet-500/15 border-violet-500/40 text-violet-300',
+            accentText: 'text-violet-300',
+            btnBg: 'bg-violet-500 hover:bg-violet-400 text-white',
+            quickActive: 'border-violet-400 bg-violet-500/20 text-violet-200',
+          };
+        };
 
         const streakCardClass = isFrozen3
           ? 'border-cyan-400/70 bg-gradient-to-br from-slate-950 via-cyan-950/70 to-sky-950/80'
@@ -1300,92 +1490,346 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                   </div>
                 </div>
 
-                {/* Point Redemption Card — ICON + NAME (TANPA DIAMOND!) */}
-                <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 space-y-3.5">
-                  <div>
-                    <p className="text-sm font-black text-white flex items-center gap-2">
-                      <Gift className="h-4 w-4 text-emerald-400" />
-                      <span>Tukar Poin Loyalty ke Hadiah</span>
-                    </p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Pilih tujuan penukaran di bawah ini (Penukaran ke Diamond tidak tersedia)
-                    </p>
+                {/* Point Redemption Section — 3 LARGE ICON+NAME CARDS + CUSTOM PACKAGES (NO DIAMOND!) */}
+                <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-5 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-800 pb-3">
+                    <div>
+                      <p className="text-sm font-black text-white flex items-center gap-2">
+                        <Gift className="h-4 w-4 text-emerald-400" />
+                        <span>Tukar Poin Loyalty ke Hadiah</span>
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Pilih paket kelipatan atau isi poin bebas — hanya kelipatan pas yang dipotong, sisa poin tetap utuh.
+                      </p>
+                    </div>
+                    {normalizedLoyaltyConfig.dailyRedeemLimitEnabled && (
+                      <div
+                        className={`rounded-xl border px-2.5 py-1 text-[11px] font-bold tabular-nums ${
+                          dailyLimitReached
+                            ? 'border-rose-500/40 bg-rose-950/60 text-rose-300'
+                            : 'border-slate-700 bg-slate-950 text-slate-300'
+                        }`}
+                      >
+                        {isAdminCard
+                          ? 'Kuota Harian: Bebas (Admin)'
+                          : `Kuota Hari Ini: ${todayRedeemCount}/${normalizedLoyaltyConfig.dailyRedeemMaxCount || 5}x`}
+                      </div>
+                    )}
                   </div>
 
                   {isAdminCard && (
-                    <p className="text-[11px] font-semibold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-xl px-3 py-2">
-                      Kartu Tier Admin: Poin Loyalty &amp; Kartu Pemulihan bernilai ∞ selamanya dan tidak pernah berkurang saat ditukar.
-                    </p>
+                    <div className="text-[11px] font-semibold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-xl px-3 py-2">
+                      Kartu Tier Admin: Poin Loyalty &amp; aset bernilai ∞ selamanya dan tidak pernah berkurang saat ditukar.
+                    </div>
                   )}
 
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-[11px] text-slate-400">
-                      <span>Jumlah Poin Ditukar (min. 50)</span>
-                      <div className="flex gap-1">
-                        {[100, 200, 500, 1000].map((preset) => (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => setRedeemPointsInput(String(preset))}
-                            className="rounded-md border border-slate-700 bg-slate-950 px-2 py-0.5 text-[10px] font-bold text-slate-300 hover:border-amber-400 hover:text-amber-300 cursor-pointer"
-                          >
-                            {preset}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <input
-                      type="number"
-                      min={50}
-                      step={50}
-                      value={redeemPointsInput}
-                      onChange={(e) => setRedeemPointsInput(e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm font-black text-white tabular-nums"
-                    />
+                  {/* 3 Large Cards + Active Custom Packages */}
+                  <div className="space-y-3">
+                    {displayPackages.map((pkg) => {
+                      const theme = getTargetTheme(pkg.target);
+                      const draft = getDraft(pkg.id);
+                      const numericInput = Math.max(0, Math.floor(Number(draft.value) || 0));
+                      const calc = calculateExactPackageRedemption({
+                        pkg,
+                        inputMode: draft.mode,
+                        inputValue: numericInput,
+                        availablePoints: isAdminCard ? Number.MAX_SAFE_INTEGER : myLoyalty.points,
+                        isAdminCard,
+                      });
+                      const maxPack = calc.maxAffordablePackages;
+                      const canOpenConfirm =
+                        pkg.enabled &&
+                        !dailyLimitReached &&
+                        calc.packagesCount >= 1 &&
+                        calc.hasEnoughPoints;
+
+                      return (
+                        <div
+                          key={pkg.id}
+                          className={`rounded-2xl border p-4 space-y-3 transition ${
+                            pkg.enabled
+                              ? `${theme.border} bg-slate-950/80`
+                              : 'border-slate-800 bg-slate-950/40 opacity-65'
+                          }`}
+                        >
+                          {/* Card Header: Icon + Name + Clear Rate */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div
+                                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${theme.iconWrap}`}
+                              >
+                                {renderTargetIcon(pkg.target, 'h-5 w-5')}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="text-sm font-black text-white truncate">
+                                    {pkg.title}
+                                  </h4>
+                                  {pkg.isCustom && (
+                                    <span className="rounded-md border border-cyan-500/40 bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-black text-cyan-300">
+                                      PAKET SPESIAL
+                                    </span>
+                                  )}
+                                  {!pkg.enabled && (
+                                    <span className="rounded-md border border-rose-500/40 bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-black text-rose-300">
+                                      NONAKTIF
+                                    </span>
+                                  )}
+                                </div>
+                                <p className={`text-xs font-black tabular-nums mt-0.5 ${theme.accentText}`}>
+                                  {pkg.pointsCost.toLocaleString('id-ID')} Poin ={' '}
+                                  {formatLoyaltyRewardLabel(pkg.target, pkg.rewardAmount)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {pkg.enabled ? (
+                            <>
+                              {/* Quick Multiplier Buttons: 1x, 2x, 5x, Maksimal */}
+                              <div className="grid grid-cols-4 gap-1.5">
+                                {[1, 2, 5].map((mult) => {
+                                  const isSelected =
+                                    draft.mode === 'multiplier' && numericInput === mult;
+                                  return (
+                                    <button
+                                      key={mult}
+                                      type="button"
+                                      onClick={() =>
+                                        setDraft(pkg.id, { mode: 'multiplier', value: String(mult) })
+                                      }
+                                      className={`min-h-[36px] rounded-xl border px-2 py-1.5 text-xs font-black tabular-nums whitespace-nowrap transition cursor-pointer ${
+                                        isSelected
+                                          ? theme.quickActive
+                                          : 'border-slate-800 bg-slate-900 text-slate-300 hover:border-slate-600 hover:text-white'
+                                      }`}
+                                    >
+                                      {mult}x
+                                    </button>
+                                  );
+                                })}
+                                <button
+                                  type="button"
+                                  disabled={!isAdminCard && maxPack < 1}
+                                  onClick={() =>
+                                    setDraft(pkg.id, {
+                                      mode: 'multiplier',
+                                      value: String(Math.max(1, maxPack)),
+                                    })
+                                  }
+                                  className={`min-h-[36px] rounded-xl border px-2 py-1.5 text-xs font-black whitespace-nowrap transition ${
+                                    !isAdminCard && maxPack < 1
+                                      ? 'border-slate-800 bg-slate-900/50 text-slate-600 cursor-not-allowed'
+                                      : draft.mode === 'multiplier' && numericInput === maxPack && maxPack > 0
+                                      ? theme.quickActive + ' cursor-pointer'
+                                      : 'border-slate-800 bg-slate-900 text-slate-200 hover:border-slate-600 cursor-pointer'
+                                  }`}
+                                >
+                                  {isAdminCard ? '10x' : `Maks (${maxPack}x)`}
+                                </button>
+                              </div>
+
+                              {/* Custom Input Mode Switch + Field */}
+                              <div className="grid grid-cols-12 gap-2 items-center">
+                                <div className="col-span-5 flex rounded-xl border border-slate-800 bg-slate-900 p-0.5 text-[10px] font-bold">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDraft(pkg.id, {
+                                        mode: 'multiplier',
+                                        value: String(Math.max(1, calc.packagesCount || 1)),
+                                      })
+                                    }
+                                    className={`flex-1 rounded-lg py-1.5 text-center transition cursor-pointer ${
+                                      draft.mode === 'multiplier'
+                                        ? 'bg-slate-800 text-white'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                  >
+                                    Kelipatan
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDraft(pkg.id, {
+                                        mode: 'points',
+                                        value: String(
+                                          Math.max(pkg.pointsCost, calc.pointsSpent || pkg.pointsCost)
+                                        ),
+                                      })
+                                    }
+                                    className={`flex-1 rounded-lg py-1.5 text-center transition cursor-pointer ${
+                                      draft.mode === 'points'
+                                        ? 'bg-slate-800 text-white'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                  >
+                                    Poin Bebas
+                                  </button>
+                                </div>
+                                <div className="col-span-7 relative">
+                                  <input
+                                    type="number"
+                                    min={draft.mode === 'multiplier' ? 1 : pkg.pointsCost}
+                                    step={draft.mode === 'multiplier' ? 1 : 50}
+                                    value={draft.value}
+                                    onChange={(e) =>
+                                      setDraft(pkg.id, { mode: draft.mode, value: e.target.value })
+                                    }
+                                    aria-label={
+                                      draft.mode === 'multiplier'
+                                        ? `Jumlah paket ${pkg.title}`
+                                        : `Jumlah poin untuk ${pkg.title}`
+                                    }
+                                    className="w-full rounded-xl border border-slate-700 bg-slate-900 pl-3 pr-14 py-2 text-xs font-black text-white tabular-nums focus:border-amber-400 focus:outline-none"
+                                  />
+                                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
+                                    {draft.mode === 'multiplier' ? 'paket' : 'poin'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Live Exact-Multiple & Remainder Calculation Strip */}
+                              <div className="rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-[11px] space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-slate-400">Estimasi Terima ({calc.packagesCount}x):</span>
+                                  <strong className={`font-black tabular-nums ${theme.accentText}`}>
+                                    +{calc.rewardLabel}
+                                  </strong>
+                                </div>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-slate-400">Poin Dipotong Pas:</span>
+                                  <span className="font-mono font-bold text-white tabular-nums">
+                                    {isAdminCard
+                                      ? '0 Poin (Tier Admin ∞)'
+                                      : `${calc.pointsSpent.toLocaleString('id-ID')} Poin`}
+                                  </span>
+                                </div>
+                                {draft.mode === 'points' && calc.remainderPoints > 0 && (
+                                  <p className="text-[10px] font-bold text-emerald-300 pt-0.5">
+                                    Sisa {calc.remainderPoints.toLocaleString('id-ID')} poin di luar kelipatan tidak dipotong dan tetap utuh di akun Anda.
+                                  </p>
+                                )}
+                                {calc.packagesCount < 1 && (
+                                  <p className="text-[10px] font-bold text-amber-300 pt-0.5">
+                                    Minimal {pkg.pointsCost.toLocaleString('id-ID')} Poin untuk 1x paket {pkg.title}.
+                                  </p>
+                                )}
+                                {calc.packagesCount >= 1 && !calc.hasEnoughPoints && !isAdminCard && (
+                                  <p className="text-[10px] font-bold text-rose-300 pt-0.5">
+                                    Poin kurang {(calc.pointsSpent - myLoyalty.points).toLocaleString('id-ID')} poin (Tersedia {myLoyalty.points.toLocaleString('id-ID')} Poin).
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Action Button -> Opens One-Click Confirmation Modal (NO PIN) */}
+                              <button
+                                type="button"
+                                disabled={!canOpenConfirm}
+                                onClick={() =>
+                                  setPendingRedeemModal({
+                                    pkg,
+                                    inputMode: draft.mode,
+                                    inputValue: numericInput,
+                                  })
+                                }
+                                className={`w-full min-h-[42px] rounded-xl px-4 py-2.5 text-xs font-black whitespace-nowrap transition ${
+                                  canOpenConfirm
+                                    ? `${theme.btnBg} cursor-pointer`
+                                    : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                }`}
+                              >
+                                {dailyLimitReached
+                                  ? 'Batas Penukaran Harian Tercapai'
+                                  : `Tukar ${pkg.title}`}
+                              </button>
+                            </>
+                          ) : (
+                            <p className="text-[11px] text-slate-400">
+                              Opsi penukaran {pkg.title} sedang dinonaktifkan sementara oleh Admin.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => showNotice(redeemLoyaltyPoints(redeemPts, 'cash'))}
-                      className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-emerald-500/40 bg-emerald-600/20 hover:bg-emerald-600/30 px-3 py-3 text-center transition cursor-pointer"
-                    >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-300">
-                        <Banknote className="h-4 w-4" />
-                      </div>
-                      <span className="text-xs font-black text-white">Saldo Tunai</span>
-                      <span className="text-[10px] font-bold text-emerald-300 tabular-nums">
-                        +{formatRupiah(estCash)}
+                  {/* Riwayat Penukaran Loyalty */}
+                  <div className="pt-2 border-t border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-black text-white flex items-center gap-1.5">
+                        <History className="h-3.5 w-3.5 text-cyan-400" />
+                        <span>Riwayat Penukaran Loyalty ({redemptionHistory.length})</span>
+                      </p>
+                      <span className="text-[10px] text-slate-400">
+                        Tercatat di Mutasi Rekening
                       </span>
-                    </button>
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={() => showNotice(redeemLoyaltyPoints(redeemPts, 'coin'))}
-                      className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-amber-500/40 bg-amber-600/20 hover:bg-amber-600/30 px-3 py-3 text-center transition cursor-pointer"
-                    >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-500/20 text-amber-300">
-                        <Coins className="h-4 w-4" />
+                    {visibleHistory.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-800 bg-slate-950/60 px-3 py-4 text-center text-[11px] text-slate-400">
+                        Belum ada penukaran Poin Loyalty. Pilih salah satu kartu di atas untuk mulai menukar.
                       </div>
-                      <span className="text-xs font-black text-white">Coin</span>
-                      <span className="text-[10px] font-bold text-amber-300 tabular-nums">
-                        +{estCoin.toLocaleString('id-ID')} Coin
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => showNotice(redeemLoyaltyPoints(redeemPts, 'voucher'))}
-                      className="flex flex-col items-center justify-center gap-1 rounded-2xl border border-violet-500/40 bg-violet-600/20 hover:bg-violet-600/30 px-3 py-3 text-center transition cursor-pointer"
-                    >
-                      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/20 text-violet-300">
-                        <Ticket className="h-4 w-4" />
+                    ) : (
+                      <div className="space-y-1.5">
+                        {visibleHistory.map((item) => {
+                          const tTheme = getTargetTheme(item.target);
+                          const dateStr = (() => {
+                            try {
+                              return new Date(item.timestampIso).toLocaleString('id-ID', {
+                                day: '2-digit',
+                                month: 'short',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              });
+                            } catch {
+                              return item.timestampIso;
+                            }
+                          })();
+                          return (
+                            <div
+                              key={item.id}
+                              className="flex items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-[11px]"
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div
+                                  className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${tTheme.iconWrap}`}
+                                >
+                                  {renderTargetIcon(item.target, 'h-3.5 w-3.5')}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-bold text-white truncate">
+                                    {item.packageTitle} ({item.packagesCount}x)
+                                  </p>
+                                  <p className="text-[10px] text-slate-400 font-mono truncate">
+                                    {dateStr} · Ref {item.referenceNo}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className={`font-black tabular-nums ${tTheme.accentText}`}>
+                                  +{item.rewardLabel}
+                                </p>
+                                <p className="text-[10px] font-mono text-slate-400 tabular-nums">
+                                  -{item.pointsSpent.toLocaleString('id-ID')} Poin
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {redemptionHistory.length > 5 && (
+                          <button
+                            type="button"
+                            onClick={() => setShowAllRedeemHistory((v) => !v)}
+                            className="w-full rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-800 py-1.5 text-[11px] font-bold text-slate-300 cursor-pointer"
+                          >
+                            {showAllRedeemHistory
+                              ? 'Tampilkan Ringkas (5 Terbaru)'
+                              : `Lihat Semua Riwayat (${redemptionHistory.length})`}
+                          </button>
+                        )}
                       </div>
-                      <span className="text-xs font-black text-white">Voucher Naik Level</span>
-                      <span className="text-[10px] font-bold text-violet-300 tabular-nums">
-                        +{estVoucher} Voucher
-                      </span>
-                    </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1664,6 +2108,11 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                   <div className="space-y-2.5">
                     {DAILY_ACHIEVEMENT_CATALOG.map((ach) => {
                       const claimed = myLoyalty.claimedAchievementIds.includes(ach.id);
+                      const effectiveAchPts = getEffectiveAchievementRewardPoints(
+                        ach.id,
+                        ach.rewardPoints,
+                        normalizedLoyaltyConfig
+                      );
                       const eligible = ach.check({
                         txCount: currentAccountTransactions.length,
                         dreamPocketCount: myDreamPockets.length,
@@ -1684,7 +2133,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                             type="button"
                             disabled={claimed || !eligible}
                             onClick={() => showNotice(claimAchievementReward(ach.id))}
-                            className={`rounded-xl px-3.5 py-2 text-xs font-black transition ${
+                            className={`rounded-xl px-3.5 py-2 text-xs font-black transition whitespace-nowrap ${
                               claimed
                                 ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/30 cursor-default'
                                 : eligible
@@ -1695,8 +2144,8 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                             {claimed
                               ? 'Sudah Diklaim'
                               : eligible
-                              ? `Klaim +${ach.rewardPoints} Poin`
-                              : 'Belum Memenuhi'}
+                              ? `Klaim +${effectiveAchPts.toLocaleString('id-ID')} Poin`
+                              : `+${effectiveAchPts.toLocaleString('id-ID')} Poin`}
                           </button>
                         </div>
                       );
@@ -1705,6 +2154,133 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                 )}
               </div>
             </div>
+
+            {/* ONE-CLICK CONFIRMATION SUMMARY MODAL (TANPA PIN) */}
+            {pendingRedeemModal && (() => {
+              const mPkg = pendingRedeemModal.pkg;
+              const mTheme = getTargetTheme(mPkg.target);
+              const mCalc = calculateExactPackageRedemption({
+                pkg: mPkg,
+                inputMode: pendingRedeemModal.inputMode,
+                inputValue: pendingRedeemModal.inputValue,
+                availablePoints: isAdminCard ? Number.MAX_SAFE_INTEGER : myLoyalty.points,
+                isAdminCard,
+              });
+              return (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label="Konfirmasi Penukaran Poin Loyalty"
+                >
+                  <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 p-5 shadow-2xl space-y-4">
+                    <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${mTheme.iconWrap}`}
+                        >
+                          {renderTargetIcon(mPkg.target, 'h-5 w-5')}
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-black text-white">
+                            Konfirmasi Penukaran Poin
+                          </h4>
+                          <p className="text-[11px] text-slate-400">
+                            Satu klik langsung cair tanpa PIN — tercatat otomatis di Mutasi Rekening.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPendingRedeemModal(null)}
+                        aria-label="Tutup modal konfirmasi"
+                        className="rounded-lg border border-slate-800 bg-slate-950 p-1.5 text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-2.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Tujuan Hadiah</span>
+                        <span className="font-black text-white">{mPkg.title}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Kurs Paket</span>
+                        <span className="font-mono font-bold text-slate-200 tabular-nums">
+                          {mPkg.pointsCost.toLocaleString('id-ID')} Poin ={' '}
+                          {formatLoyaltyRewardLabel(mPkg.target, mPkg.rewardAmount)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Jumlah Paket</span>
+                        <span className="font-mono font-black text-white tabular-nums">
+                          {mCalc.packagesCount}x Paket
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 border-t border-slate-800 pt-2">
+                        <span className="text-slate-400">Poin Dipotong Pas</span>
+                        <span className="font-mono font-black text-rose-300 tabular-nums">
+                          {isAdminCard
+                            ? '0 Poin (Admin ∞)'
+                            : `-${mCalc.pointsSpent.toLocaleString('id-ID')} Poin`}
+                        </span>
+                      </div>
+                      {pendingRedeemModal.inputMode === 'points' && mCalc.remainderPoints > 0 && (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-slate-400">Sisa di Luar Kelipatan</span>
+                          <span className="font-mono font-bold text-emerald-300 tabular-nums">
+                            {mCalc.remainderPoints.toLocaleString('id-ID')} Poin (Tetap Utuh)
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-slate-400">Hadiah Diterima</span>
+                        <span className={`font-black text-sm tabular-nums ${mTheme.accentText}`}>
+                          +{mCalc.rewardLabel}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 border-t border-slate-800 pt-2">
+                        <span className="text-slate-400">Sisa Saldo Poin Setelah Tukar</span>
+                        <span className="font-mono font-black text-white tabular-nums">
+                          {isAdminCard
+                            ? '∞ (Admin)'
+                            : `${mCalc.remainingBalanceAfter.toLocaleString('id-ID')} Poin`}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setPendingRedeemModal(null)}
+                        className="min-h-[42px] rounded-xl border border-slate-700 bg-slate-950 hover:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-200 whitespace-nowrap cursor-pointer"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = redeemLoyaltyPoints(
+                            pendingRedeemModal.inputValue,
+                            mPkg.id,
+                            {
+                              inputMode: pendingRedeemModal.inputMode,
+                              packageId: mPkg.id,
+                            }
+                          );
+                          setPendingRedeemModal(null);
+                          showNotice(res);
+                        }}
+                        className={`min-h-[42px] rounded-xl px-4 py-2 text-xs font-black whitespace-nowrap cursor-pointer ${mTheme.btnBg}`}
+                      >
+                        Konfirmasi &amp; Tukar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}

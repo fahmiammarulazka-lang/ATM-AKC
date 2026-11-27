@@ -18,6 +18,12 @@ import {
   Wallet,
   Eye,
   EyeOff,
+  Camera,
+  ImageUp,
+  QrCode,
+  ShieldAlert,
+  ReceiptText,
+  X,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { TransferBebasAssetMode } from '../types/bank';
@@ -28,10 +34,17 @@ import {
   SUPPORTED_BANKS,
 } from '../utils/bankUtils';
 import { TransferBebasPanel } from './TransferBebasPanel';
+import { QrisScannerModal } from './QrisScannerModal';
 import {
   MANDATORY_TRANSFER_ADMIN_FEE_PERCENT,
   calculateMandatoryTransferFee,
 } from '../utils/loyaltySystemUtils';
+import {
+  clearPendingQrisTransfer,
+  isSelfQrisTransferTarget,
+  parsePersonalQrisPayload,
+  savePendingQrisTransfer,
+} from '../utils/qrisTransferUtils';
 
 interface TransferWorkspaceProps {
   standalone?: boolean;
@@ -93,6 +106,26 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
   const [saveAsFav, setSaveAsFav] = useState<boolean>(false);
   const [peekSenderAccount, setPeekSenderAccount] = useState<boolean>(false);
   const [isQrisPrefillBanner, setIsQrisPrefillBanner] = useState<boolean>(Boolean(prefillFromQris));
+  const [qrisPrefillRecipientLabel, setQrisPrefillRecipientLabel] = useState<string>(
+    prefillRecipientName || ''
+  );
+  const [qrisSelfScanAlert, setQrisSelfScanAlert] = useState<string>('');
+  const [qrisScannerModal, setQrisScannerModal] = useState<{
+    open: boolean;
+    mode: 'camera' | 'gallery';
+  }>({ open: false, mode: 'camera' });
+  const [transferReceipt, setTransferReceipt] = useState<{
+    referenceNo: string;
+    timestampText: string;
+    recipientName: string;
+    recipientAccount: string;
+    recipientBank: string;
+    amount: number;
+    adminFee: number;
+    totalDeducted: number;
+    note: string;
+    fromQris: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (initialMode) {
@@ -102,9 +135,20 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
 
   useEffect(() => {
     if (prefillAccount) {
+      if (currentAccount && isSelfQrisTransferTarget({ recipientAccount: prefillAccount }, currentAccount)) {
+        clearPendingQrisTransfer();
+        setIsQrisPrefillBanner(false);
+        setQrisSelfScanAlert(
+          `QRIS Pribadi ini milik rekening Anda sendiri (${currentAccount.fullName} · ${currentAccount.accountNumber}). Anda tidak dapat mentransfer ke rekening sendiri.`
+        );
+        return;
+      }
+
       const targetBank = prefillBank || 'Bank Nusantara';
+      setQrisSelfScanAlert('');
       setDestAccount(prefillAccount);
       setDestBank(targetBank);
+      setQrisPrefillRecipientLabel(prefillRecipientName || '');
       if (prefillAmount && prefillAmount > 0) {
         setTransferAmount(String(Math.round(prefillAmount)));
       }
@@ -133,6 +177,7 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
     prefillRecipientName,
     routeKey,
     lookupAccount,
+    currentAccount,
   ]);
 
   if (!currentAccount) {
@@ -191,9 +236,33 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
     });
 
     if (res.success) {
+      const feePaid = calculateMandatoryTransferFee(amt);
+      const wasFromQris = isQrisPrefillBanner;
+      const finalRecipientName =
+        recipientLookup?.name || qrisPrefillRecipientLabel || destAccount;
       if (saveAsFav && recipientLookup?.name) {
         addFavorite(destAccount, recipientLookup.name, destBank, transferNote);
       }
+      clearPendingQrisTransfer();
+      setTransferReceipt({
+        referenceNo: `TRF${Date.now().toString().slice(-8)}`,
+        timestampText: new Date().toLocaleString('id-ID', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        recipientName: finalRecipientName,
+        recipientAccount: destAccount,
+        recipientBank: destBank,
+        amount: amt,
+        adminFee: feePaid,
+        totalDeducted: amt + feePaid,
+        note: transferNote || (wasFromQris ? 'Transfer via Scan QRIS Pribadi' : '-'),
+        fromQris: wasFromQris,
+      });
+      setIsQrisPrefillBanner(false);
       setShowTransferConfirmModal(false);
       setTransferAmount('');
       setTransferNote('');
@@ -206,6 +275,58 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
       }
     } else {
       setTransferError(res.message);
+    }
+  };
+
+  const handleQrisDetectedInWorkspace = (rawText: string, source: 'camera' | 'gallery') => {
+    setQrisScannerModal((prev) => ({ ...prev, open: false }));
+    const parsed = parsePersonalQrisPayload(rawText);
+    if (!parsed.recipientAccount) {
+      setTransferError(
+        'Kode QR yang dipindai tidak dikenali sebagai QRIS Pribadi Bank Nusantara.'
+      );
+      return;
+    }
+    if (isSelfQrisTransferTarget(parsed, currentAccount)) {
+      clearPendingQrisTransfer();
+      setIsQrisPrefillBanner(false);
+      setQrisSelfScanAlert(
+        `QRIS Pribadi ini milik rekening Anda sendiri (${currentAccount.fullName} · ${currentAccount.accountNumber}). Anda tidak dapat mentransfer ke rekening sendiri.`
+      );
+      return;
+    }
+
+    setQrisSelfScanAlert('');
+    setTransferError('');
+    setTransferReceipt(null);
+    setTransferMode('reguler');
+    savePendingQrisTransfer({
+      recipientAccount: parsed.recipientAccount,
+      recipientUserId: parsed.recipientUserId,
+      recipientBank: parsed.recipientBank || 'Bank Nusantara',
+      recipientName: parsed.recipientName,
+      amount: parsed.amount > 0 ? parsed.amount : undefined,
+      note: parsed.note || 'Transfer via Scan QRIS Pribadi',
+      source,
+    });
+    setDestAccount(parsed.recipientAccount);
+    setDestBank(parsed.recipientBank || 'Bank Nusantara');
+    setQrisPrefillRecipientLabel(parsed.recipientName || '');
+    if (parsed.amount > 0) {
+      setTransferAmount(String(parsed.amount));
+    }
+    setTransferNote(parsed.note || 'Transfer via Scan QRIS Pribadi');
+    setIsQrisPrefillBanner(true);
+    const looked = lookupAccount(
+      parsed.recipientAccount,
+      parsed.recipientBank === 'Bank Nusantara' ? 'BNUS' : parsed.recipientBank
+    );
+    if (looked.found) {
+      setRecipientLookup(looked);
+    } else if (parsed.recipientName) {
+      setRecipientLookup({ found: true, name: parsed.recipientName });
+    } else {
+      setRecipientLookup(null);
     }
   };
 
@@ -311,7 +432,113 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
         </div>
       )}
 
-      {transferSuccess && (
+      {/* Struk Digital Berhasil + Tombol Kembali */}
+      {transferReceipt && (
+        <div className="rounded-3xl border border-emerald-500/45 bg-slate-900 p-5 space-y-4 shadow-xl">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 pb-3.5">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-emerald-500/40 bg-emerald-500/15 text-emerald-300">
+                <ReceiptText className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-emerald-300">
+                  Struk Transfer Berhasil{transferReceipt.fromQris ? ' (Scan QRIS Pribadi)' : ''}
+                </h3>
+                <p className="text-[11px] font-mono text-slate-400">
+                  Ref {transferReceipt.referenceNo} · {transferReceipt.timestampText}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTransferReceipt(null)}
+              aria-label="Tutup struk transfer"
+              className="rounded-lg border border-slate-800 bg-slate-950 p-1.5 text-slate-400 hover:text-white cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-2xl border border-slate-800 bg-slate-950 p-4 text-xs">
+            <div className="space-y-1.5">
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Penerima</span>
+                <span className="font-black text-white text-right">{transferReceipt.recipientName}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">No. Rekening</span>
+                <span className="font-mono font-bold text-amber-300">{transferReceipt.recipientAccount}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Bank Tujuan</span>
+                <span className="font-bold text-slate-200">{transferReceipt.recipientBank}</span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Catatan</span>
+                <span className="text-slate-300 text-right">{transferReceipt.note}</span>
+              </div>
+            </div>
+            <div className="space-y-1.5 border-t sm:border-t-0 sm:border-l border-slate-800 pt-2 sm:pt-0 sm:pl-4">
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">Nominal Kirim</span>
+                <span className="font-mono font-bold text-white tabular-nums">
+                  {formatRupiah(transferReceipt.amount)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-2">
+                <span className="text-slate-400">
+                  Biaya Admin Wajib ({MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%)
+                </span>
+                <span className="font-mono font-bold text-amber-300 tabular-nums">
+                  {formatRupiah(transferReceipt.adminFee)}
+                </span>
+              </div>
+              <div className="flex justify-between gap-2 border-t border-slate-800 pt-1.5">
+                <span className="font-bold text-slate-200">Total Dipotong</span>
+                <span className="font-mono font-black text-emerald-300 tabular-nums">
+                  {formatRupiah(transferReceipt.totalDeducted)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {onNavigateToDashboard && (
+              <button
+                type="button"
+                onClick={onNavigateToDashboard}
+                className="min-h-[42px] inline-flex items-center gap-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 px-4 py-2 text-xs font-black text-slate-950 whitespace-nowrap cursor-pointer"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Kembali ke Dashboard</span>
+              </button>
+            )}
+            {onNavigateToMutasi && (
+              <button
+                type="button"
+                onClick={onNavigateToMutasi}
+                className="min-h-[42px] inline-flex items-center gap-1.5 rounded-xl border border-blue-500/40 bg-blue-600/20 hover:bg-blue-600/30 px-4 py-2 text-xs font-bold text-blue-200 whitespace-nowrap cursor-pointer"
+              >
+                <History className="h-4 w-4" />
+                <span>Lihat Mutasi Rekening</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setTransferReceipt(null);
+                setTransferSuccess('');
+              }}
+              className="min-h-[42px] inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-950 hover:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-200 whitespace-nowrap cursor-pointer"
+            >
+              <Send className="h-3.5 w-3.5" />
+              <span>Transfer Lagi</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {transferSuccess && !transferReceipt && (
         <div className="p-3.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-200 text-xs flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -329,7 +556,36 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
         </div>
       )}
 
-      {/* Segmented Mode Switcher inside Transfer */}
+      {/* Self-Scan Guard Warning */}
+      {qrisSelfScanAlert && (
+        <div className="rounded-2xl border border-rose-500/50 bg-rose-950/80 p-4 text-xs text-rose-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0" />
+            <span>{qrisSelfScanAlert}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setQrisSelfScanAlert('');
+                setQrisScannerModal({ open: true, mode: 'camera' });
+              }}
+              className="min-h-[38px] rounded-xl bg-rose-500 hover:bg-rose-400 px-3.5 py-1.5 text-xs font-black text-slate-950 whitespace-nowrap cursor-pointer"
+            >
+              Scan QRIS Lain
+            </button>
+            <button
+              type="button"
+              onClick={() => setQrisSelfScanAlert('')}
+              className="text-rose-300 hover:text-white font-bold cursor-pointer px-2 py-1"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Segmented Mode Switcher + Quick QRIS Camera / Gallery Buttons */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-900/90 border border-slate-800 p-3">
         <div className="flex items-center gap-1.5 p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold overflow-x-auto">
           <button
@@ -355,34 +611,97 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
             Transfer Bebas 5% (Uang, Coin &amp; Emas)
           </button>
         </div>
-        <span className="text-xs text-slate-400">
-          {transferMode === 'bebas'
-            ? `Kirim Uang, Coin Spin, Emas 24K, atau ketiganya sekaligus · Biaya Admin Wajib ${Math.max(MANDATORY_TRANSFER_ADMIN_FEE_PERCENT, goldMarketConfig.transferBebasAdminFeePercent ?? 5)}%`
-            : `Semua transfer dikenakan Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}% dari nominal kirim`}
-        </span>
-      </div>
 
-      {isQrisPrefillBanner && destAccount && (
-        <div className="p-3.5 rounded-2xl bg-sky-500/15 border border-sky-400/40 text-sky-100 text-xs flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <ShieldCheck className="w-4 h-4 text-sky-300 shrink-0" />
-            <span>
-              <strong>Lanjutkan Transaksi dari Scan QRIS Pribadi</strong> — Penerima{' '}
-              <span className="font-bold text-amber-300">
-                {recipientLookup?.name || prefillRecipientName || destAccount}
-              </span>{' '}
-              (<span className="font-mono">{destAccount}</span>) telah terisi otomatis. Periksa nominal lalu konfirmasi dengan PIN Anda.
-            </span>
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setIsQrisPrefillBanner(false)}
-            className="text-sky-300 hover:text-white font-bold cursor-pointer"
+            onClick={() => setQrisScannerModal({ open: true, mode: 'camera' })}
+            className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl bg-sky-500 hover:bg-sky-400 px-3.5 py-2 text-xs font-black text-slate-950 whitespace-nowrap cursor-pointer"
           >
-            Tutup
+            <Camera className="w-4 h-4" />
+            <span>Scan Kamera QRIS</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setQrisScannerModal({ open: true, mode: 'gallery' })}
+            className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 px-3.5 py-2 text-xs font-bold text-emerald-200 whitespace-nowrap cursor-pointer"
+          >
+            <ImageUp className="w-4 h-4" />
+            <span>Upload Gambar QR</span>
           </button>
         </div>
-      )}
+      </div>
+
+      {/* Verified QRIS Recipient Summary Card + Live 5% Admin Fee Breakdown */}
+      {isQrisPrefillBanner && destAccount && (() => {
+        const previewAmt = Math.max(0, parseInt(transferAmount, 10) || 0);
+        const previewFee = calculateMandatoryTransferFee(previewAmt);
+        const previewTotal = previewAmt + previewFee;
+        return (
+          <div className="rounded-3xl border border-sky-500/45 bg-slate-900 p-4 sm:p-5 space-y-3.5">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-sky-500/40 bg-sky-500/15 text-sky-300">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-black text-white flex items-center gap-2">
+                    <span>Penerima QRIS Pribadi Terverifikasi</span>
+                  </p>
+                  <p className="text-xs text-slate-300 mt-0.5">
+                    <strong className="text-emerald-300">
+                      {recipientLookup?.name || qrisPrefillRecipientLabel || 'Nasabah Bank Nusantara'}
+                    </strong>{' '}
+                    · <span className="font-mono text-amber-300">{destAccount}</span> · {destBank}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setQrisScannerModal({ open: true, mode: 'camera' })}
+                  className="min-h-[36px] rounded-xl border border-sky-500/40 bg-sky-500/15 hover:bg-sky-500/25 px-3 py-1.5 text-xs font-bold text-sky-200 whitespace-nowrap cursor-pointer"
+                >
+                  Scan QRIS Lain
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearPendingQrisTransfer();
+                    setIsQrisPrefillBanner(false);
+                  }}
+                  className="min-h-[36px] rounded-xl border border-slate-700 bg-slate-950 hover:bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 whitespace-nowrap cursor-pointer"
+                >
+                  Tutup Sesi
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+              <div className="rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5">
+                <span className="text-[11px] text-slate-400 block">Nominal Kirim (Dapat Diubah)</span>
+                <strong className="font-mono font-black text-white text-sm tabular-nums">
+                  {previewAmt > 0 ? formatRupiah(previewAmt) : 'Isi nominal di bawah'}
+                </strong>
+              </div>
+              <div className="rounded-xl border border-amber-500/30 bg-slate-950 px-3.5 py-2.5">
+                <span className="text-[11px] text-amber-300 block">
+                  Biaya Admin Wajib ({MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%)
+                </span>
+                <strong className="font-mono font-black text-amber-300 text-sm tabular-nums">
+                  {formatRupiah(previewFee)}
+                </strong>
+              </div>
+              <div className="rounded-xl border border-emerald-500/30 bg-slate-950 px-3.5 py-2.5">
+                <span className="text-[11px] text-emerald-300 block">Total Potong Saldo</span>
+                <strong className="font-mono font-black text-emerald-300 text-sm tabular-nums">
+                  {formatRupiah(previewTotal)}
+                </strong>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {transferMode === 'bebas' ? (
         <TransferBebasPanel
@@ -781,6 +1100,12 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
           </div>
         </div>
       )}
+      <QrisScannerModal
+        isOpen={qrisScannerModal.open}
+        initialMode={qrisScannerModal.mode}
+        onClose={() => setQrisScannerModal((prev) => ({ ...prev, open: false }))}
+        onDetected={handleQrisDetectedInWorkspace}
+      />
     </div>
   );
 };

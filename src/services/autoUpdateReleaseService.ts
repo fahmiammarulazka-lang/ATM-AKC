@@ -16,7 +16,7 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v16.43.00';
+export const STRUCTURED_BASE_VERSION = 'v16.43.10';
 
 export interface StructuredVersion {
   p: number; // AAA: Major (fitur besar / penambahan > 3 fitur sekaligus)
@@ -631,9 +631,38 @@ export function getPublicCurrentUpdate(records: AppUpdateRecord[]): AppUpdateRec
 
 /**
  * Katalog rilis khusus Admin (menggunakan penomoran terpisah vAdmin agar terpisah
- * dari nomor versi aplikasi publik v16.43.00).
+ * dari nomor versi aplikasi publik v16.43.10).
  */
 export const BUILT_IN_ADMIN_UPDATES_CATALOG: AppUpdateRecord[] = [
+  {
+    id: 'upd-admin-v1-2-0',
+    version: 'vAdmin 1.2.0',
+    releaseType: 'minor',
+    visibilityMode: 'admin_only',
+    title:
+      'Panel Pengaturan Paket Kurs Poin Loyalty (150P=Rp100rb / 100P=10 Coin / 100P=1 Voucher), Paket Kustom CRUD, Reset Kurs Bawaan, Batas Harian, Editor Hadiah Pencapaian & Pratinjau Kartu Nasabah',
+    description:
+      'Pembaruan Panel Admin vAdmin 1.2.0 memberikan kendali menyeluruh atas seluruh ekonomi Poin Loyalty: Admin dapat mengatur biaya poin & hadiah 3 paket utama beserta saklar aktif/nonaktif masing-masing, menekan tombol cepat Reset Kurs Bawaan (150 Poin = Rp 100.000, 100 Poin = 10 Coin, 100 Poin = 1 Voucher), menambah/mengedit/menghapus Paket Penukaran Kustom (Saldo Tunai, Coin, Voucher — tanpa Diamond), mengaktifkan saklar Batas Maksimal Penukaran Harian, mengubah nominal hadiah Poin Pencapaian (Milestone) & Auto-Streak, serta memantau Pratinjau Langsung Kartu Tukar Nasabah sebelum menyimpan.',
+    highlights: [
+      'Editor 3 Paket Kurs Utama + Saklar Aktif & Tombol Reset Kurs Bawaan: Atur bebas biaya poin dan hasil hadiah Saldo Tunai, Coin, dan Voucher Naik Level, nyalakan/matikan tiap opsi, atau kembalikan instan ke standar 150P=Rp100.000, 100P=10 Coin, dan 100P=1 Voucher.',
+      'Manajemen Paket Penukaran Kustom (CRUD Tanpa Diamond): Tambah, aktifkan/nonaktifkan, atau hapus paket tukar kustom tambahan khusus Saldo Tunai, Coin, atau Voucher Naik Level lengkap dengan label dan deskripsi.',
+      'Saklar Batas Penukaran Harian & Editor Hadiah Pencapaian + Auto-Streak: Kendalikan apakah penukaran bebas tanpa batas atau dibatasi per nasabah per hari, serta ubah hadiah poin untuk setiap Pencapaian (Milestone), Auto-Streak harian, bonus 7 hari, dan 100 misi harian.',
+      'Kotak Pratinjau Langsung Tampilan Nasabah: Melihat wujud kartu penukaran Poin Loyalty nasabah secara real-time saat Admin mengubah angka kurs atau paket kustom sebelum menekan Simpan Pengaturan.',
+    ],
+    changes: [
+      'Memperbarui AdminLoyaltyStreakPanel dengan editor biaya poin & hadiah 3 paket utama plus saklar aktif/nonaktif dan tombol Reset Kurs Bawaan.',
+      'Menambahkan fitur Tambah/Toggle/Hapus Paket Penukaran Kustom (Saldo Tunai, Coin, Voucher — tanpa Diamond) di Panel Admin.',
+      'Menambahkan saklar Batas Maksimal Penukaran Harian per nasabah beserta input jumlah batas harian.',
+      'Menambahkan Editor Hadiah Poin Pencapaian (Milestone) per kartu pencapaian dan Kotak Pratinjau Langsung Kartu Tukar Nasabah.',
+    ],
+    dateText: '27 Nov 2026',
+    fullDate: 'Jumat, 27 November 2026 • Pukul 21:30 WIB',
+    categoryBadge: 'Rilis Internal Admin Terbaru',
+    isCurrent: false,
+    author: 'Super Admin Utama (AzkaAKC)',
+    createdAt: '2026-11-27T14:30:00.000Z',
+    isAutoDetected: true,
+  },
   {
     id: 'upd-admin-v1-1-0',
     version: 'vAdmin 1.1.0',

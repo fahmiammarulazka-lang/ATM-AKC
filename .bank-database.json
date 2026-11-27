@@ -13627,6 +13627,35 @@
         "accountRole": "guest",
         "isAdmin": false,
         "triggerType": "app_open"
+      },
+      {
+        "id": "gv-1795783206678-09m4xp",
+        "sessionId": "SES-MWYSTGUK-TWX94M",
+        "timestampIso": "2026-11-27T12:40:06.678Z",
+        "timestampMs": 1795783206678,
+        "dateKey": "2026-11-27",
+        "monthKey": "2026-11",
+        "hourOfDay": 19,
+        "deviceId": "DEV-9F2F054C46C1",
+        "deviceSessionKey": "DEV-9F2F054C46C1__gebog|java|indonesia",
+        "accessType": "web_browser",
+        "accessTypeLabel": "Web Browser (Google Chrome 158)",
+        "deviceBrandModel": "PC / Laptop Windows",
+        "osLabel": "Windows 10 / 11",
+        "browserLabel": "Google Chrome 158",
+        "publicIp": "103.164.228.70",
+        "city": "Gebog",
+        "region": "Java",
+        "country": "Indonesia",
+        "isp": "Indonesia Network Information Center",
+        "accountId": "acc-lobby-reg-1795585697689",
+        "accountUid": "MJU7dilDyVP5C5JnhBojpUehpv63",
+        "accountName": "Azka",
+        "accountEmail": "fahmiammarulazka@gmail.com",
+        "accountNumber": "5362021409",
+        "accountRole": "customer",
+        "isAdmin": false,
+        "triggerType": "account_login"
       }
     ],
     "accountVisitsMap": {
@@ -13640,10 +13669,10 @@
         "role": "customer",
         "roleLabel": "Nasabah (REGULAR)",
         "isAdmin": false,
-        "totalVisits": 1,
+        "totalVisits": 2,
         "firstVisitIso": "2026-11-27T10:20:14.573Z",
-        "lastActiveIso": "2026-11-27T10:38:01.167Z",
-        "lastActiveMs": 1795775881167,
+        "lastActiveIso": "2026-11-27T12:47:04.480Z",
+        "lastActiveMs": 1795783624480,
         "deviceIds": [
           "DEV-9F2F054C46C1"
         ],
@@ -13651,6 +13680,24 @@
           "Gebog, Java, Indonesia"
         ],
         "recentVisits": [
+          {
+            "id": "gv-1795783206678-09m4xp",
+            "timestampIso": "2026-11-27T12:40:06.678Z",
+            "timestampMs": 1795783206678,
+            "deviceId": "DEV-9F2F054C46C1",
+            "deviceSessionKey": "DEV-9F2F054C46C1__gebog|java|indonesia",
+            "deviceBrandModel": "PC / Laptop Windows",
+            "osLabel": "Windows 10 / 11",
+            "browserLabel": "Google Chrome 158",
+            "accessType": "web_browser",
+            "accessTypeLabel": "Web Browser (Google Chrome 158)",
+            "publicIp": "103.164.228.70",
+            "city": "Gebog",
+            "region": "Java",
+            "country": "Indonesia",
+            "isp": "Indonesia Network Information Center",
+            "triggerType": "account_login"
+          },
           {
             "id": "gv-1795774814573-bjb70b",
             "timestampIso": "2026-11-27T10:20:14.573Z",
@@ -13679,22 +13726,25 @@
         "fingerprintHash": "9F2F054C46C1677A",
         "locationKey": "gebog|java|indonesia",
         "locationLabel": "Gebog, Java, Indonesia",
+        "locationSource": "geoip",
         "previousLocations": [],
         "linkedSessionKeys": [],
-        "totalVisits": 2,
+        "totalVisits": 3,
         "firstSeenIso": "2026-11-27T10:20:13.142Z",
         "firstSeenMs": 1795774813142,
-        "lastSeenIso": "2026-11-27T10:38:01.167Z",
-        "lastSeenMs": 1795775881167,
+        "lastSeenIso": "2026-11-27T12:47:04.480Z",
+        "lastSeenMs": 1795783624480,
         "isOnline": true,
-        "currentAccountKey": "fahmiammarulazka@gmail.com",
+        "currentAccountId": "acc-lobby-reg-1795585697689",
+        "currentAccountNumber": "5362021409",
+        "currentAccountKey": "acc-lobby-reg-1795585697689",
         "currentAccountName": "Azka",
         "currentAccountEmail": "fahmiammarulazka@gmail.com",
         "currentAccountRole": "customer",
         "isAdminActive": false,
         "accountsHistory": [
           {
-            "accountKey": "fahmiammarulazka@gmail.com",
+            "accountKey": "acc-lobby-reg-1795585697689",
             "accountId": "acc-lobby-reg-1795585697689",
             "accountUid": "MJU7dilDyVP5C5JnhBojpUehpv63",
             "accountName": "Azka",
@@ -13702,10 +13752,10 @@
             "accountNumber": "5362021409",
             "role": "customer",
             "isAdmin": false,
-            "loginCount": 1,
+            "loginCount": 2,
             "firstLoginIso": "2026-11-27T10:20:14.573Z",
-            "lastLoginIso": "2026-11-27T10:38:01.167Z",
-            "lastLoginMs": 1795775881167
+            "lastLoginIso": "2026-11-27T12:47:04.480Z",
+            "lastLoginMs": 1795783624480
           }
         ],
         "reviewStatus": "normal",
@@ -13744,10 +13794,11 @@
           "timezone": "Asia/Jakarta",
           "systemLanguage": "en-US",
           "connectionType": "Broadband / WiFi 4G+",
-          "downlinkMbps": 3.3,
+          "downlinkMbps": 10,
           "rttMs": 100,
-          "batteryLevelPct": 90,
-          "batteryCharging": true
+          "batteryLevelPct": 100,
+          "batteryCharging": true,
+          "locationSource": "geoip"
         }
       },
       "DEV-mwyumbk3__bandung|java|indonesia": {
@@ -13764,7 +13815,7 @@
         "firstSeenMs": 1795775924566,
         "lastSeenIso": "2026-11-27T10:38:44.566Z",
         "lastSeenMs": 1795775924566,
-        "isOnline": true,
+        "isOnline": false,
         "currentAccountId": null,
         "currentAccountNumber": null,
         "currentAccountKey": null,
@@ -13796,10 +13847,10 @@
         }
       }
     },
-    "totalAllTimeHits": 3,
-    "updatedAtMs": 1795775924566
+    "totalAllTimeHits": 4,
+    "updatedAtMs": 1795783624480
   },
   "adminTierGrantsMap": {},
   "adminTierAuditLogs": [],
-  "lastUpdated": 1795775924740
+  "lastUpdated": 1795783624481
 }

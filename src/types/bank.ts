@@ -3069,6 +3069,30 @@ export interface LoyaltyDailyMissionOverride {
   rewardPoints?: number;
 }
 
+export interface LoyaltyCustomRedeemPackage {
+  id: string;
+  title: string;
+  description?: string;
+  target: LoyaltyRedeemTarget;
+  pointsCost: number;
+  rewardAmount: number;
+  enabled: boolean;
+}
+
+export interface LoyaltyRedemptionRecord {
+  id: string;
+  referenceNo: string;
+  timestampIso: string;
+  packageId: string;
+  packageTitle: string;
+  target: LoyaltyRedeemTarget;
+  packagesCount: number;
+  pointsSpent: number;
+  rewardAmount: number;
+  rewardLabel: string;
+  isCustomPackage?: boolean;
+}
+
 export interface LoyaltyAccountState {
   points: number;
   streakDays: number;
@@ -3095,6 +3119,12 @@ export interface LoyaltyAccountState {
   dailyCounters?: Record<string, number>;
   /** Daftar ID misi harian (dari 100 misi) yang sudah diklaim hari ini */
   dailyClaimedMissionIds?: string[];
+  /** Tanggal WIB aktif untuk batas penukaran harian */
+  dailyRedemptionDateWib?: string;
+  /** Jumlah transaksi penukaran poin yang dilakukan hari ini (WIB) */
+  dailyRedemptionCount?: number;
+  /** Riwayat penukaran poin terbaru (maksimal 50 catatan) */
+  redemptionHistory?: LoyaltyRedemptionRecord[];
   claimedAchievementIds: string[];
   totalCheckIns: number;
   redeemedCount: number;
@@ -3104,9 +3134,37 @@ export interface LoyaltyAdminConfig {
   enabled: boolean;
   dailyCheckInPoints: number;
   streakBonus7DaysPoints: number;
+  /** Kurs paket Saldo Tunai: biaya poin per paket (default 150) */
+  cashPackagePoints?: number;
+  /** Kurs paket Saldo Tunai: nominal Rupiah diterima per paket (default 100.000) */
+  cashPackageAmount?: number;
+  /** Saklar aktif/nonaktif penukaran Saldo Tunai (default true) */
+  cashRedeemEnabled?: boolean;
+  /** Kurs paket Coin: biaya poin per paket (default 100) */
+  coinPackagePoints?: number;
+  /** Kurs paket Coin: jumlah Coin diterima per paket (default 10) */
+  coinPackageAmount?: number;
+  /** Saklar aktif/nonaktif penukaran Coin (default true) */
+  coinRedeemEnabled?: boolean;
+  /** Kurs paket Voucher Naik Level: biaya poin per paket (default 100) */
+  voucherPackagePoints?: number;
+  /** Kurs paket Voucher Naik Level: jumlah Voucher diterima per paket (default 1) */
+  voucherPackageAmount?: number;
+  /** Saklar aktif/nonaktif penukaran Voucher Naik Level (default true) */
+  voucherRedeemEnabled?: boolean;
+  /** Daftar paket penukaran kustom buatan Admin */
+  customRedeemPackages?: LoyaltyCustomRedeemPackage[];
+  /** Saklar batas maksimal penukaran per hari per nasabah (default false = bebas tanpa batas) */
+  dailyRedeemLimitEnabled?: boolean;
+  /** Jumlah maksimal transaksi penukaran per hari bila saklar aktif (default 5) */
+  dailyRedeemMaxCount?: number;
+  /** Override hadiah poin untuk Pencapaian Utama (achievementId -> rewardPoints) */
+  achievementRewardOverrides?: Record<string, number>;
+  /** @deprecated Dipertahankan untuk kompatibilitas lama */
   rupiahPerPoint: number;
+  /** @deprecated Dipertahankan untuk kompatibilitas lama */
   coinPer100Points: number;
-  /** Jumlah Poin Loyalty untuk menukar 1 Voucher Naik Level */
+  /** @deprecated Dipertahankan untuk kompatibilitas lama */
   pointsPerLevelVoucher?: number;
   /** Harga 1 Kartu Pemulihan Streak dalam Diamond (default 25) */
   recoveryCardDiamondPrice?: number;

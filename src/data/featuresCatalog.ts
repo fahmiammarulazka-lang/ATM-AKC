@@ -3081,6 +3081,35 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-43-10',
+    version: 'v16.43.10',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v16.43.10: Paket Kurs Poin Loyalty Resmi (150 Poin = Rp 100.000, 100 Poin = 10 Coin, 100 Poin = 1 Voucher) + Perbaikan Total Scan QRIS Pribadi Anti-Mental ke Dashboard & Scanner Kamera/Galeri',
+    fullDate: 'Jumat, 27 November 2026 • Pukul 21:30 WIB',
+    dateText: 'Jumat, 27 November 2026 • Pukul 21:30 WIB',
+    description:
+      'Pembaruan terpadu v16.43.10 menghadirkan perombakan sistem penukaran Poin Loyalty berbasis paket kurs resmi (150 Poin = Rp 100.000 Saldo Tunai, 100 Poin = 10 Coin, dan 100 Poin = 1 Voucher Naik Level — tanpa opsi Diamond) lengkap dengan tombol kelipatan cepat 1x/2x/5x/Maksimal, input custom potongan kelipatan pas (sisa poin tetap utuh), popup konfirmasi 1-klik tanpa PIN, serta pencatatan ganda ke Mutasi Rekening & Riwayat Penukaran Loyalty. Sekaligus menuntaskan masalah scan QRIS Pribadi yang sebelumnya mental ke Dashboard: kini link hasil scan kamera HP tersimpan aman di sesi hingga login/PIN selesai lalu otomatis membuka Transfer Reguler terisi lengkap, hadir pemindai kamera langsung & unggah gambar QR galeri di dalam aplikasi, pelindung anti-transfer ke rekening sendiri, rincian biaya admin 5% + total potong real-time, serta struk transfer berhasil.',
+    highlights: [
+      'Paket Kurs Poin Loyalty Resmi + Kelipatan Cepat (1x, 2x, 5x, Maksimal & Custom): 3 kartu besar berikon (150 Poin = Rp 100.000 Saldo Tunai, 100 Poin = 10 Coin, 100 Poin = 1 Voucher Naik Level) plus paket kustom aktif. Input poin bebas hanya memotong kelipatan pas sehingga sisa poin nasabah selalu utuh.',
+      'Konfirmasi Tukar 1-Klik Tanpa PIN & Pencatatan Ganda: Popup ringkasan penukaran menampilkan total poin terpakai, sisa poin utuh, dan hadiah diterima dalam satu klik tanpa perlu PIN, lalu otomatis tercatat di Mutasi Rekening maupun Riwayat Penukaran Loyalty.',
+      'Perbaikan Scan QRIS Pribadi Anti-Mental ke Dashboard: Membuka link hasil scan kamera HP (baik sudah login, belum login, maupun terkunci PIN) kini menyimpan data penerima QRIS di sesi dan otomatis membawa nasabah langsung ke formulir Transfer Reguler dengan rekening, nama penerima, nominal opsional (tetap bisa diubah), dan catatan terisi otomatis.',
+      'Scanner Kamera Langsung + Upload Galeri QR + Pelindung Self-Scan & Struk Berhasil: Kini nasabah dapat memindai QRIS langsung dari kamera atau unggah gambar QR galeri di Transfer & Kotak QRIS Pribadi, dicegah otomatis bila tidak sengaja memindai QRIS milik sendiri, melihat rincian Penerima QRIS + Admin 5% + Total Bayar secara jelas, serta menerima Struk Transfer Berhasil lengkap tombol kembali.',
+    ],
+    changes: [
+      'Memperbarui kurs bawaan penukaran Poin Loyalty menjadi 150 Poin = Rp 100.000 (Saldo Tunai), 100 Poin = 10 Coin, dan 100 Poin = 1 Voucher Naik Level dengan 3 kartu besar berikon, kelipatan cepat (1x, 2x, 5x, Maksimal), input custom kelipatan pas, popup 1-klik tanpa PIN, dan pencatatan ganda di Mutasi Rekening + Riwayat Penukaran Loyalty.',
+      'Memperbaiki alur scan QRIS Pribadi dari kamera HP agar tidak lagi terlempar ke Dashboard saat sesi dimuat atau setelah login/PIN — langsung diarahkan ke Transfer Reguler terisi otomatis.',
+      'Menambahkan pemindai Kamera Langsung dan Upload Gambar QR dari Galeri di halaman Transfer dan tab QRIS Pribadi.',
+      'Menambahkan deteksi self-scan untuk memblokir transfer ke QRIS Pribadi sendiri, kartu ringkasan Penerima QRIS + Biaya Admin 5% + Total Potong, serta tampilan Struk Transfer Berhasil dengan tombol Kembali ke Dashboard, Lihat Mutasi, dan Transfer Lagi.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-27T14:30:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v16-43-00',
     version: 'v16.43.00',
     releaseType: 'major',
@@ -3104,8 +3133,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Menerapkan Biaya Admin Wajib 5% secara konsisten di seluruh kanal transfer (Transfer Reguler, Transfer Bebas, ATM, QRIS Pribadi, dan Chat).',
       'Memperbarui QRIS Pribadi menjadi Link Transfer resmi agar saat di-scan nasabah lain langsung membuka halaman Transfer terisi otomatis.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Update Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-27T12:00:00.000Z',
     isAutoDetected: true,

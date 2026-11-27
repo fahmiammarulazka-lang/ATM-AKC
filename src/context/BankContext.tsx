@@ -109,12 +109,15 @@ import {
 } from '../utils/leaderboardUtils';
 import {
   applyAutoOnlineStreakTransition,
+  calculateExactPackageRedemption,
   calculateMandatoryTransferFee,
   computeDailyTxActivityStats,
   DEFAULT_LOYALTY_ADMIN_CONFIG as DEFAULT_LOYALTY_ADMIN_CONFIG_UTIL,
   ensureTodayLoyaltyAccountState,
   evaluateDailyLoyaltyMissionProgress,
+  getEffectiveAchievementRewardPoints,
   getEffectiveDailyLoyaltyMissions,
+  getResolvedLoyaltyRedeemPackages,
   getWibDateString,
   MANDATORY_TRANSFER_ADMIN_FEE_PERCENT,
   normalizeLoyaltyAdminConfig,
@@ -123,6 +126,7 @@ import {
   BankAccount,
   DebtHistoryEntry,
   LoyaltyRedeemTarget,
+  LoyaltyRedemptionRecord,
   LoyaltyStreakFreezeStage,
   Transaction,
   LoanApplication,
@@ -1823,9 +1827,20 @@ interface BankContextType {
   forfeitFrozenStreak: () => { success: boolean; message: string };
   recordLoyaltyDailyActivity: (metricKey: string, delta?: number, uniqueDailyTag?: string) => void;
   redeemLoyaltyPoints: (
-    pointsToSpend: number,
-    target: LoyaltyRedeemTarget
-  ) => { success: boolean; message: string };
+    amountOrMultiplier: number,
+    targetOrPackageId: LoyaltyRedeemTarget | string,
+    options?: {
+      inputMode?: 'multiplier' | 'points';
+      packageId?: string;
+    }
+  ) => {
+    success: boolean;
+    message: string;
+    record?: LoyaltyRedemptionRecord;
+    pointsSpent?: number;
+    remainderPoints?: number;
+    packagesCount?: number;
+  };
   adminUpdateLoyaltyConfig: (partial: Partial<LoyaltyAdminConfig>) => { success: boolean; message: string };
   adminAdjustLoyaltyPoints: (accountId: string, points: number, mode: 'add' | 'set') => { success: boolean; message: string };
   adminManageAccountStreak: (
@@ -28458,9 +28473,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!eligible) {
       return { success: false, message: 'Syarat pencapaian nyata belum terpenuhi.' };
     }
+    const effectiveRewardPts = getEffectiveAchievementRewardPoints(
+      def.id,
+      def.rewardPoints,
+      loyaltyConfigRef.current
+    );
     const nextState: LoyaltyAccountState = {
       ...prev,
-      points: isAdminTier ? UNLIMITED_BALANCE : prev.points + def.rewardPoints,
+      points: isAdminTier ? UNLIMITED_BALANCE : prev.points + effectiveRewardPts,
       claimedAchievementIds: [...prev.claimedAchievementIds, achievementId],
     };
     const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
@@ -28470,48 +28490,128 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     return {
       success: true,
-      pointsEarned: def.rewardPoints,
-      message: `Pencapaian "${def.title}" diklaim! +${def.rewardPoints} Poin Loyalty.`,
+      pointsEarned: effectiveRewardPts,
+      message: isAdminTier
+        ? `Pencapaian "${def.title}" diklaim! (Poin Loyalty Tier Admin tetap ∞)`
+        : `Pencapaian "${def.title}" diklaim! +${effectiveRewardPts.toLocaleString('id-ID')} Poin Loyalty.`,
     };
   };
 
   const redeemLoyaltyPoints = (
-    pointsToSpend: number,
-    target: LoyaltyRedeemTarget
-  ): { success: boolean; message: string } => {
+    amountOrMultiplier: number,
+    targetOrPackageId: LoyaltyRedeemTarget | string,
+    options?: {
+      inputMode?: 'multiplier' | 'points';
+      packageId?: string;
+    }
+  ): {
+    success: boolean;
+    message: string;
+    record?: LoyaltyRedemptionRecord;
+    pointsSpent?: number;
+    remainderPoints?: number;
+    packagesCount?: number;
+  } => {
     const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
-    if (target !== 'cash' && target !== 'coin' && target !== 'voucher') {
-      return { success: false, message: 'Penukaran ke Diamond tidak tersedia. Pilih Saldo Tunai, Coin, atau Voucher Naik Level.' };
-    }
-    const cleanPts = Math.round(Number(pointsToSpend) || 0);
-    if (cleanPts < 50) return { success: false, message: 'Minimal penukaran 50 Poin Loyalty.' };
-    const isAdminTier = isAdminCardAccount(activeAcc);
-    const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
-    if (!isAdminTier && prev.points < cleanPts) {
-      return { success: false, message: `Poin Loyalty tidak cukup (Tersedia: ${prev.points.toLocaleString('id-ID')} poin).` };
-    }
+
     const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
-    const voucherRate = cfg.pointsPerLevelVoucher || 200;
-    if (target === 'voucher' && cleanPts < voucherRate) {
+    if (!cfg.enabled) {
+      return { success: false, message: 'Sistem Poin Loyalty sedang dinonaktifkan sementara oleh Admin.' };
+    }
+
+    const resolvedPackages = getResolvedLoyaltyRedeemPackages(cfg);
+    const lookupKey = String(options?.packageId || targetOrPackageId || '').trim();
+    const mappedId =
+      lookupKey === 'cash'
+        ? 'std-cash'
+        : lookupKey === 'coin'
+        ? 'std-coin'
+        : lookupKey === 'voucher'
+        ? 'std-voucher'
+        : lookupKey;
+
+    if (lookupKey.toLowerCase().includes('diamond')) {
       return {
         success: false,
-        message: `Minimal ${voucherRate.toLocaleString('id-ID')} Poin Loyalty untuk menukar 1 Voucher Naik Level.`,
+        message: 'Penukaran ke Diamond tidak tersedia. Pilih Saldo Tunai, Coin, atau Voucher Naik Level.',
       };
     }
 
-    const rewardAmount =
-      target === 'cash'
-        ? cleanPts * (cfg.rupiahPerPoint || 500)
-        : target === 'coin'
-        ? Math.max(1, Math.floor((cleanPts / 100) * (cfg.coinPer100Points || 15)))
-        : Math.max(1, Math.floor(cleanPts / voucherRate));
+    const pkg = resolvedPackages.find((p) => p.id === mappedId);
+    if (!pkg) {
+      return {
+        success: false,
+        message: 'Paket penukaran tidak ditemukan. Pilih Saldo Tunai, Coin, Voucher Naik Level, atau paket kustom yang tersedia.',
+      };
+    }
+    if (!pkg.enabled) {
+      return {
+        success: false,
+        message: `Penukaran paket "${pkg.title}" sedang dinonaktifkan oleh Admin.`,
+      };
+    }
 
+    const isAdminTier = isAdminCardAccount(activeAcc);
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+
+    // Cek batas penukaran harian bila diaktifkan Admin (Kartu Admin bebas batas)
+    const todayCount = prev.dailyRedemptionDateWib === todayWib ? prev.dailyRedemptionCount || 0 : 0;
+    if (!isAdminTier && cfg.dailyRedeemLimitEnabled && todayCount >= (cfg.dailyRedeemMaxCount || 5)) {
+      return {
+        success: false,
+        message: `Batas penukaran harian tercapai (${todayCount}/${cfg.dailyRedeemMaxCount || 5} transaksi hari ini). Coba lagi setelah 00:00 WIB.`,
+      };
+    }
+
+    const inputMode: 'multiplier' | 'points' = options?.inputMode || 'points';
+    const calc = calculateExactPackageRedemption({
+      pkg,
+      inputMode,
+      inputValue: amountOrMultiplier,
+      availablePoints: isAdminTier ? UNLIMITED_BALANCE : prev.points,
+      isAdminCard: isAdminTier,
+    });
+
+    if (calc.packagesCount < 1) {
+      return {
+        success: false,
+        message: `Minimal ${pkg.pointsCost.toLocaleString('id-ID')} Poin untuk menukar 1x paket ${pkg.title}.`,
+      };
+    }
+
+    if (!isAdminTier && !calc.hasEnoughPoints) {
+      return {
+        success: false,
+        message: `Poin Loyalty tidak cukup (Butuh ${calc.pointsSpent.toLocaleString('id-ID')} Poin, tersedia ${prev.points.toLocaleString('id-ID')} Poin).`,
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const refNo = `LYL${Date.now().toString().slice(-8)}${Math.floor(10 + Math.random() * 89)}`;
+    const record: LoyaltyRedemptionRecord = {
+      id: `lylr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      referenceNo: refNo,
+      timestampIso: nowIso,
+      packageId: pkg.id,
+      packageTitle: pkg.title,
+      target: pkg.target,
+      packagesCount: calc.packagesCount,
+      pointsSpent: calc.pointsSpent,
+      rewardAmount: calc.rewardAmount,
+      rewardLabel: calc.rewardLabel,
+      isCustomPackage: pkg.isCustom,
+    };
+
+    const nextHistory = [record, ...(prev.redemptionHistory || [])].slice(0, 50);
     const nextState: LoyaltyAccountState = {
       ...prev,
-      points: isAdminTier ? UNLIMITED_BALANCE : Math.max(0, prev.points - cleanPts),
-      redeemedCount: prev.redeemedCount + 1,
+      points: isAdminTier ? UNLIMITED_BALANCE : Math.max(0, prev.points - calc.pointsSpent),
+      redeemedCount: (prev.redeemedCount || 0) + 1,
+      dailyRedemptionDateWib: todayWib,
+      dailyRedemptionCount: todayCount + 1,
+      redemptionHistory: nextHistory,
       dailyActivityDateWib: todayWib,
       dailyCounters: {
         ...(prev.dailyCounters || {}),
@@ -28523,30 +28623,66 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     loyaltyMapRef.current = nextMap;
     setLoyaltyMap(nextMap);
 
-    commitAccountMutationPermanent(activeAcc.id, (a) =>
-      normalizeAdminAccountAssets({
-        ...a,
-        balance: target === 'cash' && !isAdminCardAccount(a) ? a.balance + rewardAmount : a.balance,
-        spinCoins: target === 'coin' && !isAdminCardAccount(a) ? (a.spinCoins || 0) + rewardAmount : a.spinCoins,
-        levelUpVouchers:
-          target === 'voucher' && !isAdminCardAccount(a)
-            ? (a.levelUpVouchers || 0) + rewardAmount
-            : a.levelUpVouchers,
-      })
+    const nextBalanceForTx =
+      pkg.target === 'cash' && !isAdminTier
+        ? activeAcc.balance + calc.rewardAmount
+        : activeAcc.balance;
+
+    const remainderNote =
+      !isAdminTier && calc.remainderPoints > 0
+        ? ` Sisa ${calc.remainderPoints.toLocaleString('id-ID')} poin di luar kelipatan tetap utuh.`
+        : '';
+
+    const loyaltyTx: Transaction = {
+      id: `tx-lyl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      accountId: activeAcc.id,
+      type: 'redeem_code',
+      title: `Tukar Poin Loyalty: ${pkg.title} (${calc.packagesCount}x)`,
+      amount: pkg.target === 'cash' ? calc.rewardAmount : 0,
+      balanceAfter: nextBalanceForTx,
+      date: nowIso,
+      timestamp: nowIso,
+      referenceNo: refNo,
+      status: 'berhasil',
+      balanceDeducted: false,
+      note: `${calc.pointsSpent.toLocaleString('id-ID')} Poin ➔ ${calc.rewardLabel} (${calc.packagesCount} paket @ ${pkg.pointsCost.toLocaleString('id-ID')} Poin).${remainderNote}`,
+      description: `Penukaran Poin Loyalty ke ${calc.rewardLabel} • Ref ${refNo}`,
+    };
+
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+    const nextTxs = [loyaltyTx, ...latestTxs];
+    transactionsRef.current = nextTxs;
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      activeAcc.id,
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          balance: pkg.target === 'cash' && !isAdminCardAccount(a) ? a.balance + calc.rewardAmount : a.balance,
+          spinCoins:
+            pkg.target === 'coin' && !isAdminCardAccount(a)
+              ? (a.spinCoins || 0) + calc.rewardAmount
+              : a.spinCoins,
+          levelUpVouchers:
+            pkg.target === 'voucher' && !isAdminCardAccount(a)
+              ? (a.levelUpVouchers || 0) + calc.rewardAmount
+              : a.levelUpVouchers,
+        }),
+      { transactions: nextTxs }
     );
     syncLoyaltyToServer(nextMap);
     playAtmSound('cash');
-    const unitLabel =
-      target === 'cash'
-        ? formatRupiah(rewardAmount)
-        : target === 'coin'
-        ? `${rewardAmount.toLocaleString('id-ID')} Coin`
-        : `${rewardAmount.toLocaleString('id-ID')} Voucher Naik Level`;
+
     return {
       success: true,
+      record,
+      pointsSpent: calc.pointsSpent,
+      remainderPoints: calc.remainderPoints,
+      packagesCount: calc.packagesCount,
       message: isAdminTier
-        ? `Penukaran ke ${unitLabel} berhasil! (Kartu Tier Admin: Poin Loyalty & Voucher tetap ∞ selamanya dan tidak pernah berkurang.)`
-        : `${cleanPts.toLocaleString('id-ID')} Poin berhasil ditukar menjadi ${unitLabel}!`,
+        ? `Penukaran ${calc.packagesCount}x ${pkg.title} (${calc.rewardLabel}) berhasil dicatat! (Kartu Tier Admin: Poin Loyalty & aset tetap ∞ selamanya.)`
+        : `${calc.pointsSpent.toLocaleString('id-ID')} Poin (${calc.packagesCount}x ${pkg.title}) berhasil ditukar menjadi ${calc.rewardLabel}!${remainderNote}`,
     };
   };
 
@@ -28558,13 +28694,24 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         partial.missionOverrides !== undefined
           ? partial.missionOverrides
           : loyaltyConfigRef.current.missionOverrides,
+      customRedeemPackages:
+        partial.customRedeemPackages !== undefined
+          ? partial.customRedeemPackages
+          : loyaltyConfigRef.current.customRedeemPackages,
+      achievementRewardOverrides:
+        partial.achievementRewardOverrides !== undefined
+          ? partial.achievementRewardOverrides
+          : loyaltyConfigRef.current.achievementRewardOverrides,
       updatedAtMs: Date.now(),
     });
     loyaltyConfigRef.current = nextCfg;
     setLoyaltyConfig(nextCfg);
     syncLoyaltyToServer(loyaltyMapRef.current, nextCfg);
     playAtmSound('success');
-    return { success: true, message: 'Pengaturan Poin Loyalty, Streak, Kartu Pemulihan & 100 Misi berhasil disimpan!' };
+    return {
+      success: true,
+      message: 'Pengaturan Kurs Tukar, Hadiah Poin, Paket Kustom, Streak & 100 Misi berhasil disimpan!',
+    };
   };
 
   const adminManageAccountStreak = (

@@ -71,6 +71,14 @@ import {
   isPrimarySystemOwnerAccount,
 } from './types/adminAnalyticsAndTier';
 import { isAdminCardAccount } from './utils/bankUtils';
+import {
+  capturePendingQrisFromCurrentUrl,
+  clearPendingQrisTransfer,
+  isSelfQrisTransferTarget,
+  PendingQrisTransferPayload,
+  readPendingQrisTransfer,
+  savePendingQrisTransfer,
+} from './utils/qrisTransferUtils';
 
 function BankAppContent() {
   const {
@@ -90,7 +98,13 @@ function BankAppContent() {
     reportLivePresence,
     adminDirectChangeAccountTier,
   } = useBank();
-  const [activeView, setActiveView] = useState<AppNavView>('dashboard');
+  const [initialBootPendingQris] = useState<PendingQrisTransferPayload | null>(() => {
+    const fromUrl = capturePendingQrisFromCurrentUrl();
+    return fromUrl || readPendingQrisTransfer();
+  });
+  const [activeView, setActiveView] = useState<AppNavView>(() =>
+    initialBootPendingQris ? 'transfer' : 'dashboard'
+  );
   const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
   const { adminTierGrantsMap, pendingOfficialLetter } = useAdminAnalyticsAndTierSync();
 
@@ -177,8 +191,11 @@ function BankAppContent() {
     firebaseUser?.email,
     adminDirectChangeAccountTier,
   ]);
+  const [qrisSelfScanWarning, setQrisSelfScanWarning] = useState<string>('');
   const [hiddenTabNotice, setHiddenTabNotice] = useState<string>('');
   const prevAuthUidRef = useRef<string | null>(null);
+  const currentAccountRef = useRef(currentAccount);
+  currentAccountRef.current = currentAccount;
   const [requestedDashboardTab, setRequestedDashboardTab] = useState<{
     tab: DashboardTab;
     nonce: number;
@@ -193,7 +210,20 @@ function BankAppContent() {
     prefillNote?: string;
     prefillFromQris?: boolean;
     key: number;
-  }>({ mode: 'reguler', key: 0 });
+  }>(() =>
+    initialBootPendingQris
+      ? {
+          mode: 'reguler',
+          prefillAccount: initialBootPendingQris.recipientAccount,
+          prefillBank: initialBootPendingQris.recipientBank || 'Bank Nusantara',
+          prefillRecipientName: initialBootPendingQris.recipientName,
+          prefillAmount: initialBootPendingQris.amount,
+          prefillNote: initialBootPendingQris.note || 'Transfer via Scan QRIS Pribadi',
+          prefillFromQris: true,
+          key: initialBootPendingQris.createdAtMs || Date.now(),
+        }
+      : { mode: 'reguler', key: 0 }
+  );
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState<boolean>(false);
   const [showAdminPinModal, setShowAdminPinModal] = useState<boolean>(false);
   const [adminViewDuringOnboarding, setAdminViewDuringOnboarding] = useState<boolean>(false);
@@ -215,12 +245,17 @@ function BankAppContent() {
     return () => window.removeEventListener('gmp-quota-exceeded', handler);
   }, []);
 
-  // Sinkronkan tampilan aktif langsung ke Dashboard saat sesi Firebase Auth terdeteksi / dipulihkan
+  // Sinkronkan tampilan aktif saat sesi Firebase Auth pulih — JANGAN timpa ke Dashboard jika ada tujuan QRIS Pribadi aktif!
   useEffect(() => {
     const activeUid = firebaseUser?.uid || null;
     if (activeUid && prevAuthUidRef.current !== activeUid) {
       prevAuthUidRef.current = activeUid;
-      setActiveView('dashboard');
+      const pendingQris = readPendingQrisTransfer();
+      if (pendingQris) {
+        setActiveView('transfer');
+      } else {
+        setActiveView('dashboard');
+      }
     } else if (!activeUid) {
       prevAuthUidRef.current = null;
     }
@@ -347,23 +382,47 @@ function BankAppContent() {
 
     const applyQrisTransferDeepLink = (payload: {
       recipientAccount?: string;
+      recipientUserId?: string;
       recipientBank?: string;
       recipientName?: string;
       amount?: number;
       note?: string;
+      source?: 'url' | 'camera' | 'gallery' | 'manual';
     }) => {
       const cleanAcc = String(payload.recipientAccount || '').trim();
       if (!cleanAcc) return;
-      setTransferRouteContext({
-        mode: 'reguler',
-        prefillAccount: cleanAcc,
-        prefillBank: String(payload.recipientBank || 'Bank Nusantara').trim() || 'Bank Nusantara',
-        prefillRecipientName: String(payload.recipientName || '').trim() || undefined,
-        prefillAmount:
+
+      const activeAcc = currentAccountRef.current;
+      if (activeAcc && isSelfQrisTransferTarget(payload, activeAcc)) {
+        clearPendingQrisTransfer();
+        setQrisSelfScanWarning(
+          `QRIS Pribadi ini milik rekening Anda sendiri (${activeAcc.fullName} · ${activeAcc.accountNumber}). Anda tidak dapat mentransfer ke rekening sendiri.`
+        );
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
+      const saved = savePendingQrisTransfer({
+        recipientAccount: cleanAcc,
+        recipientUserId: payload.recipientUserId,
+        recipientBank: String(payload.recipientBank || 'Bank Nusantara').trim() || 'Bank Nusantara',
+        recipientName: String(payload.recipientName || '').trim() || undefined,
+        amount:
           payload.amount && Number(payload.amount) > 0
             ? Math.round(Number(payload.amount))
             : undefined,
-        prefillNote: String(payload.note || '').trim() || 'Transfer via Scan QRIS Pribadi',
+        note: String(payload.note || '').trim() || 'Transfer via Scan QRIS Pribadi',
+        source: payload.source || 'url',
+      });
+
+      setQrisSelfScanWarning('');
+      setTransferRouteContext({
+        mode: 'reguler',
+        prefillAccount: cleanAcc,
+        prefillBank: saved?.recipientBank || 'Bank Nusantara',
+        prefillRecipientName: saved?.recipientName,
+        prefillAmount: saved?.amount,
+        prefillNote: saved?.note || 'Transfer via Scan QRIS Pribadi',
         prefillFromQris: true,
         key: Date.now(),
       });
@@ -372,28 +431,11 @@ function BankAppContent() {
     };
 
     try {
-      const params = new URLSearchParams(window.location.search);
-      const isQrisTransfer = params.get('qris_transfer') === '1';
-      const qTo = params.get('to') || '';
-      const qAmt = Number(params.get('amt') || '0') || 0;
-      const qName = params.get('name') || '';
-      const qBank = params.get('bank') || 'Bank Nusantara';
-      const qNote = params.get('note') || '';
-      if (isQrisTransfer && qTo) {
-        applyQrisTransferDeepLink({
-          recipientAccount: qTo,
-          recipientBank: qBank,
-          recipientName: qName,
-          amount: qAmt > 0 ? qAmt : undefined,
-          note: qNote || 'Transfer via Scan QRIS Pribadi',
-        });
-        try {
-          const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`;
-          window.history.replaceState({}, '', cleanUrl);
-        } catch {
-          // ignore
-        }
+      const capturedFromUrl = capturePendingQrisFromCurrentUrl();
+      if (capturedFromUrl) {
+        applyQrisTransferDeepLink(capturedFromUrl);
       } else {
+        const params = new URLSearchParams(window.location.search);
         const qView = params.get('notifView');
         const qTab = params.get('notifTab');
         if (qView || qTab) {
@@ -412,10 +454,12 @@ function BankAppContent() {
     const handleQrisTransferEvent = (e: Event) => {
       const custom = e as CustomEvent<{
         recipientAccount?: string;
+        recipientUserId?: string;
         recipientBank?: string;
         recipientName?: string;
         amount?: number;
         note?: string;
+        source?: 'url' | 'camera' | 'gallery' | 'manual';
       }>;
       if (custom.detail?.recipientAccount) {
         applyQrisTransferDeepLink(custom.detail);
@@ -442,6 +486,54 @@ function BankAppContent() {
       }
     };
   }, []);
+
+  // Setelah boot cloud, login, dan verifikasi PIN tuntas: otomatis arahkan ke Transfer Reguler jika ada QRIS Pribadi di sesi (atau tampilkan peringatan jika scan milik sendiri)
+  useEffect(() => {
+    const gateOpen =
+      !googleUser || !googleUser.hasCompletedOnboarding || googleUser.isPinVerified === false;
+    if (isAuthLoading || !isCloudBootReady || gateOpen || !currentAccount) return;
+
+    const pending = readPendingQrisTransfer();
+    if (!pending) return;
+
+    if (isSelfQrisTransferTarget(pending, currentAccount)) {
+      clearPendingQrisTransfer();
+      setQrisSelfScanWarning(
+        `QRIS Pribadi ini milik rekening Anda sendiri (${currentAccount.fullName} · ${currentAccount.accountNumber}). Anda tidak dapat mentransfer ke rekening sendiri.`
+      );
+      setTransferRouteContext({ mode: 'reguler', key: Date.now() });
+      return;
+    }
+
+    setTransferRouteContext((prev) => {
+      if (
+        prev.prefillFromQris &&
+        prev.prefillAccount === pending.recipientAccount &&
+        prev.prefillAmount === pending.amount
+      ) {
+        return prev;
+      }
+      return {
+        mode: 'reguler',
+        prefillAccount: pending.recipientAccount,
+        prefillBank: pending.recipientBank || 'Bank Nusantara',
+        prefillRecipientName: pending.recipientName,
+        prefillAmount: pending.amount,
+        prefillNote: pending.note || 'Transfer via Scan QRIS Pribadi',
+        prefillFromQris: true,
+        key: Date.now(),
+      };
+    });
+    setActiveView('transfer');
+  }, [
+    isAuthLoading,
+    isCloudBootReady,
+    googleUser,
+    currentAccount?.id,
+    currentAccount?.accountNumber,
+    currentAccount?.userId16,
+    currentAccount?.fullName,
+  ]);
 
   const handleSecretAdminTrigger = () => {
     if (adminUnlocked || effectiveAdminPermissions.canOpenWithoutPin) {
@@ -604,8 +696,30 @@ function BankAppContent() {
 
   // 3. Show Mandatory Google/Email Sign-In -> Auto Detect New Card Creation OR Existing Account PIN Gate
   if (isCustomerGateOpen && !adminViewDuringOnboarding) {
+    const queuedQris = readPendingQrisTransfer();
     return (
       <>
+        {queuedQris && (
+          <div className="bg-sky-950/95 border-b border-sky-500/40 px-4 py-2.5 text-xs text-sky-100 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-sky-300 shrink-0" />
+              <span>
+                <strong>Link Transfer QRIS Pribadi tersimpan</strong> ({queuedQris.recipientName || 'Nasabah Bank Nusantara'} ·{' '}
+                <span className="font-mono text-amber-300">{queuedQris.recipientAccount}</span>) — selesaikan login / PIN untuk langsung masuk ke halaman Transfer.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                clearPendingQrisTransfer();
+                setTransferRouteContext({ mode: 'reguler', key: Date.now() });
+              }}
+              className="text-sky-300 hover:text-white font-bold cursor-pointer whitespace-nowrap"
+            >
+              Batalkan
+            </button>
+          </div>
+        )}
         {quotaExceeded && (
           <div className="bg-amber-50 border-b border-amber-300 px-4 py-3 text-sm text-amber-900 flex items-center justify-between gap-4">
             <span>
@@ -710,6 +824,7 @@ function BankAppContent() {
         activeView={activeView}
         setActiveView={(view) => {
           if (view === 'transfer') {
+            clearPendingQrisTransfer();
             setTransferRouteContext({ mode: 'reguler', assetMode: undefined, key: Date.now() });
           }
           setActiveView(view);
@@ -719,6 +834,37 @@ function BankAppContent() {
         onQuickAdminAccess={handleQuickAdminAccess}
         onOpenSecurityCenter={openSecurityCenter}
       />
+
+      {qrisSelfScanWarning && (
+        <div className="max-w-7xl w-full mx-auto px-4 pt-3">
+          <div className="rounded-2xl border border-rose-500/50 bg-rose-950/90 px-4 py-3 text-xs text-rose-100 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{qrisSelfScanWarning}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setQrisSelfScanWarning('');
+                  setRequestedDashboardTab({ tab: 'qris_pribadi', nonce: Date.now() });
+                  setActiveView('dashboard');
+                }}
+                className="rounded-lg border border-rose-400/40 bg-rose-500/20 hover:bg-rose-500/30 px-3 py-1.5 text-xs font-bold text-white cursor-pointer whitespace-nowrap"
+              >
+                Buka QRIS Pribadi Saya
+              </button>
+              <button
+                type="button"
+                onClick={() => setQrisSelfScanWarning('')}
+                className="text-rose-300 hover:text-white font-bold cursor-pointer px-2 py-1"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {hiddenTabNotice && (
         <div className="max-w-7xl w-full mx-auto px-4 pt-3">
