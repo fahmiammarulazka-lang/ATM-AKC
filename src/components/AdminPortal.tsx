@@ -158,6 +158,21 @@ import {
 } from './AdminLiveMonitorPanel';
 import { AdminWarningStudioSection } from './AdminWarningStudioSection';
 import { PinPromptModal } from './PinPromptModal';
+import { AdminTierPromotionPanel } from './AdminTierPromotionPanel';
+import { AdminVisitorAnalyticsPanel } from './AdminVisitorAnalyticsPanel';
+import {
+  useAdminAnalyticsAndTierSync,
+  apiLogDelegatedAdminTabActivity,
+} from '../hooks/useAdminAnalyticsAndTierSync';
+import {
+  resolveEffectiveAdminPermissions,
+  ADMIN_TAB_CATALOG,
+  type AdminPortalTabKey,
+} from '../types/adminAnalyticsAndTier';
+import {
+  collectFullDeviceSpecifications,
+  OFFLINE_TIMEOUT_MS,
+} from '../services/visitorTracker';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -166,6 +181,9 @@ interface AdminPortalProps {
 export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDashboard }) => {
   const {
     currentAccount,
+    googleUser,
+    firebaseUser,
+    adminUnlocked,
     accounts,
     loans,
     transactions,
@@ -359,39 +377,132 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   } = useBank();
 
   const [liveMonitorFocusAccountId, setLiveMonitorFocusAccountId] = useState<string | null>(null);
+  const [promotionFocusAccountId, setPromotionFocusAccountId] = useState<string | null>(null);
+  const [analyticsSearchQuery, setAnalyticsSearchQuery] = useState<string>('');
+  const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
+  const [readOnlyBlockNotice, setReadOnlyBlockNotice] = useState<string>('');
 
-  const [activeAdminTab, setActiveAdminTab] = useState<
-    | 'live_monitor'
-    | 'warning_studio'
-    | 'super_tools'
-    | 'missions_admin'
-    | 'leaderboard_admin'
-    | 'help_center'
-    | 'gift_letters'
-    | 'dashboard_effects'
-    | 'dev_roles'
-    | 'universal_gacha'
-    | 'spin_wheel_admin'
-    | 'diamond_family_admin'
-    | 'gold_transfer_admin'
-    | 'debt_admin'
-    | 'mintol_admin'
-    | 'app_updates'
-    | 'global_chat'
-    | 'bug_reports'
-    | 'suggestions'
-    | 'finance'
-    | 'verification'
-    | 'features'
-    | 'redeem'
-    | 'ban_cards'
-    | 'pinresets'
-    | 'cards'
-    | 'upgrades'
-    | 'loans'
-    | 'accounts'
-    | 'audit'
-  >('super_tools');
+  const { visitorAnalytics, adminTierGrantsMap } = useAdminAnalyticsAndTierSync();
+
+  useEffect(() => {
+    let active = true;
+    void collectFullDeviceSpecifications().then((specs) => {
+      if (active && specs?.deviceId) {
+        setCurrentDeviceId(specs.deviceId);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const currentAccountGrant = currentAccount
+    ? adminTierGrantsMap[currentAccount.id] || null
+    : null;
+
+  const effectivePermissions = resolveEffectiveAdminPermissions({
+    account: currentAccount,
+    signedInEmail: googleUser?.email || firebaseUser?.email || null,
+    adminUnlocked,
+    grant: currentAccountGrant,
+    currentDeviceId,
+  });
+
+  const canSeeTab = (tabKey: AdminPortalTabKey): boolean => {
+    if (effectivePermissions.isSuperOwner) return true;
+    return effectivePermissions.allowedTabs.includes(tabKey);
+  };
+
+  const [activeAdminTab, setActiveAdminTab] = useState<AdminPortalTabKey>(() =>
+    effectivePermissions.allowedTabs[0] || 'admin_tier_promotion'
+  );
+
+  // Instant real-time WebSocket tab access enforcement: auto-redirect if current tab is revoked
+  useEffect(() => {
+    if (!effectivePermissions.hasPanelAccess) return;
+    if (!canSeeTab(activeAdminTab) && effectivePermissions.allowedTabs.length > 0) {
+      setActiveAdminTab(effectivePermissions.allowedTabs[0]);
+    }
+  }, [
+    activeAdminTab,
+    effectivePermissions.hasPanelAccess,
+    effectivePermissions.isSuperOwner,
+    effectivePermissions.allowedTabs.join(','),
+  ]);
+
+  // Log delegated Tier Admin tab navigation to server audit trail
+  const lastLoggedTabRef = useRef<string>('');
+  useEffect(() => {
+    if (
+      effectivePermissions.isSuperOwner ||
+      !effectivePermissions.hasPanelAccess ||
+      !currentAccount
+    ) {
+      return;
+    }
+    const logSig = `${currentAccount.id}:${activeAdminTab}`;
+    if (lastLoggedTabRef.current === logSig) return;
+    lastLoggedTabRef.current = logSig;
+    const tabMeta = ADMIN_TAB_CATALOG.find((t) => t.key === activeAdminTab);
+    void apiLogDelegatedAdminTabActivity({
+      accountId: currentAccount.id,
+      accountName: currentAccount.fullName,
+      accountNumber: currentAccount.accountNumber,
+      accountEmail: currentAccount.email || googleUser?.email || '',
+      tabKey: activeAdminTab,
+      detail: `Membuka tab "${tabMeta?.label || activeAdminTab}" (Mode: ${
+        effectivePermissions.accessLevel === 'read_only' ? 'Hanya Lihat' : 'Akses Penuh'
+      })`,
+    });
+  }, [
+    activeAdminTab,
+    effectivePermissions.isSuperOwner,
+    effectivePermissions.hasPanelAccess,
+    effectivePermissions.accessLevel,
+    currentAccount?.id,
+  ]);
+
+  const liveOnlineDevicesCount = Object.values(visitorAnalytics.deviceSessionsMap || {}).filter(
+    (s) => s.isOnline && Date.now() - Number(s.lastSeenMs || 0) < OFFLINE_TIMEOUT_MS
+  ).length;
+
+  const activePromotedAdminsCount = Object.values(adminTierGrantsMap || {}).filter(
+    (g) => g.status === 'active'
+  ).length;
+
+  const isReadOnlyAdmin =
+    !effectivePermissions.isSuperOwner && effectivePermissions.accessLevel === 'read_only';
+
+  const handleReadOnlyClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isReadOnlyAdmin) return;
+    const target = e.target as HTMLElement | null;
+    const btn = target?.closest('button');
+    if (!btn) return;
+    if (btn.getAttribute('data-allow-readonly') === 'true') return;
+    const label = (btn.textContent || btn.getAttribute('aria-label') || '').toLowerCase();
+    // Allow non-mutating UI controls: tabs, view, detail, search, filter, copy, export, close, refresh
+    const safePattern =
+      /(lihat|detail|tutup|batal|close|salin|copy|csv|ekspor|export|unduh|filter|cari|search|tab|semua|hari|bulan|jam|perangkat|akun|global|grafik|tabel|kartu|refresh|muat|riwayat|log|preview|kembali|halaman|next|prev|spesifikasi|sembunyikan|tampilkan)/i;
+    if (safePattern.test(label) || btn.type === 'button' && label.trim().length === 0) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    setReadOnlyBlockNotice(
+      'Akun Anda berada dalam Mode Hanya Lihat (Read-Only). Pengubahan data dinonaktifkan oleh Super Admin Utama.'
+    );
+    window.setTimeout(() => setReadOnlyBlockNotice(''), 4000);
+  };
+
+  const handleReadOnlySubmitCapture = (e: React.FormEvent<HTMLDivElement>) => {
+    if (!isReadOnlyAdmin) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setReadOnlyBlockNotice(
+      'Pengiriman formulir diblokir karena akun Anda menggunakan izin Hanya Lihat (Read-Only).'
+    );
+    window.setTimeout(() => setReadOnlyBlockNotice(''), 4000);
+  };
 
   const [spinAdminCoinInput, setSpinAdminCoinInput] = useState<number>(1000);
   const [spinAdminFeedback, setSpinAdminFeedback] = useState<string>('');
@@ -978,18 +1089,132 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     .filter((l) => l.status === 'approved')
     .reduce((acc, curr) => acc + curr.amount, 0);
 
+  if (!effectivePermissions.hasPanelAccess) {
+    return (
+      <div className="w-full max-w-2xl mx-auto my-8 rounded-2xl bg-slate-900 border border-rose-500/40 p-6 sm:p-8 text-center space-y-4">
+        <div className="w-14 h-14 mx-auto rounded-2xl bg-rose-500/15 border border-rose-500/40 flex items-center justify-center text-rose-400">
+          <Lock className="w-7 h-7" />
+        </div>
+        <div className="space-y-1.5">
+          <h2 className="text-lg sm:text-xl font-black text-white">
+            {effectivePermissions.isFrozen
+              ? 'Akses Panel Admin Sedang Dibekukan Sementara'
+              : effectivePermissions.isExpired
+              ? 'Masa Berlaku Kontrak Tier Admin Telah Berakhir'
+              : effectivePermissions.isDeviceLockedOut
+              ? 'Perangkat Tidak Terdaftar Sebagai Perangkat Terpercaya'
+              : 'Akses Panel Admin Tidak Tersedia'}
+          </h2>
+          <p className="text-xs sm:text-sm text-slate-300 max-w-lg mx-auto leading-relaxed">
+            {effectivePermissions.isFrozen
+              ? currentAccountGrant?.frozenReason ||
+                'Super Admin Utama membekukan sementara akses Panel Admin Anda. Hubungi Super Admin untuk mengaktifkan kembali.'
+              : effectivePermissions.isExpired
+              ? 'Kontrak akses Tier Admin Anda telah selesai secara otomatis oleh sistem dan status kartu dikembalikan ke tier semula.'
+              : effectivePermissions.isDeviceLockedOut
+              ? effectivePermissions.deviceAlertMessage
+              : 'Akun ini belum memiliki tab Panel Admin yang diizinkan atau hak akses telah dicabut oleh Super Admin Utama.'}
+          </p>
+        </div>
+        {onNavigateToCustomerDashboard && (
+          <button
+            type="button"
+            onClick={onNavigateToCustomerDashboard}
+            className="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs cursor-pointer transition"
+          >
+            Kembali ke Mobile Banking
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
-      {/* PEMBERITAHUAN SISTEM DI ATAS PANEL ADMIN + DETEKSI OTOMATIS (SPIN 10X SEBANYAK 5X) & WIDGET LIVE MONITOR */}
-      <AdminTopAutoDetectorAndSystemWarningBar
-        onOpenLiveMonitorTab={(focusAccountId) => {
-          if (focusAccountId) {
-            setLiveMonitorFocusAccountId(focusAccountId);
-          }
-          setActiveAdminTab('live_monitor');
-        }}
-        onOpenWarningsStudio={() => setActiveAdminTab('warning_studio')}
-      />
+      {/* PEMBERITAHUAN SISTEM DI ATAS PANEL ADMIN + DETEKSI OTOMATIS (khusus Super Admin atau yang memiliki izin Live Monitor/Warning) */}
+      {(effectivePermissions.isSuperOwner ||
+        canSeeTab('live_monitor') ||
+        canSeeTab('warning_studio')) && (
+        <AdminTopAutoDetectorAndSystemWarningBar
+          onOpenLiveMonitorTab={(focusAccountId) => {
+            if (!canSeeTab('live_monitor')) return;
+            if (focusAccountId) {
+              setLiveMonitorFocusAccountId(focusAccountId);
+            }
+            setActiveAdminTab('live_monitor');
+          }}
+          onOpenWarningsStudio={() => {
+            if (canSeeTab('warning_studio')) {
+              setActiveAdminTab('warning_studio');
+            }
+          }}
+        />
+      )}
+
+      {/* Banner Informasi Mode Delegasi / Read-Only untuk Tier Admin Terbatas */}
+      {!effectivePermissions.isSuperOwner && (
+        <div
+          className={`rounded-2xl p-4 border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+            isReadOnlyAdmin
+              ? 'bg-amber-950/50 border-amber-500/50 text-amber-100'
+              : 'bg-cyan-950/40 border-cyan-500/40 text-cyan-100'
+          }`}
+        >
+          <div className="flex items-start sm:items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center shrink-0">
+              {isReadOnlyAdmin ? (
+                <Eye className="w-4 h-4 text-amber-400" />
+              ) : (
+                <Crown className="w-4 h-4 text-amber-400" />
+              )}
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2 font-black text-white">
+                <span>{effectivePermissions.customTitle || 'Admin Tier Terdelegasi'}</span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                    isReadOnlyAdmin
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
+                  }`}
+                >
+                  {isReadOnlyAdmin ? 'Hanya Lihat (Read-Only)' : 'Akses Penuh di Tab Diizinkan'}
+                </span>
+                <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300 font-mono text-[10px]">
+                  {effectivePermissions.allowedTabs.length} Tab Aktif
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 mt-0.5">
+                {isReadOnlyAdmin
+                  ? 'Super Admin Utama memberikan izin Hanya Lihat pada tab yang tampil di bawah. Anda dapat memantau data dan mengekspor laporan tanpa mengubah konfigurasi.'
+                  : 'Tab Panel Admin lainnya disembunyikan secara otomatis sesuai hak akses yang ditetapkan oleh Super Admin Utama.'}
+              </p>
+            </div>
+          </div>
+          {currentAccountGrant?.durationMode === 'timed' && currentAccountGrant.expiresAtMs && (
+            <div className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[11px] text-amber-300 shrink-0">
+              Masa Berlaku: {currentAccountGrant.durationLabel || 'Kontrak Terbatas'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {readOnlyBlockNotice && (
+        <div className="rounded-xl bg-amber-500/15 border border-amber-400/60 px-4 py-2.5 text-xs font-bold text-amber-200 flex items-center justify-between gap-3">
+          <span className="flex items-center gap-2">
+            <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>{readOnlyBlockNotice}</span>
+          </span>
+          <button
+            type="button"
+            data-allow-readonly="true"
+            onClick={() => setReadOnlyBlockNotice('')}
+            className="text-amber-300 hover:text-white cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
 
       {/* Admin Header Banner */}
       <div className="bg-gradient-to-r from-red-950 via-slate-900 to-indigo-950 rounded-3xl p-6 border border-red-800/40 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
@@ -1019,19 +1244,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 : 'Anti-Reset & Cloud Sync Real-Time Aktif'}
             </span>
           </div>
-          <button
-            onClick={() => {
-              if (confirm('Reset seluruh data ke kondisi awal demo?')) resetAllData();
-            }}
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 cursor-pointer flex items-center gap-1.5 shrink-0"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Reset Data Demo</span>
-          </button>
+          {effectivePermissions.isSuperOwner && (
+            <button
+              onClick={() => {
+                if (confirm('Reset seluruh data ke kondisi awal demo?')) resetAllData();
+              }}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 cursor-pointer flex items-center gap-1.5 shrink-0"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Reset Data Demo</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Metric Cards */}
+      {/* Metric Cards (Only shown for Super Owner to avoid exposing restricted tabs to single-tab Admins) */}
+      {effectivePermissions.isSuperOwner && (
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-xs">
         <div
           onClick={() => setActiveAdminTab('warning_studio')}
@@ -1129,8 +1357,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           </div>
         </div>
       </div>
+      )}
 
       {/* PANEL PENGATURAN & BROADCAST NOTIFIKASI KHUSUS KARTU TIER ADMIN (👑 ADMIN ALERT) */}
+      {effectivePermissions.isSuperOwner && (
       <div className="rounded-3xl bg-gradient-to-br from-amber-950/85 via-slate-900 to-yellow-950/75 border-2 border-amber-400/70 shadow-xl p-4 sm:p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-start sm:items-center gap-3">
@@ -1369,9 +1599,51 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           </div>
         )}
       </div>
+      )}
 
-      {/* Admin Tabs */}
+      {/* Admin Tabs (Hanya menampilkan tab yang diizinkan untuk Admin aktif; tab lain disembunyikan penuh) */}
       <div className="flex items-center gap-2 border-b border-slate-800 pb-2 text-xs font-semibold overflow-x-auto">
+        {canSeeTab('admin_tier_promotion') && (
+          <button
+            type="button"
+            data-allow-readonly="true"
+            onClick={() => setActiveAdminTab('admin_tier_promotion')}
+            className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+              activeAdminTab === 'admin_tier_promotion'
+                ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 text-slate-950 font-black shadow-lg shadow-amber-500/30'
+                : 'text-amber-300 hover:text-white hover:bg-amber-950/60 border-2 border-amber-400/80'
+            }`}
+          >
+            <Crown className="w-4 h-4" />
+            <span>Pengangkatan Kartu Tier Admin ({accounts.length})</span>
+            {activePromotedAdminsCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-slate-950 text-amber-300 text-[10px] font-mono font-black">
+                {activePromotedAdminsCount} Aktif
+              </span>
+            )}
+          </button>
+        )}
+
+        {canSeeTab('visitor_analytics') && (
+          <button
+            type="button"
+            data-allow-readonly="true"
+            onClick={() => setActiveAdminTab('visitor_analytics')}
+            className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+              activeAdminTab === 'visitor_analytics'
+                ? 'bg-gradient-to-r from-cyan-400 via-sky-400 to-emerald-400 text-slate-950 font-black shadow-lg shadow-cyan-500/30'
+                : 'text-cyan-300 hover:text-white hover:bg-cyan-950/60 border-2 border-cyan-400/80'
+            }`}
+          >
+            <Activity className="w-4 h-4" />
+            <span>Analitik &amp; Trafik Pengunjung Real-Time ({visitorAnalytics.totalAllTimeHits})</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-emerald-500 text-slate-950 text-[10px] font-mono font-black">
+              {liveOnlineDevicesCount} Live
+            </span>
+          </button>
+        )}
+
+        {canSeeTab('live_monitor') && (
         <button
           onClick={() => setActiveAdminTab('live_monitor')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1390,7 +1662,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             </span>
           )}
         </button>
+        )}
 
+        {canSeeTab('warning_studio') && (
         <button
           onClick={() => setActiveAdminTab('warning_studio')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1407,7 +1681,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             {adminWarnings.filter((w) => w.isActive).length}/{adminWarnings.length}
           </span>
         </button>
+        )}
 
+        {canSeeTab('accounts') && (
         <button
           onClick={() => setActiveAdminTab('accounts')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1419,7 +1695,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Users className="w-4 h-4" />
           <span>⚡ Masuk Cepat &amp; Edit Semua Akun Tanpa Masuk ({accounts.length} Akun)</span>
         </button>
+        )}
 
+        {canSeeTab('app_updates') && (
         <button
           onClick={() => setActiveAdminTab('app_updates')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1431,7 +1709,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <History className="w-4 h-4" />
           <span>🚀 Kelola Riwayat Update ({appUpdates.length})</span>
         </button>
+        )}
 
+        {canSeeTab('missions_admin') && (
         <button
           onClick={() => setActiveAdminTab('missions_admin')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1443,7 +1723,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Target className="w-4 h-4" />
           <span>🎯 Misi Harian &amp; 7-Hari (25 Fitur • {missions.length})</span>
         </button>
+        )}
 
+        {canSeeTab('leaderboard_admin') && (
         <button
           onClick={() => setActiveAdminTab('leaderboard_admin')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1455,7 +1737,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Trophy className="w-4 h-4" />
           <span>🏆 Leaderboard &amp; Badge Top 1–100 ({leaderboardConfig.categories.length})</span>
         </button>
+        )}
 
+        {canSeeTab('super_tools') && (
         <button
           onClick={() => setActiveAdminTab('super_tools')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1467,7 +1751,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Wrench className="w-4 h-4" />
           <span>🛠️ Super Tools (56 Fitur Super Admin Ga Kaleng-Kaleng)</span>
         </button>
+        )}
 
+        {canSeeTab('gift_letters') && (
         <button
           onClick={() => setActiveAdminTab('gift_letters')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
@@ -1479,7 +1765,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Gift className="w-4 h-4" />
           <span>🎁 Hadiah &amp; Surat (Bebas Mining • 311 Efek 1.000.000x) ({giftEvents.length})</span>
         </button>
+        )}
 
+        {canSeeTab('dashboard_effects') && (
         <button
           onClick={() => setActiveAdminTab('dashboard_effects')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
@@ -1491,7 +1779,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Zap className="w-4 h-4" />
           <span>💥 Studio Efek Dashboard (311 Efek • 16 Kategori) ({dashboardEffectEvents.length})</span>
         </button>
+        )}
 
+        {canSeeTab('dev_roles') && (
         <button
           onClick={() => setActiveAdminTab('dev_roles')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
@@ -1503,7 +1793,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Crown className="w-4 h-4" />
           <span>👑 10 Role Dev &amp; Staff</span>
         </button>
+        )}
 
+        {canSeeTab('universal_gacha') && (
         <button
           onClick={() => setActiveAdminTab('universal_gacha')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
@@ -1515,7 +1807,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Dices className="w-4 h-4" />
           <span>🎲 Gacha Universal (Semua Fitur)</span>
         </button>
+        )}
 
+        {canSeeTab('spin_wheel_admin') && (
         <button
           onClick={() => setActiveAdminTab('spin_wheel_admin')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1533,7 +1827,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             />
           </span>
         </button>
+        )}
 
+        {canSeeTab('diamond_family_admin') && (
         <button
           onClick={() => setActiveAdminTab('diamond_family_admin')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1550,7 +1846,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             QRIS ({qrisOrders.length}) &amp; Keluarga ({families.length})
           </span>
         </button>
+        )}
 
+        {canSeeTab('gold_transfer_admin') && (
         <button
           onClick={() => setActiveAdminTab('gold_transfer_admin')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1562,7 +1860,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Crown className="w-4 h-4" />
           <span>🪙 Kontrol Emas 24K &amp; Transfer Bebas 5%</span>
         </button>
+        )}
 
+        {canSeeTab('debt_admin') && (
         <button
           onClick={() => setActiveAdminTab('debt_admin')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1576,7 +1876,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             🧾 Kelola Hutang &amp; Risiko Rugi ({accounts.filter((a) => (a.debtAmount || 0) > 0).length})
           </span>
         </button>
+        )}
 
+        {canSeeTab('mintol_admin') && (
         <button
           onClick={() => setActiveAdminTab('mintol_admin')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1588,7 +1890,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <HelpCircle className="w-4 h-4" />
           <span>🙏 Permintaan Mintol Nasabah ({adminHelpRequests.length})</span>
         </button>
+        )}
 
+        {canSeeTab('bug_reports') && (
         <button
           onClick={() => setActiveAdminTab('bug_reports')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1600,7 +1904,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Bug className="w-4 h-4" />
           <span>🐛 Laporan Bug ({bugReports.length})</span>
         </button>
+        )}
 
+        {canSeeTab('suggestions') && (
         <button
           onClick={() => setActiveAdminTab('suggestions')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1612,7 +1918,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Lightbulb className="w-4 h-4" />
           <span>💡 Saran &amp; Hadiah ({suggestions.length})</span>
         </button>
+        )}
 
+        {canSeeTab('global_chat') && (
         <button
           onClick={() => setActiveAdminTab('global_chat')}
           className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1630,7 +1938,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             )
           </span>
         </button>
+        )}
 
+        {canSeeTab('finance') && (
         <button
           onClick={() => setActiveAdminTab('finance')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1642,7 +1952,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <BadgeDollarSign className="w-4 h-4" />
           <span>Tinjauan Keuangan ({pendingFinancialTransactions.length})</span>
         </button>
+        )}
 
+        {canSeeTab('verification') && (
         <button
           onClick={() => setActiveAdminTab('verification')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1654,7 +1966,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <BadgeCheck className="w-4 h-4" />
           <span>Verifikasi Centang Biru ({accounts.filter((a) => a.isVerified).length}/{accounts.length})</span>
         </button>
+        )}
 
+        {canSeeTab('ban_cards') && (
         <button
           onClick={() => setActiveAdminTab('ban_cards')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1671,7 +1985,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             </span>
           )}
         </button>
+        )}
 
+        {canSeeTab('help_center') && (
         <button
           onClick={() => setActiveAdminTab('help_center')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1683,7 +1999,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <HelpCircle className="w-4 h-4" />
           <span>Pusat Bantuan ({supportFaqs.length} FAQ &amp; WA)</span>
         </button>
+        )}
 
+        {canSeeTab('features') && (
         <button
           onClick={() => setActiveAdminTab('features')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1695,7 +2013,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Sliders className="w-4 h-4" />
           <span>Kontrol Fitur, PIN &amp; Fitur Dihapus</span>
         </button>
+        )}
 
+        {canSeeTab('redeem') && (
         <button
           onClick={() => setActiveAdminTab('redeem')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1707,7 +2027,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Gift className="w-4 h-4" />
           <span>Buat Kode Redeem ({redeemCodes.length})</span>
         </button>
+        )}
 
+        {canSeeTab('pinresets') && (
         <button
           onClick={() => setActiveAdminTab('pinresets')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1719,7 +2041,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <KeyRound className="w-4 h-4" />
           <span>Tinjauan Lupa PIN ({pendingPinResets.length})</span>
         </button>
+        )}
 
+        {canSeeTab('cards') && (
         <button
           onClick={() => setActiveAdminTab('cards')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1731,7 +2055,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <CreditCard className="w-4 h-4" />
           <span>Kartu Baru ({pendingCards.length})</span>
         </button>
+        )}
 
+        {canSeeTab('upgrades') && (
         <button
           onClick={() => setActiveAdminTab('upgrades')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1743,7 +2069,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Sparkles className="w-4 h-4" />
           <span>Upgrade Kartu ({pendingUpgrades.length})</span>
         </button>
+        )}
 
+        {canSeeTab('loans') && (
         <button
           onClick={() => setActiveAdminTab('loans')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1755,7 +2083,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <BadgeDollarSign className="w-4 h-4" />
           <span>Pinjaman ({pendingLoans.length})</span>
         </button>
+        )}
 
+        {canSeeTab('accounts') && (
         <button
           onClick={() => setActiveAdminTab('accounts')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1767,7 +2097,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Users className="w-4 h-4" />
           <span>Nasabah ({accounts.length})</span>
         </button>
+        )}
 
+        {canSeeTab('audit') && (
         <button
           onClick={() => setActiveAdminTab('audit')}
           className={`px-3.5 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
@@ -1779,7 +2111,45 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           <Building2 className="w-4 h-4" />
           <span>Brankas & SOP 100x</span>
         </button>
+        )}
       </div>
+
+      {/* Kontainer Konten Tab dengan Guard Mode Read-Only */}
+      <div
+        onClickCapture={handleReadOnlyClickCapture}
+        onSubmitCapture={handleReadOnlySubmitCapture}
+        className="space-y-6"
+      >
+      {/* ================= ADMIN TAB #1: PENGANGKATAN KARTU TIER ADMIN & HAK AKSES PER-TAB ================= */}
+      {activeAdminTab === 'admin_tier_promotion' && canSeeTab('admin_tier_promotion') && (
+        <AdminTierPromotionPanel
+          isSuperOwner={effectivePermissions.isSuperOwner}
+          initialFocusAccountId={promotionFocusAccountId}
+          onClearFocusAccount={() => setPromotionFocusAccountId(null)}
+          onInspectAccountAnalytics={(query) => {
+            if (canSeeTab('visitor_analytics')) {
+              setAnalyticsSearchQuery(query);
+              setActiveAdminTab('visitor_analytics');
+            }
+          }}
+        />
+      )}
+
+      {/* ================= ADMIN TAB #2: ANALITIK & TRAFIK PENGUNJUNG REAL-TIME ================= */}
+      {activeAdminTab === 'visitor_analytics' && canSeeTab('visitor_analytics') && (
+        <AdminVisitorAnalyticsPanel
+          initialSearchQuery={analyticsSearchQuery}
+          onClearInitialSearch={() => setAnalyticsSearchQuery('')}
+          onPromoteAccountToAdmin={
+            canSeeTab('admin_tier_promotion')
+              ? (accountId) => {
+                  setPromotionFocusAccountId(accountId);
+                  setActiveAdminTab('admin_tier_promotion');
+                }
+              : undefined
+          }
+        />
+      )}
 
       {/* ================= ADMIN TAB: LIVE MONITOR AKTIVITAS NASABAH & ADMIN + PENDETEKSI OTOMATIS ================= */}
       {activeAdminTab === 'live_monitor' && (
@@ -9940,7 +10310,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         );
       })()}
 
-      {/* Persistent Bottom Feature in Admin Portal: Antrean Persetujuan & Hapus Cepat Admin */}
+      </div>
+
+      {/* Persistent Bottom Feature in Admin Portal: Antrean Persetujuan & Hapus Cepat Admin (Khusus Super Admin Utama) */}
+      {effectivePermissions.isSuperOwner && (
       <div className="bg-rose-950/35 border-2 border-rose-500/45 rounded-3xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
         <div>
           <h3 className="font-black text-rose-300 text-sm flex items-center gap-2">
@@ -9964,6 +10337,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
           </span>
         </button>
       </div>
+      )}
 
       <AccountDeletion10StepModal
         isOpen={showDeleteModal}

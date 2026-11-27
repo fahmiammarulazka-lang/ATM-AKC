@@ -163,6 +163,80 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "authorId", "reporterName", "category", "explanation", "status"]
+    },
+    "GlobalVisitLog": {
+      "title": "GlobalVisitLog",
+      "description": "Every individual Web/APK visitor entry event with 10s debounce metadata, environment, and server-resolved geo metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "sessionId": { "type": "string", "maxLength": 128 },
+        "timestampIso": { "type": "string", "maxLength": 64 },
+        "timestampMs": { "type": "number" },
+        "dateKey": { "type": "string", "maxLength": 16 },
+        "monthKey": { "type": "string", "maxLength": 16 },
+        "hourOfDay": { "type": "integer" },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "deviceSessionKey": { "type": "string", "maxLength": 200 },
+        "accessType": { "type": "string", "enum": ["web_browser", "apk_webview"] },
+        "accessTypeLabel": { "type": "string", "maxLength": 120 },
+        "deviceBrandModel": { "type": "string", "maxLength": 160 },
+        "osLabel": { "type": "string", "maxLength": 100 },
+        "browserLabel": { "type": "string", "maxLength": 100 },
+        "publicIp": { "type": "string", "maxLength": 80 },
+        "city": { "type": "string", "maxLength": 120 },
+        "region": { "type": "string", "maxLength": 120 },
+        "country": { "type": "string", "maxLength": 120 },
+        "isp": { "type": "string", "maxLength": 160 },
+        "accountName": { "type": "string", "maxLength": 160 },
+        "accountEmail": { "type": "string", "maxLength": 254 },
+        "accountNumber": { "type": "string", "maxLength": 64 },
+        "accountRole": { "type": "string", "enum": ["admin", "customer", "guest"] },
+        "isAdmin": { "type": "boolean" },
+        "triggerType": { "type": "string", "enum": ["app_open", "account_login", "reopen"] }
+      },
+      "required": ["id", "sessionId", "timestampMs", "deviceId", "accessType", "accountRole"]
+    },
+    "AccountVisitSummary": {
+      "title": "AccountVisitSummary",
+      "description": "Per-account cumulative visit counter, device list, locations, and chronological login history",
+      "type": "object",
+      "properties": {
+        "accountKey": { "type": "string", "maxLength": 254 },
+        "accountId": { "type": "string", "maxLength": 128 },
+        "accountUid": { "type": "string", "maxLength": 128 },
+        "accountNumber": { "type": "string", "maxLength": 64 },
+        "accountName": { "type": "string", "maxLength": 160 },
+        "accountEmail": { "type": "string", "maxLength": 254 },
+        "role": { "type": "string", "enum": ["admin", "customer"] },
+        "roleLabel": { "type": "string", "maxLength": 120 },
+        "isAdmin": { "type": "boolean" },
+        "totalVisits": { "type": "integer" },
+        "lastActiveMs": { "type": "number" },
+        "deviceIds": { "type": "array", "items": { "type": "string" } },
+        "locations": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["accountKey", "accountId", "accountName", "role", "totalVisits", "lastActiveMs"]
+    },
+    "RealtimeDeviceSession": {
+      "title": "RealtimeDeviceSession",
+      "description": "Real-time physical device + location fingerprint tracker with online heartbeat, multi-account history, and hardware specifications",
+      "type": "object",
+      "properties": {
+        "sessionKey": { "type": "string", "maxLength": 200 },
+        "deviceId": { "type": "string", "maxLength": 128 },
+        "fingerprintHash": { "type": "string", "maxLength": 128 },
+        "locationKey": { "type": "string", "maxLength": 160 },
+        "locationLabel": { "type": "string", "maxLength": 200 },
+        "totalVisits": { "type": "integer" },
+        "firstSeenMs": { "type": "number" },
+        "lastSeenMs": { "type": "number" },
+        "isOnline": { "type": "boolean" },
+        "currentAccountRole": { "type": "string", "enum": ["admin", "customer", "guest"] },
+        "reviewStatus": { "type": "string", "enum": ["normal", "watched", "safe"] },
+        "specs": { "type": "object" }
+      },
+      "required": ["sessionKey", "deviceId", "locationKey", "totalVisits", "lastSeenMs", "isOnline", "specs"]
     }
   },
   "firestore": {
@@ -205,6 +279,18 @@
     "/bug_reports/{reportId}": {
       "schema": { "$ref": "#/entities/BugReport" },
       "description": "Customer bug reports with UID ownership and Admin moderation"
+    },
+    "/global_visits/{visitId}": {
+      "schema": { "$ref": "#/entities/GlobalVisitLog" },
+      "description": "Real-time global Web & APK visitor hits log (Admin-only read)"
+    },
+    "/account_visits/{accountKey}": {
+      "schema": { "$ref": "#/entities/AccountVisitSummary" },
+      "description": "Real-time per-account visit totals and chronological login history (Admin-only read)"
+    },
+    "/device_sessions/{sessionKey}": {
+      "schema": { "$ref": "#/entities/RealtimeDeviceSession" },
+      "description": "Real-time device fingerprint + location session tracker with full hardware specs (Admin-only read)"
     }
   }
 }

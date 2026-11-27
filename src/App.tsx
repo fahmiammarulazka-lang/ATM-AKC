@@ -52,7 +52,24 @@ import {
   KeyRound,
   RotateCcw,
   Cloud,
+  Crown,
+  CheckCircle2,
+  X,
 } from 'lucide-react';
+import {
+  useBackgroundVisitorTracker,
+  collectFullDeviceSpecifications,
+  type ActiveTrackerAccountInfo,
+} from './services/visitorTracker';
+import {
+  useAdminAnalyticsAndTierSync,
+  dismissOfficialPromotionLetter,
+} from './hooks/useAdminAnalyticsAndTierSync';
+import {
+  resolveEffectiveAdminPermissions,
+  isPrimarySystemOwnerAccount,
+} from './types/adminAnalyticsAndTier';
+import { isAdminCardAccount } from './utils/bankUtils';
 
 function BankAppContent() {
   const {
@@ -70,8 +87,95 @@ function BankAppContent() {
     markLatestAppUpdateSeen,
     uiVisibilityConfig,
     reportLivePresence,
+    adminDirectChangeAccountTier,
   } = useBank();
   const [activeView, setActiveView] = useState<AppNavView>('dashboard');
+  const [currentDeviceId, setCurrentDeviceId] = useState<string | null>(null);
+  const { adminTierGrantsMap, pendingOfficialLetter } = useAdminAnalyticsAndTierSync();
+
+  useEffect(() => {
+    let active = true;
+    void collectFullDeviceSpecifications().then((specs) => {
+      if (active && specs?.deviceId) {
+        setCurrentDeviceId(specs.deviceId);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const currentAccountGrant = currentAccount
+    ? adminTierGrantsMap[currentAccount.id] || null
+    : null;
+
+  const effectiveAdminPermissions = resolveEffectiveAdminPermissions({
+    account: currentAccount,
+    signedInEmail: googleUser?.email || firebaseUser?.email || null,
+    adminUnlocked,
+    grant: currentAccountGrant,
+    currentDeviceId,
+  });
+
+  // Automatically track all visits (Web & APK, guest & logged-in) in background
+  const activeTrackerAccount: ActiveTrackerAccountInfo | null = currentAccount
+    ? {
+        accountId: currentAccount.id,
+        accountUid: firebaseUser?.uid || currentAccount.id,
+        accountNumber: currentAccount.accountNumber,
+        accountName: currentAccount.fullName,
+        accountEmail: currentAccount.email || googleUser?.email || firebaseUser?.email || '',
+        role:
+          isPrimarySystemOwnerAccount(currentAccount, googleUser?.email || firebaseUser?.email) ||
+          isAdminCardAccount(currentAccount) ||
+          effectiveAdminPermissions.hasPanelAccess
+            ? 'admin'
+            : 'customer',
+        roleLabel: effectiveAdminPermissions.isSuperOwner
+          ? 'Super Admin Utama'
+          : effectiveAdminPermissions.hasPanelAccess
+          ? effectiveAdminPermissions.customTitle || 'Admin Tier'
+          : isAdminCardAccount(currentAccount)
+          ? 'Kartu Tier Admin'
+          : `Nasabah (${currentAccount.cardTier.toUpperCase()})`,
+        isAdmin:
+          isPrimarySystemOwnerAccount(currentAccount, googleUser?.email || firebaseUser?.email) ||
+          isAdminCardAccount(currentAccount) ||
+          effectiveAdminPermissions.hasPanelAccess,
+      }
+    : null;
+
+  useBackgroundVisitorTracker(activeTrackerAccount);
+
+  // Auto-revert expired timed Admin Tier grant back to original customer card tier
+  const revertedExpiredGrantsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentAccount || !currentAccountGrant) return;
+    if (isPrimarySystemOwnerAccount(currentAccount, googleUser?.email || firebaseUser?.email)) {
+      return;
+    }
+    if (
+      currentAccountGrant.status === 'expired' &&
+      currentAccount.cardTier === 'admin' &&
+      !revertedExpiredGrantsRef.current.has(`${currentAccount.id}:${currentAccountGrant.updatedAtMs}`)
+    ) {
+      revertedExpiredGrantsRef.current.add(`${currentAccount.id}:${currentAccountGrant.updatedAtMs}`);
+      const fallbackTier =
+        currentAccountGrant.previousCardTier && currentAccountGrant.previousCardTier !== 'admin'
+          ? currentAccountGrant.previousCardTier
+          : 'regular';
+      adminDirectChangeAccountTier(currentAccount.id, fallbackTier);
+    }
+  }, [
+    currentAccount?.id,
+    currentAccount?.cardTier,
+    currentAccountGrant?.status,
+    currentAccountGrant?.updatedAtMs,
+    currentAccountGrant?.previousCardTier,
+    googleUser?.email,
+    firebaseUser?.email,
+    adminDirectChangeAccountTier,
+  ]);
   const [hiddenTabNotice, setHiddenTabNotice] = useState<string>('');
   const prevAuthUidRef = useRef<string | null>(null);
   const [requestedDashboardTab, setRequestedDashboardTab] = useState<{
@@ -242,7 +346,8 @@ function BankAppContent() {
   }, []);
 
   const handleSecretAdminTrigger = () => {
-    if (adminUnlocked) {
+    if (adminUnlocked || effectiveAdminPermissions.canOpenWithoutPin) {
+      setAdminUnlocked(true);
       if (!googleUser || !googleUser.hasCompletedOnboarding) {
         setAdminViewDuringOnboarding(true);
       } else {
@@ -266,6 +371,16 @@ function BankAppContent() {
   };
 
   const handleQuickAdminAccess = (role?: DevRoleConfig | null) => {
+    if (effectiveAdminPermissions.canOpenWithoutPin) {
+      setAdminUnlocked(true);
+      if (!googleUser || !googleUser.hasCompletedOnboarding) {
+        setAdminViewDuringOnboarding(true);
+      } else {
+        setActiveView('admin');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     if (!role || !role.canQuickOpenAdmin) {
       handleSecretAdminTrigger();
       return;
@@ -634,7 +749,127 @@ function BankAppContent() {
         isOpen={showAdminPinModal}
         onSuccess={handleAdminAuthSuccess}
         onCancel={() => setShowAdminPinModal(false)}
+        customAcceptedPin={currentAccountGrant?.customAdminPin}
       />
+
+      {/* Surat Pengangkatan Resmi Tier Admin (Push Real-Time via WebSocket) */}
+      {pendingOfficialLetter &&
+        currentAccount &&
+        pendingOfficialLetter.targetAccountId === currentAccount.id && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="w-full max-w-lg rounded-2xl bg-slate-900 border border-amber-400/60 shadow-2xl overflow-hidden text-white">
+              <div className="bg-gradient-to-r from-amber-500/20 via-slate-900 to-cyan-500/20 border-b border-slate-800 px-6 py-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-400/20 border border-amber-400/60 flex items-center justify-center text-amber-300 shrink-0">
+                    <Crown className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-mono uppercase tracking-widest text-amber-300 font-bold">
+                      SURAT KEPUTUSAN RESMI • BANK NUSANTARA
+                    </div>
+                    <h3 className="text-base font-black text-white">
+                      Pengangkatan Kartu Menjadi Tier Admin
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => dismissOfficialPromotionLetter(pendingOfficialLetter.id)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4 text-xs">
+                <p className="text-slate-200 leading-relaxed">
+                  Selamat <strong className="text-amber-300">{pendingOfficialLetter.targetAccountName}</strong>{' '}
+                  (Rek. <span className="font-mono">{pendingOfficialLetter.targetAccountNumber}</span>),
+                  Super Admin Utama <strong>{pendingOfficialLetter.grantedByName}</strong> resmi
+                  mengangkat kartu Anda menjadi{' '}
+                  <strong className="text-amber-300">{pendingOfficialLetter.customTitle}</strong>.
+                </p>
+
+                <div className="grid grid-cols-2 gap-2.5 bg-slate-950 border border-slate-800 rounded-xl p-3.5">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Tingkat Aksi</span>
+                    <span className="font-bold text-white">
+                      {pendingOfficialLetter.accessLevel === 'read_only'
+                        ? 'Hanya Lihat (Read-Only)'
+                        : 'Akses Penuh (Edit & Kelola)'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Masa Berlaku</span>
+                    <span className="font-bold text-amber-300 font-mono">
+                      {pendingOfficialLetter.durationLabel}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Cara Masuk Panel</span>
+                    <span className="font-bold text-emerald-300">
+                      {pendingOfficialLetter.panelAccessMode === 'auto_open'
+                        ? 'Buka Langsung Tanpa PIN'
+                        : 'Wajib Masukkan PIN Admin'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Jumlah Tab Diizinkan</span>
+                    <span className="font-bold text-cyan-300 font-mono">
+                      {pendingOfficialLetter.allowedTabLabels.length} Tab Panel
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold text-slate-300 block">
+                    Daftar Tab Panel Admin yang Diberikan:
+                  </span>
+                  <div className="max-h-28 overflow-y-auto flex flex-wrap gap-1.5 p-2.5 rounded-xl bg-slate-950 border border-slate-800">
+                    {pendingOfficialLetter.allowedTabLabels.map((lbl, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/15 border border-amber-400/40 text-amber-200 text-[11px] font-semibold"
+                      >
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                        <span>{lbl}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {pendingOfficialLetter.reason && (
+                  <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-300">
+                    <span className="text-[10px] uppercase font-mono text-slate-400 block mb-0.5">
+                      Catatan / Alasan Pengangkatan:
+                    </span>
+                    <span>{pendingOfficialLetter.reason}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      dismissOfficialPromotionLetter(pendingOfficialLetter.id);
+                      handleSecretAdminTrigger();
+                    }}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-xs cursor-pointer transition"
+                  >
+                    Buka Panel Admin Sekarang
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => dismissOfficialPromotionLetter(pendingOfficialLetter.id)}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs cursor-pointer transition"
+                  >
+                    Tutup Surat
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* Zero-Trust Security & Sync Command Center Modal */}
       <SecurityCommandCenter

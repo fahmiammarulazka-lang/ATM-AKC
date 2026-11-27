@@ -235,6 +235,74 @@ service cloud.firestore {
         && (!('adminReply' in data) || (data.adminReply is string && data.adminReply.size() <= 2000));
     }
 
+    function isValidGlobalVisit(data) {
+      return data.keys().hasAll(['id', 'sessionId', 'timestampMs', 'deviceId', 'accessType', 'accountRole'])
+        && data.keys().hasOnly([
+          'id', 'sessionId', 'timestampIso', 'timestampMs', 'dateKey', 'monthKey', 'hourOfDay',
+          'deviceId', 'deviceSessionKey', 'accessType', 'accessTypeLabel', 'deviceBrandModel',
+          'osLabel', 'browserLabel', 'publicIp', 'city', 'region', 'country', 'isp',
+          'accountId', 'accountUid', 'accountName', 'accountEmail', 'accountNumber',
+          'accountRole', 'isAdmin', 'triggerType', 'updatedAt', 'updatedAtMs', 'updatedAtServer'
+        ])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
+        && data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 128
+        && data.timestampMs is number
+        && data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 128
+        && data.accessType is string && data.accessType in ['web_browser', 'apk_webview']
+        && data.accountRole is string && data.accountRole in ['admin', 'customer', 'guest']
+        && (!('publicIp' in data) || (data.publicIp is string && data.publicIp.size() <= 80))
+        && (!('city' in data) || (data.city is string && data.city.size() <= 120))
+        && (!('region' in data) || (data.region is string && data.region.size() <= 120))
+        && (!('country' in data) || (data.country is string && data.country.size() <= 120))
+        && (!('isp' in data) || (data.isp is string && data.isp.size() <= 160))
+        && (!('accountName' in data) || (data.accountName is string && data.accountName.size() <= 160))
+        && (!('accountEmail' in data) || (data.accountEmail is string && data.accountEmail.size() <= 254))
+        && (!('isAdmin' in data) || data.isAdmin is bool)
+        && (!('triggerType' in data) || (data.triggerType is string && data.triggerType in ['app_open', 'account_login', 'reopen']));
+    }
+
+    function isValidAccountVisit(data) {
+      return data.keys().hasAll(['accountKey', 'accountId', 'accountName', 'role', 'totalVisits', 'lastActiveMs'])
+        && data.keys().hasOnly([
+          'accountKey', 'accountId', 'accountUid', 'accountNumber', 'accountName', 'accountEmail',
+          'role', 'roleLabel', 'isAdmin', 'totalVisits', 'firstVisitIso', 'lastActiveIso',
+          'lastActiveMs', 'deviceIds', 'locations', 'recentVisits',
+          'updatedAt', 'updatedAtMs', 'updatedAtServer'
+        ])
+        && data.accountKey is string && data.accountKey.size() >= 1 && data.accountKey.size() <= 254
+        && data.accountId is string && data.accountId.size() >= 1 && data.accountId.size() <= 128
+        && data.accountName is string && data.accountName.size() >= 1 && data.accountName.size() <= 160
+        && data.role is string && data.role in ['admin', 'customer']
+        && data.totalVisits is int && data.totalVisits >= 0 && data.totalVisits <= 100000000
+        && data.lastActiveMs is number
+        && (!('isAdmin' in data) || data.isAdmin is bool)
+        && (!('deviceIds' in data) || (data.deviceIds is list && data.deviceIds.size() <= 500))
+        && (!('locations' in data) || (data.locations is list && data.locations.size() <= 500))
+        && (!('recentVisits' in data) || (data.recentVisits is list && data.recentVisits.size() <= 500));
+    }
+
+    function isValidRealtimeDeviceSession(data) {
+      return data.keys().hasAll(['sessionKey', 'deviceId', 'locationKey', 'totalVisits', 'lastSeenMs', 'isOnline', 'specs'])
+        && data.keys().hasOnly([
+          'sessionKey', 'deviceId', 'fingerprintHash', 'locationKey', 'locationLabel',
+          'previousLocations', 'linkedSessionKeys', 'totalVisits', 'firstSeenIso', 'firstSeenMs',
+          'lastSeenIso', 'lastSeenMs', 'isOnline', 'currentAccountKey', 'currentAccountName',
+          'currentAccountEmail', 'currentAccountRole', 'isAdminActive', 'accountsHistory',
+          'reviewStatus', 'reviewNote', 'specs', 'updatedAt', 'updatedAtMs', 'updatedAtServer'
+        ])
+        && data.sessionKey is string && data.sessionKey.size() >= 1 && data.sessionKey.size() <= 200
+        && data.deviceId is string && data.deviceId.size() >= 1 && data.deviceId.size() <= 128
+        && data.locationKey is string && data.locationKey.size() >= 1 && data.locationKey.size() <= 160
+        && data.totalVisits is int && data.totalVisits >= 0 && data.totalVisits <= 100000000
+        && data.lastSeenMs is number
+        && data.isOnline is bool
+        && data.specs is map
+        && (!('currentAccountRole' in data) || (data.currentAccountRole is string && data.currentAccountRole in ['admin', 'customer', 'guest']))
+        && (!('reviewStatus' in data) || (data.reviewStatus is string && data.reviewStatus in ['normal', 'watched', 'safe']))
+        && (!('reviewNote' in data) || (data.reviewNote is string && data.reviewNote.size() <= 500))
+        && (!('accountsHistory' in data) || (data.accountsHistory is list && data.accountsHistory.size() <= 200));
+    }
+
     // ------------------------------------------------------------------------
     // ISOLASI TENANT MUTLAK BERBASIS UID: /users/{userId}/...
     // ------------------------------------------------------------------------
@@ -436,6 +504,34 @@ service cloud.firestore {
         && isSignedIn()
         && incoming().updatedAtMs is number;
       allow delete: if isValidId(docId) && isVerifiedAdmin();
+    }
+
+    // ------------------------------------------------------------------------
+    // REAL-TIME VISITOR ANALYTICS COLLECTIONS (ADMIN-ONLY READ FOR PII/IP)
+    // ------------------------------------------------------------------------
+    match /global_visits/{visitId} {
+      allow get, list: if isVerifiedAdmin();
+      allow create: if isValidId(visitId)
+        && isSignedIn()
+        && isValidGlobalVisit(incoming());
+      allow update: if false;
+      allow delete: if isValidId(visitId) && isVerifiedAdmin();
+    }
+
+    match /account_visits/{accountKey} {
+      allow get, list: if isVerifiedAdmin();
+      allow create, update: if isValidId(accountKey)
+        && isSignedIn()
+        && isValidAccountVisit(incoming());
+      allow delete: if isValidId(accountKey) && isVerifiedAdmin();
+    }
+
+    match /device_sessions/{sessionKey} {
+      allow get, list: if isVerifiedAdmin();
+      allow create, update: if isValidId(sessionKey)
+        && isSignedIn()
+        && isValidRealtimeDeviceSession(incoming());
+      allow delete: if isValidId(sessionKey) && isVerifiedAdmin();
     }
   }
 }

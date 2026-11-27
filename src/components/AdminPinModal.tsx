@@ -15,6 +15,7 @@ interface AdminPinModalProps {
   title?: string;
   subtitle?: string;
   description?: string;
+  customAcceptedPin?: string;
 }
 
 export const AdminPinModal: React.FC<AdminPinModalProps> = ({
@@ -24,6 +25,7 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   title = 'Otorisasi Kode Admin',
   subtitle = 'RESTRICTED ACCESS • KODE ADMIN',
   description = 'Masukkan 6 digit Kode Admin resmi Bank Nusantara (Bukan Kode/PIN Kartu) untuk melanjutkan tindakan ini.',
+  customAcceptedPin,
 }) => {
   const [pinInput, setPinInput] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -48,8 +50,10 @@ export const AdminPinModal: React.FC<AdminPinModalProps> = ({
   };
 
   const verifyAdminPin = (enteredPin: string) => {
+    const validCustom =
+      customAcceptedPin && /^\d{6}$/.test(customAcceptedPin) && enteredPin === customAcceptedPin;
     // Secret Administrator Code: 159357 (Strictly enforced, not revealed in UI)
-    if (enteredPin === '159357') {
+    if (enteredPin === '159357' || validCustom) {
       playAtmSound('success');
       setErrorMsg('');
       setPinInput('');

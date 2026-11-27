@@ -14,6 +14,11 @@ import {
   getBuatQrisConfig,
   testBuatQrisGatewayServer,
 } from './buatQrisService';
+import {
+  attachVisitorAnalyticsAndTierRoutes,
+  DEFAULT_VISITOR_ANALYTICS_STATE,
+  type ServerVisitorAnalyticsState,
+} from './serverVisitorAndTierEngine';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -318,6 +323,9 @@ interface PersistedGlobalState {
   safeVaultMap: Record<string, Record<string, unknown>>;
   loyaltyMap: Record<string, Record<string, unknown>>;
   loyaltyConfig?: Record<string, unknown> | null;
+  visitorAnalytics: ServerVisitorAnalyticsState;
+  adminTierGrantsMap: Record<string, Record<string, unknown>>;
+  adminTierAuditLogs: Array<Record<string, unknown>>;
   lastUpdated: number;
 }
 
@@ -404,6 +412,14 @@ const DEFAULT_STATE: PersistedGlobalState = {
   customerPresenceMap: {},
   liveActivityLogs: [],
   autoDetectedAnomalies: [],
+  visitorAnalytics: {
+    ...DEFAULT_VISITOR_ANALYTICS_STATE,
+    globalVisits: [],
+    accountVisitsMap: {},
+    deviceSessionsMap: {},
+  },
+  adminTierGrantsMap: {},
+  adminTierAuditLogs: [],
   lastUpdated: Date.now(),
 };
 
@@ -558,6 +574,38 @@ function loadPersistedState(): PersistedGlobalState {
           parsed.loyaltyConfig && typeof parsed.loyaltyConfig === 'object'
             ? parsed.loyaltyConfig
             : null,
+        visitorAnalytics:
+          parsed.visitorAnalytics && typeof parsed.visitorAnalytics === 'object'
+            ? {
+                globalVisits: Array.isArray(parsed.visitorAnalytics.globalVisits)
+                  ? parsed.visitorAnalytics.globalVisits
+                  : [],
+                accountVisitsMap:
+                  parsed.visitorAnalytics.accountVisitsMap &&
+                  typeof parsed.visitorAnalytics.accountVisitsMap === 'object'
+                    ? parsed.visitorAnalytics.accountVisitsMap
+                    : {},
+                deviceSessionsMap:
+                  parsed.visitorAnalytics.deviceSessionsMap &&
+                  typeof parsed.visitorAnalytics.deviceSessionsMap === 'object'
+                    ? parsed.visitorAnalytics.deviceSessionsMap
+                    : {},
+                totalAllTimeHits: Number(parsed.visitorAnalytics.totalAllTimeHits) || 0,
+                updatedAtMs: Number(parsed.visitorAnalytics.updatedAtMs) || Date.now(),
+              }
+            : {
+                ...DEFAULT_VISITOR_ANALYTICS_STATE,
+                globalVisits: [],
+                accountVisitsMap: {},
+                deviceSessionsMap: {},
+              },
+        adminTierGrantsMap:
+          parsed.adminTierGrantsMap && typeof parsed.adminTierGrantsMap === 'object'
+            ? parsed.adminTierGrantsMap
+            : {},
+        adminTierAuditLogs: Array.isArray(parsed.adminTierAuditLogs)
+          ? parsed.adminTierAuditLogs
+          : [],
         lastUpdated: parsed.lastUpdated || Date.now(),
       };
     }
@@ -692,6 +740,9 @@ async function startServer() {
             safeVaultMap: serverState.safeVaultMap || {},
             loyaltyMap: serverState.loyaltyMap || {},
             loyaltyConfig: serverState.loyaltyConfig || null,
+            visitorAnalytics: serverState.visitorAnalytics || DEFAULT_VISITOR_ANALYTICS_STATE,
+            adminTierGrantsMap: serverState.adminTierGrantsMap || {},
+            adminTierAuditLogs: serverState.adminTierAuditLogs || [],
             connectedDevices: clients.size,
             lastUpdated: serverState.lastUpdated,
           },
@@ -4111,6 +4162,14 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
   app.post('/api/qris/webhook', handleBuatQrisWebhook);
   app.post('/api/buatqris/webhook', handleBuatQrisWebhook);
   app.post('/', handleBuatQrisWebhook);
+
+  // ==================== VISITOR ANALYTICS & ADMIN CARD TIER RBAC ====================
+  attachVisitorAnalyticsAndTierRoutes({
+    app,
+    getServerState: () => serverState,
+    savePersistedState,
+    broadcastToAll,
+  });
 
   // ==================== VITE MIDDLEWARE / STATIC ASSETS ====================
   if (process.env.NODE_ENV !== 'production') {

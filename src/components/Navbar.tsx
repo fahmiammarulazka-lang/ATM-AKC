@@ -62,6 +62,8 @@ import {
   getNotificationCategoryMeta,
 } from '../data/notificationCategories';
 import { RefreshCw } from 'lucide-react';
+import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
+import { resolveEffectiveAdminPermissions } from '../types/adminAnalyticsAndTier';
 
 export type AppNavView =
   | 'dashboard'
@@ -100,6 +102,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const {
     currentAccount,
+    firebaseUser,
+    adminUnlocked,
     notifications,
     unreadNotificationCount,
     markNotificationAsRead,
@@ -135,6 +139,17 @@ export const Navbar: React.FC<NavbarProps> = ({
     dismissNotification,
     totalChatUnreadCount,
   } = useBank();
+
+  const { adminTierGrantsMap } = useAdminAnalyticsAndTierSync();
+  const navbarTierAdminGrant = currentAccount
+    ? adminTierGrantsMap[currentAccount.id] || null
+    : null;
+  const navbarTierAdminPerms = resolveEffectiveAdminPermissions({
+    account: currentAccount,
+    signedInEmail: googleUser?.email || firebaseUser?.email || null,
+    adminUnlocked,
+    grant: navbarTierAdminGrant,
+  });
 
   const activeMissionsCount = React.useMemo(
     () => (missions || []).filter((m) => m.isActive).length,
@@ -589,6 +604,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </button>
             )}
+
+          {/* Tombol Akses Cepat Panel Admin untuk Akun yang Diangkat Menjadi Tier Admin */}
+          {navbarTierAdminPerms.hasPanelAccess && !navbarTierAdminPerms.hideAdminStatus && (
+            <button
+              type="button"
+              onClick={onSecretAdminTrigger}
+              className={`flex items-center gap-1.5 h-7 sm:h-8 px-2.5 rounded-lg sm:rounded-xl font-black text-[10px] sm:text-[11px] transition cursor-pointer shrink-0 whitespace-nowrap border ${
+                activeView === 'admin'
+                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow'
+                  : 'bg-slate-900 hover:bg-amber-500/20 border-amber-400/60 text-amber-200'
+              }`}
+              title={`${navbarTierAdminPerms.customTitle || 'Panel Admin'} (${navbarTierAdminPerms.allowedTabs.length} Tab)`}
+            >
+              {navbarTierAdminPerms.showCrownBadge && (
+                <Crown className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+              )}
+              <span className="hidden sm:inline">Panel Admin</span>
+              <span className="px-1.5 py-0.2 rounded bg-slate-950/70 text-amber-300 font-mono text-[9px] tabular-nums">
+                {navbarTierAdminPerms.allowedTabs.length}
+              </span>
+            </button>
+          )}
 
           {/* 🔔 Tombol Notifikasi (10 Jenis dengan Centang Izin & Drill-Down + Tab Khusus Admin Tier) */}
           <div className="relative shrink-0">
