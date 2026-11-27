@@ -3081,6 +3081,32 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-46-23',
+    version: 'v16.46.23',
+    releaseType: 'patch',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v16.46.23: Animasi Ledakan Besar Siklus 5 Detik di Semua 5 Bingkai Aura (Petir Menyambar, Semburan Api Naga, Sinar Emas 24K, Pecahan Es & Supernova Meteor) + Pemicu Ketuk Instan',
+    fullDate: 'Sabtu, 28 November 2026 • Pukul 15:40 WIB',
+    dateText: 'Sabtu, 28 November 2026 • Pukul 15:40 WIB',
+    description:
+      'Pembaruan patch v16.46.23 menambahkan animasi ledakan besar tematik berdurasi ~1 detik yang muncul otomatis setiap 5 detik secara berurutan di sela gerak mengambang halus, berputar lambat, dan bernapas pada kelima Bingkai Aura Eksklusif: Petir Cyber melepaskan sambaran petir zig-zag bercabang + kilatan cahaya biru-putih; Api Naga menyemburkan kobaran api ke atas + hujan bara; Emas Imperial memancarkan ledakan sinar emas 24K + hujan kilau bintang; Kristal Es meledakkan pecahan es radial + badai salju kristal singkat; dan Galaksi Kosmik memancarkan denyut supernova nebula + lintasan meteor melesat. Pengguna juga dapat langsung mengetuk/mengklik bingkai untuk memicu efek besar seketika, dengan versi ringkas yang tetap rapi di ikon kecil PayChat, Navbar, serta Leaderboard.',
+    highlights: [
+      'Animasi Besar Siklus 5 Detik (~1 Detik Tajam & Megah): Petir Cyber menyambar zig-zag biru-putih, Api Naga menyemburkan api & hujan bara, Emas Imperial memancarkan sunburst 24K & bintang, Kristal Es meledakkan pecahan es & badai salju, dan Galaksi Kosmik melepaskan supernova & meteor.',
+      'Ritme Berurutan Alami + Gerak Kontinu Di Sela Waktu: Di sela jeda 5 detik, bingkai tetap mengambang lembut, berputar lambat, dan bernapas; saat beberapa bingkai tampil bersamaan, ledakan terjadi bergantian secara alami.',
+      'Pemicu Sentuh/Klik Instan & Rapi Di Semua Ukuran: Sentuh atau klik bingkai untuk langsung memicu ledakan besarnya tanpa menunggu 5 detik, dan tetap tampil ringkas rapi di gelembung kecil PayChat, Navbar, dan Leaderboard.',
+    ],
+    changes: [
+      'Menambahkan penjadwal siklus 5 detik ber-offset deterministik serta pemicu klik/sentuh instan di ProfileAvatarBadge yang tetap meneruskan aksi tombol induk.',
+      'Menambahkan lapisan SVG dan CSS compositor keyframes .bn-burst-* (~1 detik) untuk seluruh 5 tema bingkai baik ukuran sm (ringkas) maupun md/lg/xl (penuh & panggung).',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-28T08:40:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v16-46-22',
     version: 'v16.46.22',
     releaseType: 'patch',
@@ -3101,8 +3127,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Menambahkan keyframes CSS compositor-only untuk mengambang tipis ±2px, getar mikro Petir Cyber, lidah api & bara naik Api Naga, kilau diagonal Emas Imperial, salju melayang Kristal Es, serta nebula bernapas & bob planet/bulan Galaksi Kosmik.',
       'Menghubungkan stageHighlight pada layar perayaan STAGE_SPOTLIGHT_REVEAL dan menyesuaikan pemusatan klaster 5 heksagon merah di SpinBingkaiArena.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Rilis Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-28T08:10:00.000Z',
     isAutoDetected: true,

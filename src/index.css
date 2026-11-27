@@ -306,6 +306,23 @@
   .bn-obj-nebula-breathe,
   .bn-obj-planet-bob,
   .bn-obj-moon-bob,
+  .bn-burst-shock,
+  .bn-burst-flash,
+  .bn-burst-bolt-strike,
+  .bn-burst-flame-jet,
+  .bn-burst-ember-jet-a,
+  .bn-burst-ember-jet-b,
+  .bn-burst-ember-jet-c,
+  .bn-burst-sunburst,
+  .bn-burst-star-jet-a,
+  .bn-burst-star-jet-b,
+  .bn-burst-ice-shard-1,
+  .bn-burst-ice-shard-2,
+  .bn-burst-ice-shard-3,
+  .bn-burst-ice-shard-4,
+  .bn-burst-snowstorm,
+  .bn-burst-supernova,
+  .bn-burst-meteor,
   .bn-spotlight-sweep-left,
   .bn-spotlight-sweep-right {
     animation: none !important;
@@ -986,6 +1003,353 @@
 
 .bn-spark-burst {
   animation: bnSparkBurst 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* 5-Second Periodic Ultimate Thematic Burst Animations (~1.0s Dramatic Peak) */
+@keyframes bnBurstShockwave {
+  0% {
+    opacity: 0;
+    transform: scale(0.65);
+  }
+  22% {
+    opacity: 0.95;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.68);
+  }
+}
+
+@keyframes bnBurstFlashHalo {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  14% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  30% {
+    opacity: 0.25;
+    transform: scale(1.02);
+  }
+  48% {
+    opacity: 0.95;
+    transform: scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.22);
+  }
+}
+
+@keyframes bnBurstBoltStrike {
+  0% {
+    opacity: 0;
+    transform: scale(0.75) translate3d(0, -6px, 0);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1.08) translate3d(0, 0, 0);
+  }
+  32% {
+    opacity: 0.2;
+    transform: scale(0.98);
+  }
+  48% {
+    opacity: 1;
+    transform: scale(1.1) translate3d(1px, 1px, 0);
+  }
+  75% {
+    opacity: 0.65;
+    transform: scale(1.02);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+@keyframes bnBurstFlameJet {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scaleY(0.45) scaleX(0.8);
+  }
+  25% {
+    opacity: 1;
+    transform: translate3d(0, -8px, 0) scaleY(1.26) scaleX(1.08);
+  }
+  65% {
+    opacity: 0.92;
+    transform: translate3d(0, -15px, 0) scaleY(1.12) scaleX(0.96);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -24px, 0) scaleY(0.7) scaleX(0.75);
+  }
+}
+
+@keyframes bnBurstEmberJetA {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0) scale(0.5);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-18px, -28px, 0) scale(1.2);
+  }
+}
+
+@keyframes bnBurstEmberJetB {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0) scale(0.5);
+  }
+  22% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(18px, -26px, 0) scale(1.15);
+  }
+}
+
+@keyframes bnBurstEmberJetC {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0) scale(0.6);
+  }
+  24% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(3px, -34px, 0) scale(0.85);
+  }
+}
+
+@keyframes bnBurstSunburst {
+  0% {
+    opacity: 0;
+    transform: scale(0.48) rotate(-14deg);
+  }
+  30% {
+    opacity: 0.98;
+    transform: scale(1.22) rotate(8deg);
+  }
+  70% {
+    opacity: 0.72;
+    transform: scale(1.38) rotate(22deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.56) rotate(32deg);
+  }
+}
+
+@keyframes bnBurstStarJetA {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.4) rotate(0deg);
+  }
+  25% {
+    opacity: 1;
+    transform: translate3d(-16px, -16px, 0) scale(1.25) rotate(35deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-26px, -28px, 0) scale(0.55) rotate(80deg);
+  }
+}
+
+@keyframes bnBurstStarJetB {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.4) rotate(0deg);
+  }
+  25% {
+    opacity: 1;
+    transform: translate3d(16px, -14px, 0) scale(1.25) rotate(-35deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(26px, -26px, 0) scale(0.55) rotate(-85deg);
+  }
+}
+
+@keyframes bnBurstIceShard1 {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.45);
+  }
+  25% {
+    opacity: 1;
+    transform: translate3d(-12px, -12px, 0) scale(1.18);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-24px, -24px, 0) scale(0.75);
+  }
+}
+@keyframes bnBurstIceShard2 {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.45);
+  }
+  25% {
+    opacity: 1;
+    transform: translate3d(12px, -12px, 0) scale(1.18);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(24px, -24px, 0) scale(0.75);
+  }
+}
+@keyframes bnBurstIceShard3 {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.45);
+  }
+  25% {
+    opacity: 1;
+    transform: translate3d(-12px, 12px, 0) scale(1.18);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-24px, 24px, 0) scale(0.75);
+  }
+}
+@keyframes bnBurstIceShard4 {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.45);
+  }
+  25% {
+    opacity: 1;
+    transform: translate3d(12px, 12px, 0) scale(1.18);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(24px, 24px, 0) scale(0.75);
+  }
+}
+@keyframes bnBurstSnowstorm {
+  0% {
+    opacity: 0;
+    transform: rotate(-30deg) scale(0.72);
+  }
+  30% {
+    opacity: 1;
+    transform: rotate(20deg) scale(1.18);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(85deg) scale(1.48);
+  }
+}
+
+@keyframes bnBurstSupernova {
+  0% {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  28% {
+    opacity: 1;
+    transform: scale(1.16);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.74);
+  }
+}
+
+@keyframes bnBurstMeteor {
+  0% {
+    opacity: 0;
+    transform: translate3d(32px, -28px, 0) scale(0.6);
+  }
+  18% {
+    opacity: 1;
+    transform: translate3d(14px, -12px, 0) scale(1.08);
+  }
+  75% {
+    opacity: 0.95;
+    transform: translate3d(-22px, 20px, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(-38px, 34px, 0) scale(0.5);
+  }
+}
+
+.bn-burst-shock {
+  transform-origin: center;
+  animation: bnBurstShockwave 0.98s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bn-burst-flash {
+  transform-origin: center;
+  animation: bnBurstFlashHalo 0.95s ease-out forwards;
+}
+.bn-burst-bolt-strike {
+  transform-origin: center;
+  animation: bnBurstBoltStrike 0.95s ease-out forwards;
+}
+.bn-burst-flame-jet {
+  transform-origin: bottom center;
+  animation: bnBurstFlameJet 1.04s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bn-burst-ember-jet-a {
+  animation: bnBurstEmberJetA 1.02s ease-out forwards;
+}
+.bn-burst-ember-jet-b {
+  animation: bnBurstEmberJetB 1.02s ease-out 0.06s forwards;
+}
+.bn-burst-ember-jet-c {
+  animation: bnBurstEmberJetC 1.05s ease-out 0.1s forwards;
+}
+.bn-burst-sunburst {
+  transform-origin: center;
+  animation: bnBurstSunburst 1.06s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bn-burst-star-jet-a {
+  transform-origin: center;
+  animation: bnBurstStarJetA 1.02s ease-out forwards;
+}
+.bn-burst-star-jet-b {
+  transform-origin: center;
+  animation: bnBurstStarJetB 1.02s ease-out 0.08s forwards;
+}
+.bn-burst-ice-shard-1 {
+  transform-origin: center;
+  animation: bnBurstIceShard1 1.02s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bn-burst-ice-shard-2 {
+  transform-origin: center;
+  animation: bnBurstIceShard2 1.02s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bn-burst-ice-shard-3 {
+  transform-origin: center;
+  animation: bnBurstIceShard3 1.02s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bn-burst-ice-shard-4 {
+  transform-origin: center;
+  animation: bnBurstIceShard4 1.02s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bn-burst-snowstorm {
+  transform-origin: center;
+  animation: bnBurstSnowstorm 1.06s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bn-burst-supernova {
+  transform-origin: center;
+  animation: bnBurstSupernova 1.08s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.bn-burst-meteor {
+  transform-origin: center;
+  animation: bnBurstMeteor 0.98s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
 
 /* Custom scrollbars */

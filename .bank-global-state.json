@@ -13896,6 +13896,64 @@
         "accountRole": "customer",
         "isAdmin": false,
         "triggerType": "account_login"
+      },
+      {
+        "id": "gv-1795818871060-lk1tzh",
+        "sessionId": "SES-MWYSTGUK-TWX94M",
+        "timestampIso": "2026-11-27T22:34:31.060Z",
+        "timestampMs": 1795818871060,
+        "dateKey": "2026-11-28",
+        "monthKey": "2026-11",
+        "hourOfDay": 5,
+        "deviceId": "DEV-9F2F054C46C1",
+        "deviceSessionKey": "DEV-9F2F054C46C1__gebog|java|indonesia",
+        "accessType": "web_browser",
+        "accessTypeLabel": "Web Browser (Google Chrome 158)",
+        "deviceBrandModel": "PC / Laptop Windows",
+        "osLabel": "Windows 10 / 11",
+        "browserLabel": "Google Chrome 158",
+        "publicIp": "103.164.228.70",
+        "city": "Gebog",
+        "region": "Java",
+        "country": "Indonesia",
+        "isp": "Indonesia Network Information Center",
+        "accountId": null,
+        "accountUid": null,
+        "accountName": "Pengunjung Tamu (Belum Login)",
+        "accountEmail": "-",
+        "accountNumber": "-",
+        "accountRole": "guest",
+        "isAdmin": false,
+        "triggerType": "app_open"
+      },
+      {
+        "id": "gv-1795818873556-19i7v4",
+        "sessionId": "SES-MWYSTGUK-TWX94M",
+        "timestampIso": "2026-11-27T22:34:33.556Z",
+        "timestampMs": 1795818873556,
+        "dateKey": "2026-11-28",
+        "monthKey": "2026-11",
+        "hourOfDay": 5,
+        "deviceId": "DEV-9F2F054C46C1",
+        "deviceSessionKey": "DEV-9F2F054C46C1__gebog|java|indonesia",
+        "accessType": "web_browser",
+        "accessTypeLabel": "Web Browser (Google Chrome 158)",
+        "deviceBrandModel": "PC / Laptop Windows",
+        "osLabel": "Windows 10 / 11",
+        "browserLabel": "Google Chrome 158",
+        "publicIp": "103.164.228.70",
+        "city": "Gebog",
+        "region": "Java",
+        "country": "Indonesia",
+        "isp": "Indonesia Network Information Center",
+        "accountId": "acc-lobby-reg-1795585697689",
+        "accountUid": "MJU7dilDyVP5C5JnhBojpUehpv63",
+        "accountName": "Azka",
+        "accountEmail": "fahmiammarulazka@gmail.com",
+        "accountNumber": "5362021409",
+        "accountRole": "customer",
+        "isAdmin": false,
+        "triggerType": "account_login"
       }
     ],
     "accountVisitsMap": {
@@ -13909,10 +13967,10 @@
         "role": "customer",
         "roleLabel": "Nasabah (REGULAR)",
         "isAdmin": false,
-        "totalVisits": 5,
+        "totalVisits": 6,
         "firstVisitIso": "2026-11-27T10:20:14.573Z",
-        "lastActiveIso": "2026-11-27T22:06:40.086Z",
-        "lastActiveMs": 1795817200086,
+        "lastActiveIso": "2026-11-27T22:35:50.693Z",
+        "lastActiveMs": 1795818950693,
         "deviceIds": [
           "DEV-9F2F054C46C1"
         ],
@@ -13920,6 +13978,24 @@
           "Gebog, Java, Indonesia"
         ],
         "recentVisits": [
+          {
+            "id": "gv-1795818873556-19i7v4",
+            "timestampIso": "2026-11-27T22:34:33.556Z",
+            "timestampMs": 1795818873556,
+            "deviceId": "DEV-9F2F054C46C1",
+            "deviceSessionKey": "DEV-9F2F054C46C1__gebog|java|indonesia",
+            "deviceBrandModel": "PC / Laptop Windows",
+            "osLabel": "Windows 10 / 11",
+            "browserLabel": "Google Chrome 158",
+            "accessType": "web_browser",
+            "accessTypeLabel": "Web Browser (Google Chrome 158)",
+            "publicIp": "103.164.228.70",
+            "city": "Gebog",
+            "region": "Java",
+            "country": "Indonesia",
+            "isp": "Indonesia Network Information Center",
+            "triggerType": "account_login"
+          },
           {
             "id": "gv-1795817120803-8t1v1h",
             "timestampIso": "2026-11-27T22:05:20.803Z",
@@ -14005,11 +14081,11 @@
         "locationSource": "geoip",
         "previousLocations": [],
         "linkedSessionKeys": [],
-        "totalVisits": 9,
+        "totalVisits": 11,
         "firstSeenIso": "2026-11-27T10:20:13.142Z",
         "firstSeenMs": 1795774813142,
-        "lastSeenIso": "2026-11-27T22:06:40.086Z",
-        "lastSeenMs": 1795817200086,
+        "lastSeenIso": "2026-11-27T22:35:50.693Z",
+        "lastSeenMs": 1795818950693,
         "isOnline": true,
         "currentAccountId": "acc-lobby-reg-1795585697689",
         "currentAccountNumber": "5362021409",
@@ -14028,10 +14104,10 @@
             "accountNumber": "5362021409",
             "role": "customer",
             "isAdmin": false,
-            "loginCount": 4,
+            "loginCount": 5,
             "firstLoginIso": "2026-11-27T10:20:14.573Z",
-            "lastLoginIso": "2026-11-27T22:06:40.086Z",
-            "lastLoginMs": 1795817200086
+            "lastLoginIso": "2026-11-27T22:35:50.693Z",
+            "lastLoginMs": 1795818950693
           }
         ],
         "reviewStatus": "normal",
@@ -14056,7 +14132,7 @@
           "gpuVendor": "Google Inc. (AMD)",
           "gpuRenderer": "ANGLE (AMD, AMD Radeon HD 8330 (0x00009832) Direct3D11 vs_5_0 ps_5_0, D3D11)",
           "screenResolution": "1366 x 768 px",
-          "viewportSize": "861 x 462 px",
+          "viewportSize": "861 x 511 px",
           "pixelRatio": 1,
           "screenOrientation": "Landscape (Mendatar)",
           "colorDepth": 24,
@@ -14070,8 +14146,8 @@
           "timezone": "Asia/Jakarta",
           "systemLanguage": "en-US",
           "connectionType": "Broadband / WiFi 4G+",
-          "downlinkMbps": 5.65,
-          "rttMs": 100,
+          "downlinkMbps": 10,
+          "rttMs": 50,
           "batteryLevelPct": 100,
           "batteryCharging": true,
           "locationSource": "geoip"
@@ -14123,10 +14199,10 @@
         }
       }
     },
-    "totalAllTimeHits": 21,
-    "updatedAtMs": 1795817200086
+    "totalAllTimeHits": 23,
+    "updatedAtMs": 1795818950693
   },
   "adminTierGrantsMap": {},
   "adminTierAuditLogs": [],
-  "lastUpdated": 1795817200087
+  "lastUpdated": 1795818950694
 }
