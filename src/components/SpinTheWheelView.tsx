@@ -380,12 +380,12 @@ export const SpinTheWheelView: React.FC = () => {
           onClick={() => setSpinMode('frame')}
           className={`min-h-[48px] px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition cursor-pointer ${
             spinMode === 'frame'
-              ? 'bg-gradient-to-r from-fuchsia-500 via-purple-500 to-indigo-500 text-white shadow-lg shadow-fuchsia-500/25'
+              ? 'bg-gradient-to-r from-red-600 via-orange-500 to-amber-500 text-white shadow-lg shadow-red-600/30'
               : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
           }`}
         >
           <Sparkles className="w-4 h-4 shrink-0" />
-          <span>2. Spin Bingkai (25 Kotak · 5% Aura · Token {(currentAccount.spinTokens || 0).toLocaleString('id-ID')})</span>
+          <span>2. Spin Bingkai (25 Heksagon · 5% Aura · Token {(currentAccount.spinTokens || 0).toLocaleString('id-ID')})</span>
         </button>
       </div>
 

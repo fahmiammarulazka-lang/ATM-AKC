@@ -3118,6 +3118,15 @@ export const NusantaraChat: React.FC = () => {
                         {/* Sender header */}
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                            <ProfileAvatarBadge
+                              account={{
+                                fullName: senderAccountObj?.fullName || msg.senderName,
+                                cardStatus: senderAccountObj?.cardStatus || 'active',
+                                avatarPresetId: senderAccountObj?.avatarPresetId,
+                                avatarFrameId: senderAccountObj?.avatarFrameId,
+                              }}
+                              size="sm"
+                            />
                             <button
                               type="button"
                               disabled={!isAdminUser || !senderAccountObj}
@@ -5093,22 +5102,33 @@ export const NusantaraChat: React.FC = () => {
                               <div className="flex items-center justify-between gap-2 mb-1">
                                 <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                                   {(activeTarget.type === 'group' || isMsgAdmin || !isStrictOwner) && (
-                                    <button
-                                      type="button"
-                                      disabled={!isAdminUser || !senderAccountObj}
-                                      onClick={() => {
-                                        if (isAdminUser && senderAccountObj) setAdminQuickAcc(senderAccountObj);
-                                      }}
-                                      className={`text-xs font-extrabold truncate text-left ${
-                                        isMsgAdmin
-                                          ? 'text-amber-300'
-                                          : isStrictOwner
-                                            ? 'text-indigo-100'
-                                            : 'text-white'
-                                      } ${isAdminUser && senderAccountObj ? 'hover:underline cursor-pointer' : 'cursor-default'}`}
-                                    >
-                                      {msg.senderName}
-                                    </button>
+                                    <span className="inline-flex items-center gap-1.5 min-w-0">
+                                      <ProfileAvatarBadge
+                                        account={{
+                                          fullName: senderAccountObj?.fullName || msg.senderName,
+                                          cardStatus: senderAccountObj?.cardStatus || 'active',
+                                          avatarPresetId: senderAccountObj?.avatarPresetId,
+                                          avatarFrameId: senderAccountObj?.avatarFrameId,
+                                        }}
+                                        size="sm"
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={!isAdminUser || !senderAccountObj}
+                                        onClick={() => {
+                                          if (isAdminUser && senderAccountObj) setAdminQuickAcc(senderAccountObj);
+                                        }}
+                                        className={`text-xs font-extrabold truncate text-left ${
+                                          isMsgAdmin
+                                            ? 'text-amber-300'
+                                            : isStrictOwner
+                                              ? 'text-indigo-100'
+                                              : 'text-white'
+                                        } ${isAdminUser && senderAccountObj ? 'hover:underline cursor-pointer' : 'cursor-default'}`}
+                                      >
+                                        {msg.senderName}
+                                      </button>
+                                    </span>
                                   )}
                                   {isMsgAdmin && (
                                     <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950">

@@ -268,11 +268,23 @@
   }
   .top-badge-gold-shimmer::after,
   .bn-warn-shimmer::after,
+  .aura-frame-petir-cyber::before,
   .aura-frame-petir-cyber::after,
+  .aura-frame-api-naga::before,
   .aura-frame-api-naga::after,
+  .aura-frame-emas-imperial::before,
   .aura-frame-emas-imperial::after,
+  .aura-frame-kristal-es::before,
   .aura-frame-kristal-es::after,
-  .aura-frame-galaksi-kosmik::after {
+  .aura-frame-galaksi-kosmik::before,
+  .aura-frame-galaksi-kosmik::after,
+  .bn-vortex-spin,
+  .bn-vortex-spin-reverse,
+  .bn-aura-svg-spin,
+  .bn-aura-svg-spin-rev,
+  .bn-aura-svg-pulse,
+  .bn-spotlight-sweep-left,
+  .bn-spotlight-sweep-right {
     animation: none !important;
   }
   .bn-warn-zoom,
@@ -321,18 +333,7 @@
   animation-play-state: paused;
 }
 
-/* 5 Spin Bingkai Special Aura Animations (Compositor-Friendly) */
-@keyframes bnAuraPulse {
-  0%, 100% {
-    transform: scale(1) rotate(0deg);
-    opacity: 0.85;
-  }
-  50% {
-    transform: scale(1.06) rotate(180deg);
-    opacity: 1;
-  }
-}
-
+/* Living Multi-Layer 5 Spin Bingkai Aura Animations (Compositor-Friendly) */
 @keyframes bnAuraOrbit {
   0% {
     transform: rotate(0deg);
@@ -342,69 +343,302 @@
   }
 }
 
+@keyframes bnAuraOrbitReverse {
+  0% {
+    transform: rotate(360deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes bnAuraFlamePulse {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.88;
+  }
+  35% {
+    transform: scale(1.09) rotate(4deg);
+    opacity: 1;
+  }
+  70% {
+    transform: scale(1.03) rotate(-4deg);
+    opacity: 0.94;
+  }
+}
+
+@keyframes bnAuraElectricFlicker {
+  0%, 100% {
+    opacity: 0.85;
+    transform: rotate(0deg) scale(1);
+  }
+  20% {
+    opacity: 1;
+    transform: rotate(72deg) scale(1.06);
+  }
+  42% {
+    opacity: 0.68;
+    transform: rotate(150deg) scale(0.99);
+  }
+  65% {
+    opacity: 1;
+    transform: rotate(238deg) scale(1.07);
+  }
+  84% {
+    opacity: 0.82;
+    transform: rotate(305deg) scale(1.02);
+  }
+}
+
+@keyframes bnAuraCrystalShimmer {
+  0%, 100% {
+    opacity: 0.8;
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(180deg) scale(1.06);
+  }
+}
+
+.bn-aura-svg-spin {
+  animation: bnAuraOrbit 5s linear infinite;
+}
+.bn-aura-svg-spin-rev {
+  animation: bnAuraOrbitReverse 6.5s linear infinite;
+}
+.bn-aura-svg-pulse {
+  animation: bnAuraFlamePulse 1.8s ease-in-out infinite;
+}
+
+/* 1. Petir Cyber — Listrik Biru-Cyan Menyambar */
 .aura-frame-petir-cyber {
-  box-shadow: 0 0 0 2px #22d3ee, 0 0 16px rgba(34, 211, 238, 0.72);
+  box-shadow: 0 0 0 2px #22d3ee, 0 0 18px rgba(34, 211, 238, 0.88), 0 0 32px rgba(59, 130, 246, 0.55);
+}
+.aura-frame-petir-cyber::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  padding: 2.5px;
+  background: conic-gradient(from 0deg, #22d3ee, #ffffff, #0284c7, transparent 42%, #38bdf8, #ffffff, #22d3ee);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: bnAuraOrbit 2.1s linear infinite;
 }
 .aura-frame-petir-cyber::after {
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: -7px;
   border-radius: inherit;
-  border: 2px dashed rgba(56, 189, 248, 0.85);
+  border: 1.5px dashed rgba(103, 232, 249, 0.92);
   pointer-events: none;
-  animation: bnAuraOrbit 3.6s linear infinite;
+  animation: bnAuraElectricFlicker 2.6s linear infinite;
 }
 
+/* 2. Api Naga — Kobaran Bara Merah-Jingga Hidup */
 .aura-frame-api-naga {
-  box-shadow: 0 0 0 2px #f97316, 0 0 18px rgba(239, 68, 68, 0.75);
+  box-shadow: 0 0 0 2px #fb923c, 0 0 20px rgba(239, 68, 68, 0.9), 0 0 34px rgba(249, 115, 22, 0.65);
+}
+.aura-frame-api-naga::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  padding: 2.5px;
+  background: conic-gradient(from 30deg, #ef4444, #fde047, #f97316, #dc2626, #fb923c, #fef08a, #ef4444);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: bnAuraOrbit 2.6s linear infinite;
 }
 .aura-frame-api-naga::after {
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: -7px;
   border-radius: inherit;
-  border: 2px solid rgba(251, 146, 60, 0.85);
+  border: 2px solid rgba(251, 146, 60, 0.78);
   pointer-events: none;
-  animation: bnAuraPulse 2.4s ease-in-out infinite;
+  animation: bnAuraFlamePulse 1.75s ease-in-out infinite;
 }
 
+/* 3. Emas Imperial — Halo Kerajaan 24K Berkilau */
 .aura-frame-emas-imperial {
-  box-shadow: 0 0 0 2px #facc15, 0 0 18px rgba(245, 158, 11, 0.78);
+  box-shadow: 0 0 0 2px #fde047, 0 0 20px rgba(250, 204, 21, 0.88), 0 0 34px rgba(217, 119, 6, 0.58);
+}
+.aura-frame-emas-imperial::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  padding: 2.5px;
+  background: conic-gradient(from 0deg, #fef08a, #f59e0b, #ffffff, #d97706, #fde047, #f59e0b, #fef08a);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: bnAuraOrbit 3.4s linear infinite;
 }
 .aura-frame-emas-imperial::after {
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: -7px;
   border-radius: inherit;
-  border: 2px solid rgba(253, 224, 71, 0.88);
+  border: 1.5px solid rgba(254, 240, 138, 0.85);
   pointer-events: none;
-  animation: bnAuraPulse 2.8s ease-in-out infinite;
+  animation: bnAuraFlamePulse 2.4s ease-in-out infinite;
 }
 
+/* 4. Kristal Es — Faset Es & Pendar Salju Dingin */
 .aura-frame-kristal-es {
-  box-shadow: 0 0 0 2px #7dd3fc, 0 0 18px rgba(125, 211, 252, 0.75);
+  box-shadow: 0 0 0 2px #bae6fd, 0 0 20px rgba(125, 211, 252, 0.88), 0 0 34px rgba(96, 165, 250, 0.55);
+}
+.aura-frame-kristal-es::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  padding: 2.5px;
+  background: conic-gradient(from 0deg, #e0f2fe, #38bdf8, #ffffff, #818cf8, #7dd3fc, #ffffff, #e0f2fe);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: bnAuraOrbitReverse 4.2s linear infinite;
 }
 .aura-frame-kristal-es::after {
   content: '';
   position: absolute;
-  inset: -4px;
+  inset: -7px;
   border-radius: inherit;
-  border: 2px dotted rgba(186, 230, 253, 0.92);
+  border: 2px dotted rgba(224, 242, 254, 0.95);
   pointer-events: none;
-  animation: bnAuraOrbit 5.5s linear infinite;
+  animation: bnAuraCrystalShimmer 3.6s ease-in-out infinite;
 }
 
+/* 5. Galaksi Kosmik — Nebula Ungu-Magenta Mengorbit */
 .aura-frame-galaksi-kosmik {
-  box-shadow: 0 0 0 2px #c084fc, 0 0 20px rgba(168, 85, 247, 0.78);
+  box-shadow: 0 0 0 2px #d946ef, 0 0 22px rgba(192, 132, 252, 0.9), 0 0 36px rgba(217, 70, 239, 0.62);
 }
-.aura-frame-galaksi-kosmik::after {
+.aura-frame-galaksi-kosmik::before {
   content: '';
   position: absolute;
   inset: -4px;
   border-radius: inherit;
-  border: 2px dashed rgba(232, 121, 249, 0.85);
+  padding: 2.5px;
+  background: conic-gradient(from 45deg, #c084fc, #f472b6, #6366f1, #e879f9, #ffffff, #8b5cf6, #c084fc);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
   pointer-events: none;
-  animation: bnAuraOrbit 4.4s linear infinite reverse;
+  animation: bnAuraOrbit 3.1s linear infinite;
+}
+.aura-frame-galaksi-kosmik::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: inherit;
+  border: 1.5px dashed rgba(240, 171, 252, 0.9);
+  pointer-events: none;
+  animation: bnAuraOrbitReverse 4.8s linear infinite;
+}
+
+/* Vortex Hexagon Arena & Celebration Keyframes */
+.bn-hex-clip {
+  clip-path: polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%);
+}
+
+@keyframes bnVortexSpin {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.04);
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+  }
+}
+
+.bn-vortex-spin {
+  animation: bnVortexSpin 16s linear infinite;
+}
+
+.bn-vortex-spin-reverse {
+  animation: bnAuraOrbitReverse 11s linear infinite;
+}
+
+@keyframes bnBannerBloom {
+  0% {
+    opacity: 0;
+    transform: scale(0.55) translateY(18px);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.06) translateY(-2px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.bn-banner-bloom {
+  animation: bnBannerBloom 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes bnSpotlightSweepLeft {
+  0%, 100% {
+    transform: rotate(-16deg) scaleX(0.96);
+    opacity: 0.72;
+  }
+  50% {
+    transform: rotate(-10deg) scaleX(1.06);
+    opacity: 0.95;
+  }
+}
+
+@keyframes bnSpotlightSweepRight {
+  0%, 100% {
+    transform: rotate(16deg) scaleX(0.96);
+    opacity: 0.72;
+  }
+  50% {
+    transform: rotate(10deg) scaleX(1.06);
+    opacity: 0.95;
+  }
+}
+
+.bn-spotlight-sweep-left {
+  transform-origin: top center;
+  animation: bnSpotlightSweepLeft 2.8s ease-in-out infinite;
+}
+
+.bn-spotlight-sweep-right {
+  transform-origin: top center;
+  animation: bnSpotlightSweepRight 2.8s ease-in-out infinite;
+}
+
+@keyframes bnSparkBurst {
+  0% {
+    opacity: 0;
+    transform: scale(0.35);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 0.92;
+    transform: scale(1);
+  }
+}
+
+.bn-spark-burst {
+  animation: bnSparkBurst 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Custom scrollbars */

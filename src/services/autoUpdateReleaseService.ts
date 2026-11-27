@@ -16,7 +16,7 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v16.45.20';
+export const STRUCTURED_BASE_VERSION = 'v16.46.21';
 
 export interface StructuredVersion {
   p: number; // AAA: Major (fitur besar / penambahan > 3 fitur sekaligus)
@@ -631,7 +631,7 @@ export function getPublicCurrentUpdate(records: AppUpdateRecord[]): AppUpdateRec
 
 /**
  * Katalog rilis khusus Admin (menggunakan penomoran terpisah vAdmin agar terpisah
- * dari nomor versi aplikasi publik v16.45.20).
+ * dari nomor versi aplikasi publik v16.46.21).
  */
 export const BUILT_IN_ADMIN_UPDATES_CATALOG: AppUpdateRecord[] = [
   {
@@ -640,18 +640,18 @@ export const BUILT_IN_ADMIN_UPDATES_CATALOG: AppUpdateRecord[] = [
     releaseType: 'minor',
     visibilityMode: 'admin_only',
     title:
-      'Panel Kontrol Spin Bingkai 25 Kotak (Harga 18/87 Koin, Peluang 5%, Toko 300 Token, Mode Paksa Menang & Kirim/Cabut Bingkai Aura Nasabah)',
+      'Panel Kontrol Spin Bingkai 25 Heksagon (Harga 18/87 Koin, Peluang 5%, Token Berbobot 1–20, Toko 500 Token, Mode Paksa Menang & Kirim/Cabut Bingkai Aura Nasabah)',
     description:
-      'Pembaruan Panel Admin vAdmin 1.5.0 (bersamaan rilis publik v16.45.20) menambahkan kendali lengkap mode baru Spin Bingkai di dalam tab Kontrol Spin the Wheel: atur status aktif/tutup Spin Bingkai, ubah harga 1x (18 Koin) & 5x (87 Koin), persentase peluang menang Bingkai Aura (default 5%), rentang hadiah Token kotak 1–25 (default 5–25), kompensasi duplikat (+5 Token), biaya tukar Toko Bingkai (300 Token), saklar Mode Paksa Dapat Bingkai (100%), serta panel pemberian/penarikan Token dan 5 Bingkai Aura langsung per rekening nasabah.',
+      'Pembaruan Panel Admin vAdmin 1.5.0 (bersamaan rilis publik v16.46.21) menambahkan kendali lengkap mode Spin Bingkai pusaran 25 heksagon di dalam tab Kontrol Spin the Wheel: atur status aktif/tutup Spin Bingkai, ubah harga 1x (18 Koin) & 5x (87 Koin), persentase peluang menang Bingkai Aura (default 5%), rentang hadiah Token berbobot kotak 1–25 (default 1–20), kompensasi duplikat (+5 Token), biaya tukar Toko Bingkai (500 Token dengan migrasi otomatis nilai lama), saklar Mode Paksa Dapat Bingkai (100%), serta panel pemberian/penarikan Token dan 5 Bingkai Aura hidup langsung per rekening nasabah.',
     highlights: [
-      'Pengaturan Penuh Spin Bingkai di Tab Spin Admin: Ubah biaya 1x (18 Koin) & 5x (87 Koin), biaya tukar toko (300 Token), peluang menang Bingkai (default 5%), rentang Token (5–25), serta kompensasi bingkai duplikat (+5 Token).',
+      'Pengaturan Penuh Spin Bingkai di Tab Spin Admin: Ubah biaya 1x (18 Koin) & 5x (87 Koin), biaya tukar toko (500 Token), peluang menang Bingkai (default 5%), rentang Token berbobot (1–20), serta kompensasi bingkai duplikat (+5 Token).',
       'Saklar Buka/Tutup & Mode Paksa Menang Bingkai: Aktifkan atau tutup sementara mode Spin Bingkai maupun aktifkan Mode Paksa Dapat Bingkai (100%) untuk acara khusus.',
-      'Kelola Token & 5 Bingkai Aura per Akun Nasabah: Tambah +100 / +300 Token serta kirim atau tarik langsung Bingkai Petir Cyber, Api Naga, Emas Imperial, Kristal Es, dan Galaksi Kosmik per rekening.',
-      'Sinkronisasi Real-Time Cloud & Toast Konfirmasi Admin: Setiap perubahan langsung tersimpan ke Cloud beserta umpan balik notifikasi mengambang di pojok kanan atas.',
+      'Kelola Token & 5 Bingkai Aura per Akun Nasabah: Tambah +100 / +500 Token serta kirim atau tarik langsung Bingkai Petir Cyber, Api Naga, Emas Imperial, Kristal Es, dan Galaksi Kosmik per rekening.',
+      'Sinkronisasi Real-Time Cloud, Migrasi Otomatis & Toast Admin: Konfigurasi lama 5–25 Token / 300 Tukar otomatis dimigrasi ke 1–20 Token / 500 Tukar dan setiap perubahan memberi toast konfirmasi pojok kanan atas.',
     ],
     changes: [
-      'Menambahkan sub-bagian 5 (Kontrol Spin Bingkai) dan sub-bagian 6 (Kelola Token & 5 Bingkai Aura per Nasabah) di AdminPortal tab spin_wheel_admin.',
-      'Menambahkan aksi adminGrantSpinTokensAndFrame dan normalisasi frameSpin pada adminUpdateSpinWheelConfig / adminResetSpinWheelConfig di BankContext.',
+      'Menambahkan sub-bagian 5 (Kontrol Spin Bingkai) dan sub-bagian 6 (Kelola Token & 5 Bingkai Aura per Nasabah) di AdminPortal tab spin_wheel_admin dengan default 1–20 Token dan 500 Token tukar.',
+      'Menambahkan aksi adminGrantSpinTokensAndFrame, commitPendingFrameSpinReward, dan migrasi otomatis normalizeFrameSpinConfig di BankContext & spinWheelCatalog.',
       'Menjamin pemegang Kartu Tier Admin tetap mempertahankan saldo Koin Spin Infinity (∞) saat memutar Spin Bingkai maupun Spin Uang.',
     ],
     dateText: '28 Nov 2026',

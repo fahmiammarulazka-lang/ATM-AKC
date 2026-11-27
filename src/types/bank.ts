@@ -1114,6 +1114,25 @@ export interface FrameSpinHistoryRecord {
   timestamp: string;
 }
 
+export interface PendingFrameSpinCommitPayload {
+  commitId: string;
+  accountId: string;
+  spinCount: 1 | 5;
+  coinsSpent: number;
+  isCoinUnlim: boolean;
+  totalTokensEarned: number;
+  newlyUnlockedFrameIds: string[];
+  results: {
+    rollIndex: number;
+    slotNumber: number;
+    kind: 'frame' | 'token' | 'duplicate_frame';
+    frameId?: string;
+    frameLabel?: string;
+    tokensAwarded: number;
+  }[];
+  timestamp: string;
+}
+
 export interface AppFloatingToastItem {
   id: string;
   type: 'error' | 'warning' | 'success' | 'info';

@@ -298,6 +298,7 @@ import {
   LoyaltyAdminConfig,
   FrameSpinAdminConfig,
   FrameSpinHistoryRecord,
+  PendingFrameSpinCommitPayload,
   AppFloatingToastItem,
 } from '../types/bank';
 import {
@@ -426,6 +427,7 @@ import {
   DEFAULT_FRAME_SPIN_CONFIG,
   normalizeFrameSpinConfig,
   buildFrameSpinRingSlots25,
+  pickWeightedFrameSpinTokenSlot,
   SPIN_WHEEL_PRIZES,
   COIN_PURCHASE_PACKAGES_300,
   calculateCoinPackagePrice,
@@ -1744,7 +1746,10 @@ interface BankContextType {
   dismissFloatingToast: (id: string) => void;
   coinShopOpenRequestNonce: number;
   requestOpenSpinCoinShop: () => void;
-  spinBingkaiWheel: (spinCount: 1 | 5) => {
+  spinBingkaiWheel: (
+    spinCount: 1 | 5,
+    options?: { deferRewardReveal?: boolean }
+  ) => {
     success: boolean;
     message: string;
     coinsSpent?: number;
@@ -1760,6 +1765,13 @@ interface BankContextType {
     newlyUnlockedFrameIds?: string[];
     newCoinBalance?: number;
     newTokenBalance?: number;
+    pendingCommitPayload?: PendingFrameSpinCommitPayload;
+  };
+  commitPendingFrameSpinReward: (payload: PendingFrameSpinCommitPayload) => {
+    success: boolean;
+    message: string;
+    newTokenBalance?: number;
+    newlyUnlockedFrameIds?: string[];
   };
   exchangeTokenForSpinFrame: (frameId: string) => {
     success: boolean;
@@ -4222,6 +4234,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   spinWheelConfigRef.current = spinWheelConfig;
   const [spinHistory, setSpinHistory] = useState<SpinHistoryRecord[]>([]);
   const [frameSpinHistory, setFrameSpinHistory] = useState<FrameSpinHistoryRecord[]>([]);
+  const frameSpinHistoryRef = useRef<FrameSpinHistoryRecord[]>(frameSpinHistory);
+  frameSpinHistoryRef.current = frameSpinHistory;
+  const committedFrameSpinIdsRef = useRef<Set<string>>(new Set());
   const [floatingToasts, setFloatingToasts] = useState<AppFloatingToastItem[]>([]);
   const [coinShopOpenRequestNonce, setCoinShopOpenRequestNonce] = useState<number>(0);
 
@@ -32310,8 +32325,149 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   };
 
-  // ==================== SPIN BINGKAI (25 KOTAK, 5% BINGKAI AURA, TOKO 300 TOKEN) ====================
-  const spinBingkaiWheel = (spinCount: 1 | 5) => {
+  // ==================== SPIN BINGKAI (25 KOTAK HEKSAGON, TOKEN 1-20, TUKAR 500 TOKEN) ====================
+  const commitPendingFrameSpinReward = (payload: PendingFrameSpinCommitPayload) => {
+    if (!payload || !payload.commitId) {
+      return { success: false, message: 'Data hadiah Spin Bingkai tidak valid.' };
+    }
+    if (committedFrameSpinIdsRef.current.has(payload.commitId)) {
+      const existingAcc = accountsRef.current.find((a) => a.id === payload.accountId);
+      return {
+        success: true,
+        message: 'Hadiah Spin Bingkai sudah tercatat.',
+        newTokenBalance: existingAcc?.spinTokens ?? 0,
+        newlyUnlockedFrameIds: payload.newlyUnlockedFrameIds,
+      };
+    }
+    committedFrameSpinIdsRef.current.add(payload.commitId);
+
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const liveAcc = latestPool.find((a) => a.id === payload.accountId);
+    if (!liveAcc) {
+      return { success: false, message: 'Akun penerima hadiah tidak ditemukan.' };
+    }
+
+    const nextTokenBalance = (liveAcc.spinTokens || 0) + payload.totalTokensEarned;
+
+    const histEntry: FrameSpinHistoryRecord = {
+      id: payload.commitId,
+      accountId: liveAcc.id,
+      accountName: liveAcc.fullName,
+      spinCount: payload.spinCount,
+      coinsSpent: payload.coinsSpent,
+      totalTokensEarned: payload.totalTokensEarned,
+      unlockedFrameIds: payload.newlyUnlockedFrameIds,
+      results: payload.results,
+      timestamp: payload.timestamp,
+    };
+
+    const nextFrameHistory = [histEntry, ...frameSpinHistoryRef.current].slice(0, 80);
+    frameSpinHistoryRef.current = nextFrameHistory;
+    setFrameSpinHistory(nextFrameHistory);
+
+    const unlockedNamesText = payload.newlyUnlockedFrameIds
+      .map((fid) => getAvatarFrameById(fid).label)
+      .join(', ');
+
+    const frameTx: Transaction = {
+      id: `tx-fspin-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      accountId: liveAcc.id,
+      type: 'belanja_fitur',
+      title:
+        payload.newlyUnlockedFrameIds.length > 0
+          ? `Spin Bingkai (${payload.spinCount}x): Dapat ${unlockedNamesText}!`
+          : `Spin Bingkai (${payload.spinCount}x): +${payload.totalTokensEarned} Token`,
+      amount: 0,
+      balanceAfter: liveAcc.balance,
+      status: 'success',
+      referenceNo: `FBK${Date.now().toString().slice(-7)}`,
+      timestamp: payload.timestamp,
+      balanceDeducted: false,
+      category: 'redeem',
+      description: `Putar Spin Bingkai ${payload.spinCount}x (${
+        payload.isCoinUnlim ? 'Tier Admin ∞ Koin' : `-${payload.coinsSpent} Koin`
+      }). Hasil: +${payload.totalTokensEarned} Token Bingkai${
+        unlockedNamesText ? ` & Bingkai Baru [${unlockedNamesText}]` : ''
+      }.`,
+    };
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+    const nextTxs = [frameTx, ...latestTxs];
+    transactionsRef.current = nextTxs;
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      liveAcc.id,
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          spinTokens: (a.spinTokens || 0) + payload.totalTokensEarned,
+          ownedSpinFrameIds: Array.from(
+            new Set([...(a.ownedSpinFrameIds || []), ...payload.newlyUnlockedFrameIds])
+          ),
+        }),
+      {
+        transactions: nextTxs,
+        frameSpinHistory: nextFrameHistory,
+      }
+    );
+
+    if (payload.newlyUnlockedFrameIds.length > 0) {
+      playAtmSound('cash');
+      try {
+        confetti({
+          particleCount: 130,
+          spread: 90,
+          origin: { y: 0.58 },
+        });
+      } catch {
+        // ignore
+      }
+      addNotification(
+        `✨ Jackpot Bingkai Aura Baru!`,
+        `Dari ${payload.spinCount}x Spin Bingkai Anda membuka [${unlockedNamesText}]${
+          payload.totalTokensEarned > 0 ? ` dan +${payload.totalTokensEarned} Token Bingkai` : ''
+        }!`,
+        'success'
+      );
+      pushAppToast({
+        type: 'success',
+        title: 'Bingkai Aura Baru Terbuka!',
+        message: `Selamat! Anda mendapatkan ${unlockedNamesText}${
+          payload.totalTokensEarned > 0 ? ` + ${payload.totalTokensEarned} Token` : ''
+        }.`,
+      });
+    } else {
+      playAtmSound('success');
+      pushAppToast({
+        type: 'success',
+        title: `+${payload.totalTokensEarned} Token Bingkai`,
+        message: `Total saldo Token Anda kini ${nextTokenBalance.toLocaleString('id-ID')} Token.`,
+      });
+    }
+
+    recordMissionActivities(liveAcc.id, [
+      { metricKey: 'spin_count', delta: Math.max(1, payload.spinCount) },
+    ]);
+
+    return {
+      success: true,
+      newTokenBalance: nextTokenBalance,
+      newlyUnlockedFrameIds: payload.newlyUnlockedFrameIds,
+      message:
+        payload.newlyUnlockedFrameIds.length > 0
+          ? `Jackpot! Membuka ${unlockedNamesText}${
+              payload.totalTokensEarned > 0 ? ` + ${payload.totalTokensEarned} Token Bingkai` : ''
+            }!`
+          : `Berhasil memperoleh +${payload.totalTokensEarned} Token Bingkai! (Total Token: ${nextTokenBalance.toLocaleString(
+              'id-ID'
+            )})`,
+    };
+  };
+
+  const spinBingkaiWheel = (
+    spinCount: 1 | 5,
+    options?: { deferRewardReveal?: boolean }
+  ) => {
     const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
     const activeAcc =
       latestPool.find((a) => a.id === currentAccountIdRef.current) ||
@@ -32421,8 +32577,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
         }
       } else {
-        const chosenTokenSlot =
-          tokenSlots[Math.floor(Math.random() * tokenSlots.length)] || ringSlots[0];
+        const chosenTokenSlot = pickWeightedFrameSpinTokenSlot(
+          tokenSlots,
+          frameCfg.tokenRewardMin,
+          frameCfg.tokenRewardMax
+        );
         const awarded = Math.max(1, chosenTokenSlot.tokenAmount || frameCfg.tokenRewardMin);
         totalTokensEarned += awarded;
         results.push({
@@ -32437,102 +32596,40 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const newCoinBalance = isCoinUnlim
       ? UNLIMITED_BALANCE
       : Math.max(0, currentCoins - coinCost);
-    const nextTokenBalance = (activeAcc.spinTokens || 0) + totalTokensEarned;
-    const nextOwnedFrames = Array.from(ownedSet);
+    const expectedTokenBalance = (activeAcc.spinTokens || 0) + totalTokensEarned;
     const nowIso = new Date().toISOString();
+    const commitId = `fspin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-    const histEntry: FrameSpinHistoryRecord = {
-      id: `fspin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      accountId: activeAcc.id,
-      accountName: activeAcc.fullName,
-      spinCount,
-      coinsSpent: isCoinUnlim ? 0 : coinCost,
-      totalTokensEarned,
-      unlockedFrameIds: newlyUnlockedFrameIds,
-      results,
-      timestamp: nowIso,
-    };
-
-    const nextFrameHistory = [histEntry, ...frameSpinHistory].slice(0, 80);
-    setFrameSpinHistory(nextFrameHistory);
-
-    const unlockedNamesText = newlyUnlockedFrameIds
-      .map((fid) => getAvatarFrameById(fid).label)
-      .join(', ');
-    const frameTx: Transaction = {
-      id: `tx-fspin-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-      accountId: activeAcc.id,
-      type: 'belanja_fitur',
-      title:
-        newlyUnlockedFrameIds.length > 0
-          ? `Spin Bingkai (${spinCount}x): Dapat ${unlockedNamesText}!`
-          : `Spin Bingkai (${spinCount}x): +${totalTokensEarned} Token`,
-      amount: 0,
-      balanceAfter: activeAcc.balance,
-      status: 'success',
-      referenceNo: `FBK${Date.now().toString().slice(-7)}`,
-      timestamp: nowIso,
-      balanceDeducted: false,
-      category: 'redeem',
-      description: `Putar Spin Bingkai ${spinCount}x (${
-        isCoinUnlim ? 'Tier Admin ∞ Koin' : `-${coinCost} Koin`
-      }). Hasil: +${totalTokensEarned} Token Bingkai${
-        unlockedNamesText ? ` & Bingkai Baru [${unlockedNamesText}]` : ''
-      }.`,
-    };
-    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
-    const nextTxs = [frameTx, ...latestTxs];
-    transactionsRef.current = nextTxs;
-    setTransactions(nextTxs);
-
+    // Potong koin & catat total putaran lebih dulu agar tidak bisa double-spend saat animasi berjalan
     commitAccountMutationPermanent(
       activeAcc.id,
       (a) =>
         normalizeAdminAccountAssets({
           ...a,
           spinCoins: newCoinBalance,
-          spinTokens: nextTokenBalance,
-          ownedSpinFrameIds: nextOwnedFrames,
           totalSpinsPlayed: (a.totalSpinsPlayed || 0) + spinCount,
-        }),
-      {
-        transactions: nextTxs,
-        frameSpinHistory: nextFrameHistory,
-      }
+        })
     );
 
-    if (newlyUnlockedFrameIds.length > 0) {
-      playAtmSound('cash');
-      try {
-        confetti({
-          particleCount: 120,
-          spread: 85,
-          origin: { y: 0.6 },
-        });
-      } catch {
-        // ignore
-      }
-      addNotification(
-        `✨ Jackpot Bingkai Aura Baru!`,
-        `Dari ${spinCount}x Spin Bingkai Anda membuka [${unlockedNamesText}]${
-          totalTokensEarned > 0 ? ` dan +${totalTokensEarned} Token Bingkai` : ''
-        }!`,
-        'success'
-      );
-      pushAppToast({
-        type: 'success',
-        title: 'Bingkai Aura Baru Terbuka!',
-        message: `Selamat! Anda mendapatkan ${unlockedNamesText}${
-          totalTokensEarned > 0 ? ` + ${totalTokensEarned} Token` : ''
-        }.`,
-      });
-    } else {
-      playAtmSound('success');
-    }
+    const pendingCommitPayload: PendingFrameSpinCommitPayload = {
+      commitId,
+      accountId: activeAcc.id,
+      spinCount,
+      coinsSpent: isCoinUnlim ? 0 : coinCost,
+      isCoinUnlim,
+      totalTokensEarned,
+      newlyUnlockedFrameIds,
+      results,
+      timestamp: nowIso,
+    };
 
-    recordMissionActivities(activeAcc.id, [
-      { metricKey: 'spin_count', delta: Math.max(1, spinCount) },
-    ]);
+    const unlockedNamesText = newlyUnlockedFrameIds
+      .map((fid) => getAvatarFrameById(fid).label)
+      .join(', ');
+
+    if (!options?.deferRewardReveal) {
+      commitPendingFrameSpinReward(pendingCommitPayload);
+    }
 
     return {
       success: true,
@@ -32541,7 +32638,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ? `Jackpot! Membuka ${unlockedNamesText}${
               totalTokensEarned > 0 ? ` + ${totalTokensEarned} Token Bingkai` : ''
             }!`
-          : `Berhasil memperoleh +${totalTokensEarned} Token Bingkai! (Total Token: ${nextTokenBalance.toLocaleString(
+          : `Berhasil memperoleh +${totalTokensEarned} Token Bingkai! (Total Token: ${expectedTokenBalance.toLocaleString(
               'id-ID'
             )})`,
       coinsSpent: isCoinUnlim ? 0 : coinCost,
@@ -32549,7 +32646,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       totalTokensEarned,
       newlyUnlockedFrameIds,
       newCoinBalance,
-      newTokenBalance: nextTokenBalance,
+      newTokenBalance: expectedTokenBalance,
+      pendingCommitPayload,
     };
   };
 
@@ -40797,6 +40895,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         coinShopOpenRequestNonce,
         requestOpenSpinCoinShop,
         spinBingkaiWheel,
+        commitPendingFrameSpinReward,
         exchangeTokenForSpinFrame,
         equipSpinAvatarFrame,
         adminGrantSpinTokensAndFrame,

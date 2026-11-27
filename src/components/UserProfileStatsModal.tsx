@@ -1484,7 +1484,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                   </div>
                 </div>
 
-                {/* Koleksi Bingkai Aura Eksklusif (Hasil Spin Bingkai / Tukar 300 Token) */}
+                {/* Koleksi Bingkai Aura Eksklusif (Hasil Spin Bingkai / Tukar 500 Token) */}
                 <div className="pt-2 border-t border-slate-200/80">
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                     <p className="text-xs font-semibold text-slate-800">
@@ -1534,7 +1534,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                               avatarPresetId: avatarPresetDraft,
                               avatarFrameId: frame.id,
                             }}
-                            size="sm"
+                            size="md"
                           />
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-1">
@@ -1552,7 +1552,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                               </span>
                             </div>
                             <p className="text-[10px] text-slate-500 truncate">
-                              {owned ? frame.description : 'Spin Bingkai 5% / Tukar 300 Token'}
+                              {owned ? frame.description : 'Spin Bingkai 5% / Tukar 500 Token'}
                             </p>
                           </div>
                         </button>

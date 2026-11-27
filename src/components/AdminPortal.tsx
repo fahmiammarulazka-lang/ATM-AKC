@@ -2848,10 +2848,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <span className="text-[10px] font-mono uppercase text-fuchsia-300 font-bold block">
-                        5. KONTROL SPIN BINGKAI (25 KOTAK LINGKARAN · HANYA KOIN)
+                        5. KONTROL SPIN BINGKAI (25 HEKSAGON PUSARAN · HANYA KOIN)
                       </span>
                       <h3 className="text-sm font-black text-white mt-0.5">
-                        Atur Harga Koin (18 / 87), Peluang Bingkai (5%), Rentang Token &amp; Biaya Tukar (300 Token)
+                        Atur Harga Koin (18 / 87), Peluang Bingkai (5%), Rentang Token (1–20) &amp; Biaya Tukar (500 Token)
                       </h3>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -2951,7 +2951,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         min={1}
                         value={fCfg.exchangeTokenCost}
                         onChange={(e) => {
-                          const val = Math.max(1, Math.round(Number(e.target.value) || 300));
+                          const val = Math.max(1, Math.round(Number(e.target.value) || 500));
                           adminUpdateSpinWheelConfig({
                             frameSpin: { ...fCfg, exchangeTokenCost: val },
                           });
@@ -2961,14 +2961,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     </div>
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold text-slate-300 block">
-                        Token Hadiah Min (1–25)
+                        Token Hadiah Min (1–20)
                       </label>
                       <input
                         type="number"
                         min={1}
                         value={fCfg.tokenRewardMin}
                         onChange={(e) => {
-                          const val = Math.max(1, Math.round(Number(e.target.value) || 5));
+                          const val = Math.max(1, Math.round(Number(e.target.value) || 1));
                           adminUpdateSpinWheelConfig({
                             frameSpin: {
                               ...fCfg,
@@ -2982,7 +2982,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     </div>
                     <div className="space-y-1">
                       <label className="text-[11px] font-bold text-slate-300 block">
-                        Token Hadiah Maks (1–25)
+                        Token Hadiah Maks (1–20)
                       </label>
                       <input
                         type="number"
@@ -2991,7 +2991,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         onChange={(e) => {
                           const val = Math.max(
                             fCfg.tokenRewardMin,
-                            Math.round(Number(e.target.value) || 25)
+                            Math.round(Number(e.target.value) || 20)
                           );
                           adminUpdateSpinWheelConfig({
                             frameSpin: { ...fCfg, tokenRewardMax: val },
@@ -3028,7 +3028,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                         }}
                         className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs cursor-pointer"
                       >
-                        Reset Default (18/87/5%/300)
+                        Reset Default (18/87/5%/500)
                       </button>
                     </div>
                   </div>
@@ -3076,13 +3076,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                                 type="button"
                                 onClick={() => {
                                   const res = adminGrantSpinTokensAndFrame(acc.id, {
-                                    tokenDelta: 300,
+                                    tokenDelta: 500,
                                   });
                                   setSpinAdminFeedback(res.message);
                                 }}
                                 className="px-2.5 py-1 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-[10px] cursor-pointer"
                               >
-                                +300 Token
+                                +500 Token
                               </button>
 
                               {SPIN_AURA_FRAMES.map((frame) => {

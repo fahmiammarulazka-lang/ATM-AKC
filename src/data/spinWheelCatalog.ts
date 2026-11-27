@@ -17,21 +17,35 @@ export const DEFAULT_FRAME_SPIN_CONFIG: FrameSpinAdminConfig = {
   cost1xCoins: 18,
   cost5xCoins: 87,
   frameWinProbabilityPercent: 5,
-  exchangeTokenCost: 300,
+  exchangeTokenCost: 500,
   duplicateTokenCompensation: 5,
-  tokenRewardMin: 5,
-  tokenRewardMax: 25,
+  tokenRewardMin: 1,
+  tokenRewardMax: 20,
   forceWinFrame: false,
 };
 
 export function normalizeFrameSpinConfig(
   raw?: Partial<FrameSpinAdminConfig> | null
 ): FrameSpinAdminConfig {
-  const tokenMin = Math.max(1, Math.min(500, Math.round(Number(raw?.tokenRewardMin ?? 5) || 5)));
-  const tokenMax = Math.max(
-    tokenMin,
-    Math.min(1000, Math.round(Number(raw?.tokenRewardMax ?? 25) || 25))
-  );
+  const rawMin = raw?.tokenRewardMin;
+  const rawMax = raw?.tokenRewardMax;
+  const rawExchange = raw?.exchangeTokenCost;
+
+  // Migrasi otomatis nilai default lama (5-25 Token & 300 Tukar) -> (1-20 Token & 500 Tukar)
+  const isLegacyRange =
+    (rawMin === 5 && rawMax === 25) || (rawMin === undefined && rawMax === undefined);
+  const tokenMin = isLegacyRange
+    ? 1
+    : Math.max(1, Math.min(500, Math.round(Number(rawMin ?? 1) || 1)));
+  const tokenMax = isLegacyRange
+    ? 20
+    : Math.max(tokenMin, Math.min(1000, Math.round(Number(rawMax ?? 20) || 20)));
+
+  const normalizedExchange =
+    rawExchange === 300 || rawExchange === undefined
+      ? 500
+      : Math.max(10, Math.min(100_000, Math.round(Number(rawExchange) || 500)));
+
   return {
     enabled: raw?.enabled !== false,
     cost1xCoins: Math.max(1, Math.min(10_000, Math.round(Number(raw?.cost1xCoins ?? 18) || 18))),
@@ -40,10 +54,7 @@ export function normalizeFrameSpinConfig(
       0,
       Math.min(100, Number(raw?.frameWinProbabilityPercent ?? 5))
     ),
-    exchangeTokenCost: Math.max(
-      10,
-      Math.min(100_000, Math.round(Number(raw?.exchangeTokenCost ?? 300) || 300))
-    ),
+    exchangeTokenCost: normalizedExchange,
     duplicateTokenCompensation: Math.max(
       1,
       Math.min(1_000, Math.round(Number(raw?.duplicateTokenCompensation ?? 5) || 5))
@@ -620,9 +631,9 @@ export interface FrameSpinRingSlot {
 }
 
 /**
- * Membangun tepat 25 kotak luar lingkaran (nomor 1 s/d 25) untuk mode Spin Bingkai.
+ * Membangun tepat 25 kotak heksagon luar lingkaran (nomor 1 s/d 25) untuk mode Spin Bingkai.
  * Kotak kelipatan 5 (5, 10, 15, 20, 25) merepresentasikan 5 Bingkai Aura Spesial,
- * sedangkan 20 kotak lainnya berisi Token Bingkai terdistribusi rapi dalam rentang Admin.
+ * sedangkan 20 kotak lainnya berisi Token Bingkai (bawaan: variasi 1, 2, 3, 5, 8, 10, 15, 20).
  */
 export function buildFrameSpinRingSlots25(
   rawCfg?: Partial<FrameSpinAdminConfig> | null
@@ -631,14 +642,22 @@ export function buildFrameSpinRingSlots25(
   const minT = cfg.tokenRewardMin;
   const maxT = cfg.tokenRewardMax;
   const span = Math.max(0, maxT - minT);
+  const isDefaultRange = minT === 1 && maxT === 20;
 
-  // Kurva nilai token rapi untuk 20 kotak agar angka bervariasi (misal 5, 8, 10, 12, 15, 20, 25)
+  // Variasi seimbang 20 slot Token (bawaan: 1, 2, 3, 5, 8, 10, 15, 20; dominan x1-x5)
+  const defaultTokens20 = [
+    1, 2, 5, 3,
+    1, 8, 2, 15,
+    3, 5, 1, 10,
+    2, 20, 3, 5,
+    1, 8, 2, 10,
+  ];
   const tokenFactors = [
-    0.0, 0.2, 0.4, 0.65,
-    0.1, 0.35, 0.55, 0.85,
-    0.0, 0.25, 0.5, 1.0,
-    0.15, 0.4, 0.7, 0.9,
-    0.05, 0.3, 0.6, 0.75,
+    0.0, 0.05, 0.21, 0.11,
+    0.0, 0.37, 0.05, 0.74,
+    0.11, 0.21, 0.0, 0.47,
+    0.05, 1.0, 0.11, 0.21,
+    0.0, 0.37, 0.05, 0.47,
   ];
 
   const slots: FrameSpinRingSlot[] = [];
@@ -657,12 +676,11 @@ export function buildFrameSpinRingSlots25(
         glowColorHex: frame.glowColorHex,
       });
     } else {
-      const factor = tokenFactors[tokenCursor % tokenFactors.length];
+      const idx = tokenCursor % 20;
       tokenCursor++;
-      const computedToken = Math.max(
-        1,
-        Math.round(minT + span * factor)
-      );
+      const computedToken = isDefaultRange
+        ? defaultTokens20[idx]
+        : Math.max(1, Math.round(minT + span * tokenFactors[idx]));
       slots.push({
         slotNumber: slot,
         kind: 'token',
@@ -672,4 +690,34 @@ export function buildFrameSpinRingSlots25(
   }
 
   return slots;
+}
+
+/**
+ * Memilih 1 kotak Token secara berbobot:
+ * nilai kecil (x1 - x5) jauh lebih sering jatuh (~72%), nilai sedang (x8 - x10) moderat (~20%),
+ * dan nilai besar (x15 - x20) langka (~8%).
+ */
+export function pickWeightedFrameSpinTokenSlot(
+  tokenSlots: FrameSpinRingSlot[],
+  minT = 1,
+  maxT = 20
+): FrameSpinRingSlot {
+  if (tokenSlots.length === 0) {
+    return { slotNumber: 1, kind: 'token', tokenAmount: minT };
+  }
+  const rangeSpan = Math.max(1, maxT - minT);
+  const weighted = tokenSlots.map((slot) => {
+    const ratio = (slot.tokenAmount - minT) / rangeSpan;
+    // Kurva bobot menurun halus: terkecil bobot ~18, sedang ~5, tertinggi ~1.1
+    const weight =
+      ratio <= 0.25 ? 16 : ratio <= 0.5 ? 5.5 : ratio <= 0.8 ? 2.1 : 1.0;
+    return { slot, weight };
+  });
+  const totalWeight = weighted.reduce((acc, w) => acc + w.weight, 0);
+  let r = Math.random() * totalWeight;
+  for (const item of weighted) {
+    r -= item.weight;
+    if (r <= 0) return item.slot;
+  }
+  return tokenSlots[0];
 }

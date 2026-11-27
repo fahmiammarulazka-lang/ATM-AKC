@@ -3081,32 +3081,32 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
-    id: 'upd-v16-45-20',
-    version: 'v16.45.20',
+    id: 'upd-v16-46-21',
+    version: 'v16.46.21',
     releaseType: 'minor',
     visibilityMode: 'auto',
     title:
-      'Pembaruan v16.45.20: Spin the Wheel Mode Ganda (Spin Uang & Spin Bingkai 25 Kotak · 5% Aura Eksklusif · Toko 300 Token) + Notifikasi Mengambang Pojok Kanan Atas 4 Detik',
-    fullDate: 'Sabtu, 28 November 2026 • Pukul 13:00 WIB',
-    dateText: 'Sabtu, 28 November 2026 • Pukul 13:00 WIB',
+      'Pembaruan v16.46.21: Spin Bingkai Pusaran 25 Heksagon (5 Heksagon Merah Bara, Token Berbobot 1–20, Tukar 500 Token, Animasi Selamat + Sorot Panggung, Aura Hidup Lintas Aplikasi & PayChat) + Toast Pojok Kanan Atas 4 Detik',
+    fullDate: 'Sabtu, 28 November 2026 • Pukul 14:30 WIB',
+    dateText: 'Sabtu, 28 November 2026 • Pukul 14:30 WIB',
     description:
-      'Pembaruan v16.45.20 menghadirkan Mode Ganda pada Spin the Wheel: selain Spin Uang, kini tersedia Mode Spin Bingkai dengan lingkaran 25 kotak sorot lampu berputar cepat mengelilingi 5 Bingkai Aura Eksklusif di tengah (Petir Cyber, Api Naga, Emas Imperial, Kristal Es, Galaksi Kosmik). Putaran hanya memakai Koin Spin (1x = 18 Koin, 5x = 87 Koin; Kartu Tier Admin tetap ∞) dengan peluang 5% mendapat Bingkai serta hadiah Token Bingkai untuk ditukar di Toko 300 Token. Ditambah sistem Notifikasi Mengambang Global di pojok kanan atas yang otomatis menghilang dalam 4 detik lengkap dengan bar hitung mundur, jeda saat kursor diarahkan, dan tombol aksi cepat Beli Koin saat saldo koin kurang.',
+      'Pembaruan gabungan v16.46.21 menghadirkan perombakan penuh Mode 2 Spin Bingkai berlatar pusaran kosmik gelap berputar: 25 heksagon metalik melingkar berisi emblem perisai emas Token Bingkai berbobot (x1–x20; nominal kecil lebih sering & x15–x20 lebih langka) mengelilingi klaster 5 heksagon merah bara menyala bertepi oranye api untuk 5 Bingkai Aura Eksklusif (Petir Cyber, Api Naga, Emas Imperial, Kristal Es, Galaksi Kosmik). Putaran tetap memakai Koin Spin (1x = 18 Koin, 5x = 87 Koin; Kartu Tier Admin ∞), dengan lampu sorot putih-emas berhenti penuh terlebih dahulu diikuti suara detak melambat & fanfare, spanduk mekar "SELAMAT!" (~1,4 detik) di tengah layar gelap, lalu Sorotan Lampu Panggung + konfeti emas ke bingkai hadiah dengan tombol "Pasang Sekarang" & "Tutup" (termasuk saat menukar 500 Token berulang di Toko Bingkai). Seluruh efek aura 5 bingkai kini tampil hidup berlapis-lapis (petir menyambar, api berkobar, salju kristal, nebula kosmik) di Spin Arena, Toko 500 Token, Profil, Kartu Nama Digital, Navbar, Leaderboard, serta seluruh percakapan PayChat (chat global, DM, grup, dan header), dilengkapi Notifikasi Mengambang Pojok Kanan Atas 4 detik.',
     highlights: [
-      'Spin Bingkai 25 Kotak & 5 Bingkai Aura Eksklusif: Putar arena lingkaran 1–25 hanya dengan Koin Spin (18 Koin / 1x, 87 Koin / 5x) untuk peluang 5% memenangkan Bingkai Petir Cyber, Api Naga, Emas Imperial, Kristal Es, atau Galaksi Kosmik.',
-      'Token Bingkai & Toko Tukar 300 Token: Kotak 1–25 berhadiah Token Bingkai (5–25 Token), dan bingkai kembar otomatis dikonversi menjadi +5 Token. Kumpulkan 300 Token untuk menukar bingkai pilihan Anda.',
-      'Tampil & Pasang di Seluruh Aplikasi: Bingkai Aura yang terbuka langsung bisa dipasang dari arena Spin Bingkai maupun Profil, lalu tampil bersinar di Profil, Navbar, Kartu Nama Digital, PayChat, dan Leaderboard.',
-      'Notifikasi Mengambang Pojok Kanan Atas (Auto 4 Detik): Pemberitahuan error, kurang koin/saldo/diamond, atau salah PIN kini melayang rapi di pojok kanan atas (maks 3 tumpukan) dengan bar hitung mundur 4 detik, jeda saat hover, tombol silang, dan pintasan Beli Koin.',
+      'Arena Pusaran 25 Heksagon & 5 Heksagon Merah Bara: 25 kolom heksagon melingkar dengan emblem perisai emas x1–x20 berlatar pusaran hitam-ungu gelap dan klaster 5 heksagon merah menyala bertepi oranye api yang menampilkan pratinjau avatar berbingkai aktif.',
+      'Token Berbobot 1–20 & Toko Tukar 500 Token Berulang: Nominal x1–x5 lebih sering muncul sementara x15–x20 lebih langka (+5 Token kompensasi bingkai duplikat). Kumpulkan 500 Token dengan bar progres & rincian sisa kurangnya untuk menukar bingkai berulang kali.',
+      'Lampu Sorot Berhenti Dulu → Spanduk "SELAMAT!" → Sorot Panggung: Kredit Token, Bingkai, mutasi, dan toast pojok kanan atas menunggu hingga lampu sorot berhenti penuh, lalu memicu spanduk mekar 1,4 detik dan sorotan lampu panggung berkonfeti (juga aktif saat tukar 500 Token).',
+      'Aura Hidup 5 Bingkai Lintas Aplikasi + PayChat & Toast 4 Detik: Efek petir, api, salju, dan galaksi berputar aktif di Spin Arena, Profil, Kartu Nama Digital, Navbar, Leaderboard, dan seluruh obrolan/header PayChat, bersama toast pojok kanan atas 4 detik (jeda hover, tombol silang, pintasan Beli Koin).',
     ],
     changes: [
-      'Menambahkan Dual Mode Switcher (Spin Uang vs Spin Bingkai) dan komponen SpinBingkaiArena dengan 25 kotak luar dan 5 Bingkai Aura beranimasi di tengah.',
-      'Menambahkan sistem Token Bingkai, kompensasi duplikat (+5 Token), Toko Tukar 300 Token, serta tampilan Bingkai Aura di ProfileAvatarBadge (Profil, Navbar, Kartu Nama Digital, PayChat, dan Leaderboard).',
-      'Menambahkan GlobalFloatingToastContainer di pojok kanan atas untuk seluruh aplikasi dengan durasi 4 detik, countdown bar, pause on hover, tombol tutup, dan tombol aksi cepat Beli Koin / Top Up Diamond.',
-      'Menambahkan kendali lengkap Spin Bingkai dan kelola Token/Bingkai per nasabah di tab Kontrol Spin the Wheel pada Panel Admin.',
+      'Merancang ulang SpinBingkaiArena dengan pusaran kosmik gelap, 25 heksagon luar, TokenEmblemIcon perisai emas x1–x20 berbobot, 5 heksagon merah bara di tengah, efek suara Web Audio melambat & fanfare, serta penundaan toast/reward sampai sorot berhenti.',
+      'Menambahkan layar perayaan 2 tahap: spanduk mekar "SELAMAT!" (versi megah untuk Bingkai / Tukar 500 Token & versi ringkas untuk Token) dan panggung lampu sorot tengah dengan tombol Pasang Sekarang & Tutup.',
+      'Meningkatkan aura .aura-frame-* dan ProfileAvatarBadge (md/lg/xl) dengan cincin energi berputar multi-lapis serta partikel SVG animasi hidup, serta memasangnya di seluruh gelembung chat global, grup, DM, dan header PayChat.',
+      'Memperbarui aturan default ke 1–20 Token & tukar 500 Token beserta migrasi otomatis konfigurasi lama (5–25 / 300 Token) di AdminPortal & BankContext, plus GlobalFloatingToastContainer 4 detik di pojok kanan atas.',
     ],
     isCurrent: true,
     categoryBadge: 'Update Sekarang',
     author: 'Tim Pengembangan Bank Nusantara',
-    createdAt: '2026-11-28T06:00:00.000Z',
+    createdAt: '2026-11-28T07:30:00.000Z',
     isAutoDetected: true,
   },
   {
