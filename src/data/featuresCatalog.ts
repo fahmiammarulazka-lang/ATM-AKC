@@ -3081,6 +3081,33 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-47-23',
+    version: 'v16.47.23',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v16.47.23: Upgrade Maksimal Mesin Canvas Real-Time 60–120fps + Cincin Neon Cepat untuk Seluruh 13 Bingkai (5 Eksklusif Mencolok & 8 Bingkai Profil Hidup Ringan)',
+    fullDate: 'Sabtu, 28 November 2026 • Pukul 16:00 WIB',
+    dateText: 'Sabtu, 28 November 2026 • Pukul 16:00 WIB',
+    description:
+      'Pembaruan minor v16.47.23 menghadirkan mesin animasi HTML5 Canvas real-time berkecepatan 60–120fps berbasis fisika delta-milidetik (requestAnimationFrame) plus cincin neon berputar cepat yang sangat mencolok dan langsung terlihat jelas di seluruh 13 bingkai! Ke-5 Bingkai Aura Eksklusif Spin Bingkai kini menyala terang baik yang dimiliki maupun masih terkunci dengan partikel aditif nonstop: Petir Cyber dengan busur listrik plasma menyambar & percikan neon, Api Naga dengan kobaran api menari & puluhan bara naik, Emas Imperial dengan serpihan & bintang emas 24K jatuh, Kristal Es dengan badai kristal salju berputar, serta Galaksi Kosmik dengan lintasan bintang nebula 3D mengorbit—tetap dipadukan dengan jurus ledakan besar siklus 5 detik dan ketuk instan. Ditambah animasi hidup ringan pada semua 8 bingkai Profil biasa (termasuk di Navbar & PayChat), serta pelepasan kliping di klaster 5 heksagon merah arena Spin Bingkai agar efek bingkai mengambang bebas tanpa terpotong.',
+    highlights: [
+      'Mesin Canvas Real-Time 60–120fps + Cincin Neon Cepat: Fisika partikel kontinu berbasis milidetik dengan cahaya aditif terang di semua ukuran (Navbar, PayChat, Leaderboard, Profil, Kartu Nama Digital, Toko 500 Token, dan Spin Bingkai).',
+      '13 Bingkai Hidup Menyeluruh (5 Eksklusif Maksimal + 8 Bingkai Profil Ringan): Akun biasa di Navbar maupun pratinjau terkunci di Profil/Spin langsung menampilkan efek hidup mencolok, ditambah jurus ledakan besar siklus 5 detik & ketuk instan.',
+      'Bebas Terpotong Di 5 Heksagon Merah Spin Bingkai: Avatar beserta partikel plasma, tanduk naga, mahkota 24K, prisma es, dan orbit galaksi kini mengambang bebas di atas heksagon merah tanpa terpotong tepian.',
+    ],
+    changes: [
+      'Membuat komponen LiveFrameCanvas beresolusi retina (DPR) dengan optimasi IntersectionObserver dan mode glow lighter untuk ke-5 tema eksklusif maupun 8 tema bingkai profil reguler.',
+      'Menebalkan seluruh siluet objek tematik SVG (Kumparan Tesla, Tanduk Naga, Mahkota 24K, Puncak Prisma Es, Saturnus & Bulan Sabit) serta mempercepat putaran cincin neon conic pada src/index.css.',
+      'Memisahkan lapisan avatar mengambang bebas (z-20 overflow-visible) di atas latar .bn-hex-clip pada klaster 5 heksagon merah tengah SpinBingkaiArena.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-28T09:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v16-46-23',
     version: 'v16.46.23',
     releaseType: 'patch',
@@ -3100,8 +3127,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Menambahkan penjadwal siklus 5 detik ber-offset deterministik serta pemicu klik/sentuh instan di ProfileAvatarBadge yang tetap meneruskan aksi tombol induk.',
       'Menambahkan lapisan SVG dan CSS compositor keyframes .bn-burst-* (~1 detik) untuk seluruh 5 tema bingkai baik ukuran sm (ringkas) maupun md/lg/xl (penuh & panggung).',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Rilis Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-28T08:40:00.000Z',
     isAutoDetected: true,

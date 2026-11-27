@@ -13954,6 +13954,64 @@
         "accountRole": "customer",
         "isAdmin": false,
         "triggerType": "account_login"
+      },
+      {
+        "id": "gv-1795819676355-ptv9fg",
+        "sessionId": "SES-MWYSTGUK-TWX94M",
+        "timestampIso": "2026-11-27T22:47:56.355Z",
+        "timestampMs": 1795819676355,
+        "dateKey": "2026-11-28",
+        "monthKey": "2026-11",
+        "hourOfDay": 5,
+        "deviceId": "DEV-9F2F054C46C1",
+        "deviceSessionKey": "DEV-9F2F054C46C1__gebog|java|indonesia",
+        "accessType": "web_browser",
+        "accessTypeLabel": "Web Browser (Google Chrome 158)",
+        "deviceBrandModel": "PC / Laptop Windows",
+        "osLabel": "Windows 10 / 11",
+        "browserLabel": "Google Chrome 158",
+        "publicIp": "103.164.228.70",
+        "city": "Gebog",
+        "region": "Java",
+        "country": "Indonesia",
+        "isp": "Indonesia Network Information Center",
+        "accountId": null,
+        "accountUid": null,
+        "accountName": "Pengunjung Tamu (Belum Login)",
+        "accountEmail": "-",
+        "accountNumber": "-",
+        "accountRole": "guest",
+        "isAdmin": false,
+        "triggerType": "app_open"
+      },
+      {
+        "id": "gv-1795819677943-ct8uro",
+        "sessionId": "SES-MWYSTGUK-TWX94M",
+        "timestampIso": "2026-11-27T22:47:57.943Z",
+        "timestampMs": 1795819677943,
+        "dateKey": "2026-11-28",
+        "monthKey": "2026-11",
+        "hourOfDay": 5,
+        "deviceId": "DEV-9F2F054C46C1",
+        "deviceSessionKey": "DEV-9F2F054C46C1__gebog|java|indonesia",
+        "accessType": "web_browser",
+        "accessTypeLabel": "Web Browser (Google Chrome 158)",
+        "deviceBrandModel": "PC / Laptop Windows",
+        "osLabel": "Windows 10 / 11",
+        "browserLabel": "Google Chrome 158",
+        "publicIp": "103.164.228.70",
+        "city": "Gebog",
+        "region": "Java",
+        "country": "Indonesia",
+        "isp": "Indonesia Network Information Center",
+        "accountId": "acc-lobby-reg-1795585697689",
+        "accountUid": "MJU7dilDyVP5C5JnhBojpUehpv63",
+        "accountName": "Azka",
+        "accountEmail": "fahmiammarulazka@gmail.com",
+        "accountNumber": "5362021409",
+        "accountRole": "customer",
+        "isAdmin": false,
+        "triggerType": "account_login"
       }
     ],
     "accountVisitsMap": {
@@ -13967,10 +14025,10 @@
         "role": "customer",
         "roleLabel": "Nasabah (REGULAR)",
         "isAdmin": false,
-        "totalVisits": 6,
+        "totalVisits": 7,
         "firstVisitIso": "2026-11-27T10:20:14.573Z",
-        "lastActiveIso": "2026-11-27T22:35:50.693Z",
-        "lastActiveMs": 1795818950693,
+        "lastActiveIso": "2026-11-27T22:48:35.701Z",
+        "lastActiveMs": 1795819715701,
         "deviceIds": [
           "DEV-9F2F054C46C1"
         ],
@@ -13978,6 +14036,24 @@
           "Gebog, Java, Indonesia"
         ],
         "recentVisits": [
+          {
+            "id": "gv-1795819677943-ct8uro",
+            "timestampIso": "2026-11-27T22:47:57.943Z",
+            "timestampMs": 1795819677943,
+            "deviceId": "DEV-9F2F054C46C1",
+            "deviceSessionKey": "DEV-9F2F054C46C1__gebog|java|indonesia",
+            "deviceBrandModel": "PC / Laptop Windows",
+            "osLabel": "Windows 10 / 11",
+            "browserLabel": "Google Chrome 158",
+            "accessType": "web_browser",
+            "accessTypeLabel": "Web Browser (Google Chrome 158)",
+            "publicIp": "103.164.228.70",
+            "city": "Gebog",
+            "region": "Java",
+            "country": "Indonesia",
+            "isp": "Indonesia Network Information Center",
+            "triggerType": "account_login"
+          },
           {
             "id": "gv-1795818873556-19i7v4",
             "timestampIso": "2026-11-27T22:34:33.556Z",
@@ -14081,11 +14157,11 @@
         "locationSource": "geoip",
         "previousLocations": [],
         "linkedSessionKeys": [],
-        "totalVisits": 11,
+        "totalVisits": 13,
         "firstSeenIso": "2026-11-27T10:20:13.142Z",
         "firstSeenMs": 1795774813142,
-        "lastSeenIso": "2026-11-27T22:35:50.693Z",
-        "lastSeenMs": 1795818950693,
+        "lastSeenIso": "2026-11-27T22:48:35.701Z",
+        "lastSeenMs": 1795819715701,
         "isOnline": true,
         "currentAccountId": "acc-lobby-reg-1795585697689",
         "currentAccountNumber": "5362021409",
@@ -14104,10 +14180,10 @@
             "accountNumber": "5362021409",
             "role": "customer",
             "isAdmin": false,
-            "loginCount": 5,
+            "loginCount": 6,
             "firstLoginIso": "2026-11-27T10:20:14.573Z",
-            "lastLoginIso": "2026-11-27T22:35:50.693Z",
-            "lastLoginMs": 1795818950693
+            "lastLoginIso": "2026-11-27T22:48:35.701Z",
+            "lastLoginMs": 1795819715701
           }
         ],
         "reviewStatus": "normal",
@@ -14199,10 +14275,10 @@
         }
       }
     },
-    "totalAllTimeHits": 23,
-    "updatedAtMs": 1795818950693
+    "totalAllTimeHits": 25,
+    "updatedAtMs": 1795819715701
   },
   "adminTierGrantsMap": {},
   "adminTierAuditLogs": [],
-  "lastUpdated": 1795818950694
+  "lastUpdated": 1795819715703
 }

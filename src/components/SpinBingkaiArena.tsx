@@ -824,7 +824,7 @@ export const SpinBingkaiArena: React.FC<SpinBingkaiArenaProps> = ({ onOpenCoinSh
             })}
 
             {/* KLASTER TENGAH PUSARAN: 5 HEKSAGON MERAH BARA KHUSUS BINGKAI */}
-            <div className="absolute inset-[19%] pointer-events-none">
+            <div className="absolute inset-[19%] pointer-events-none overflow-visible">
               {SPIN_AURA_FRAMES.map((frame, idx) => {
                 const pos = centerClusterOffsets[idx] || centerClusterOffsets[0];
                 const isOwned = ownedSet.has(frame.id);
@@ -844,11 +844,11 @@ export const SpinBingkaiArena: React.FC<SpinBingkaiArenaProps> = ({ onOpenCoinSh
                     title={`${frame.label} — ${
                       isEquipped ? 'Dipakai' : isOwned ? 'Dimiliki' : 'Terkunci'
                     }`}
-                    className={`pointer-events-auto absolute w-[68px] h-[76px] sm:w-[96px] sm:h-[108px] transition-transform duration-150 cursor-pointer focus:outline-none ${
+                    className={`pointer-events-auto overflow-visible absolute w-[70px] h-[78px] sm:w-[98px] sm:h-[110px] transition-transform duration-150 cursor-pointer focus:outline-none ${
                       isSelected ? 'z-30' : 'z-20 hover:scale-105'
                     }`}
                   >
-                    {/* Glowing Fiery Red-Orange Hexagon Bevel */}
+                    {/* Layer 1: Glowing Fiery Red-Orange Clipped Hexagon Background + Labels */}
                     <div
                       className={`w-full h-full bn-hex-clip p-[2px] sm:p-[3px] ${
                         isSelected
@@ -856,21 +856,8 @@ export const SpinBingkaiArena: React.FC<SpinBingkaiArenaProps> = ({ onOpenCoinSh
                           : 'bg-gradient-to-b from-amber-300 via-orange-500 to-red-700 shadow-[0_0_16px_rgba(220,38,38,0.65)]'
                       }`}
                     >
-                      <div className="w-full h-full bn-hex-clip bg-gradient-to-b from-red-500 via-red-600 to-rose-900 flex flex-col items-center justify-center px-1 pt-2 pb-1 text-center relative">
-                        {/* Avatar Wearing This Living Aura Frame */}
-                        <div className="scale-[0.65] sm:scale-[0.78] origin-center -my-0.5">
-                          <ProfileAvatarBadge
-                            account={{
-                              fullName: currentAccount.fullName,
-                              cardStatus: currentAccount.cardStatus,
-                              avatarPresetId: currentAccount.avatarPresetId,
-                              avatarFrameId: frame.id,
-                            }}
-                            size="md"
-                          />
-                        </div>
-
-                        <span className="text-[7px] sm:text-[9px] font-black text-white leading-tight truncate max-w-[92%] mt-0.5 drop-shadow">
+                      <div className="w-full h-full bn-hex-clip bg-gradient-to-b from-red-500 via-red-600 to-rose-900 flex flex-col items-center justify-end px-1 pb-2 sm:pb-2.5 text-center relative">
+                        <span className="text-[7px] sm:text-[9px] font-black text-white leading-tight truncate max-w-[92%] drop-shadow">
                           {frame.label}
                         </span>
                         <span
@@ -884,6 +871,21 @@ export const SpinBingkaiArena: React.FC<SpinBingkaiArenaProps> = ({ onOpenCoinSh
                         >
                           {isEquipped ? 'Dipakai' : isOwned ? 'Dimiliki' : 'Terkunci'}
                         </span>
+                      </div>
+                    </div>
+
+                    {/* Layer 2: Unclipped Free-Floating Living Avatar + Real-Time Canvas */}
+                    <div className="pointer-events-none overflow-visible absolute inset-x-0 -top-1 sm:top-1 flex items-center justify-center z-20">
+                      <div className="scale-[0.76] sm:scale-[0.94] origin-center overflow-visible">
+                        <ProfileAvatarBadge
+                          account={{
+                            fullName: currentAccount.fullName,
+                            cardStatus: currentAccount.cardStatus,
+                            avatarPresetId: currentAccount.avatarPresetId,
+                            avatarFrameId: frame.id,
+                          }}
+                          size="md"
+                        />
                       </div>
                     </div>
                   </button>

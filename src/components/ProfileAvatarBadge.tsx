@@ -5,6 +5,7 @@ import {
   getAvatarFrameById,
   getAvatarPresetById,
 } from '../data/profileCustomizationCatalog';
+import { LiveCanvasTheme, LiveFrameCanvas } from './LiveFrameCanvas';
 
 interface ProfileAvatarBadgeProps {
   account: Pick<
@@ -41,104 +42,106 @@ const renderCompactSmOverlay = (auraTheme: AuraTheme) => {
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[5px] w-[calc(100%+10px)] h-[calc(100%+10px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible"
           aria-hidden="true"
         >
-          {/* Cyber chamfered corner brackets */}
-          <path d="M2 22 L2 6 L10 2 L24 2" fill="none" stroke="#67e8f9" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M76 2 L90 2 L98 10 L98 22" fill="none" stroke="#67e8f9" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M2 78 L2 90 L10 98 L24 98" fill="none" stroke="#22d3ee" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M76 98 L90 98 L98 90 L98 78" fill="none" stroke="#22d3ee" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+          {/* Thick Cyber chamfered corner brackets */}
+          <path d="M1 24 L1 6 L10 1 L26 1" fill="none" stroke="#67e8f9" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M74 1 L90 1 L99 10 L99 24" fill="none" stroke="#67e8f9" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M1 76 L1 90 L10 99 L26 99" fill="none" stroke="#22d3ee" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M74 99 L90 99 L99 90 L99 76" fill="none" stroke="#22d3ee" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
           {/* Top mini Volt badge + alternating spark */}
-          <polygon points="50,-8 58,-1 54,6 46,6 42,-1" fill="#083344" stroke="#67e8f9" strokeWidth="2.5" />
-          <path d="M51,-5 L47,0 L51,0 L48,4" fill="none" stroke="#fef08a" strokeWidth="2.5" strokeLinecap="round" className="bn-obj-bolt-a" />
-          <path d="M97,46 L104,50 L98,55" fill="none" stroke="#ffffff" strokeWidth="2.6" strokeLinecap="round" className="bn-obj-bolt-b" />
+          <polygon points="50,-11 60,-2 55,7 45,7 40,-2" fill="#083344" stroke="#67e8f9" strokeWidth="3" />
+          <path d="M52,-7 L47,-1 L52,-1 L48,4" fill="none" stroke="#fef08a" strokeWidth="3" strokeLinecap="round" className="bn-obj-bolt-a" />
+          <path d="M97,45 L106,50 L98,56" fill="none" stroke="#ffffff" strokeWidth="3.2" strokeLinecap="round" className="bn-obj-bolt-b" />
         </svg>
       );
     case 'api':
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[5px] w-[calc(100%+10px)] h-[calc(100%+10px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible"
           aria-hidden="true"
         >
-          {/* Mini curved Dragon Horns top left/right */}
-          <path d="M16 14 C8 -2, 2 -10, 14 -12 C18 -4, 22 4, 28 8 Z" fill="#fb923c" stroke="#fef08a" strokeWidth="1.5" />
-          <path d="M84 14 C92 -2, 98 -10, 86 -12 C82 -4, 78 4, 72 8 Z" fill="#fb923c" stroke="#fef08a" strokeWidth="1.5" />
-          {/* Rising mini embers */}
-          <circle cx="50" cy="-4" r="3.5" fill="#fde047" className="bn-obj-ember-a" />
-          <circle cx="94" cy="36" r="2.8" fill="#fb923c" className="bn-obj-ember-b" />
+          {/* Bold curved Dragon Horns top left/right */}
+          <path d="M14 15 C5 -4, -1 -14, 14 -16 C19 -6, 23 3, 30 8 Z" fill="#fb923c" stroke="#fef08a" strokeWidth="2.2" />
+          <path d="M86 15 C95 -4, 101 -14, 86 -16 C81 -6, 77 3, 70 8 Z" fill="#fb923c" stroke="#fef08a" strokeWidth="2.2" />
+          {/* Rising embers */}
+          <circle cx="50" cy="-6" r="4.2" fill="#fde047" className="bn-obj-ember-a" />
+          <circle cx="96" cy="36" r="3.4" fill="#fb923c" className="bn-obj-ember-b" />
         </svg>
       );
     case 'emas':
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[5px] w-[calc(100%+10px)] h-[calc(100%+10px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible"
           aria-hidden="true"
         >
-          {/* Mini Royal Gold Crown at top */}
+          {/* Bold Royal Gold Crown at top */}
           <path
-            d="M32 6 L37 -8 L45 -1 L50 -12 L55 -1 L63 -8 L68 6 Z"
+            d="M30 7 L35 -11 L44 -2 L50 -16 L56 -2 L65 -11 L70 7 Z"
             fill="#facc15"
-            stroke="#fef9c3"
-            strokeWidth="2"
+            stroke="#78350f"
+            strokeWidth="2.2"
             strokeLinejoin="round"
             className="bn-obj-crown-float"
           />
-          <circle cx="50" cy="0" r="2.4" fill="#e11d48" className="bn-obj-crown-float" />
+          <circle cx="50" cy="-1" r="3" fill="#e11d48" className="bn-obj-crown-float" />
           {/* Gold corner studs */}
-          <circle cx="8" cy="8" r="3.2" fill="#fde047" />
-          <circle cx="92" cy="8" r="3.2" fill="#fde047" />
-          <circle cx="8" cy="92" r="3.2" fill="#fde047" />
-          <circle cx="92" cy="92" r="3.2" fill="#fde047" />
+          <circle cx="6" cy="6" r="4" fill="#fde047" stroke="#78350f" strokeWidth="1.2" />
+          <circle cx="94" cy="6" r="4" fill="#fde047" stroke="#78350f" strokeWidth="1.2" />
+          <circle cx="6" cy="94" r="4" fill="#fde047" stroke="#78350f" strokeWidth="1.2" />
+          <circle cx="94" cy="94" r="4" fill="#fde047" stroke="#78350f" strokeWidth="1.2" />
         </svg>
       );
     case 'es':
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[5px] w-[calc(100%+10px)] h-[calc(100%+10px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible"
           aria-hidden="true"
         >
           {/* 4 corner faceted ice crystal prisms */}
-          <polygon points="-4,-4 15,2 4,15" fill="#e0f2fe" stroke="#38bdf8" strokeWidth="1.6" className="bn-obj-ice-glint" />
-          <polygon points="104,-4 85,2 96,15" fill="#bae6fd" stroke="#38bdf8" strokeWidth="1.6" className="bn-obj-ice-glint" />
-          <polygon points="-4,104 15,98 4,85" fill="#bae6fd" stroke="#38bdf8" strokeWidth="1.6" className="bn-obj-ice-glint" />
-          <polygon points="104,104 85,98 96,85" fill="#e0f2fe" stroke="#38bdf8" strokeWidth="1.6" className="bn-obj-ice-glint" />
+          <polygon points="-7,-7 16,1 3,16" fill="#e0f2fe" stroke="#0284c7" strokeWidth="2.2" className="bn-obj-ice-glint" />
+          <polygon points="107,-7 84,1 97,16" fill="#bae6fd" stroke="#0284c7" strokeWidth="2.2" className="bn-obj-ice-glint" />
+          <polygon points="-7,107 16,99 3,84" fill="#bae6fd" stroke="#0284c7" strokeWidth="2.2" className="bn-obj-ice-glint" />
+          <polygon points="107,107 84,99 97,84" fill="#e0f2fe" stroke="#0284c7" strokeWidth="2.2" className="bn-obj-ice-glint" />
           {/* Drifting snowflakes */}
-          <circle cx="50" cy="-6" r="3" fill="#ffffff" className="bn-obj-snow-a" />
-          <circle cx="99" cy="54" r="2.6" fill="#bae6fd" className="bn-obj-snow-b" />
+          <circle cx="50" cy="-7" r="3.6" fill="#ffffff" className="bn-obj-snow-a" />
+          <circle cx="101" cy="54" r="3.2" fill="#bae6fd" className="bn-obj-snow-b" />
         </svg>
       );
     case 'galaksi':
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[7px] w-[calc(100%+14px)] h-[calc(100%+14px)] pointer-events-none z-20 overflow-visible"
           aria-hidden="true"
         >
           {/* Tilted cosmic orbital ellipse */}
           <ellipse
             cx="50"
             cy="50"
-            rx="56"
-            ry="22"
+            rx="57"
+            ry="23"
             transform="rotate(-24 50 50)"
             fill="none"
-            stroke="rgba(240,171,252,0.8)"
-            strokeWidth="2.4"
+            stroke="rgba(240,171,252,0.9)"
+            strokeWidth="3"
             className="bn-obj-nebula-breathe"
           />
           {/* Mini Saturn top-right */}
           <g className="bn-obj-planet-bob">
-            <circle cx="90" cy="10" r="6" fill="#e879f9" stroke="#ffffff" strokeWidth="1.4" />
-            <ellipse cx="90" cy="10" rx="10" ry="3.2" transform="rotate(-22 90 10)" fill="none" stroke="#fde047" strokeWidth="1.8" />
+            <circle cx="92" cy="8" r="7.5" fill="#d946ef" stroke="#ffffff" strokeWidth="1.8" />
+            <ellipse cx="92" cy="8" rx="12.5" ry="3.8" transform="rotate(-22 92 8)" fill="none" stroke="#fde047" strokeWidth="2.2" />
           </g>
           {/* Mini crescent moon bottom-left */}
           <path
-            d="M14 84 A7 7 0 1 0 22 93 A5.5 5.5 0 1 1 14 84 Z"
+            d="M12 82 A8.5 8.5 0 1 0 22 93 A6.5 6.5 0 1 1 12 82 Z"
             fill="#fef08a"
+            stroke="#f59e0b"
+            strokeWidth="1.2"
             className="bn-obj-moon-bob"
           />
         </svg>
@@ -151,63 +154,63 @@ const renderFullArchitecturalAura = (
   stageHighlight?: boolean
 ) => {
   const insetClass = stageHighlight
-    ? '-inset-3.5 w-[calc(100%+28px)] h-[calc(100%+28px)]'
-    : '-inset-2.5 w-[calc(100%+20px)] h-[calc(100%+20px)]';
+    ? '-inset-4 w-[calc(100%+32px)] h-[calc(100%+32px)]'
+    : '-inset-3 w-[calc(100%+24px)] h-[calc(100%+24px)]';
 
   switch (auraTheme) {
     case 'petir':
       return (
         <svg
-          viewBox="-16 -18 132 136"
+          viewBox="-18 -20 136 140"
           className={`absolute ${insetClass} pointer-events-none z-20 overflow-visible`}
           aria-hidden="true"
         >
           <defs>
             <linearGradient id="bnCyberMetal" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#67e8f9" />
+              <stop offset="0%" stopColor="#a5f3fc" />
               <stop offset="50%" stopColor="#0ea5e9" />
               <stop offset="100%" stopColor="#1e3a8a" />
             </linearGradient>
           </defs>
 
-          {/* Distinct Architectural Cyber-Tech Chamfered Brackets & Circuit Frame */}
-          <path d="M 2 24 L 2 8 L 12 0 L 32 0" fill="none" stroke="#67e8f9" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M 68 0 L 88 0 L 98 8 L 98 24" fill="none" stroke="#67e8f9" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M 2 76 L 2 92 L 12 100 L 32 100" fill="none" stroke="#22d3ee" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M 68 100 L 88 100 L 98 92 L 98 76" fill="none" stroke="#22d3ee" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+          {/* Bold Cyber-Tech Chamfered Brackets */}
+          <path d="M 0 26 L 0 7 L 12 -1 L 34 -1" fill="none" stroke="#67e8f9" strokeWidth="5.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M 66 -1 L 88 -1 L 100 7 L 100 26" fill="none" stroke="#67e8f9" strokeWidth="5.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M 0 74 L 0 93 L 12 101 L 34 101" fill="none" stroke="#22d3ee" strokeWidth="5.2" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M 66 101 L 88 101 L 100 93 L 100 74" fill="none" stroke="#22d3ee" strokeWidth="5.2" strokeLinecap="round" strokeLinejoin="round" />
 
-          {/* Unique Object 1: Top Cyber Volt Crest Shield */}
+          {/* Top Cyber Volt Crest Shield */}
           <g className="bn-obj-tesla-hum">
-            <polygon points="50,-14 63,-5 58,5 42,5 37,-5" fill="#082f49" stroke="url(#bnCyberMetal)" strokeWidth="2.4" />
-            <path d="M 52 -10 L 46 -3 L 51 -3 L 48 3 L 55 -4 L 50 -4 Z" fill="#fef08a" />
+            <polygon points="50,-18 66,-6 60,6 40,6 34,-6" fill="#082f49" stroke="url(#bnCyberMetal)" strokeWidth="3" />
+            <path d="M 53 -13 L 45 -3 L 51 -3 L 47 4 L 56 -5 L 50 -5 Z" fill="#fef08a" />
           </g>
 
-          {/* Unique Object 2: Dual Side Tesla High-Voltage Coils */}
+          {/* Dual Side Tesla High-Voltage Coils */}
           <g className="bn-obj-tesla-hum">
-            <rect x="-9" y="39" width="8" height="22" rx="3" fill="#0f172a" stroke="#38bdf8" strokeWidth="2" />
-            <line x1="-9" y1="45" x2="-1" y2="45" stroke="#67e8f9" strokeWidth="1.6" />
-            <line x1="-9" y1="50" x2="-1" y2="50" stroke="#ffffff" strokeWidth="1.6" />
-            <line x1="-9" y1="55" x2="-1" y2="55" stroke="#67e8f9" strokeWidth="1.6" />
-            <circle cx="-5" cy="36" r="2.6" fill="#e0f2fe" />
+            <rect x="-12" y="36" width="10" height="28" rx="3.5" fill="#0f172a" stroke="#38bdf8" strokeWidth="2.6" />
+            <line x1="-12" y1="43" x2="-2" y2="43" stroke="#67e8f9" strokeWidth="2" />
+            <line x1="-12" y1="50" x2="-2" y2="50" stroke="#ffffff" strokeWidth="2.2" />
+            <line x1="-12" y1="57" x2="-2" y2="57" stroke="#67e8f9" strokeWidth="2" />
+            <circle cx="-7" cy="32" r="3.4" fill="#ffffff" stroke="#22d3ee" strokeWidth="1.5" />
 
-            <rect x="101" y="39" width="8" height="22" rx="3" fill="#0f172a" stroke="#38bdf8" strokeWidth="2" />
-            <line x1="101" y1="45" x2="109" y2="45" stroke="#67e8f9" strokeWidth="1.6" />
-            <line x1="101" y1="50" x2="109" y2="50" stroke="#ffffff" strokeWidth="1.6" />
-            <line x1="101" y1="55" x2="109" y2="55" stroke="#67e8f9" strokeWidth="1.6" />
-            <circle cx="105" cy="36" r="2.6" fill="#e0f2fe" />
+            <rect x="102" y="36" width="10" height="28" rx="3.5" fill="#0f172a" stroke="#38bdf8" strokeWidth="2.6" />
+            <line x1="102" y1="43" x2="112" y2="43" stroke="#67e8f9" strokeWidth="2" />
+            <line x1="102" y1="50" x2="112" y2="50" stroke="#ffffff" strokeWidth="2.2" />
+            <line x1="102" y1="57" x2="112" y2="57" stroke="#67e8f9" strokeWidth="2" />
+            <circle cx="107" cy="32" r="3.4" fill="#ffffff" stroke="#22d3ee" strokeWidth="1.5" />
           </g>
 
-          {/* 3 Independent Alternating Flickering Lightning Arcs */}
-          <path d="M 11 -10 L 18 -2 L 13 -1 L 20 8" fill="none" stroke="#e0f2fe" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="bn-obj-bolt-a" />
-          <path d="M 90 -9 L 83 0 L 89 1 L 81 9" fill="none" stroke="#67e8f9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="bn-obj-bolt-b" />
-          <path d="M 48 101 L 54 108 L 49 110 L 55 117" fill="none" stroke="#22d3ee" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="bn-obj-bolt-c" />
+          {/* 3 Bold Alternating Flickering Lightning Arcs */}
+          <path d="M 10 -12 L 19 -2 L 13 -1 L 21 9" fill="none" stroke="#ffffff" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" className="bn-obj-bolt-a" />
+          <path d="M 91 -11 L 83 -1 L 90 1 L 80 10" fill="none" stroke="#67e8f9" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" className="bn-obj-bolt-b" />
+          <path d="M 47 101 L 55 109 L 49 111 L 57 120" fill="none" stroke="#22d3ee" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" className="bn-obj-bolt-c" />
         </svg>
       );
 
     case 'api':
       return (
         <svg
-          viewBox="-16 -20 132 138"
+          viewBox="-18 -22 136 142"
           className={`absolute ${insetClass} pointer-events-none z-20 overflow-visible`}
           aria-hidden="true"
         >
@@ -223,35 +226,29 @@ const renderFullArchitecturalAura = (
             </linearGradient>
           </defs>
 
-          {/* Distinct Dragon-Scale Scalloped Obsidian-Molten Rim */}
-          <path d="M 6 88 Q 28 107 50 103 Q 72 107 94 88" fill="none" stroke="url(#bnDragonScale)" strokeWidth="5" strokeLinecap="round" />
-          <path d="M 38 103 L 50 113 L 62 103 Z" fill="#ef4444" stroke="#fde047" strokeWidth="1.6" />
+          {/* Bold Dragon-Scale Scalloped Obsidian-Molten Rim */}
+          <path d="M 4 88 Q 28 110 50 104 Q 72 110 96 88" fill="none" stroke="url(#bnDragonScale)" strokeWidth="6.5" strokeLinecap="round" />
+          <path d="M 35 103 L 50 117 L 65 103 Z" fill="#ef4444" stroke="#fde047" strokeWidth="2.2" />
 
-          {/* Curved Dragon Horns */}
-          <path d="M 18 14 C 5 4, -4 -10, 11 -16 C 14 -6, 20 2, 30 7 Z" fill="url(#bnDragonHorn)" stroke="#fef08a" strokeWidth="1.5" />
-          <path d="M 82 14 C 95 4, 104 -10, 89 -16 C 86 -6, 80 2, 70 7 Z" fill="url(#bnDragonHorn)" stroke="#fef08a" strokeWidth="1.5" />
+          {/* Bold Curved Dragon Horns */}
+          <path d="M 16 15 C 2 3, -8 -13, 12 -20 C 16 -8, 22 2, 32 7 Z" fill="url(#bnDragonHorn)" stroke="#fef08a" strokeWidth="2" />
+          <path d="M 84 15 C 98 3, 108 -13, 88 -20 C 84 -8, 78 2, 68 7 Z" fill="url(#bnDragonHorn)" stroke="#fef08a" strokeWidth="2" />
 
           {/* Side Dragon Wing / Claw Guard Silhouettes */}
-          <path d="M -2 30 C -14 38, -14 52, -3 68 C -6 56, -6 44, -2 30 Z" fill="#dc2626" stroke="#fb923c" strokeWidth="1.6" />
-          <path d="M 102 30 C 114 38, 114 52, 103 68 C 106 56, 106 44, 102 30 Z" fill="#dc2626" stroke="#fb923c" strokeWidth="1.6" />
+          <path d="M -2 27 C -16 37, -16 54, -3 72 C -7 58, -7 44, -2 27 Z" fill="#dc2626" stroke="#fde047" strokeWidth="2" />
+          <path d="M 102 27 C 116 37, 116 54, 103 72 C 107 58, 107 44, 102 27 Z" fill="#dc2626" stroke="#fde047" strokeWidth="2" />
 
           {/* Undulating Wavy Dragon Flame Tongues */}
-          <path d="M 50 -16 C 57 -8, 60 -1, 50 5 C 40 -1, 43 -8, 50 -16 Z" fill="#fb923c" stroke="#fef08a" strokeWidth="1.4" className="bn-obj-flame-a" />
-          <path d="M 0 22 C -10 14, -10 4, 2 0 C 3 9, 5 16, 0 22 Z" fill="#f97316" className="bn-obj-flame-b" />
-          <path d="M 100 22 C 110 14, 110 4, 98 0 C 97 9, 95 16, 100 22 Z" fill="#ef4444" className="bn-obj-flame-a" />
-
-          {/* Rising Ember Particles */}
-          <circle cx="28" cy="-8" r="2.7" fill="#fde047" className="bn-obj-ember-a" />
-          <circle cx="72" cy="-6" r="2.4" fill="#fb923c" className="bn-obj-ember-b" />
-          <circle cx="107" cy="48" r="2.6" fill="#fef08a" className="bn-obj-ember-c" />
-          <circle cx="-7" cy="52" r="2.4" fill="#f97316" className="bn-obj-ember-b" />
+          <path d="M 50 -20 C 59 -9, 63 -1, 50 6 C 37 -1, 41 -9, 50 -20 Z" fill="#fb923c" stroke="#fef08a" strokeWidth="2" className="bn-obj-flame-a" />
+          <path d="M 0 22 C -12 13, -12 1, 2 -3 C 4 8, 6 16, 0 22 Z" fill="#f97316" className="bn-obj-flame-b" />
+          <path d="M 100 22 C 112 13, 112 1, 98 -3 C 96 8, 94 16, 100 22 Z" fill="#ef4444" className="bn-obj-flame-a" />
         </svg>
       );
 
     case 'emas':
       return (
         <svg
-          viewBox="-16 -22 132 140"
+          viewBox="-18 -24 136 144"
           className={`absolute ${insetClass} pointer-events-none z-20 overflow-visible`}
           aria-hidden="true"
         >
@@ -267,43 +264,39 @@ const renderFullArchitecturalAura = (
             </clipPath>
           </defs>
 
-          {/* Distinct Baroque Double Filigree Bevel + Corner Ruby Jewels */}
-          <rect x="-1" y="-1" width="102" height="102" rx="16" fill="none" stroke="url(#bnRoyalGold)" strokeWidth="3.2" />
-          <circle cx="4" cy="4" r="4" fill="#e11d48" stroke="#fef08a" strokeWidth="1.6" />
-          <circle cx="96" cy="4" r="4" fill="#e11d48" stroke="#fef08a" strokeWidth="1.6" />
-          <circle cx="4" cy="96" r="4" fill="#e11d48" stroke="#fef08a" strokeWidth="1.6" />
-          <circle cx="96" cy="96" r="4" fill="#e11d48" stroke="#fef08a" strokeWidth="1.6" />
+          {/* Bold Baroque Double Filigree Bevel + Corner Ruby Jewels */}
+          <rect x="-2" y="-2" width="104" height="104" rx="16" fill="none" stroke="url(#bnRoyalGold)" strokeWidth="4.2" />
+          <circle cx="3" cy="3" r="5" fill="#e11d48" stroke="#fef08a" strokeWidth="2" />
+          <circle cx="97" cy="3" r="5" fill="#e11d48" stroke="#fef08a" strokeWidth="2" />
+          <circle cx="3" cy="97" r="5" fill="#e11d48" stroke="#fef08a" strokeWidth="2" />
+          <circle cx="97" cy="97" r="5" fill="#e11d48" stroke="#fef08a" strokeWidth="2" />
 
           {/* Sweeping Metallic Gold Sheen Band */}
           <g clipPath="url(#bnImperialSheenMask)">
-            <rect x="0" y="-14" width="24" height="130" fill="rgba(255,255,255,0.42)" className="bn-obj-gold-sheen" />
+            <rect x="0" y="-14" width="28" height="132" fill="rgba(255,255,255,0.52)" className="bn-obj-gold-sheen" />
           </g>
 
-          {/* Royal Gold Crown */}
+          {/* Sculpted Royal Gold Crown */}
           <g className="bn-obj-crown-float">
-            <path d="M 30 4 L 33 -11 L 43 -4 L 50 -16 L 57 -4 L 67 -11 L 70 4 Z" fill="url(#bnRoyalGold)" stroke="#78350f" strokeWidth="1.5" strokeLinejoin="round" />
-            <circle cx="50" cy="-3" r="2.8" fill="#e11d48" stroke="#fef9c3" strokeWidth="1" />
-            <circle cx="38" cy="-1" r="2" fill="#0ea5e9" />
-            <circle cx="62" cy="-1" r="2" fill="#0ea5e9" />
+            <path d="M 27 5 L 31 -14 L 42 -5 L 50 -20 L 58 -5 L 69 -14 L 73 5 Z" fill="url(#bnRoyalGold)" stroke="#78350f" strokeWidth="2" strokeLinejoin="round" />
+            <circle cx="50" cy="-3" r="3.4" fill="#e11d48" stroke="#fef9c3" strokeWidth="1.2" />
+            <circle cx="36" cy="-1" r="2.4" fill="#0ea5e9" />
+            <circle cx="64" cy="-1" r="2.4" fill="#0ea5e9" />
           </g>
 
           {/* Gold Laurel Wreath Leaves */}
-          <path d="M -6 72 C -12 58, -12 42, -5 28 M -8 62 L -2 58 M -9 50 L -2 47 M -8 38 L -2 36" fill="none" stroke="#fde047" strokeWidth="2.4" strokeLinecap="round" />
-          <path d="M 106 72 C 112 58, 112 42, 105 28 M 108 62 L 102 58 M 109 50 L 102 47 M 108 38 L 102 36" fill="none" stroke="#fde047" strokeWidth="2.4" strokeLinecap="round" />
+          <path d="M -8 74 C -15 58, -15 41, -7 25 M -10 63 L -2 58 M -11 50 L -2 47 M -10 37 L -2 35" fill="none" stroke="#fde047" strokeWidth="3.2" strokeLinecap="round" />
+          <path d="M 108 74 C 115 58, 115 41, 107 25 M 110 63 L 102 58 M 111 50 L 102 47 M 110 37 L 102 35" fill="none" stroke="#fde047" strokeWidth="3.2" strokeLinecap="round" />
 
           {/* Bottom Royal Seal Crest */}
-          <polygon points="50,98 56,105 50,112 44,105" fill="url(#bnRoyalGold)" stroke="#78350f" strokeWidth="1.3" />
-
-          {/* Staggered 4-Point Royal Sparkles */}
-          <polygon points="16,-6 18,-2 22,0 18,2 16,6 14,2 10,0 14,-2" fill="#ffffff" className="bn-obj-twinkle-a" />
-          <polygon points="85,96 87,100 91,102 87,104 85,108 83,104 79,102 83,100" fill="#fef08a" className="bn-obj-twinkle-b" />
+          <polygon points="50,98 58,107 50,116 42,107" fill="url(#bnRoyalGold)" stroke="#78350f" strokeWidth="1.8" />
         </svg>
       );
 
     case 'es':
       return (
         <svg
-          viewBox="-16 -18 132 136"
+          viewBox="-18 -20 136 140"
           className={`absolute ${insetClass} pointer-events-none z-20 overflow-visible`}
           aria-hidden="true"
         >
@@ -315,39 +308,24 @@ const renderFullArchitecturalAura = (
             </linearGradient>
           </defs>
 
-          {/* Geometric Faceted Glacial Rim */}
-          <polygon points="14,-2 86,-2 102,14 102,86 86,102 14,102 -2,86 -2,14" fill="none" stroke="url(#bnIceFacet)" strokeWidth="2.8" />
+          {/* Bold Geometric Faceted Glacial Rim */}
+          <polygon points="14,-3 86,-3 103,14 103,86 86,103 14,103 -3,86 -3,14" fill="none" stroke="url(#bnIceFacet)" strokeWidth="4" />
 
-          {/* 4 Sharp Diagonal Faceted Ice Prism Spears + Glacial Tiara */}
+          {/* 4 Bold Sharp Diagonal Ice Prism Spears + Glacial Tiara */}
           <g className="bn-obj-ice-glint">
-            <polygon points="-11,-11 14,0 5,6 0,14" fill="url(#bnIceFacet)" stroke="#ffffff" strokeWidth="1.2" />
-            <polygon points="111,-11 86,0 95,6 100,14" fill="url(#bnIceFacet)" stroke="#ffffff" strokeWidth="1.2" />
-            <polygon points="-11,111 14,100 5,94 0,86" fill="url(#bnIceFacet)" stroke="#ffffff" strokeWidth="1.2" />
-            <polygon points="111,111 86,100 95,94 100,86" fill="url(#bnIceFacet)" stroke="#ffffff" strokeWidth="1.2" />
-            <polygon points="50,-15 57,-2 50,3 43,-2" fill="#e0f2fe" stroke="#38bdf8" strokeWidth="1.4" />
+            <polygon points="-15,-15 15,0 6,7 0,15" fill="url(#bnIceFacet)" stroke="#0369a1" strokeWidth="1.6" />
+            <polygon points="115,-15 85,0 94,7 100,15" fill="url(#bnIceFacet)" stroke="#0369a1" strokeWidth="1.6" />
+            <polygon points="-15,115 15,100 6,93 0,85" fill="url(#bnIceFacet)" stroke="#0369a1" strokeWidth="1.6" />
+            <polygon points="115,115 85,100 94,93 100,85" fill="url(#bnIceFacet)" stroke="#0369a1" strokeWidth="1.6" />
+            <polygon points="50,-19 59,-3 50,4 41,-3" fill="#e0f2fe" stroke="#0284c7" strokeWidth="1.8" />
           </g>
-
-          {/* Independent Drifting Snowflakes */}
-          <g stroke="#ffffff" strokeWidth="1.9" strokeLinecap="round" className="bn-obj-snow-a">
-            <line x1="25" y1="-10" x2="25" y2="-2" />
-            <line x1="21" y1="-6" x2="29" y2="-6" />
-          </g>
-          <g stroke="#bae6fd" strokeWidth="1.9" strokeLinecap="round" className="bn-obj-snow-b">
-            <line x1="106" y1="45" x2="106" y2="55" />
-            <line x1="101" y1="50" x2="111" y2="50" />
-          </g>
-          <g stroke="#e0f2fe" strokeWidth="1.9" strokeLinecap="round" className="bn-obj-snow-c">
-            <line x1="-7" y1="48" x2="-7" y2="58" />
-            <line x1="-12" y1="53" x2="-2" y2="53" />
-          </g>
-          <circle cx="76" cy="107" r="2.6" fill="#ffffff" className="bn-obj-snow-a" />
         </svg>
       );
 
     case 'galaksi':
       return (
         <svg
-          viewBox="-18 -18 136 136"
+          viewBox="-20 -20 140 140"
           className={`absolute ${insetClass} pointer-events-none z-20 overflow-visible`}
           aria-hidden="true"
         >
@@ -359,26 +337,21 @@ const renderFullArchitecturalAura = (
             </linearGradient>
           </defs>
 
-          {/* Breathing Soft Nebula Ring + Double Tilted Astrolabe Orbits */}
-          <circle cx="50" cy="50" r="56" fill="none" stroke="rgba(192,132,252,0.45)" strokeWidth="2.5" className="bn-obj-nebula-breathe" />
-          <ellipse cx="50" cy="50" rx="61" ry="23" transform="rotate(-26 50 50)" fill="none" stroke="rgba(240,171,252,0.82)" strokeWidth="2" strokeDasharray="10 4" className="bn-obj-nebula-breathe" />
-          <ellipse cx="50" cy="50" rx="59" ry="21" transform="rotate(24 50 50)" fill="none" stroke="rgba(129,140,248,0.65)" strokeWidth="1.6" />
+          {/* Bold Breathing Nebula Ring + Tilted Astrolabe Orbits */}
+          <circle cx="50" cy="50" r="57" fill="none" stroke="rgba(192,132,252,0.58)" strokeWidth="3.2" className="bn-obj-nebula-breathe" />
+          <ellipse cx="50" cy="50" rx="63" ry="24" transform="rotate(-26 50 50)" fill="none" stroke="rgba(240,171,252,0.9)" strokeWidth="2.8" strokeDasharray="10 4" className="bn-obj-nebula-breathe" />
+          <ellipse cx="50" cy="50" rx="60" ry="22" transform="rotate(24 50 50)" fill="none" stroke="rgba(129,140,248,0.78)" strokeWidth="2.2" />
 
-          {/* Ringed Mini Saturn Planet Top-Right */}
+          {/* Bold Ringed Mini Saturn Planet Top-Right */}
           <g className="bn-obj-planet-bob">
-            <circle cx="93" cy="6" r="7.5" fill="url(#bnSaturnBody)" stroke="#fae8ff" strokeWidth="1.4" />
-            <ellipse cx="93" cy="6" rx="13.5" ry="4" transform="rotate(-20 93 6)" fill="none" stroke="#fde047" strokeWidth="2" />
+            <circle cx="95" cy="5" r="9" fill="url(#bnSaturnBody)" stroke="#fae8ff" strokeWidth="1.8" />
+            <ellipse cx="95" cy="5" rx="16" ry="4.6" transform="rotate(-20 95 5)" fill="none" stroke="#fde047" strokeWidth="2.5" />
           </g>
 
-          {/* Glowing Crescent Moon Bottom-Left */}
+          {/* Bold Glowing Crescent Moon Bottom-Left */}
           <g className="bn-obj-moon-bob">
-            <path d="M 8 83 A 9 9 0 1 0 18 95 A 7 7 0 1 1 8 83 Z" fill="#fef08a" stroke="#f59e0b" strokeWidth="1" />
+            <path d="M 6 82 A 10.5 10.5 0 1 0 18 96 A 8 8 0 1 1 6 82 Z" fill="#fef08a" stroke="#d97706" strokeWidth="1.4" />
           </g>
-
-          {/* Independent Twinkling Cosmic Stars */}
-          <polygon points="16,4 18,8 22,10 18,12 16,16 14,12 10,10 14,8" fill="#ffffff" className="bn-obj-twinkle-a" />
-          <polygon points="89,90 91,94 95,96 91,98 89,102 87,98 83,96 87,94" fill="#f472b6" className="bn-obj-twinkle-b" />
-          <circle cx="50" cy="-8" r="2.6" fill="#c084fc" className="bn-obj-twinkle-b" />
         </svg>
       );
   }
@@ -392,10 +365,10 @@ const renderBurstEffectOverlay = (
 ) => {
   const isSm = size === 'sm';
   const burstBoxClass = isSm
-    ? '-inset-[8px] w-[calc(100%+16px)] h-[calc(100%+16px)]'
+    ? '-inset-[9px] w-[calc(100%+18px)] h-[calc(100%+18px)]'
     : stageHighlight
-    ? '-inset-6 w-[calc(100%+48px)] h-[calc(100%+48px)]'
-    : '-inset-4 w-[calc(100%+32px)] h-[calc(100%+32px)]';
+    ? '-inset-7 w-[calc(100%+56px)] h-[calc(100%+56px)]'
+    : '-inset-5 w-[calc(100%+40px)] h-[calc(100%+40px)]';
 
   switch (auraTheme) {
     case 'petir':
@@ -406,68 +379,16 @@ const renderBurstEffectOverlay = (
           className={`absolute ${burstBoxClass} pointer-events-none z-30 overflow-visible`}
           aria-hidden="true"
         >
-          {/* Blue-White Electric Flash Halo + Expanding Shockwave */}
-          <circle
-            cx="50"
-            cy="50"
-            r="52"
-            fill="rgba(186,230,253,0.34)"
-            stroke="#ffffff"
-            strokeWidth={isSm ? 3.5 : 2.5}
-            className="bn-burst-flash"
-          />
-          <circle
-            cx="50"
-            cy="50"
-            r="56"
-            fill="none"
-            stroke="#38bdf8"
-            strokeWidth={isSm ? 4 : 3}
-            className="bn-burst-shock"
-          />
-          {/* Dramatic Branched Zig-Zag Lightning Strike Across Frame */}
+          <circle cx="50" cy="50" r="52" fill="rgba(186,230,253,0.38)" stroke="#ffffff" strokeWidth={isSm ? 4 : 3} className="bn-burst-flash" />
+          <circle cx="50" cy="50" r="56" fill="none" stroke="#38bdf8" strokeWidth={isSm ? 4.5 : 3.5} className="bn-burst-shock" />
           <g className="bn-burst-bolt-strike">
-            <path
-              d="M 14 -20 L 32 4 L 18 10 L 44 36 L 34 42 L 54 66"
-              fill="none"
-              stroke="#ffffff"
-              strokeWidth={isSm ? 5.2 : 4.2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M 14 -20 L 32 4 L 18 10 L 44 36 L 34 42 L 54 66"
-              fill="none"
-              stroke="#22d3ee"
-              strokeWidth={isSm ? 2.4 : 2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M 88 -16 L 68 8 L 80 14 L 58 38"
-              fill="none"
-              stroke="#e0f2fe"
-              strokeWidth={isSm ? 4.2 : 3.4}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+            <path d="M 14 -20 L 32 4 L 18 10 L 44 36 L 34 42 L 54 66" fill="none" stroke="#ffffff" strokeWidth={isSm ? 6 : 5} strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M 14 -20 L 32 4 L 18 10 L 44 36 L 34 42 L 54 66" fill="none" stroke="#22d3ee" strokeWidth={isSm ? 2.8 : 2.4} strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M 88 -16 L 68 8 L 80 14 L 58 38" fill="none" stroke="#e0f2fe" strokeWidth={isSm ? 4.8 : 4} strokeLinecap="round" strokeLinejoin="round" />
             {!isSm && (
               <>
-                <path
-                  d="M 32 4 L 46 2 L 56 -10"
-                  fill="none"
-                  stroke="#67e8f9"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M 62 72 L 76 92 L 66 96 L 84 118"
-                  fill="none"
-                  stroke="#67e8f9"
-                  strokeWidth="3.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
+                <path d="M 32 4 L 46 2 L 56 -10" fill="none" stroke="#67e8f9" strokeWidth="3" strokeLinecap="round" />
+                <path d="M 62 72 L 76 92 L 66 96 L 84 118" fill="none" stroke="#67e8f9" strokeWidth="3.8" strokeLinecap="round" strokeLinejoin="round" />
               </>
             )}
           </g>
@@ -482,28 +403,10 @@ const renderBurstEffectOverlay = (
           className={`absolute ${burstBoxClass} pointer-events-none z-30 overflow-visible`}
           aria-hidden="true"
         >
-          {/* Molten Heatwave Ring */}
-          <circle
-            cx="50"
-            cy="50"
-            r="54"
-            fill="rgba(249,115,22,0.22)"
-            stroke="#fb923c"
-            strokeWidth={isSm ? 4 : 3}
-            className="bn-burst-shock"
-          />
-          {/* Soaring Dragon Fire Plume Erupting Upward */}
+          <circle cx="50" cy="50" r="54" fill="rgba(249,115,22,0.28)" stroke="#fb923c" strokeWidth={isSm ? 4.5 : 3.5} className="bn-burst-shock" />
           <g className="bn-burst-flame-jet">
-            <path
-              d="M 50 -30 C 66 -12, 74 6, 56 26 L 50 18 L 44 26 C 26 6, 34 -12, 50 -30 Z"
-              fill="#f97316"
-              stroke="#fef08a"
-              strokeWidth="2"
-            />
-            <path
-              d="M 50 -20 C 59 -6, 61 5, 50 18 C 39 5, 41 -6, 50 -20 Z"
-              fill="#fde047"
-            />
+            <path d="M 50 -32 C 68 -12, 76 6, 58 26 L 50 18 L 42 26 C 24 6, 32 -12, 50 -32 Z" fill="#f97316" stroke="#fef08a" strokeWidth="2.4" />
+            <path d="M 50 -22 C 60 -6, 62 5, 50 18 C 38 5, 40 -6, 50 -22 Z" fill="#fde047" />
             {!isSm && (
               <>
                 <path d="M 22 4 C 10 -12, 16 -24, 29 -14 C 31 -5, 29 2, 22 4 Z" fill="#ef4444" />
@@ -511,16 +414,9 @@ const renderBurstEffectOverlay = (
               </>
             )}
           </g>
-          {/* Rising Ember Rain Shower */}
-          <circle cx="34" cy="18" r={isSm ? 3.8 : 3.2} fill="#fef08a" className="bn-burst-ember-jet-a" />
-          <circle cx="66" cy="20" r={isSm ? 3.5 : 3} fill="#fb923c" className="bn-burst-ember-jet-b" />
-          <circle cx="50" cy="6" r={isSm ? 3.8 : 3.4} fill="#ffffff" className="bn-burst-ember-jet-c" />
-          {!isSm && (
-            <>
-              <circle cx="24" cy="36" r="2.8" fill="#ef4444" className="bn-burst-ember-jet-a" />
-              <circle cx="78" cy="34" r="2.8" fill="#fde047" className="bn-burst-ember-jet-b" />
-            </>
-          )}
+          <circle cx="34" cy="18" r={isSm ? 4 : 3.6} fill="#fef08a" className="bn-burst-ember-jet-a" />
+          <circle cx="66" cy="20" r={isSm ? 3.8 : 3.4} fill="#fb923c" className="bn-burst-ember-jet-b" />
+          <circle cx="50" cy="6" r={isSm ? 4 : 3.8} fill="#ffffff" className="bn-burst-ember-jet-c" />
         </svg>
       );
 
@@ -532,28 +428,23 @@ const renderBurstEffectOverlay = (
           className={`absolute ${burstBoxClass} pointer-events-none z-30 overflow-visible`}
           aria-hidden="true"
         >
-          {/* Radiant 24K Gold Sunburst Rays Expanding Outward */}
           <g className="bn-burst-sunburst">
-            <circle cx="50" cy="50" r="54" fill="rgba(250,204,21,0.22)" stroke="#fef08a" strokeWidth={isSm ? 3.5 : 2.5} />
-            <line x1="50" y1="-26" x2="50" y2="-4" stroke="#fef9c3" strokeWidth={isSm ? 4 : 3.2} strokeLinecap="round" />
-            <line x1="50" y1="104" x2="50" y2="126" stroke="#fde047" strokeWidth={isSm ? 4 : 3.2} strokeLinecap="round" />
-            <line x1="-26" y1="50" x2="-4" y2="50" stroke="#fef9c3" strokeWidth={isSm ? 4 : 3.2} strokeLinecap="round" />
-            <line x1="104" y1="50" x2="126" y2="50" stroke="#fde047" strokeWidth={isSm ? 4 : 3.2} strokeLinecap="round" />
+            <circle cx="50" cy="50" r="54" fill="rgba(250,204,21,0.28)" stroke="#fef08a" strokeWidth={isSm ? 4 : 3} />
+            <line x1="50" y1="-28" x2="50" y2="-4" stroke="#fef9c3" strokeWidth={isSm ? 4.5 : 3.8} strokeLinecap="round" />
+            <line x1="50" y1="104" x2="50" y2="128" stroke="#fde047" strokeWidth={isSm ? 4.5 : 3.8} strokeLinecap="round" />
+            <line x1="-28" y1="50" x2="-4" y2="50" stroke="#fef9c3" strokeWidth={isSm ? 4.5 : 3.8} strokeLinecap="round" />
+            <line x1="104" y1="50" x2="128" y2="50" stroke="#fde047" strokeWidth={isSm ? 4.5 : 3.8} strokeLinecap="round" />
             {!isSm && (
               <>
-                <line x1="-4" y1="-4" x2="10" y2="10" stroke="#facc15" strokeWidth="2.8" strokeLinecap="round" />
-                <line x1="104" y1="-4" x2="90" y2="10" stroke="#facc15" strokeWidth="2.8" strokeLinecap="round" />
-                <line x1="-4" y1="104" x2="10" y2="90" stroke="#facc15" strokeWidth="2.8" strokeLinecap="round" />
-                <line x1="104" y1="104" x2="90" y2="90" stroke="#facc15" strokeWidth="2.8" strokeLinecap="round" />
+                <line x1="-6" y1="-6" x2="10" y2="10" stroke="#facc15" strokeWidth="3.2" strokeLinecap="round" />
+                <line x1="106" y1="-6" x2="90" y2="10" stroke="#facc15" strokeWidth="3.2" strokeLinecap="round" />
+                <line x1="-6" y1="106" x2="10" y2="90" stroke="#facc15" strokeWidth="3.2" strokeLinecap="round" />
+                <line x1="106" y1="106" x2="90" y2="90" stroke="#facc15" strokeWidth="3.2" strokeLinecap="round" />
               </>
             )}
           </g>
-          {/* 24K Star Sparkle Shower */}
           <polygon points="34,12 37,18 43,20 37,22 34,28 31,22 25,20 31,18" fill="#ffffff" className="bn-burst-star-jet-a" />
           <polygon points="66,12 69,18 75,20 69,22 66,28 63,22 57,20 63,18" fill="#fef08a" className="bn-burst-star-jet-b" />
-          {!isSm && (
-            <polygon points="50,-8 53,-2 59,0 53,2 50,8 47,2 41,0 47,-2" fill="#fde047" className="bn-burst-ember-jet-c" />
-          )}
         </svg>
       );
 
@@ -565,18 +456,16 @@ const renderBurstEffectOverlay = (
           className={`absolute ${burstBoxClass} pointer-events-none z-30 overflow-visible`}
           aria-hidden="true"
         >
-          {/* Radial Exploding Ice Shards */}
-          <polygon points="10,10 22,14 14,22" fill="#ffffff" stroke="#38bdf8" strokeWidth="1.5" className="bn-burst-ice-shard-1" />
-          <polygon points="90,10 78,14 86,22" fill="#e0f2fe" stroke="#38bdf8" strokeWidth="1.5" className="bn-burst-ice-shard-2" />
-          <polygon points="10,90 22,86 14,78" fill="#bae6fd" stroke="#38bdf8" strokeWidth="1.5" className="bn-burst-ice-shard-3" />
-          <polygon points="90,90 78,86 86,78" fill="#ffffff" stroke="#38bdf8" strokeWidth="1.5" className="bn-burst-ice-shard-4" />
-          {/* Brief Swirling Crystal Snowstorm Ring */}
+          <polygon points="8,8 23,13 13,23" fill="#ffffff" stroke="#0284c7" strokeWidth="1.8" className="bn-burst-ice-shard-1" />
+          <polygon points="92,8 77,13 87,23" fill="#e0f2fe" stroke="#0284c7" strokeWidth="1.8" className="bn-burst-ice-shard-2" />
+          <polygon points="8,92 23,87 13,77" fill="#bae6fd" stroke="#0284c7" strokeWidth="1.8" className="bn-burst-ice-shard-3" />
+          <polygon points="92,92 77,87 87,77" fill="#ffffff" stroke="#0284c7" strokeWidth="1.8" className="bn-burst-ice-shard-4" />
           <g className="bn-burst-snowstorm">
-            <circle cx="50" cy="50" r="54" fill="rgba(186,230,253,0.2)" stroke="#e0f2fe" strokeWidth={isSm ? 3 : 2.2} strokeDasharray="8 10" />
-            <circle cx="50" cy="-10" r={isSm ? 4 : 3.2} fill="#ffffff" />
-            <circle cx="110" cy="50" r={isSm ? 3.5 : 2.8} fill="#bae6fd" />
-            <circle cx="50" cy="110" r={isSm ? 4 : 3.2} fill="#ffffff" />
-            <circle cx="-10" cy="50" r={isSm ? 3.5 : 2.8} fill="#7dd3fc" />
+            <circle cx="50" cy="50" r="54" fill="rgba(186,230,253,0.26)" stroke="#e0f2fe" strokeWidth={isSm ? 3.5 : 2.8} strokeDasharray="8 10" />
+            <circle cx="50" cy="-10" r={isSm ? 4.4 : 3.8} fill="#ffffff" />
+            <circle cx="110" cy="50" r={isSm ? 4 : 3.4} fill="#bae6fd" />
+            <circle cx="50" cy="110" r={isSm ? 4.4 : 3.8} fill="#ffffff" />
+            <circle cx="-10" cy="50" r={isSm ? 4 : 3.4} fill="#7dd3fc" />
           </g>
         </svg>
       );
@@ -589,40 +478,14 @@ const renderBurstEffectOverlay = (
           className={`absolute ${burstBoxClass} pointer-events-none z-30 overflow-visible`}
           aria-hidden="true"
         >
-          {/* Supernova Shockwave Expansion */}
-          <circle
-            cx="50"
-            cy="50"
-            r="56"
-            fill="rgba(192,132,252,0.24)"
-            stroke="#f0abfc"
-            strokeWidth={isSm ? 4 : 3}
-            className="bn-burst-supernova"
-          />
+          <circle cx="50" cy="50" r="56" fill="rgba(192,132,252,0.28)" stroke="#f0abfc" strokeWidth={isSm ? 4.5 : 3.4} className="bn-burst-supernova" />
           {!isSm && (
-            <circle
-              cx="50"
-              cy="50"
-              r="48"
-              fill="none"
-              stroke="#818cf8"
-              strokeWidth="2.4"
-              className="bn-burst-shock"
-            />
+            <circle cx="50" cy="50" r="48" fill="none" stroke="#818cf8" strokeWidth="2.8" className="bn-burst-shock" />
           )}
-          {/* Shooting Star Meteor Streaking Across Frame */}
           <g className="bn-burst-meteor">
-            <line
-              x1="62"
-              y1="38"
-              x2="96"
-              y2="6"
-              stroke="rgba(244,114,182,0.85)"
-              strokeWidth={isSm ? 4 : 3}
-              strokeLinecap="round"
-            />
-            <circle cx="60" cy="40" r={isSm ? 5.2 : 4.6} fill="#ffffff" />
-            <polygon points="60,32 62,38 68,40 62,42 60,48 58,42 52,40 58,38" fill="#fef08a" />
+            <line x1="62" y1="38" x2="98" y2="4" stroke="rgba(244,114,182,0.92)" strokeWidth={isSm ? 4.6 : 3.6} strokeLinecap="round" />
+            <circle cx="60" cy="40" r={isSm ? 5.6 : 5} fill="#ffffff" />
+            <polygon points="60,31 62,38 69,40 62,42 60,49 58,42 51,40 58,38" fill="#fef08a" />
           </g>
         </svg>
       );
@@ -640,6 +503,8 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
   const frame = getAvatarFrameById(account.avatarFrameId);
   const isExclusiveAura = Boolean(frame.isSpinExclusive && frame.auraTheme);
   const auraTheme = frame.auraTheme;
+  const canvasTheme: LiveCanvasTheme =
+    auraTheme || frame.ambientTheme || 'clean';
 
   const [burstNonce, setBurstNonce] = useState(0);
   const [isBursting, setIsBursting] = useState(false);
@@ -651,7 +516,6 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
   }, [auraTheme, account.fullName]);
 
   const triggerBurst = useCallback(() => {
-    if (!isExclusiveAura || !auraTheme) return;
     if (
       typeof window !== 'undefined' &&
       window.matchMedia &&
@@ -668,7 +532,7 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
       setIsBursting(false);
       burstHideTimerRef.current = null;
     }, 1140);
-  }, [isExclusiveAura, auraTheme]);
+  }, []);
 
   useEffect(() => {
     if (!isExclusiveAura || !auraTheme) {
@@ -760,11 +624,9 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
 
   const frameRing =
     size === 'sm'
-      ? account.avatarFrameId && account.avatarFrameId !== 'frame-clean'
-        ? frame.ringClass
-            .replace('ring-offset-2', 'ring-offset-1')
-            .replace('ring-offset-white', 'ring-offset-slate-900')
-        : ''
+      ? frame.ringClass
+          .replace('ring-offset-2', 'ring-offset-1')
+          .replace('ring-offset-white', 'ring-offset-slate-900')
       : frame.ringClass;
 
   const livingMotionClass = isExclusiveAura
@@ -773,51 +635,56 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
       : frame.auraTheme === 'petir'
       ? 'bn-frame-living-cyber'
       : 'bn-frame-living'
-    : '';
+    : 'bn-frame-living-sm';
 
   const showGooglePhoto = Boolean(googlePicture) && !account.avatarPresetId;
 
-  const badgeCore = (
+  return (
     <div
-      className={`relative flex items-center justify-center font-bold shrink-0 ${sizeClass} ${bgClass} ${frameRing} ${livingMotionClass} ${
-        stageHighlight ? 'bn-frame-stage-boost' : ''
-      } ${!isExclusiveAura ? className : ''}`}
+      onClick={() => triggerBurst()}
+      title={`${frame.label} — Ketuk untuk memicu efek aura`}
+      className={`relative inline-flex items-center justify-center shrink-0 bn-frame-hover-wrap cursor-pointer ${className}`}
     >
-      {isExclusiveAura &&
-        auraTheme &&
-        (size === 'sm'
-          ? renderCompactSmOverlay(auraTheme)
-          : renderFullArchitecturalAura(auraTheme, stageHighlight))}
-      {isExclusiveAura &&
-        auraTheme &&
-        isBursting &&
-        renderBurstEffectOverlay(auraTheme, size, burstNonce, stageHighlight)}
-      <div className="relative z-10 w-full h-full rounded-[inherit] overflow-hidden flex items-center justify-center">
-        {showGooglePhoto ? (
-          <img
-            src={googlePicture}
-            alt={account.fullName}
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          renderSymbol()
-        )}
+      <div
+        className={`relative flex items-center justify-center font-bold shrink-0 ${sizeClass} ${bgClass} ${frameRing} ${livingMotionClass} ${
+          stageHighlight ? 'bn-frame-stage-boost' : ''
+        }`}
+      >
+        {/* Real-time 60-120fps Canvas Particle & Plasma Engine for ALL 13 Frames */}
+        <LiveFrameCanvas
+          theme={canvasTheme}
+          isExclusive={isExclusiveAura}
+          size={size}
+          burstTriggerNonce={burstNonce}
+          stageHighlight={stageHighlight}
+        />
+
+        {/* Bespoke Structural Architecture & Thick Theme Objects for 5 Exclusive Frames */}
+        {isExclusiveAura &&
+          auraTheme &&
+          (size === 'sm'
+            ? renderCompactSmOverlay(auraTheme)
+            : renderFullArchitecturalAura(auraTheme, stageHighlight))}
+
+        {/* Dramatic 5-Second / Tap SVG Burst Overlay */}
+        {isExclusiveAura &&
+          auraTheme &&
+          isBursting &&
+          renderBurstEffectOverlay(auraTheme, size, burstNonce, stageHighlight)}
+
+        <div className="relative z-10 w-full h-full rounded-[inherit] overflow-hidden flex items-center justify-center">
+          {showGooglePhoto ? (
+            <img
+              src={googlePicture}
+              alt={account.fullName}
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            renderSymbol()
+          )}
+        </div>
       </div>
     </div>
   );
-
-  if (isExclusiveAura) {
-    return (
-      <div
-        onClick={() => triggerBurst()}
-        title={`${frame.label} — Ketuk untuk memicu efek aura`}
-        className={`relative inline-flex items-center justify-center shrink-0 bn-frame-hover-wrap cursor-pointer ${className}`}
-      >
-        {badgeCore}
-      </div>
-    );
-  }
-
-  return badgeCore;
 };

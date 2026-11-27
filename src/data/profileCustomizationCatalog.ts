@@ -14,6 +14,7 @@ export interface ProfileAvatarFrame {
   badgeColorClass: string;
   isSpinExclusive?: boolean;
   auraTheme?: 'petir' | 'api' | 'emas' | 'es' | 'galaksi';
+  ambientTheme?: 'clean' | 'sapphire' | 'gold' | 'diamond' | 'emerald' | 'flame' | 'violet' | 'obsidian';
   auraCssClass?: string;
   auraGradientClass?: string;
   glowColorHex?: string;
@@ -153,58 +154,74 @@ export const AVATAR_FRAMES: ProfileAvatarFrame[] = [
   {
     id: 'frame-clean',
     label: 'Klasik Rapi',
-    description: 'Bingkai tipis profesional',
-    ringClass: 'ring-2 ring-slate-300 ring-offset-2 ring-offset-white',
+    description: 'Bingkai perak berkilau hidup ringan',
+    ringClass: 'ring-2 ring-slate-300 ring-offset-2 ring-offset-white ambient-frame-clean',
     badgeColorClass: 'bg-slate-700 text-white',
+    ambientTheme: 'clean',
+    glowColorHex: '#cbd5e1',
   },
   {
     id: 'frame-sapphire',
     label: 'Sapphire Bank',
-    description: 'Cincin biru institusional',
-    ringClass: 'ring-[3px] ring-blue-600 ring-offset-2 ring-offset-white',
+    description: 'Cincin biru institusional bercahaya hidup',
+    ringClass: 'ring-[3px] ring-blue-500 ring-offset-2 ring-offset-white ambient-frame-sapphire',
     badgeColorClass: 'bg-blue-600 text-white',
+    ambientTheme: 'sapphire',
+    glowColorHex: '#3b82f6',
   },
   {
     id: 'frame-gold-royal',
     label: 'Emas 24K',
-    description: 'Bingkai emas berkilau',
-    ringClass: 'ring-[3px] ring-amber-500 ring-offset-2 ring-offset-amber-50',
+    description: 'Bingkai emas berkilau hidup',
+    ringClass: 'ring-[3px] ring-amber-400 ring-offset-2 ring-offset-amber-50 ambient-frame-gold',
     badgeColorClass: 'bg-amber-500 text-slate-950',
+    ambientTheme: 'gold',
+    glowColorHex: '#f59e0b',
   },
   {
     id: 'frame-cyan-diamond',
     label: 'Kristal Permata',
-    description: 'Bingkai cyan berlian',
-    ringClass: 'ring-[3px] ring-cyan-500 ring-offset-2 ring-offset-cyan-50',
+    description: 'Bingkai cyan berlian berbinar',
+    ringClass: 'ring-[3px] ring-cyan-400 ring-offset-2 ring-offset-cyan-50 ambient-frame-diamond',
     badgeColorClass: 'bg-cyan-600 text-white',
+    ambientTheme: 'diamond',
+    glowColorHex: '#06b6d4',
   },
   {
     id: 'frame-emerald-guard',
     label: 'Pelindung Zamrud',
-    description: 'Bingkai keamanan terenkripsi',
-    ringClass: 'ring-[3px] ring-emerald-500 ring-offset-2 ring-offset-emerald-50',
+    description: 'Bingkai zamrud terenkripsi bercahaya',
+    ringClass: 'ring-[3px] ring-emerald-400 ring-offset-2 ring-offset-emerald-50 ambient-frame-emerald',
     badgeColorClass: 'bg-emerald-600 text-white',
+    ambientTheme: 'emerald',
+    glowColorHex: '#10b981',
   },
   {
     id: 'frame-crimson-flame',
     label: 'Api Streak',
-    description: 'Bingkai energi streak aktif',
-    ringClass: 'ring-[3px] ring-orange-500 ring-offset-2 ring-offset-orange-50',
+    description: 'Bingkai energi streak menyala ringan',
+    ringClass: 'ring-[3px] ring-orange-500 ring-offset-2 ring-offset-orange-50 ambient-frame-flame',
     badgeColorClass: 'bg-orange-600 text-white',
+    ambientTheme: 'flame',
+    glowColorHex: '#f97316',
   },
   {
     id: 'frame-violet-prestige',
     label: 'Violet Prestige',
-    description: 'Bingkai eksekutif premium',
-    ringClass: 'ring-[3px] ring-violet-600 ring-offset-2 ring-offset-violet-50',
+    description: 'Bingkai eksekutif berkilau ungu',
+    ringClass: 'ring-[3px] ring-violet-500 ring-offset-2 ring-offset-violet-50 ambient-frame-violet',
     badgeColorClass: 'bg-violet-600 text-white',
+    ambientTheme: 'violet',
+    glowColorHex: '#8b5cf6',
   },
   {
     id: 'frame-obsidian-vip',
     label: 'Obsidian VIP',
-    description: 'Bingkai gelap monokrom elegan',
-    ringClass: 'ring-[3px] ring-slate-900 ring-offset-2 ring-offset-slate-100',
+    description: 'Bingkai gelap monokrom dengan kilap emas',
+    ringClass: 'ring-[3px] ring-slate-900 ring-offset-2 ring-offset-slate-100 ambient-frame-obsidian',
     badgeColorClass: 'bg-slate-900 text-amber-300',
+    ambientTheme: 'obsidian',
+    glowColorHex: '#facc15',
   },
 ];
 

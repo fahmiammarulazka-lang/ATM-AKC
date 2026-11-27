@@ -278,6 +278,14 @@
   .aura-frame-kristal-es::after,
   .aura-frame-galaksi-kosmik::before,
   .aura-frame-galaksi-kosmik::after,
+  .ambient-frame-clean::before,
+  .ambient-frame-sapphire::before,
+  .ambient-frame-gold::before,
+  .ambient-frame-diamond::before,
+  .ambient-frame-emerald::before,
+  .ambient-frame-flame::before,
+  .ambient-frame-violet::before,
+  .ambient-frame-obsidian::before,
   .bn-vortex-spin,
   .bn-vortex-spin-reverse,
   .bn-aura-svg-spin,
@@ -775,139 +783,208 @@
   animation: bnNebulaBreathe 3.8s ease-in-out infinite;
 }
 
-/* 1. Petir Cyber — Rangka Cyber & Listrik Biru-Cyan */
+/* 1. Petir Cyber — Neon Rangka Cyber Berputar Cepat */
 .aura-frame-petir-cyber {
-  box-shadow: 0 0 0 2px #22d3ee, 0 0 16px rgba(34, 211, 238, 0.85), 0 0 28px rgba(59, 130, 246, 0.5);
+  box-shadow: 0 0 0 2.5px #22d3ee, 0 0 20px rgba(34, 211, 238, 0.95), 0 0 34px rgba(59, 130, 246, 0.72);
 }
 .aura-frame-petir-cyber::before {
   content: '';
   position: absolute;
-  inset: -3.5px;
+  inset: -4px;
   border-radius: inherit;
-  padding: 2px;
-  background: conic-gradient(from 0deg, #22d3ee, #ffffff, #0284c7, transparent 42%, #38bdf8, #ffffff, #22d3ee);
+  padding: 3px;
+  background: conic-gradient(from 0deg, #22d3ee, #ffffff, #0284c7, transparent 35%, #38bdf8, #ffffff, #22d3ee);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
-  animation: bnAuraOrbit 5.8s linear infinite;
+  animation: bnAuraOrbit 1.75s linear infinite;
 }
 .aura-frame-petir-cyber::after {
   content: '';
   position: absolute;
-  inset: -6px;
+  inset: -7px;
   border-radius: inherit;
-  border: 1.5px dashed rgba(103, 232, 249, 0.78);
+  border: 2px dashed rgba(103, 232, 249, 0.9);
   pointer-events: none;
-  animation: bnTeslaHum 3.5s ease-in-out infinite;
+  animation: bnAuraOrbitReverse 3.2s linear infinite;
 }
 
-/* 2. Api Naga — Sisik Obsidian-Merah & Bara Hangat */
+/* 2. Api Naga — Cincin Magma & Bara Berputar Cepat */
 .aura-frame-api-naga {
-  box-shadow: 0 0 0 2px #fb923c, 0 0 18px rgba(239, 68, 68, 0.88), 0 0 30px rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 0 2.5px #fb923c, 0 0 22px rgba(239, 68, 68, 0.95), 0 0 36px rgba(249, 115, 22, 0.72);
 }
 .aura-frame-api-naga::before {
   content: '';
   position: absolute;
-  inset: -3.5px;
+  inset: -4px;
   border-radius: inherit;
-  padding: 2.5px;
-  background: conic-gradient(from 30deg, #ef4444, #fde047, #f97316, #dc2626, #fb923c, #fef08a, #ef4444);
+  padding: 3px;
+  background: conic-gradient(from 30deg, #ef4444, #fde047, #f97316, #dc2626, #fb923c, #ffffff, #ef4444);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
-  animation: bnAuraOrbit 6.5s linear infinite;
+  animation: bnAuraOrbit 2.1s linear infinite;
 }
 .aura-frame-api-naga::after {
   content: '';
   position: absolute;
-  inset: -6px;
+  inset: -7px;
   border-radius: inherit;
-  border: 1.5px solid rgba(251, 146, 60, 0.75);
+  border: 2px solid rgba(251, 146, 60, 0.85);
   pointer-events: none;
-  animation: bnNebulaBreathe 3.6s ease-in-out infinite;
+  animation: bnNebulaBreathe 2.6s ease-in-out infinite;
 }
 
-/* 3. Emas Imperial — Filigri Kerajaan 24K Berkilau */
+/* 3. Emas Imperial — Filigri Kerajaan 24K Berputar Cepat */
 .aura-frame-emas-imperial {
-  box-shadow: 0 0 0 2px #fde047, 0 0 18px rgba(250, 204, 21, 0.85), 0 0 30px rgba(217, 119, 6, 0.55);
+  box-shadow: 0 0 0 2.5px #fde047, 0 0 22px rgba(250, 204, 21, 0.95), 0 0 36px rgba(217, 119, 6, 0.68);
 }
 .aura-frame-emas-imperial::before {
   content: '';
   position: absolute;
-  inset: -3.5px;
+  inset: -4px;
   border-radius: inherit;
-  padding: 2.5px;
-  background: conic-gradient(from 0deg, #fef08a, #f59e0b, #ffffff, #d97706, #fde047, #f59e0b, #fef08a);
+  padding: 3px;
+  background: conic-gradient(from 0deg, #fef08a, #f59e0b, #ffffff, #d97706, #fde047, #ffffff, #fef08a);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
-  animation: bnAuraOrbit 7.5s linear infinite;
+  animation: bnAuraOrbit 2.4s linear infinite;
 }
 .aura-frame-emas-imperial::after {
   content: '';
   position: absolute;
-  inset: -6px;
+  inset: -7px;
   border-radius: inherit;
-  border: 1.5px solid rgba(254, 240, 138, 0.78);
+  border: 2px solid rgba(254, 240, 138, 0.88);
   pointer-events: none;
-  animation: bnIceGlint 4s ease-in-out infinite;
+  animation: bnIceGlint 2.8s ease-in-out infinite;
 }
 
-/* 4. Kristal Es — Faset Berlian & Salju Dingin */
+/* 4. Kristal Es — Faset Berlian & Badai Salju */
 .aura-frame-kristal-es {
-  box-shadow: 0 0 0 2px #bae6fd, 0 0 18px rgba(125, 211, 252, 0.85), 0 0 30px rgba(96, 165, 250, 0.52);
+  box-shadow: 0 0 0 2.5px #bae6fd, 0 0 22px rgba(125, 211, 252, 0.95), 0 0 36px rgba(56, 189, 248, 0.68);
 }
 .aura-frame-kristal-es::before {
   content: '';
   position: absolute;
-  inset: -3.5px;
+  inset: -4px;
   border-radius: inherit;
-  padding: 2.5px;
+  padding: 3px;
   background: conic-gradient(from 0deg, #e0f2fe, #38bdf8, #ffffff, #818cf8, #7dd3fc, #ffffff, #e0f2fe);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
-  animation: bnAuraOrbitReverse 8.2s linear infinite;
+  animation: bnAuraOrbitReverse 2.5s linear infinite;
 }
 .aura-frame-kristal-es::after {
   content: '';
   position: absolute;
-  inset: -6px;
+  inset: -7px;
   border-radius: inherit;
-  border: 1.5px dotted rgba(224, 242, 254, 0.9);
+  border: 2px dotted rgba(224, 242, 254, 0.95);
   pointer-events: none;
-  animation: bnIceGlint 4.2s ease-in-out infinite;
+  animation: bnAuraOrbit 5.5s linear infinite;
 }
 
-/* 5. Galaksi Kosmik — Orbit Nebula Ungu-Magenta Bernapas */
+/* 5. Galaksi Kosmik — Orbit Nebula Ungu-Magenta Berputar Cepat */
 .aura-frame-galaksi-kosmik {
-  box-shadow: 0 0 0 2px #d946ef, 0 0 20px rgba(192, 132, 252, 0.88), 0 0 32px rgba(217, 70, 239, 0.58);
+  box-shadow: 0 0 0 2.5px #d946ef, 0 0 24px rgba(192, 132, 252, 0.96), 0 0 38px rgba(217, 70, 239, 0.72);
 }
 .aura-frame-galaksi-kosmik::before {
   content: '';
   position: absolute;
-  inset: -3.5px;
+  inset: -4px;
   border-radius: inherit;
-  padding: 2.5px;
+  padding: 3px;
   background: conic-gradient(from 45deg, #c084fc, #f472b6, #6366f1, #e879f9, #ffffff, #8b5cf6, #c084fc);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
-  animation: bnAuraOrbit 7.2s linear infinite;
+  animation: bnAuraOrbit 2.2s linear infinite;
 }
 .aura-frame-galaksi-kosmik::after {
   content: '';
   position: absolute;
-  inset: -6px;
+  inset: -7px;
   border-radius: inherit;
-  border: 1.5px dashed rgba(240, 171, 252, 0.85);
+  border: 2px dashed rgba(240, 171, 252, 0.9);
   pointer-events: none;
-  animation: bnNebulaBreathe 4.6s ease-in-out infinite;
+  animation: bnAuraOrbitReverse 4.2s linear infinite;
+}
+
+/* 8 Bingkai Profil Reguler — Kilau Cincin Berputar Ringan */
+.ambient-frame-clean::before,
+.ambient-frame-sapphire::before,
+.ambient-frame-gold::before,
+.ambient-frame-diamond::before,
+.ambient-frame-emerald::before,
+.ambient-frame-flame::before,
+.ambient-frame-violet::before,
+.ambient-frame-obsidian::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  padding: 2px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: bnAuraOrbit 3.4s linear infinite;
+}
+.ambient-frame-clean {
+  box-shadow: 0 0 10px rgba(148, 163, 184, 0.45);
+}
+.ambient-frame-clean::before {
+  background: conic-gradient(from 0deg, transparent 55%, #ffffff 78%, #94a3b8 92%, transparent);
+}
+.ambient-frame-sapphire {
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.55);
+}
+.ambient-frame-sapphire::before {
+  background: conic-gradient(from 0deg, transparent 45%, #ffffff 72%, #60a5fa 90%, transparent);
+}
+.ambient-frame-gold {
+  box-shadow: 0 0 13px rgba(245, 158, 11, 0.6);
+}
+.ambient-frame-gold::before {
+  background: conic-gradient(from 0deg, transparent 45%, #ffffff 72%, #fde047 90%, transparent);
+}
+.ambient-frame-diamond {
+  box-shadow: 0 0 13px rgba(6, 182, 212, 0.6);
+}
+.ambient-frame-diamond::before {
+  background: conic-gradient(from 0deg, transparent 45%, #ffffff 72%, #67e8f9 90%, transparent);
+}
+.ambient-frame-emerald {
+  box-shadow: 0 0 13px rgba(16, 185, 129, 0.58);
+}
+.ambient-frame-emerald::before {
+  background: conic-gradient(from 0deg, transparent 45%, #ffffff 72%, #6ee7b7 90%, transparent);
+}
+.ambient-frame-flame {
+  box-shadow: 0 0 14px rgba(249, 115, 22, 0.62);
+}
+.ambient-frame-flame::before {
+  background: conic-gradient(from 0deg, transparent 45%, #fef08a 72%, #fb923c 90%, transparent);
+}
+.ambient-frame-violet {
+  box-shadow: 0 0 13px rgba(139, 92, 246, 0.58);
+}
+.ambient-frame-violet::before {
+  background: conic-gradient(from 0deg, transparent 45%, #ffffff 72%, #c084fc 90%, transparent);
+}
+.ambient-frame-obsidian {
+  box-shadow: 0 0 14px rgba(250, 204, 21, 0.5);
+}
+.ambient-frame-obsidian::before {
+  background: conic-gradient(from 0deg, transparent 45%, #fde047 72%, #94a3b8 90%, transparent);
 }
 
 /* Vortex Hexagon Arena & Celebration Keyframes */
