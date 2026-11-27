@@ -3132,8 +3132,18 @@ export interface LoyaltyAccountState {
 
 export interface LoyaltyAdminConfig {
   enabled: boolean;
+  /** Saklar khusus sistem Auto-Streak & pembekuan otomatis (default true) */
+  streakEnabled?: boolean;
+  /** Saklar khusus penukaran Poin Loyalty ke Saldo/Coin/Voucher (default true) */
+  redeemEnabled?: boolean;
+  /** Mode Libur Nasional: mencegah pembekuan & reset streak saat nasabah offline (default false) */
+  nationalHolidayMode?: boolean;
   dailyCheckInPoints: number;
   streakBonus7DaysPoints: number;
+  /** Bonus ekstra poin ketika mencapai kelipatan/hari ke-14 (default 350) */
+  streakBonus14DaysPoints?: number;
+  /** Bonus ekstra poin ketika mencapai kelipatan/hari ke-30 (default 1000) */
+  streakBonus30DaysPoints?: number;
   /** Kurs paket Saldo Tunai: biaya poin per paket (default 150) */
   cashPackagePoints?: number;
   /** Kurs paket Saldo Tunai: nominal Rupiah diterima per paket (default 100.000) */

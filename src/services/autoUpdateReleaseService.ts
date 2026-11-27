@@ -635,6 +635,35 @@ export function getPublicCurrentUpdate(records: AppUpdateRecord[]): AppUpdateRec
  */
 export const BUILT_IN_ADMIN_UPDATES_CATALOG: AppUpdateRecord[] = [
   {
+    id: 'upd-admin-v1-3-0',
+    version: 'vAdmin 1.3.0',
+    releaseType: 'minor',
+    visibilityMode: 'admin_only',
+    title:
+      'Tab Khusus Panel Admin: Setting Streak & Loyalty (5 Sub-Tab Rapi, Mode Libur Nasional, Bonus 14/30 Hari, 4 Aksi Massal, Badge Kritis 3 & Log Penukaran Live)',
+    description:
+      'Pembaruan eksklusif internal Admin vAdmin 1.3.0 tanpa mengubah versi publik (tetap v16.43.10). Memindahkan penuh kontrol Loyalty & Streak dari area Kantong Impian menjadi tab khusus tepat di sebelah Misi Harian & Leaderboard, lengkap dengan badge merah jumlah nasabah beku kritis tahap 3, izin per-tab di Pengangkatan Admin, 4 kartu statistik atas + Top 5 Streak & Poin, 5 sub-tab rapi, Mode Libur Nasional anti-beku, bonus streak Hari ke-14 & ke-30, 4 aksi massal aman, filter lengkap kelola per nasabah, dan tabel log penukaran live.',
+    highlights: [
+      'Tab Navigasi Khusus + Badge Kritis Tahap 3 & RBAC: Ditempatkan di sebelah Misi Harian & Leaderboard lengkap dengan lencana merah jumlah nasabah Beku Kritis Tahap 3, pintasan cepat dari Kantong Impian, dan masuk daftar izin per-tab Pengangkatan Kartu Tier Admin.',
+      'Pita Statistik Atas + 5 Sub-Tab Rapi: Menampilkan Total Poin Beredar & Rata-Rata Streak, Rincian Kesehatan Api (Aktif / Beku 1 / Beku 2 / Kritis 3), Penukaran Hari Ini & Stok Kartu, Top 5 Streak & Poin Terbanyak, serta 5 sub-tab manajemen.',
+      'Mode Libur Nasional, Saklar Terpisah, Bonus Hari ke-14/30 & 4 Aksi Massal: Aktifkan Mode Libur Nasional agar streak tidak membeku otomatis, nyalakan/matikan Streak & Penukaran terpisah, atur bonus hari ke-14 & ke-30, serta jalankan Cairkan Semua Beku, Bonus Poin Massal, Bagikan Kartu Massal, atau Reset Misi Harian Semua Nasabah.',
+      'Kelola Nasabah Berfilter Lengkap & Log Penukaran Global Live: Filter status api (Aktif, Beku 1–2, Kritis 3, Reset 0), filter khusus Tier Admin (∞), urutkan streak/poin, kontrol cepat per akun, dan pantau tabel log penukaran poin seluruh nasabah secara live.',
+    ],
+    changes: [
+      'Menambahkan tab khusus loyalty_streak_admin ("Setting Streak & Loyalty") di sebelah tab Misi Harian & Leaderboard beserta badge peringatan nasabah beku kritis tahap 3.',
+      'Memindahkan penuh AdminLoyaltyStreakPanel ke tab khusus dengan menyisakan tombol pintasan cepat di Super Tools > Kantong Impian.',
+      'Mendaftarkan tab Setting Streak & Loyalty ke ADMIN_TAB_CATALOG sehingga hak aksesnya dapat didelegasikan lewat Pengangkatan Kartu Tier Admin.',
+      'Menambahkan Mode Libur Nasional, saklar terpisah Streak & Penukaran Poin, bonus streak Hari ke-14 & ke-30, 4 aksi massal aman, filter kelola per nasabah, dan log penukaran poin live.',
+    ],
+    dateText: '27 Nov 2026',
+    fullDate: 'Jumat, 27 November 2026 • Pukul 22:15 WIB',
+    categoryBadge: 'Rilis Internal Admin Terbaru',
+    isCurrent: false,
+    author: 'Super Admin Utama (AzkaAKC)',
+    createdAt: '2026-11-27T15:15:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-admin-v1-2-0',
     version: 'vAdmin 1.2.0',
     releaseType: 'minor',

@@ -1319,6 +1319,12 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                     {streakVisual.description}
                   </p>
 
+                  {normalizedLoyaltyConfig.nationalHolidayMode && (
+                    <div className="rounded-2xl border border-emerald-500/40 bg-emerald-950/35 px-3.5 py-2.5 text-[11px] font-semibold text-emerald-200">
+                      Mode Libur Nasional sedang diaktifkan Admin: api streak Anda terlindungi penuh dari pembekuan &amp; reset otomatis, dan tetap ada bonus ekstra pada Streak Hari ke-7 ({(normalizedLoyaltyConfig.streakBonus7DaysPoints ?? 150).toLocaleString('id-ID')} Poin), Hari ke-14 ({(normalizedLoyaltyConfig.streakBonus14DaysPoints ?? 350).toLocaleString('id-ID')} Poin), &amp; Hari ke-30 ({(normalizedLoyaltyConfig.streakBonus30DaysPoints ?? 1000).toLocaleString('id-ID')} Poin).
+                    </div>
+                  )}
+
                   {/* Stats Pair */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="rounded-2xl border border-amber-500/30 bg-slate-950/75 p-3.5">
@@ -1517,6 +1523,12 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                     )}
                   </div>
 
+                  {(!normalizedLoyaltyConfig.enabled || !normalizedLoyaltyConfig.redeemEnabled) && (
+                    <div className="rounded-xl border border-rose-500/40 bg-rose-950/40 px-3.5 py-2.5 text-[11px] font-bold text-rose-200">
+                      Penukaran Poin Loyalty sedang dijeda sementara oleh Admin. Poin Anda tetap tersimpan aman.
+                    </div>
+                  )}
+
                   {isAdminCard && (
                     <div className="text-[11px] font-semibold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-xl px-3 py-2">
                       Kartu Tier Admin: Poin Loyalty &amp; aset bernilai ∞ selamanya dan tidak pernah berkurang saat ditukar.
@@ -1537,7 +1549,11 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                         isAdminCard,
                       });
                       const maxPack = calc.maxAffordablePackages;
+                      const redeemSwitchActive =
+                        normalizedLoyaltyConfig.enabled !== false &&
+                        normalizedLoyaltyConfig.redeemEnabled !== false;
                       const canOpenConfirm =
+                        redeemSwitchActive &&
                         pkg.enabled &&
                         !dailyLimitReached &&
                         calc.packagesCount >= 1 &&

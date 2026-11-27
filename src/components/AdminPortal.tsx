@@ -7,7 +7,7 @@
  * 4. Tinjauan Lupa PIN Kartu ATM (Tinjau permohonan lupa PIN dari ATM dan beritahu PIN-nya ke nasabah)
  * 5. Persetujuan Kartu Perdana, Upgrade Kartu, Pinjaman Online, Master Nasabah, & Brankas ATM
  */
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   CheckCircle,
   XCircle,
@@ -71,6 +71,7 @@ import {
   Radio,
   Star,
   PiggyBank,
+  Flame,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -174,6 +175,7 @@ import {
   collectFullDeviceSpecifications,
   OFFLINE_TIMEOUT_MS,
 } from '../services/visitorTracker';
+import { computeStreakVisualSnapshot } from '../utils/loyaltySystemUtils';
 
 interface AdminPortalProps {
   onNavigateToCustomerDashboard?: () => void;
@@ -473,6 +475,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
 
   const isReadOnlyAdmin =
     !effectivePermissions.isSuperOwner && effectivePermissions.accessLevel === 'read_only';
+
+  const criticalFrozenStage3Count = useMemo(
+    () =>
+      accounts.filter(
+        (acc) => computeStreakVisualSnapshot(loyaltyMap[acc.id], loyaltyConfig).stage === 3
+      ).length,
+    [accounts, loyaltyMap, loyaltyConfig]
+  );
 
   const handleReadOnlyClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!isReadOnlyAdmin) return;
@@ -1718,6 +1728,25 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         </button>
         )}
 
+        {canSeeTab('loyalty_streak_admin') && (
+        <button
+          onClick={() => setActiveAdminTab('loyalty_streak_admin')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'loyalty_streak_admin'
+              ? 'bg-gradient-to-r from-orange-400 via-amber-400 to-yellow-400 text-slate-950 font-black shadow-lg shadow-amber-500/30'
+              : 'text-orange-300 hover:text-white hover:bg-orange-950/60 border-2 border-orange-400/60'
+          }`}
+        >
+          <Flame className="w-4 h-4" />
+          <span>Setting Streak &amp; Loyalty</span>
+          {criticalFrozenStage3Count > 0 && (
+            <span className="ml-1 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-black text-white tabular-nums">
+              {criticalFrozenStage3Count} Kritis
+            </span>
+          )}
+        </button>
+        )}
+
         {canSeeTab('leaderboard_admin') && (
         <button
           onClick={() => setActiveAdminTab('leaderboard_admin')}
@@ -2175,6 +2204,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
 
       {/* ================= ADMIN TAB: MISI HARIAN, 7-HARI & BIASA (25 FITUR) ================= */}
       {activeAdminTab === 'missions_admin' && <AdminMissionsTab />}
+
+      {/* ================= ADMIN TAB: SETTING STREAK & LOYALTY KHUSUS ================= */}
+      {activeAdminTab === 'loyalty_streak_admin' && (
+        <AdminLoyaltyStreakPanel isReadOnly={isReadOnlyAdmin} />
+      )}
 
       {/* ================= ADMIN TAB: LEADERBOARD MULTI-ASET & BADGE TOP 1–100 ================= */}
       {activeAdminTab === 'leaderboard_admin' && <AdminLeaderboardTab />}
@@ -2877,12 +2911,15 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 </button>
               </div>
 
-              {/* Pengaturan Poin Loyalty, Auto-Streak Beku, Kartu Pemulihan & 100 Misi Harian */}
-              <div className="rounded-2xl border border-amber-500/30 bg-slate-950/70 p-4 flex flex-col justify-between space-y-2">
+              {/* Pintasan ke Tab Khusus Setting Streak & Loyalty */}
+              <div className="rounded-2xl border border-amber-500/30 bg-slate-950/70 p-4 flex flex-col justify-between space-y-3">
                 <div>
-                  <h4 className="font-black text-amber-300">Ringkasan Sistem Loyalty &amp; Streak v16.43.10</h4>
+                  <h4 className="font-black text-amber-300 flex items-center gap-1.5">
+                    <Flame className="h-4 w-4 text-orange-400" />
+                    <span>Pusat Setting Streak &amp; Loyalty Kini Punya Tab Sendiri</span>
+                  </h4>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    Kelola kurs paket tukar (Saldo Tunai, Coin, Voucher Naik Level + paket kustom), hadiah poin Auto-Streak, 100 misi harian, pencapaian, harga Kartu Pemulihan ({loyaltyConfig.recoveryCardDiamondPrice ?? 25} Diamond), dan kontrol streak nasabah di bawah ini.
+                    Seluruh pengaturan Mode Libur Nasional, bonus 7/14/30 hari, 4 aksi massal, kurs tukar, 100 misi harian, kontrol per nasabah, dan log penukaran kini tersedia lengkap pada tab khusus di sebelah Misi Harian &amp; Leaderboard.
                   </p>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
@@ -2891,8 +2928,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     <strong className="text-amber-300 font-mono tabular-nums">{loyaltyConfig.activeDailyMissionCount ?? 100}</strong>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-900 p-2">
-                    <span className="text-slate-400 block text-[10px]">Kartu Pulih</span>
-                    <strong className="text-cyan-300 font-mono tabular-nums">{loyaltyConfig.recoveryCardDiamondPrice ?? 25} 💎</strong>
+                    <span className="text-slate-400 block text-[10px]">Beku Kritis 3</span>
+                    <strong className="text-rose-300 font-mono tabular-nums">{criticalFrozenStage3Count} Akun</strong>
                   </div>
                   <div className="rounded-xl border border-slate-800 bg-slate-900 p-2">
                     <span className="text-slate-400 block text-[10px]">Paket Tunai</span>
@@ -2901,15 +2938,22 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                     </strong>
                   </div>
                 </div>
+                {canSeeTab('loyalty_streak_admin') ? (
+                  <button
+                    type="button"
+                    data-allow-readonly="true"
+                    onClick={() => setActiveAdminTab('loyalty_streak_admin')}
+                    className="w-full min-h-[40px] rounded-xl bg-amber-400 hover:bg-amber-300 px-4 py-2 text-xs font-black text-slate-950 whitespace-nowrap cursor-pointer"
+                  >
+                    Buka Tab Setting Streak &amp; Loyalty
+                  </button>
+                ) : (
+                  <p className="text-[11px] text-slate-500 text-center">
+                    Izin tab Setting Streak &amp; Loyalty dapat diaktifkan lewat Pengangkatan Admin.
+                  </p>
+                )}
               </div>
             </div>
-
-            <AdminLoyaltyStreakPanel
-              onFeedback={(msg) => {
-                setExtraMgmtFeedback(msg);
-                window.setTimeout(() => setExtraMgmtFeedback(''), 4500);
-              }}
-            />
           </div>
         </div>
       )}

@@ -112,6 +112,7 @@ import {
   calculateExactPackageRedemption,
   calculateMandatoryTransferFee,
   computeDailyTxActivityStats,
+  computeStreakVisualSnapshot,
   DEFAULT_LOYALTY_ADMIN_CONFIG as DEFAULT_LOYALTY_ADMIN_CONFIG_UTIL,
   ensureTodayLoyaltyAccountState,
   evaluateDailyLoyaltyMissionProgress,
@@ -1850,6 +1851,10 @@ interface BankContextType {
       value?: number;
     }
   ) => { success: boolean; message: string };
+  adminBulkThawAllFrozenStreaks: () => { success: boolean; message: string; affectedCount: number };
+  adminBulkGrantLoyaltyPoints: (points: number) => { success: boolean; message: string; affectedCount: number };
+  adminBulkGrantRecoveryCards: (cards: number) => { success: boolean; message: string; affectedCount: number };
+  adminBulkResetDailyLoyaltyMissions: () => { success: boolean; message: string; affectedCount: number };
   adminAdjustAccountDiamonds: (
     accountId: string,
     diamonds: number,
@@ -28176,7 +28181,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
     const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
-    if (!cfg.enabled) return { success: false, message: 'Program Loyalty sedang nonaktif.' };
+    if (!cfg.enabled || !cfg.streakEnabled) {
+      return { success: false, message: 'Sistem Auto-Streak sedang dinonaktifkan sementara oleh Admin.' };
+    }
     const todayWib = getWibDateString();
     const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
     if (prev.freezeStage === 3) {
@@ -28288,8 +28295,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const rescuedBase = Math.max(1, prev.frozenStreakDays || prev.streakDays || 1);
     const nextStreak = rescuedBase + 1;
     const basePts = cfg.dailyCheckInPoints || 25;
-    const bonusPts = nextStreak % 7 === 0 ? cfg.streakBonus7DaysPoints || 150 : 0;
-    const totalPts = basePts + bonusPts;
+    const bonus7 = nextStreak % 7 === 0 ? cfg.streakBonus7DaysPoints || 0 : 0;
+    const bonus14 = nextStreak % 14 === 0 ? cfg.streakBonus14DaysPoints || 0 : 0;
+    const bonus30 = nextStreak % 30 === 0 ? cfg.streakBonus30DaysPoints || 0 : 0;
+    const totalPts = basePts + bonus7 + bonus14 + bonus30;
     const recentDates = Array.from(new Set([...(prev.recentActiveDatesWib || []), todayWib])).slice(-14);
 
     const nextState: LoyaltyAccountState = {
@@ -28516,8 +28525,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
 
     const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
-    if (!cfg.enabled) {
-      return { success: false, message: 'Sistem Poin Loyalty sedang dinonaktifkan sementara oleh Admin.' };
+    if (!cfg.enabled || !cfg.redeemEnabled) {
+      return { success: false, message: 'Penukaran Poin Loyalty sedang dinonaktifkan sementara oleh Admin.' };
     }
 
     const resolvedPackages = getResolvedLoyaltyRedeemPackages(cfg);
@@ -28815,6 +28824,142 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       message: isAdminTier
         ? `Kartu Tier Admin (${acc.fullName}) otomatis terkunci Infinity (∞) untuk Poin Loyalty dan tidak perlu diubah manual.`
         : `Poin Loyalty ${acc.fullName} diperbarui menjadi ${isUnlimitedNumber(nextPoints) ? '∞' : nextPoints.toLocaleString('id-ID')} poin.`,
+    };
+  };
+
+  const adminBulkThawAllFrozenStreaks = (): {
+    success: boolean;
+    message: string;
+    affectedCount: number;
+  } => {
+    const todayWib = getWibDateString();
+    const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
+    const nextMap = { ...loyaltyMapRef.current };
+    let affectedCount = 0;
+
+    for (const acc of accountsRef.current) {
+      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib);
+      const visual = computeStreakVisualSnapshot(prev, cfg, todayWib);
+      if (visual.stage > 0 || prev.manualFreezeLock || (prev.freezeStage || 0) > 0) {
+        const restored = Math.max(1, prev.frozenStreakDays || prev.streakDays || visual.recoverableStreak || 1);
+        nextMap[acc.id] = {
+          ...prev,
+          streakDays: restored,
+          lastCheckInDate: todayWib,
+          lastOnlineDateWib: todayWib,
+          freezeStage: 0,
+          frozenStreakDays: 0,
+          lastThawedFromStage: Math.max(1, Math.min(3, visual.stage || prev.freezeStage || 3)) as 1 | 2 | 3,
+          manualFreezeLock: false,
+        };
+        affectedCount += 1;
+      }
+    }
+
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return {
+      success: true,
+      affectedCount,
+      message:
+        affectedCount > 0
+          ? `Berhasil mencairkan & memulihkan ${affectedCount} nasabah yang streknya membeku!`
+          : 'Tidak ada nasabah yang sedang membeku saat ini (semua streak sudah cair).',
+    };
+  };
+
+  const adminBulkGrantLoyaltyPoints = (
+    points: number
+  ): { success: boolean; message: string; affectedCount: number } => {
+    const cleanPts = Math.max(1, Math.round(Number(points) || 0));
+    const todayWib = getWibDateString();
+    const nextMap = { ...loyaltyMapRef.current };
+    let affectedCount = 0;
+
+    for (const acc of accountsRef.current) {
+      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib);
+      const isAdminTier = isAdminCardAccount(acc);
+      nextMap[acc.id] = {
+        ...prev,
+        points: isAdminTier ? UNLIMITED_BALANCE : (prev.points || 0) + cleanPts,
+      };
+      if (!isAdminTier) {
+        affectedCount += 1;
+      }
+    }
+
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('cash');
+    return {
+      success: true,
+      affectedCount,
+      message: `Bonus +${cleanPts.toLocaleString('id-ID')} Poin Loyalty berhasil dibagikan ke ${affectedCount} nasabah reguler!`,
+    };
+  };
+
+  const adminBulkGrantRecoveryCards = (
+    cards: number
+  ): { success: boolean; message: string; affectedCount: number } => {
+    const cleanCards = Math.max(1, Math.round(Number(cards) || 0));
+    const todayWib = getWibDateString();
+    const nextMap = { ...loyaltyMapRef.current };
+    let affectedCount = 0;
+
+    for (const acc of accountsRef.current) {
+      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib);
+      const isAdminTier = isAdminCardAccount(acc);
+      nextMap[acc.id] = {
+        ...prev,
+        recoveryCards: isAdminTier ? UNLIMITED_BALANCE : (prev.recoveryCards || 0) + cleanCards,
+      };
+      if (!isAdminTier) {
+        affectedCount += 1;
+      }
+    }
+
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return {
+      success: true,
+      affectedCount,
+      message: `Sebanyak ${cleanCards.toLocaleString('id-ID')} Kartu Pemulihan Streak dibagikan ke ${affectedCount} nasabah!`,
+    };
+  };
+
+  const adminBulkResetDailyLoyaltyMissions = (): {
+    success: boolean;
+    message: string;
+    affectedCount: number;
+  } => {
+    const todayWib = getWibDateString();
+    const nextMap = { ...loyaltyMapRef.current };
+    let affectedCount = 0;
+
+    for (const acc of accountsRef.current) {
+      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib);
+      nextMap[acc.id] = {
+        ...prev,
+        dailyActivityDateWib: todayWib,
+        dailyCounters: {},
+        dailyClaimedMissionIds: [],
+      };
+      affectedCount += 1;
+    }
+
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return {
+      success: true,
+      affectedCount,
+      message: `Progres 100 misi harian untuk ${affectedCount} akun berhasil direset paksa hari ini (${todayWib})!`,
     };
   };
 
@@ -39764,6 +39909,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminUpdateLoyaltyConfig,
         adminAdjustLoyaltyPoints,
         adminManageAccountStreak,
+        adminBulkThawAllFrozenStreaks,
+        adminBulkGrantLoyaltyPoints,
+        adminBulkGrantRecoveryCards,
+        adminBulkResetDailyLoyaltyMissions,
         adminAdjustAccountDiamonds,
         spendAccountDiamonds,
         upgradeJobLevelWithDiamonds,

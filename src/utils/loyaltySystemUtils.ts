@@ -32,8 +32,13 @@ export const DEFAULT_LOYALTY_EXCHANGE_RATES = {
 
 export const DEFAULT_LOYALTY_ADMIN_CONFIG: LoyaltyAdminConfig = {
   enabled: true,
+  streakEnabled: true,
+  redeemEnabled: true,
+  nationalHolidayMode: false,
   dailyCheckInPoints: 25,
   streakBonus7DaysPoints: 150,
+  streakBonus14DaysPoints: 350,
+  streakBonus30DaysPoints: 1000,
   ...DEFAULT_LOYALTY_EXCHANGE_RATES,
   customRedeemPackages: [],
   dailyRedeemLimitEnabled: false,
@@ -152,10 +157,21 @@ export function normalizeLoyaltyAdminConfig(
 
   return {
     enabled: raw?.enabled !== false,
+    streakEnabled: raw?.streakEnabled !== false,
+    redeemEnabled: raw?.redeemEnabled !== false,
+    nationalHolidayMode: Boolean(raw?.nationalHolidayMode),
     dailyCheckInPoints: Math.max(1, Math.round(Number(raw?.dailyCheckInPoints ?? 25) || 25)),
     streakBonus7DaysPoints: Math.max(
       0,
       Math.round(Number(raw?.streakBonus7DaysPoints ?? 150) || 0)
+    ),
+    streakBonus14DaysPoints: Math.max(
+      0,
+      Math.round(Number(raw?.streakBonus14DaysPoints ?? 350) || 0)
+    ),
+    streakBonus30DaysPoints: Math.max(
+      0,
+      Math.round(Number(raw?.streakBonus30DaysPoints ?? 1000) || 0)
     ),
     cashPackagePoints,
     cashPackageAmount,
@@ -481,6 +497,21 @@ export function computeStreakVisualSnapshot(
   const cfg = normalizeLoyaltyAdminConfig(rawConfig);
   const state = ensureTodayLoyaltyAccountState(rawState, todayWib);
 
+  if (!cfg.enabled || !cfg.streakEnabled) {
+    return {
+      stage: 0,
+      status: 'active',
+      offlineGapDays: 0,
+      activeStreak: Math.max(0, state.streakDays),
+      recoverableStreak: 0,
+      requiresRecoveryCard: false,
+      canAutoThaw: false,
+      badgeText: 'STREAK DIJEDA ADMIN',
+      headline: `Streak ${Math.max(0, state.streakDays)} Hari Tersimpan Aman`,
+      description: 'Sistem Auto-Streak sedang dijeda sementara oleh Admin. Posisi streak Anda tetap aman dan tidak akan hangus.',
+    };
+  }
+
   // Jika sedang terkunci beku tahap 3 (atau disimulasikan Admin)
   if (state.freezeStage === 3) {
     const saved = Math.max(1, state.frozenStreakDays || state.streakDays || 1);
@@ -566,6 +597,21 @@ export function computeStreakVisualSnapshot(
           : state.lastThawedFromStage === 1
           ? 'Api sempat membeku (1 hari offline) dan langsung dicairkan otomatis saat Anda online!'
           : 'Streak terisi otomatis saat Anda online hari ini. Jangan sampai offline 3 hari agar api tidak membeku penuh.',
+    };
+  }
+
+  if (cfg.nationalHolidayMode) {
+    return {
+      stage: 0,
+      status: 'active',
+      offlineGapDays: 0,
+      activeStreak: Math.max(0, state.streakDays),
+      recoverableStreak: 0,
+      requiresRecoveryCard: false,
+      canAutoThaw: false,
+      badgeText: 'LIBUR NASIONAL • STREAK TERLINDUNGI',
+      headline: `Mode Libur Nasional Aktif (${Math.max(0, state.streakDays)} Hari Aman)`,
+      description: 'Admin mengaktifkan Mode Libur Nasional: api streak Anda dilindungi dan tidak akan membeku maupun hangus meski sempat offline.',
     };
   }
 
@@ -658,7 +704,7 @@ export function applyAutoOnlineStreakTransition(
   const cfg = normalizeLoyaltyAdminConfig(rawConfig);
   const base = ensureTodayLoyaltyAccountState(rawState, todayWib);
 
-  if (!cfg.enabled) {
+  if (!cfg.enabled || !cfg.streakEnabled) {
     return { changed: false, nextState: base, pointsEarned: 0 };
   }
 
@@ -694,7 +740,9 @@ export function applyAutoOnlineStreakTransition(
   const gapDays = lastDate ? Math.max(0, diffDays - 1) : 0;
 
   // Offline tepat pada hari wajib Kartu Pemulihan (default 3 hari offline) & punya streak sebelumnya > 0
+  // Saat Mode Libur Nasional aktif, nasabah TIDAK boleh dibekukan atau dihanguskan otomatis
   if (
+    !cfg.nationalHolidayMode &&
     lastDate &&
     base.streakDays > 0 &&
     gapDays >= (cfg.freezeRecoveryRequiredDays || 3) &&
@@ -720,6 +768,8 @@ export function applyAutoOnlineStreakTransition(
 
   if (!lastDate || base.streakDays <= 0) {
     nextStreak = 1;
+  } else if (cfg.nationalHolidayMode) {
+    nextStreak = base.streakDays + 1;
   } else if (gapDays === 0) {
     nextStreak = base.streakDays + 1;
   } else if (gapDays >= (cfg.freezeStage1Days || 1) && gapDays < (cfg.freezeRecoveryRequiredDays || 3)) {
@@ -733,8 +783,11 @@ export function applyAutoOnlineStreakTransition(
   }
 
   const basePts = cfg.dailyCheckInPoints || 25;
-  const bonusPts = nextStreak % 7 === 0 ? cfg.streakBonus7DaysPoints || 150 : 0;
-  const totalPts = basePts + bonusPts;
+  const bonus7 = nextStreak % 7 === 0 ? cfg.streakBonus7DaysPoints || 0 : 0;
+  const bonus14 = nextStreak % 14 === 0 ? cfg.streakBonus14DaysPoints || 0 : 0;
+  const bonus30 = nextStreak % 30 === 0 ? cfg.streakBonus30DaysPoints || 0 : 0;
+  const totalBonusPts = bonus7 + bonus14 + bonus30;
+  const totalPts = basePts + totalBonusPts;
   const recentDates = Array.from(new Set([...(base.recentActiveDatesWib || []), todayWib])).slice(-14);
 
   const nextState: LoyaltyAccountState = {
@@ -765,8 +818,8 @@ export function applyAutoOnlineStreakTransition(
     noticeText = `Api beku (1 hari offline) berhasil dicairkan otomatis! Streak lanjut ke Hari ke-${nextStreak} (+${totalPts} Poin).`;
   } else if (lastExpiredStreakDays && lastExpiredStreakDays > 0) {
     noticeText = `Streak lama (${lastExpiredStreakDays} hari) hangus karena offline lebih dari ${cfg.streakExpireAfterDays || 3} hari. Mulai baru Hari ke-1 (+${totalPts} Poin).`;
-  } else if (bonusPts > 0) {
-    noticeText = `Auto-Streak Hari ke-${nextStreak}! +${basePts} Poin + Bonus Kelipatan 7 Hari +${bonusPts} Poin!`;
+  } else if (totalBonusPts > 0) {
+    noticeText = `Auto-Streak Hari ke-${nextStreak}! +${basePts} Poin + Bonus Milestone +${totalBonusPts} Poin!`;
   }
 
   return {

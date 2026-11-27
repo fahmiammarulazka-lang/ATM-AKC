@@ -13,6 +13,7 @@ export type AdminPortalTabKey =
   | 'warning_studio'
   | 'help_center'
   | 'missions_admin'
+  | 'loyalty_streak_admin'
   | 'leaderboard_admin'
   | 'super_tools'
   | 'gift_letters'
@@ -169,6 +170,13 @@ export const ADMIN_TAB_CATALOG: AdminTabCatalogItem[] = [
     shortLabel: 'Misi Harian',
     group: 'Sosial & Komunitas',
     description: 'Kelola misi harian, target 7 hari, dan hadiah misi.',
+  },
+  {
+    key: 'loyalty_streak_admin',
+    label: 'Setting Streak & Loyalty',
+    shortLabel: 'Streak & Loyalty',
+    group: 'Sosial & Komunitas',
+    description: 'Atur Mode Libur Nasional, bonus 7/14/30 hari, aksi massal, kurs tukar, 100 misi, kontrol nasabah & log penukaran.',
   },
   {
     key: 'leaderboard_admin',
