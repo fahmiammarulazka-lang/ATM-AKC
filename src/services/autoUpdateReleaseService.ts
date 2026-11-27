@@ -16,7 +16,7 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v16.43.10';
+export const STRUCTURED_BASE_VERSION = 'v16.44.20';
 
 export interface StructuredVersion {
   p: number; // AAA: Major (fitur besar / penambahan > 3 fitur sekaligus)
@@ -631,9 +631,38 @@ export function getPublicCurrentUpdate(records: AppUpdateRecord[]): AppUpdateRec
 
 /**
  * Katalog rilis khusus Admin (menggunakan penomoran terpisah vAdmin agar terpisah
- * dari nomor versi aplikasi publik v16.43.10).
+ * dari nomor versi aplikasi publik v16.44.20).
  */
 export const BUILT_IN_ADMIN_UPDATES_CATALOG: AppUpdateRecord[] = [
+  {
+    id: 'upd-admin-v1-4-0',
+    version: 'vAdmin 1.4.0',
+    releaseType: 'minor',
+    visibilityMode: 'admin_only',
+    title:
+      '7 Pilihan Jadwal Reset 100 Misi Aktif Loyalty (Default Mingguan Senin 00:00 WIB + Jam/Hari Custom, Reset Sekarang Opsional & Hitung Mundur Real-Time WIB)',
+    description:
+      'Pembaruan Panel Admin vAdmin 1.4.0 (bersamaan rilis publik v16.43.20) menambahkan kendali penuh 7 pilihan jadwal reset khusus 100 Misi Aktif Loyalty pada sub-tab 100 Misi & Pencapaian di tab Setting Streak & Loyalty. Default sistem kini Mingguan setiap Senin pukul 00:00 WIB dengan pemilih jam reset (00:00–23:00 WIB), patokan hari (Senin–Minggu), pratinjau hitung mundur real-time WIB, serta tombol opsional "Reset Misi Sekarang". Perubahan jadwal langsung berlaku pada siklus berjalan, sedangkan Auto-Streak harian dan batas penukaran poin harian tetap berjalan terpisah setiap hari pukul 00:00 WIB.',
+    highlights: [
+      '7 Pilihan Jadwal Reset 100 Misi Loyalty (Default Mingguan): Pilih Setiap 1 Hari, Setiap 3 Hari, Mingguan (Default), Setiap 2 Minggu, Bulanan (Tanggal 1), Pilih Hari Tertentu (Senin–Minggu), atau Manual Admin Saja.',
+      'Patokan Hari & Jam Reset WIB yang Bisa Diubah + Pratinjau Langsung: Default Mingguan jatuh pada Senin 00:00 WIB; Admin dapat mengatur hari patokan (Senin–Minggu) serta jam reset (00:00–23:00 WIB) dan langsung melihat pratinjau hitung mundurnya sebelum menyimpan.',
+      'Berlaku Langsung di Siklus Aktif + Tombol Opsional Reset Sekarang: Menyimpan jadwal baru langsung memperbarui siklus aktif nasabah, ditambah tombol konfirmasi "Reset Misi Sekarang" yang otomatis mengosongkan progres, klaim, dan batas transaksi misi ke nol.',
+      'Isolasi Penuh Auto-Streak & Batas Tukar Harian: Mesin Auto-Streak online dan kuota batas penukaran poin harian nasabah tetap terkunci harian pukul 00:00 WIB agar kedisiplinan streak tidak ikut melambat.',
+    ],
+    changes: [
+      'Menambahkan 7 pilihan jadwal reset (daily, every_3_days, weekly, biweekly, monthly, custom_day, manual) dengan default weekly (Senin 00:00 WIB) pada konfigurasi Admin Loyalty.',
+      'Menambahkan UI pemilih 7 opsi jadwal reset, patokan hari Senin–Minggu, jam reset WIB (00:00–23:00), kotak pratinjau hitung mundur real-time, serta tombol opsional Reset Misi Sekarang di Sub-Tab 3 AdminLoyaltyStreakPanel.',
+      'Memisahkan missionCycleKey dan rentang jendela transaksi misi dari tanggal harian WIB agar Auto-Streak dan dailyRedemptionCount tetap reset harian pukul 00:00 WIB.',
+      'Memperbarui halaman Misi Nasabah dengan label jadwal reset aktif, waktu reset berikutnya, serta hitung mundur WIB detik-per-detik secara real-time.',
+    ],
+    dateText: '27 Nov 2026',
+    fullDate: 'Jumat, 27 November 2026 • Pukul 23:10 WIB',
+    categoryBadge: 'Rilis Internal Admin Terbaru',
+    isCurrent: true,
+    author: 'Super Admin Utama (AzkaAKC)',
+    createdAt: '2026-11-27T16:10:00.000Z',
+    isAutoDetected: true,
+  },
   {
     id: 'upd-admin-v1-3-0',
     version: 'vAdmin 1.3.0',

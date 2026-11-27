@@ -343,6 +343,22 @@ export interface BankAccount {
   blockedChatIntervalsMap?: Record<string, Array<{ startMs: number; endMs?: number }>>;
   chatDndEnabled?: boolean;
   enterKeySendsMessage?: boolean;
+  // Kustomisasi Profil & Riwayat Ganti Nama (v16.44.20)
+  profileBio?: string;
+  city?: string;
+  avatarPresetId?: string;
+  avatarFrameId?: string;
+  featuredTitle?: string;
+  nameChangeHistory?: NameChangeHistoryEntry[];
+}
+
+export interface NameChangeHistoryEntry {
+  id: string;
+  oldName: string;
+  newName: string;
+  diamondCost: number;
+  isAdminFree?: boolean;
+  timestampIso: string;
 }
 
 export interface DebtHistoryEntry {
@@ -3113,13 +3129,15 @@ export interface LoyaltyAccountState {
   recoveryCards?: number;
   /** Riwayat 14 tanggal WIB terakhir saat nasabah aktif online */
   recentActiveDatesWib?: string[];
+  /** Penanda siklus reset aktif 100 Misi Loyalty (mengikuti 7 pilihan jadwal Admin, default Mingguan) */
+  missionCycleKey?: string;
   /** Tanggal WIB aktif untuk penghitung 100 misi harian (reset otomatis 00:00 WIB) */
   dailyActivityDateWib?: string;
   /** Penghitung aktivitas nyata harian (kunci metrik -> jumlah hari ini) */
   dailyCounters?: Record<string, number>;
-  /** Daftar ID misi harian (dari 100 misi) yang sudah diklaim hari ini */
+  /** Daftar ID misi harian (dari 100 misi) yang sudah diklaim pada siklus aktif */
   dailyClaimedMissionIds?: string[];
-  /** Tanggal WIB aktif untuk batas penukaran harian */
+  /** Tanggal WIB aktif untuk batas penukaran harian (tetap harian 00:00 WIB) */
   dailyRedemptionDateWib?: string;
   /** Jumlah transaksi penukaran poin yang dilakukan hari ini (WIB) */
   dailyRedemptionCount?: number;
@@ -3129,6 +3147,15 @@ export interface LoyaltyAccountState {
   totalCheckIns: number;
   redeemedCount: number;
 }
+
+export type LoyaltyMissionResetMode =
+  | 'daily'
+  | 'every_3_days'
+  | 'weekly'
+  | 'biweekly'
+  | 'monthly'
+  | 'custom_day'
+  | 'manual';
 
 export interface LoyaltyAdminConfig {
   enabled: boolean;
@@ -3192,6 +3219,16 @@ export interface LoyaltyAdminConfig {
   missionRewardMultiplier?: number;
   /** Override per misi dari Panel Admin (aktif/nonaktif, target, hadiah poin) */
   missionOverrides?: Record<string, LoyaltyDailyMissionOverride>;
+  /** Jadwal reset siklus 100 Misi Aktif Loyalty (7 pilihan, default 'weekly') */
+  missionResetMode?: LoyaltyMissionResetMode;
+  /** Patokan hari reset WIB (0=Minggu, 1=Senin .. 6=Sabtu; default 1=Senin) */
+  missionResetDayOfWeek?: number;
+  /** Patokan jam reset WIB (0..23; default 0 = 00:00 WIB) */
+  missionResetHourWib?: number;
+  /** Stempel waktu saat Admin memicu Reset Misi Sekarang */
+  missionManualResetAtMs?: number;
+  /** Nomor urut reset paksa Admin agar seluruh siklus aktif segera ter-reset */
+  missionManualResetNonce?: number;
   /** @deprecated Penukaran ke Diamond ditiadakan */
   diamondPer100Points?: number;
   updatedAtMs?: number;

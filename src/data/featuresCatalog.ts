@@ -3081,6 +3081,64 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-44-20',
+    version: 'v16.44.20',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v16.44.20: Ganti Nama Profil 50 Diamond (Ikon Pensil & Sync Penuh), 4 Tab Pusat Profil Lengkap, Avatar & Bingkai Keren, Kartu Nama Digital + Unduh QRIS PNG, Grafik Arus Kas Bulanan, Ekspor CSV/PDF, Rekening Favorit & Kontrol PIN/Kartu Darurat',
+    fullDate: 'Jumat, 27 November 2026 • Pukul 23:45 WIB',
+    dateText: 'Jumat, 27 November 2026 • Pukul 23:45 WIB',
+    description:
+      'Pembaruan v16.44.20 merombak total halaman Profil Nasabah menjadi 4 tab rapi (Ringkasan, Identitas & Kartu, Aksi & Favorit, Keamanan & PIN) dan menghadirkan fitur Ganti Nama Profil memakai 50 Diamond langsung dari tombol ikon pensil di sebelah nama Anda (gratis & Diamond tetap ∞ untuk Kartu Tier Admin). Nama baru otomatis tersinkron ke Navbar, Kartu ATM, Transfer, PayChat, QRIS Pribadi, Leaderboard, Keluarga, dan Favorit sekaligus tercatat di Mutasi Rekening serta Riwayat Perubahan Nama. Nasabah juga dapat mengatur Bio, No HP, Email, Kota Domisili, Avatar Preset & Bingkai Keren, Gelar Unggulan, mengunduh Kartu Nama Digital + QRIS Pribadi PNG, memantau grafik mini arus kas bulan ini, mengekspor laporan CSV/PDF, mengelola Rekening Favorit, serta mengubah PIN atau membekukan kartu darurat langsung dari Profil.',
+    highlights: [
+      'Ganti Nama Profil 50 Diamond (Tanpa PIN & Bisa Berulang): Tekan tombol ikon pensil di sebelah nama Profil, isi nama baru minimal 3 huruf, lalu klik tombol konfirmasi pembelian bertuliskan ikon & saldo Diamond langsung di bawah kolom. Otomatis potong 50 Diamond (Kartu Tier Admin tetap ∞), sinkron ke semua fitur, dan tercatat di Mutasi Rekening serta Riwayat Ganti Nama.',
+      'Tab Ringkasan Lengkap + Grafik Mini Arus Kas Bulan Ini: Menampilkan portofolio Saldo, Permata, Coin Spin, Emas 24K + valuasi, Deposito, Kantong Impian, kartu status Streak Online + Poin Loyalty + Kartu Pemulihan, peringkat Leaderboard aktif + progres Level Karir, serta grafik perbandingan pemasukan vs pengeluaran bulan ini.',
+      'Tab Identitas, Avatar Preset, Bingkai Keren & Unduh QRIS PNG: Bebas edit Bio, No HP, Email, Kota Domisili, pilih 8 gaya Avatar Preset + 8 Bingkai Avatar + Gelar Unggulan, serta Kartu Nama Digital lengkap dengan tombol Unduh QRIS Pribadi PNG dan Salin Link QRIS.',
+      'Tab Aksi Cepat, Ekspor CSV/PDF, Rekening Favorit & Tab Keamanan/PIN: Tersedia pintasan 1-klik ke Mobile Banking, Emas 24K, dan PayChat, unduh laporan akun CSV atau cetak PDF, pengelola daftar Rekening Favorit, sensor privasi nomor (****), Ubah PIN ATM 6 digit, dan saklar Bekukan/Cairkan Kartu Darurat instan.',
+    ],
+    changes: [
+      'Menambahkan tombol ikon pensil dan tombol saldo Permata di header Profil untuk membuka dialog Ganti Nama 50 Diamond (min. 3 huruf, tanpa PIN, gratis ∞ untuk Tier Admin) dengan tombol konfirmasi pembelian tepat di bawah kolom input.',
+      'Menyinkronkan pergantian nama ke seluruh fitur akun, riwayat nama lama pada profil, dan mencatat transaksi ke Mutasi Rekening.',
+      'Menyusun ulang modal Profil menjadi 4 tab responsif (Ringkasan, Identitas & Kartu, Aksi & Favorit, Keamanan & PIN) untuk HP maupun Desktop.',
+      'Menambahkan kustomisasi Bio, No HP, Email, Kota, Avatar Preset, Bingkai Avatar, Gelar Unggulan, Kartu Nama Digital + Unduh QRIS PNG, grafik arus kas bulan ini, ekspor CSV/PDF, pengelola Rekening Favorit, Ubah PIN, dan saklar Bekukan Kartu Darurat.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-27T16:45:00.000Z',
+    isAutoDetected: true,
+  },
+  {
+    id: 'upd-v16-43-20',
+    version: 'v16.43.20',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v16.43.20: Jadwal Reset 100 Misi Aktif Loyalty (Default Mingguan Senin 00:00 WIB · 7 Pilihan Jadwal) & Hitung Mundur Real-Time WIB',
+    fullDate: 'Jumat, 27 November 2026 • Pukul 23:10 WIB',
+    dateText: 'Jumat, 27 November 2026 • Pukul 23:10 WIB',
+    description:
+      'Pembaruan v16.43.20 memperbarui siklus 100 Misi Aktif Loyalty menjadi default Mingguan setiap hari Senin pukul 00:00 WIB dengan dukungan 7 pilihan jadwal fleksibel yang diatur Admin (1 Hari, 3 Hari, Mingguan, 2 Minggu, Bulanan, Pilih Hari, hingga Manual). Di halaman Misi & Loyalty, nasabah kini melihat label jadwal reset aktif serta hitung mundur real-time WIB menuju pergantian siklus berikutnya, sementara Auto-Streak dan batas penukaran poin harian tetap berjalan harian pukul 00:00 WIB.',
+    highlights: [
+      'Siklus Baru 100 Misi Aktif Loyalty (Default Mingguan Senin 00:00 WIB): Memberi waktu lebih leluasa bagi nasabah untuk menuntaskan misi-misi besar selama sepekan penuh sebelum progres dan klaim di-reset otomatis.',
+      '7 Pilihan Jadwal Reset dari Panel Admin: Mendukung mode 1 Hari, 3 Hari, Mingguan (Default), 2 Minggu, Bulanan, Pilih Hari Tertentu (Senin–Minggu), dan Manual Admin dengan jam reset WIB yang dapat disesuaikan.',
+      'Label Jadwal Aktif & Hitung Mundur Real-Time WIB: Halaman 100 Misi Loyalty menampilkan jadwal siklus aktif, tanggal-jam reset berikutnya, dan penghitung mundur real-time WIB.',
+      'Auto-Streak & Batas Tukar Harian Tetap 00:00 WIB: Pengisian otomatis api streak harian dan kuota penukaran poin harian tetap konsisten di-reset setiap hari pukul 00:00 WIB.',
+    ],
+    changes: [
+      'Menambahkan mesin siklus 7 pilihan jadwal reset khusus untuk 100 Misi Aktif Loyalty dengan default Mingguan (Senin 00:00 WIB).',
+      'Menampilkan label jadwal reset aktif dan hitung mundur real-time WIB di halaman Misi & Loyalty nasabah.',
+      'Menyediakan panel konfigurasi 7 jadwal reset, pemilih hari & jam WIB, pratinjau hitung mundur, serta tombol Reset Sekarang di Panel Admin.',
+      'Menjaga Auto-Streak online dan batas penukaran poin harian tetap bekerja harian pukul 00:00 WIB terpisah dari siklus 100 misi.',
+    ],
+    isCurrent: false,
+    categoryBadge: 'Rilis Terdahulu',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-27T16:10:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v16-43-10',
     version: 'v16.43.10',
     releaseType: 'minor',
@@ -3103,8 +3161,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Menambahkan pemindai Kamera Langsung dan Upload Gambar QR dari Galeri di halaman Transfer dan tab QRIS Pribadi.',
       'Menambahkan deteksi self-scan untuk memblokir transfer ke QRIS Pribadi sendiri, kartu ringkasan Penerima QRIS + Biaya Admin 5% + Total Potong, serta tampilan Struk Transfer Berhasil dengan tombol Kembali ke Dashboard, Lihat Mutasi, dan Transfer Lagi.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Rilis Terdahulu',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-27T14:30:00.000Z',
     isAutoDetected: true,

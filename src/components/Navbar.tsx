@@ -41,6 +41,7 @@ import {
 import { useBank } from '../context/BankContext';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
 import { UserProfileStatsModal } from './UserProfileStatsModal';
+import { ProfileAvatarBadge } from './ProfileAvatarBadge';
 import { VerifiedBadge, UserId16AboveNameBanner, OaAccountBadge } from './VerifiedBadge';
 import {
   formatRupiah,
@@ -251,7 +252,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v16.43.10';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v16.44.20';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -1157,12 +1158,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Buka Profil, Status Sync Cloud & Statistik Akun Lengkap"
               className="flex items-center gap-1.5 sm:gap-2 p-1 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs cursor-pointer transition-colors shrink-0"
             >
-              <div
-                className={`relative w-7 h-7 rounded-lg text-white flex items-center justify-center font-bold text-xs shrink-0 ${
-                  currentAccount?.cardStatus === 'banned' ? 'bg-rose-600' : 'bg-blue-600'
-                }`}
-              >
-                {currentAccount ? currentAccount.fullName.charAt(0) : 'U'}
+              <div className="relative shrink-0">
+                {currentAccount ? (
+                  <ProfileAvatarBadge
+                    account={currentAccount}
+                    googlePicture={googleUser?.picture}
+                    size="sm"
+                  />
+                ) : (
+                  <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
+                    U
+                  </div>
+                )}
                 <span
                   title={
                     syncTelemetry.status === 'error'
@@ -1583,6 +1590,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       onClose={() => setShowProfileStatsModal(false)}
       onQuickAdminAccess={onQuickAdminAccess}
       onOpenSecurityCenter={onOpenSecurityCenter}
+      onNavigateView={(view) => setActiveView(view)}
     />
     </>
   );

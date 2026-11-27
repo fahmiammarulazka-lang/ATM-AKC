@@ -3,6 +3,7 @@ import {
   LoyaltyAdminConfig,
   LoyaltyCustomRedeemPackage,
   LoyaltyDailyMissionCategory,
+  LoyaltyMissionResetMode,
   LoyaltyRedeemTarget,
   LoyaltyRedemptionRecord,
   LoyaltyStreakFreezeStage,
@@ -58,7 +59,100 @@ export const DEFAULT_LOYALTY_ADMIN_CONFIG: LoyaltyAdminConfig = {
   activeDailyMissionCount: 100,
   missionRewardMultiplier: 1,
   missionOverrides: {},
+  missionResetMode: 'weekly',
+  missionResetDayOfWeek: 1,
+  missionResetHourWib: 0,
+  missionManualResetAtMs: 0,
+  missionManualResetNonce: 0,
 };
+
+export const WIB_DAY_OF_WEEK_OPTIONS: Array<{ value: number; label: string; shortLabel: string }> = [
+  { value: 1, label: 'Senin', shortLabel: 'Sen' },
+  { value: 2, label: 'Selasa', shortLabel: 'Sel' },
+  { value: 3, label: 'Rabu', shortLabel: 'Rab' },
+  { value: 4, label: 'Kamis', shortLabel: 'Kam' },
+  { value: 5, label: 'Jumat', shortLabel: 'Jum' },
+  { value: 6, label: 'Sabtu', shortLabel: 'Sab' },
+  { value: 0, label: 'Minggu', shortLabel: 'Min' },
+];
+
+export const LOYALTY_MISSION_RESET_OPTIONS: Array<{
+  mode: LoyaltyMissionResetMode;
+  label: string;
+  shortLabel: string;
+  description: string;
+  supportsDayPicker: boolean;
+  supportsHourPicker: boolean;
+  isDefault?: boolean;
+}> = [
+  {
+    mode: 'daily',
+    label: 'Setiap 1 Hari (Harian)',
+    shortLabel: '1 Hari',
+    description: 'Progres & klaim 100 misi di-reset setiap 1 hari pada jam WIB pilihan.',
+    supportsDayPicker: false,
+    supportsHourPicker: true,
+  },
+  {
+    mode: 'every_3_days',
+    label: 'Setiap 3 Hari',
+    shortLabel: '3 Hari',
+    description: 'Siklus 100 misi berjalan selama 3 hari berturut-turut sebelum reset.',
+    supportsDayPicker: false,
+    supportsHourPicker: true,
+  },
+  {
+    mode: 'weekly',
+    label: 'Mingguan (Default)',
+    shortLabel: 'Mingguan',
+    description: 'Default sistem: reset setiap minggu pada hari & jam WIB (bawaan Senin 00:00 WIB).',
+    supportsDayPicker: true,
+    supportsHourPicker: true,
+    isDefault: true,
+  },
+  {
+    mode: 'biweekly',
+    label: 'Setiap 2 Minggu',
+    shortLabel: '2 Minggu',
+    description: 'Siklus menengah 14 hari penuh sebelum progres & klaim di-reset.',
+    supportsDayPicker: true,
+    supportsHourPicker: true,
+  },
+  {
+    mode: 'monthly',
+    label: 'Bulanan (Tanggal 1)',
+    shortLabel: 'Bulanan',
+    description: 'Reset otomatis setiap awal bulan (tanggal 1) pada jam WIB pilihan.',
+    supportsDayPicker: false,
+    supportsHourPicker: true,
+  },
+  {
+    mode: 'custom_day',
+    label: 'Pilih Hari Tertentu',
+    shortLabel: 'Pilih Hari',
+    description: 'Reset mingguan khusus tepat pada hari Senin–Minggu yang ditentukan Admin.',
+    supportsDayPicker: true,
+    supportsHourPicker: true,
+  },
+  {
+    mode: 'manual',
+    label: 'Manual Admin Saja',
+    shortLabel: 'Manual',
+    description: 'Tidak pernah reset otomatis oleh waktu; hanya reset saat Admin menekan Reset.',
+    supportsDayPicker: false,
+    supportsHourPicker: false,
+  },
+];
+
+const VALID_MISSION_RESET_MODES: LoyaltyMissionResetMode[] = [
+  'daily',
+  'every_3_days',
+  'weekly',
+  'biweekly',
+  'monthly',
+  'custom_day',
+  'manual',
+];
 
 export function sanitizeCustomRedeemPackages(
   raw?: LoyaltyCustomRedeemPackage[] | null
@@ -212,6 +306,27 @@ export function normalizeLoyaltyAdminConfig(
       raw?.missionOverrides && typeof raw.missionOverrides === 'object'
         ? raw.missionOverrides
         : {},
+    missionResetMode: VALID_MISSION_RESET_MODES.includes(
+      raw?.missionResetMode as LoyaltyMissionResetMode
+    )
+      ? (raw?.missionResetMode as LoyaltyMissionResetMode)
+      : 'weekly',
+    missionResetDayOfWeek: (() => {
+      const dow = Math.round(Number(raw?.missionResetDayOfWeek ?? 1));
+      return Number.isFinite(dow) && dow >= 0 && dow <= 6 ? dow : 1;
+    })(),
+    missionResetHourWib: Math.max(
+      0,
+      Math.min(23, Math.round(Number(raw?.missionResetHourWib ?? 0) || 0))
+    ),
+    missionManualResetAtMs: Math.max(
+      0,
+      Math.round(Number(raw?.missionManualResetAtMs ?? 0) || 0)
+    ),
+    missionManualResetNonce: Math.max(
+      0,
+      Math.round(Number(raw?.missionManualResetNonce ?? 0) || 0)
+    ),
     updatedAtMs: raw?.updatedAtMs,
   };
 }
@@ -408,10 +523,207 @@ export function getWibResetCountdownText(nowMs: number = Date.now()): string {
   return `${String(h).padStart(2, '0')}j ${String(m).padStart(2, '0')}m menuju 00:00 WIB`;
 }
 
+export interface MissionResetCycleWindow {
+  mode: LoyaltyMissionResetMode;
+  dayOfWeek: number;
+  dayLabel: string;
+  hourWib: number;
+  hourLabel: string;
+  cycleKey: string;
+  cycleStartMs: number;
+  nextResetMs: number | null;
+  manualResetAtMs: number;
+  scheduleLabel: string;
+  shortScheduleLabel: string;
+  nextResetDateTimeText: string;
+  periodNoun: string;
+}
+
+const WIB_OFFSET_MS = 7 * 3600_000;
+
+export function getWibDayLabel(dayOfWeek: number): string {
+  return WIB_DAY_OF_WEEK_OPTIONS.find((d) => d.value === dayOfWeek)?.label || 'Senin';
+}
+
+export function formatWibHourLabel(hourWib: number): string {
+  const h = Math.max(0, Math.min(23, Math.round(hourWib || 0)));
+  return `${String(h).padStart(2, '0')}:00 WIB`;
+}
+
+export function formatNextResetWibDateTime(
+  nextResetMs: number | null,
+  mode: LoyaltyMissionResetMode
+): string {
+  if (mode === 'manual' || nextResetMs === null || !Number.isFinite(nextResetMs)) {
+    return 'Reset Manual oleh Admin';
+  }
+  try {
+    const datePart = new Intl.DateTimeFormat('id-ID', {
+      timeZone: 'Asia/Jakarta',
+      weekday: 'long',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    }).format(new Date(nextResetMs));
+    const shifted = new Date(nextResetMs + WIB_OFFSET_MS);
+    const hh = String(shifted.getUTCHours()).padStart(2, '0');
+    const mm = String(shifted.getUTCMinutes()).padStart(2, '0');
+    return `${datePart} · ${hh}:${mm} WIB`;
+  } catch {
+    return 'Jadwal WIB aktif';
+  }
+}
+
+export function formatMissionResetCountdown(
+  cycle: Pick<MissionResetCycleWindow, 'mode' | 'nextResetMs' | 'hourLabel'>,
+  nowMs: number = Date.now()
+): string {
+  if (cycle.mode === 'manual' || cycle.nextResetMs === null) {
+    return 'Mode Manual Admin · Tidak reset otomatis';
+  }
+  const remSec = Math.max(0, Math.floor((cycle.nextResetMs - nowMs) / 1000));
+  const days = Math.floor(remSec / 86_400);
+  const hours = Math.floor((remSec % 86_400) / 3600);
+  const mins = Math.floor((remSec % 3600) / 60);
+  const secs = remSec % 60;
+  if (days > 0) {
+    return `${days}h ${String(hours).padStart(2, '0')}j ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}d menuju reset`;
+  }
+  return `${String(hours).padStart(2, '0')}j ${String(mins).padStart(2, '0')}m ${String(secs).padStart(2, '0')}d menuju ${cycle.hourLabel}`;
+}
+
+export function resolveMissionResetCycleWindow(
+  rawConfig?: Partial<LoyaltyAdminConfig> | null,
+  nowMs: number = Date.now()
+): MissionResetCycleWindow {
+  const cfg = normalizeLoyaltyAdminConfig(rawConfig);
+  const mode: LoyaltyMissionResetMode = cfg.missionResetMode || 'weekly';
+  const dow = cfg.missionResetDayOfWeek ?? 1;
+  const hour = cfg.missionResetHourWib ?? 0;
+  const nonce = cfg.missionManualResetNonce ?? 0;
+  const manualResetAtMs = cfg.missionManualResetAtMs ?? 0;
+  const dayLabel = getWibDayLabel(dow);
+  const hourLabel = formatWibHourLabel(hour);
+
+  const shiftedMs = nowMs + WIB_OFFSET_MS;
+  const shiftedDate = new Date(shiftedMs);
+  const y = shiftedDate.getUTCFullYear();
+  const m = shiftedDate.getUTCMonth();
+  const d = shiftedDate.getUTCDate();
+  const currentDow = shiftedDate.getUTCDay();
+
+  let cycleStartShifted = 0;
+  let nextResetShifted: number | null = null;
+  let cycleKey = '';
+  let scheduleLabel = '';
+  let shortScheduleLabel = '';
+  let periodNoun = 'siklus ini';
+
+  if (mode === 'daily') {
+    const todayBoundary = Date.UTC(y, m, d, hour, 0, 0);
+    if (shiftedMs >= todayBoundary) {
+      cycleStartShifted = todayBoundary;
+      nextResetShifted = Date.UTC(y, m, d + 1, hour, 0, 0);
+    } else {
+      cycleStartShifted = Date.UTC(y, m, d - 1, hour, 0, 0);
+      nextResetShifted = todayBoundary;
+    }
+    const startYmd = getWibDateString(cycleStartShifted - WIB_OFFSET_MS);
+    cycleKey = `daily:${startYmd}:h${hour}:r${nonce}`;
+    scheduleLabel = `Reset Harian (1 Hari) · Setiap Hari ${hourLabel}`;
+    shortScheduleLabel = `Harian · ${hourLabel}`;
+    periodNoun = 'hari ini';
+  } else if (mode === 'every_3_days') {
+    const anchorWithHour = Date.UTC(2026, 0, 5, hour, 0, 0);
+    const bucket = Math.floor((shiftedMs - anchorWithHour) / (3 * 86_400_000));
+    cycleStartShifted = anchorWithHour + bucket * 3 * 86_400_000;
+    nextResetShifted = anchorWithHour + (bucket + 1) * 3 * 86_400_000;
+    const startYmd = getWibDateString(cycleStartShifted - WIB_OFFSET_MS);
+    cycleKey = `every_3_days:${startYmd}:h${hour}:r${nonce}`;
+    scheduleLabel = `Reset Setiap 3 Hari · Pukul ${hourLabel}`;
+    shortScheduleLabel = `Setiap 3 Hari · ${hourLabel}`;
+    periodNoun = 'siklus 3 hari ini';
+  } else if (mode === 'weekly' || mode === 'custom_day') {
+    const daysBack = (currentDow - dow + 7) % 7;
+    const candBoundary = Date.UTC(y, m, d - daysBack, hour, 0, 0);
+    if (shiftedMs >= candBoundary) {
+      cycleStartShifted = candBoundary;
+      nextResetShifted = candBoundary + 7 * 86_400_000;
+    } else {
+      cycleStartShifted = candBoundary - 7 * 86_400_000;
+      nextResetShifted = candBoundary;
+    }
+    const startYmd = getWibDateString(cycleStartShifted - WIB_OFFSET_MS);
+    cycleKey = `${mode}:d${dow}:${startYmd}:h${hour}:r${nonce}`;
+    scheduleLabel =
+      mode === 'weekly'
+        ? `Reset Mingguan · Setiap ${dayLabel} ${hourLabel}`
+        : `Reset Pilih Hari · Setiap ${dayLabel} ${hourLabel}`;
+    shortScheduleLabel = `Mingguan · ${dayLabel} ${hourLabel}`;
+    periodNoun = 'minggu ini';
+  } else if (mode === 'biweekly') {
+    const anchorWithHour = Date.UTC(2026, 0, 4 + dow, hour, 0, 0);
+    const bucket = Math.floor((shiftedMs - anchorWithHour) / (14 * 86_400_000));
+    cycleStartShifted = anchorWithHour + bucket * 14 * 86_400_000;
+    nextResetShifted = anchorWithHour + (bucket + 1) * 14 * 86_400_000;
+    const startYmd = getWibDateString(cycleStartShifted - WIB_OFFSET_MS);
+    cycleKey = `biweekly:d${dow}:${startYmd}:h${hour}:r${nonce}`;
+    scheduleLabel = `Reset Setiap 2 Minggu · ${dayLabel} ${hourLabel}`;
+    shortScheduleLabel = `2 Minggu · ${dayLabel} ${hourLabel}`;
+    periodNoun = 'siklus 2 minggu ini';
+  } else if (mode === 'monthly') {
+    const candBoundary = Date.UTC(y, m, 1, hour, 0, 0);
+    if (shiftedMs >= candBoundary) {
+      cycleStartShifted = candBoundary;
+      nextResetShifted = Date.UTC(y, m + 1, 1, hour, 0, 0);
+    } else {
+      cycleStartShifted = Date.UTC(y, m - 1, 1, hour, 0, 0);
+      nextResetShifted = candBoundary;
+    }
+    const startYmd = getWibDateString(cycleStartShifted - WIB_OFFSET_MS);
+    cycleKey = `monthly:${startYmd.slice(0, 7)}:h${hour}:r${nonce}`;
+    scheduleLabel = `Reset Bulanan · Tgl 1 Pukul ${hourLabel}`;
+    shortScheduleLabel = `Bulanan · Tgl 1 ${hourLabel}`;
+    periodNoun = 'bulan ini';
+  } else {
+    cycleStartShifted = (manualResetAtMs > 0 ? manualResetAtMs : 0) + WIB_OFFSET_MS;
+    nextResetShifted = null;
+    cycleKey = `manual:r${nonce}`;
+    scheduleLabel = 'Reset Manual Admin (Tanpa Reset Otomatis)';
+    shortScheduleLabel = 'Manual Admin';
+    periodNoun = 'siklus aktif ini';
+  }
+
+  const cycleStartMs =
+    mode === 'manual'
+      ? Math.max(0, manualResetAtMs)
+      : Math.max(0, cycleStartShifted - WIB_OFFSET_MS);
+  const nextResetMs = nextResetShifted !== null ? nextResetShifted - WIB_OFFSET_MS : null;
+
+  return {
+    mode,
+    dayOfWeek: dow,
+    dayLabel,
+    hourWib: hour,
+    hourLabel,
+    cycleKey,
+    cycleStartMs,
+    nextResetMs,
+    manualResetAtMs,
+    scheduleLabel,
+    shortScheduleLabel,
+    nextResetDateTimeText: formatNextResetWibDateTime(nextResetMs, mode),
+    periodNoun,
+  };
+}
+
 export function ensureTodayLoyaltyAccountState(
   raw: LoyaltyAccountState | undefined,
-  todayWib: string = getWibDateString()
+  todayWib: string = getWibDateString(),
+  rawConfig?: Partial<LoyaltyAdminConfig> | null,
+  nowMs: number = Date.now()
 ): LoyaltyAccountState {
+  const cycle = resolveMissionResetCycleWindow(rawConfig, nowMs);
   const base: LoyaltyAccountState = raw
     ? {
         ...raw,
@@ -429,6 +741,7 @@ export function ensureTodayLoyaltyAccountState(
         redemptionHistory: Array.isArray(raw.redemptionHistory)
           ? (raw.redemptionHistory.slice(0, 50) as LoyaltyRedemptionRecord[])
           : [],
+        missionCycleKey: raw.missionCycleKey || '',
         dailyRedemptionDateWib: raw.dailyRedemptionDateWib || todayWib,
         dailyRedemptionCount:
           raw.dailyRedemptionDateWib === todayWib
@@ -448,8 +761,9 @@ export function ensureTodayLoyaltyAccountState(
         freezeStage: 0,
         frozenStreakDays: 0,
         recentActiveDatesWib: [],
+        missionCycleKey: cycle.cycleKey,
         dailyActivityDateWib: todayWib,
-        dailyCounters: {},
+        dailyCounters: { online_visit: 1 },
         dailyClaimedMissionIds: [],
         dailyRedemptionDateWib: todayWib,
         dailyRedemptionCount: 0,
@@ -457,18 +771,21 @@ export function ensureTodayLoyaltyAccountState(
       };
 
   const resetRedemptionDaily = base.dailyRedemptionDateWib !== todayWib;
-  if (base.dailyActivityDateWib !== todayWib || resetRedemptionDaily) {
+  const resetMissionCycle = base.missionCycleKey !== cycle.cycleKey;
+
+  if (resetMissionCycle || resetRedemptionDaily || base.dailyActivityDateWib !== todayWib) {
+    const nextCounters = resetMissionCycle
+      ? {
+          online_visit: 1,
+          ...(base.lastOnlineDateWib === todayWib ? { streak_online_today: 1 } : {}),
+        }
+      : base.dailyCounters;
     return {
       ...base,
+      missionCycleKey: cycle.cycleKey,
       dailyActivityDateWib: todayWib,
-      dailyCounters:
-        base.dailyActivityDateWib !== todayWib
-          ? {
-              online_visit: 1,
-            }
-          : base.dailyCounters,
-      dailyClaimedMissionIds:
-        base.dailyActivityDateWib !== todayWib ? [] : base.dailyClaimedMissionIds,
+      dailyCounters: nextCounters,
+      dailyClaimedMissionIds: resetMissionCycle ? [] : base.dailyClaimedMissionIds,
       dailyRedemptionDateWib: todayWib,
       dailyRedemptionCount: resetRedemptionDaily ? 0 : base.dailyRedemptionCount,
     };
@@ -495,7 +812,7 @@ export function computeStreakVisualSnapshot(
   todayWib: string = getWibDateString()
 ): StreakFreezeVisualSnapshot {
   const cfg = normalizeLoyaltyAdminConfig(rawConfig);
-  const state = ensureTodayLoyaltyAccountState(rawState, todayWib);
+  const state = ensureTodayLoyaltyAccountState(rawState, todayWib, cfg);
 
   if (!cfg.enabled || !cfg.streakEnabled) {
     return {
@@ -702,7 +1019,7 @@ export function applyAutoOnlineStreakTransition(
   noticeText?: string;
 } {
   const cfg = normalizeLoyaltyAdminConfig(rawConfig);
-  const base = ensureTodayLoyaltyAccountState(rawState, todayWib);
+  const base = ensureTodayLoyaltyAccountState(rawState, todayWib, cfg);
 
   if (!cfg.enabled || !cfg.streakEnabled) {
     return { changed: false, nextState: base, pointsEarned: 0 };
@@ -1262,7 +1579,9 @@ export interface DailyLoyaltyRealActivityStats {
 export function computeDailyTxActivityStats(
   accountId: string,
   transactions: Transaction[],
-  todayWib: string = getWibDateString()
+  todayWibOrCycle:
+    | string
+    | { startMs: number; nextResetMs?: number | null; manualResetAtMs?: number } = getWibDateString()
 ): DailyLoyaltyRealActivityStats {
   let transferCountToday = 0;
   let transferAmountToday = 0;
@@ -1271,12 +1590,29 @@ export function computeDailyTxActivityStats(
   let goldBuyCountToday = 0;
   let goldSellCountToday = 0;
 
+  const isWindowFilter = typeof todayWibOrCycle === 'object' && todayWibOrCycle !== null;
+  const effectiveStartMs = isWindowFilter
+    ? Math.max(todayWibOrCycle.startMs || 0, todayWibOrCycle.manualResetAtMs || 0)
+    : 0;
+  const effectiveEndMs =
+    isWindowFilter &&
+    typeof todayWibOrCycle.nextResetMs === 'number' &&
+    Number.isFinite(todayWibOrCycle.nextResetMs)
+      ? todayWibOrCycle.nextResetMs
+      : null;
+  const targetYmd = typeof todayWibOrCycle === 'string' ? todayWibOrCycle : getWibDateString();
+
   for (const tx of transactions) {
     if (tx.accountId !== accountId) continue;
     if (tx.status === 'pending' || tx.status === 'rejected') continue;
     const tsMs = Date.parse(tx.timestamp || '');
     if (!Number.isFinite(tsMs)) continue;
-    if (getWibDateString(tsMs) !== todayWib) continue;
+    if (isWindowFilter) {
+      if (tsMs < effectiveStartMs) continue;
+      if (effectiveEndMs !== null && tsMs >= effectiveEndMs) continue;
+    } else {
+      if (getWibDateString(tsMs) !== targetYmd) continue;
+    }
 
     dailyTxCountToday += 1;
     const t = String(tx.type || '').toLowerCase();
@@ -1327,7 +1663,9 @@ export function evaluateDailyLoyaltyMissionProgress(
   mission: EffectiveLoyaltyDailyMission,
   rawState: LoyaltyAccountState | undefined,
   txStats: DailyLoyaltyRealActivityStats,
-  todayWib: string = getWibDateString()
+  todayWib: string = getWibDateString(),
+  rawConfig?: Partial<LoyaltyAdminConfig> | null,
+  nowMs: number = Date.now()
 ): {
   current: number;
   target: number;
@@ -1335,7 +1673,7 @@ export function evaluateDailyLoyaltyMissionProgress(
   completed: boolean;
   claimed: boolean;
 } {
-  const state = ensureTodayLoyaltyAccountState(rawState, todayWib);
+  const state = ensureTodayLoyaltyAccountState(rawState, todayWib, rawConfig, nowMs);
   const counters = state.dailyCounters || {};
   const claimedIds = state.dailyClaimedMissionIds || [];
   const claimed = claimedIds.includes(mission.id);

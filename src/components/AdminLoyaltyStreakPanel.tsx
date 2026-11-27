@@ -24,6 +24,7 @@ import {
   Send,
   RefreshCw,
   Crown,
+  Clock,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { isAdminCardAccount } from '../utils/bankUtils';
@@ -32,16 +33,21 @@ import {
   DEFAULT_LOYALTY_EXCHANGE_RATES,
   LOYALTY_100_DAILY_MISSIONS,
   LOYALTY_MISSION_CATEGORY_META,
+  LOYALTY_MISSION_RESET_OPTIONS,
+  WIB_DAY_OF_WEEK_OPTIONS,
   computeStreakVisualSnapshot,
   formatLoyaltyRewardLabel,
+  formatMissionResetCountdown,
   getResolvedLoyaltyRedeemPackages,
   getWibDateString,
   normalizeLoyaltyAdminConfig,
+  resolveMissionResetCycleWindow,
 } from '../utils/loyaltySystemUtils';
 import {
   LoyaltyCustomRedeemPackage,
   LoyaltyDailyMissionCategory,
   LoyaltyDailyMissionOverride,
+  LoyaltyMissionResetMode,
   LoyaltyRedeemTarget,
   LoyaltyRedemptionRecord,
 } from '../types/bank';
@@ -118,6 +124,17 @@ export const AdminLoyaltyStreakPanel: React.FC<AdminLoyaltyStreakPanelProps> = (
   const [rewardMultiplierDraft, setRewardMultiplierDraft] = useState<string>(
     String(cfg.missionRewardMultiplier || 1)
   );
+  const [missionResetModeDraft, setMissionResetModeDraft] = useState<LoyaltyMissionResetMode>(
+    cfg.missionResetMode || 'weekly'
+  );
+  const [missionResetDayDraft, setMissionResetDayDraft] = useState<number>(
+    cfg.missionResetDayOfWeek ?? 1
+  );
+  const [missionResetHourDraft, setMissionResetHourDraft] = useState<number>(
+    cfg.missionResetHourWib ?? 0
+  );
+  const [confirmMissionResetNow, setConfirmMissionResetNow] = useState<boolean>(false);
+  const [liveClockMs, setLiveClockMs] = useState<number>(() => Date.now());
 
   // 3 Standard Exchange Package Drafts
   const [cashPtsDraft, setCashPtsDraft] = useState<string>(
@@ -246,9 +263,37 @@ export const AdminLoyaltyStreakPanel: React.FC<AdminLoyaltyStreakPanelProps> = (
     setExpireAfterDraft(String(cfg.streakExpireAfterDays || 3));
     setActiveMissionCountDraft(String(cfg.activeDailyMissionCount || 100));
     setRewardMultiplierDraft(String(cfg.missionRewardMultiplier || 1));
+    setMissionResetModeDraft(cfg.missionResetMode || 'weekly');
+    setMissionResetDayDraft(cfg.missionResetDayOfWeek ?? 1);
+    setMissionResetHourDraft(cfg.missionResetHourWib ?? 0);
     setOverridesDraft({ ...(cfg.missionOverrides || {}) });
     setAchOverridesDraft({ ...(cfg.achievementRewardOverrides || {}) });
   }, [cfg]);
+
+  useEffect(() => {
+    if (activeSubTab !== 'missions_achievements') return;
+    setLiveClockMs(Date.now());
+    const id = window.setInterval(() => setLiveClockMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [activeSubTab]);
+
+  const draftMissionCyclePreview = useMemo(
+    () =>
+      resolveMissionResetCycleWindow(
+        {
+          ...cfg,
+          missionResetMode: missionResetModeDraft,
+          missionResetDayOfWeek: missionResetDayDraft,
+          missionResetHourWib: missionResetHourDraft,
+        },
+        liveClockMs
+      ),
+    [cfg, missionResetModeDraft, missionResetDayDraft, missionResetHourDraft, liveClockMs]
+  );
+
+  const selectedResetOptionMeta =
+    LOYALTY_MISSION_RESET_OPTIONS.find((o) => o.mode === missionResetModeDraft) ||
+    LOYALTY_MISSION_RESET_OPTIONS[2];
 
   const notify = (text: string) => {
     setLocalMsg(text);
@@ -541,6 +586,9 @@ export const AdminLoyaltyStreakPanel: React.FC<AdminLoyaltyStreakPanelProps> = (
       streakExpireAfterDays: Math.max(3, Number(expireAfterDraft) || 3),
       activeDailyMissionCount: Math.max(1, Math.min(100, Number(activeMissionCountDraft) || 100)),
       missionRewardMultiplier: Math.max(0.25, Math.min(10, Number(rewardMultiplierDraft) || 1)),
+      missionResetMode: missionResetModeDraft,
+      missionResetDayOfWeek: missionResetDayDraft,
+      missionResetHourWib: missionResetHourDraft,
       missionOverrides: overridesDraft,
       achievementRewardOverrides: achOverridesDraft,
     });
@@ -1679,26 +1727,181 @@ export const AdminLoyaltyStreakPanel: React.FC<AdminLoyaltyStreakPanelProps> = (
         </div>
       )}
 
-      {/* ================= SUB-TAB 3: 100 MISI HARIAN & PENCAPAIAN ================= */}
+      {/* ================= SUB-TAB 3: 100 MISI HARIAN, JADWAL RESET 7 OPSI & PENCAPAIAN ================= */}
       {activeSubTab === 'missions_achievements' && (
-        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5 space-y-4">
+        <div className="rounded-2xl border border-slate-800 bg-slate-950 p-5 space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
             <div>
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Sliders className="h-4 w-4 text-amber-400" />
-                <span>Pengaturan 100 Misi Aktif Harian &amp; Pencapaian Utama</span>
+                <span>Pengaturan 100 Misi Aktif Loyalty, Jadwal Reset (7 Pilihan) &amp; Pencapaian</span>
               </h3>
               <p className="text-[11px] text-slate-400">
-                Kendalikan jumlah misi aktif per hari (1–100), pengali hadiah global, target tiap misi, dan hadiah poin pencapaian.
+                Atur jadwal reset 100 Misi Aktif Loyalty (default Mingguan setiap Senin 00:00 WIB), jumlah misi, pengali hadiah, dan Pencapaian Utama. Auto-Streak &amp; batas tukar poin tetap harian 00:00 WIB.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleSaveGlobalConfig}
-              className="min-h-[40px] rounded-xl bg-amber-400 hover:bg-amber-300 px-5 py-2 text-xs font-black text-slate-950 whitespace-nowrap cursor-pointer"
-            >
-              Simpan 100 Misi &amp; Pencapaian
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmMissionResetNow((v) => !v)}
+                className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-950/40 hover:bg-rose-900/50 px-3.5 py-2 text-xs font-bold text-rose-200 whitespace-nowrap cursor-pointer"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>Reset Misi Sekarang</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveGlobalConfig}
+                className="min-h-[40px] rounded-xl bg-amber-400 hover:bg-amber-300 px-5 py-2 text-xs font-black text-slate-950 whitespace-nowrap cursor-pointer"
+              >
+                Simpan Misi &amp; Jadwal Reset
+              </button>
+            </div>
+          </div>
+
+          {confirmMissionResetNow && (
+            <div className="rounded-xl border border-rose-500/50 bg-rose-950/40 p-3.5 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-xs text-rose-100">
+                <strong>Konfirmasi Reset Paksa 100 Misi:</strong> Mengosongkan progres &amp; status klaim 100 Misi Loyalty seluruh akun ({fleetData.rows.length} akun) detik ini juga tanpa menunggu jadwal siklus berikutnya.
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-allow-readonly="true"
+                  onClick={() => setConfirmMissionResetNow(false)}
+                  className="min-h-[36px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-300 cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const res = adminBulkResetDailyLoyaltyMissions();
+                    notify(res.message);
+                    setConfirmMissionResetNow(false);
+                  }}
+                  className="min-h-[36px] rounded-lg bg-rose-500 hover:bg-rose-400 px-4 py-1.5 text-xs font-black text-white cursor-pointer"
+                >
+                  Ya, Reset Progres Sekarang
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 7 Pilihan Jadwal Reset 100 Misi Loyalty */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 shrink-0" />
+                  <span>7 Pilihan Jadwal Reset 100 Misi Aktif Loyalty</span>
+                </h4>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Perubahan jadwal langsung berlaku pada siklus aktif saat Anda menekan Simpan. Khusus 100 Misi Loyalty saja.
+                </p>
+              </div>
+              <span className="font-mono tabular-nums text-[11px] font-bold text-amber-300">
+                Aktif Tersimpan: {resolveMissionResetCycleWindow(cfg, liveClockMs).shortScheduleLabel}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+              {LOYALTY_MISSION_RESET_OPTIONS.map((opt, idx) => {
+                const selected = missionResetModeDraft === opt.mode;
+                return (
+                  <button
+                    key={opt.mode}
+                    type="button"
+                    onClick={() => setMissionResetModeDraft(opt.mode)}
+                    className={`min-h-[82px] text-left rounded-xl border p-3 transition flex flex-col justify-between gap-1.5 cursor-pointer ${
+                      selected
+                        ? 'border-amber-400 bg-amber-500/15 text-white'
+                        : 'border-slate-800 bg-slate-950/75 text-slate-300 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="font-mono text-[10px] text-slate-400">0{idx + 1}</span>
+                      {opt.isDefault && (
+                        <span className="text-[10px] font-bold text-emerald-300">Default</span>
+                      )}
+                    </div>
+                    <p className={`text-xs font-bold leading-snug ${selected ? 'text-amber-300' : 'text-white'}`}>
+                      {opt.shortLabel}
+                    </p>
+                    <p className="text-[10px] leading-tight text-slate-400 line-clamp-2">
+                      {opt.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Day of Week, WIB Hour Picker & Live Preview Strip */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
+              <div className="md:col-span-4 rounded-xl border border-slate-800 bg-slate-950 p-3 space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-300 block">
+                  Patokan Hari Reset (Senin–Minggu)
+                </label>
+                <select
+                  value={missionResetDayDraft}
+                  disabled={!selectedResetOptionMeta.supportsDayPicker}
+                  onChange={(e) => setMissionResetDayDraft(Number(e.target.value))}
+                  className="w-full min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-bold text-white disabled:opacity-45 disabled:cursor-not-allowed"
+                >
+                  {WIB_DAY_OF_WEEK_OPTIONS.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      Setiap Hari {d.label}{d.value === 1 ? ' (Default)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-400">
+                  {selectedResetOptionMeta.supportsDayPicker
+                    ? 'Menentukan hari pergantian siklus untuk mode pilihan.'
+                    : 'Mode ini memakai siklus kalender tetap (tidak memakai patokan hari).'}
+                </p>
+              </div>
+
+              <div className="md:col-span-3 rounded-xl border border-slate-800 bg-slate-950 p-3 space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-300 block">
+                  Jam Pergantian Reset (WIB)
+                </label>
+                <select
+                  value={missionResetHourDraft}
+                  disabled={!selectedResetOptionMeta.supportsHourPicker}
+                  onChange={(e) => setMissionResetHourDraft(Number(e.target.value))}
+                  className="w-full min-h-[40px] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-xs font-bold text-cyan-300 tabular-nums disabled:opacity-45 disabled:cursor-not-allowed"
+                >
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <option key={h} value={h}>
+                      Pukul {String(h).padStart(2, '0')}:00 WIB{h === 0 ? ' (Default)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-400">
+                  {selectedResetOptionMeta.supportsHourPicker
+                    ? 'Bawaan 00:00 WIB, dapat diubah ke jam berapa saja.'
+                    : 'Mode Manual tidak menjadwalkan jam reset otomatis.'}
+                </p>
+              </div>
+
+              <div className="md:col-span-5 rounded-xl border border-cyan-500/35 bg-cyan-950/20 p-3 flex flex-col justify-between space-y-1.5">
+                <div className="flex items-center justify-between gap-2 text-[10px] text-cyan-300 font-bold">
+                  <span>Pratinjau Jadwal &amp; Hitung Mundur Nasabah</span>
+                  <span className="font-mono text-slate-400">WIB (UTC+7)</span>
+                </div>
+                <p className="text-xs font-bold text-white">
+                  {draftMissionCyclePreview.scheduleLabel}
+                </p>
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono tabular-nums">
+                  <span className="text-emerald-300 font-semibold">
+                    {formatMissionResetCountdown(draftMissionCyclePreview, liveClockMs)}
+                  </span>
+                  <span className="text-slate-400">
+                    {draftMissionCyclePreview.nextResetDateTimeText}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">

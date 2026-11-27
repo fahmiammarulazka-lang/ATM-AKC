@@ -122,6 +122,7 @@ import {
   getWibDateString,
   MANDATORY_TRANSFER_ADMIN_FEE_PERCENT,
   normalizeLoyaltyAdminConfig,
+  resolveMissionResetCycleWindow,
 } from '../utils/loyaltySystemUtils';
 import {
   BankAccount,
@@ -292,9 +293,11 @@ import {
   DreamPocket,
   DreamPocketAdminConfig,
   SafeVaultAccountState,
+  NameChangeHistoryEntry,
   LoyaltyAccountState,
   LoyaltyAdminConfig,
 } from '../types/bank';
+import { PROFILE_RENAME_DIAMOND_COST } from '../data/profileCustomizationCatalog';
 import {
   DAILY_ACHIEVEMENT_CATALOG,
   computeChatReputationRank,
@@ -1184,6 +1187,22 @@ interface BankContextType {
   regenerateAccountNumberWithPin: (accountId: string, pin: string) => { success: boolean; message: string; newAccountNumber?: string };
   changePin: (accountId: string, oldPin: string, newPin: string) => { success: boolean; message: string };
   updatePhone: (accountId: string, newPhone: string) => { success: boolean; message: string };
+  renameAccountWithDiamond: (newName: string) => {
+    success: boolean;
+    message: string;
+    newName?: string;
+    diamondsSpent?: number;
+    insufficientDiamonds?: boolean;
+  };
+  updateAccountProfileDetails: (patch: {
+    profileBio?: string;
+    phone?: string;
+    email?: string;
+    city?: string;
+    avatarPresetId?: string;
+    avatarFrameId?: string;
+    featuredTitle?: string;
+  }) => { success: boolean; message: string };
 
   // Switch / Login to Old Card using that Old Card's 6-Digit PIN (Bukan PIN Admin!)
   loginToCardWithPin: (
@@ -21292,14 +21311,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const nextStatus: CardStatus = target.cardStatus === 'active' ? 'frozen' : 'active';
-    setAccounts((prev) =>
-      prev.map((acc) => {
-        if (acc.id === accountId) {
-          return { ...acc, cardStatus: nextStatus };
-        }
-        return acc;
-      })
-    );
+    const stampMs = Date.now();
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const nextAccounts = latestPool.map((acc) => {
+      if (acc.id === accountId) {
+        return { ...acc, cardStatus: nextStatus, accountUpdatedAtMs: stampMs };
+      }
+      return acc;
+    });
+    accountsRef.current = nextAccounts;
+    latestServerAccountsRef.current = nextAccounts;
+    setAccounts(nextAccounts);
+    void flushMasterStateToCloud({ accounts: nextAccounts });
 
     if (nextStatus === 'frozen') {
       addNotification(
@@ -25161,11 +25184,208 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!newPhone || newPhone.length < 10) {
       return { success: false, message: 'Nomor telepon tidak valid' };
     }
-    setAccounts((prev) =>
-      prev.map((acc) => (acc.id === accountId ? { ...acc, phone: newPhone } : acc))
-    );
+    commitAccountMutationPermanent(accountId, (acc) => ({
+      ...acc,
+      phone: newPhone,
+    }));
     addNotification('Nomor HP Diperbarui 📱', `Nomor telepon terdaftar berhasil diganti ke ${newPhone}.`, 'info');
     return { success: true, message: 'Nomor telepon terdaftar berhasil diubah!' };
+  };
+
+  const renameAccountWithDiamond = (
+    newName: string
+  ): {
+    success: boolean;
+    message: string;
+    newName?: string;
+    diamondsSpent?: number;
+    insufficientDiamonds?: boolean;
+  } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAcc =
+      latestPool.find((a) => a.id === currentAccountIdRef.current) ||
+      latestPool.find((a) => a.id === currentAccount?.id) ||
+      currentAccount;
+
+    if (!activeAcc) {
+      return { success: false, message: 'Silakan login terlebih dahulu sebelum mengganti nama.' };
+    }
+
+    const cleanName = newName.trim().replace(/\s+/g, ' ');
+    if (cleanName.length < 3) {
+      playAtmSound('alert');
+      return { success: false, message: 'Nama baru wajib berisi minimal 3 huruf/karakter!' };
+    }
+    if (cleanName.length > 60) {
+      playAtmSound('alert');
+      return { success: false, message: 'Nama baru maksimal 60 karakter.' };
+    }
+    if (cleanName === activeAcc.fullName.trim()) {
+      playAtmSound('alert');
+      return { success: false, message: 'Nama baru masih sama dengan nama akun Anda saat ini.' };
+    }
+
+    const isAdminTier = isAdminCardAccount(activeAcc);
+    const diamondCost = PROFILE_RENAME_DIAMOND_COST;
+    const currentDiamonds = activeAcc.diamonds || 0;
+
+    if (!isAdminTier && currentDiamonds < diamondCost) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        insufficientDiamonds: true,
+        message: `Saldo Diamond tidak cukup! Dibutuhkan ${diamondCost} Diamond untuk ganti nama (Saldo Anda: ${currentDiamonds.toLocaleString('id-ID')} Diamond).`,
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const oldName = activeAcc.fullName;
+    const historyEntry: NameChangeHistoryEntry = {
+      id: `rename-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      oldName,
+      newName: cleanName,
+      diamondCost: isAdminTier ? 0 : diamondCost,
+      isAdminFree: isAdminTier,
+      timestampIso: nowIso,
+    };
+
+    const renameNote = isAdminTier
+      ? `Ganti nama profil "${oldName}" → "${cleanName}" (Kartu Tier Admin ∞ Diamond — gratis selamanya)`
+      : `Ganti nama profil "${oldName}" → "${cleanName}" (-${diamondCost} Diamond)`;
+
+    const renameTx: Transaction = {
+      id: `tx-rename-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      accountId: activeAcc.id,
+      type: 'belanja_fitur',
+      title: isAdminTier
+        ? 'Ganti Nama Profil (Tier Admin ∞)'
+        : `Ganti Nama Profil (${diamondCost} Diamond)`,
+      amount: 0,
+      balanceAfter: activeAcc.balance,
+      status: 'success',
+      referenceNo: `RNM${Date.now().toString().slice(-8)}`,
+      timestamp: nowIso,
+      balanceDeducted: false,
+      category: 'lainnya',
+      description: renameNote,
+      note: renameNote,
+    };
+
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+    const nextTxs = [renameTx, ...latestTxs];
+    transactionsRef.current = nextTxs;
+    setTransactions(nextTxs);
+
+    // Sinkronkan juga ke permintaan keluarga & daftar rekening favorit yang merujuk akun ini
+    const nextFamilies = familiesRef.current.map((fam) => ({
+      ...fam,
+      pendingRequests: fam.pendingRequests.map((req) =>
+        req.requesterAccountId === activeAcc.id ? { ...req, requesterName: cleanName } : req
+      ),
+    }));
+    familiesRef.current = nextFamilies;
+    setFamilies(nextFamilies);
+
+    const nextFavorites = favorites.map((fav) =>
+      fav.accountNumber === activeAcc.accountNumber ? { ...fav, ownerName: cleanName } : fav
+    );
+    setFavorites(nextFavorites);
+
+    commitAccountMutationPermanent(
+      activeAcc.id,
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          fullName: cleanName,
+          diamonds: isAdminTier ? a.diamonds : Math.max(0, (a.diamonds || 0) - diamondCost),
+          nameChangeHistory: [historyEntry, ...(a.nameChangeHistory || [])].slice(0, 50),
+        }),
+      {
+        transactions: nextTxs,
+        families: nextFamilies,
+      }
+    );
+
+    void flushMasterStateToCloud({
+      favorites: nextFavorites,
+    });
+
+    addNotification(
+      'Nama Profil Diperbarui ✨',
+      isAdminTier
+        ? `Nama akun berhasil diganti dari "${oldName}" menjadi "${cleanName}" (Kartu Tier Admin ∞ Diamond).`
+        : `Nama akun berhasil diganti dari "${oldName}" menjadi "${cleanName}" menggunakan ${diamondCost} Diamond dan telah tersinkron ke seluruh fitur.`,
+      'success',
+      {
+        category: 'security',
+        targetView: 'dashboard',
+        targetDashboardTab: 'ringkasan',
+        accountId: activeAcc.id,
+      }
+    );
+
+    playAtmSound('success');
+    return {
+      success: true,
+      newName: cleanName,
+      diamondsSpent: isAdminTier ? 0 : diamondCost,
+      message: isAdminTier
+        ? `Nama berhasil diganti menjadi "${cleanName}" dan tersinkron ke semua fitur! (Kartu Tier Admin: Diamond tetap ∞)`
+        : `Nama berhasil diganti menjadi "${cleanName}" (-${diamondCost} Diamond), tersinkron ke seluruh fitur & tercatat di Mutasi!`,
+    };
+  };
+
+  const updateAccountProfileDetails = (patch: {
+    profileBio?: string;
+    phone?: string;
+    email?: string;
+    city?: string;
+    avatarPresetId?: string;
+    avatarFrameId?: string;
+    featuredTitle?: string;
+  }): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAcc =
+      latestPool.find((a) => a.id === currentAccountIdRef.current) ||
+      latestPool.find((a) => a.id === currentAccount?.id) ||
+      currentAccount;
+
+    if (!activeAcc) {
+      return { success: false, message: 'Silakan login terlebih dahulu.' };
+    }
+
+    if (patch.phone !== undefined) {
+      const cleanPhone = patch.phone.trim();
+      if (cleanPhone.length > 0 && cleanPhone.replace(/[^\d+]/g, '').length < 8) {
+        playAtmSound('alert');
+        return { success: false, message: 'Nomor HP minimal 8 digit angka.' };
+      }
+    }
+
+    if (patch.email !== undefined) {
+      const cleanEmail = patch.email.trim();
+      if (cleanEmail.length > 0 && (!cleanEmail.includes('@') || !cleanEmail.includes('.'))) {
+        playAtmSound('alert');
+        return { success: false, message: 'Format email tidak valid.' };
+      }
+    }
+
+    commitAccountMutationPermanent(activeAcc.id, (a) => ({
+      ...a,
+      ...(patch.profileBio !== undefined ? { profileBio: patch.profileBio.trim().slice(0, 180) } : {}),
+      ...(patch.phone !== undefined ? { phone: patch.phone.trim() } : {}),
+      ...(patch.email !== undefined ? { email: patch.email.trim() } : {}),
+      ...(patch.city !== undefined ? { city: patch.city.trim().slice(0, 60) } : {}),
+      ...(patch.avatarPresetId !== undefined ? { avatarPresetId: patch.avatarPresetId } : {}),
+      ...(patch.avatarFrameId !== undefined ? { avatarFrameId: patch.avatarFrameId } : {}),
+      ...(patch.featuredTitle !== undefined ? { featuredTitle: patch.featuredTitle } : {}),
+    }));
+
+    playAtmSound('success');
+    return {
+      success: true,
+      message: 'Kustomisasi identitas & detail profil berhasil disimpan dan tersinkron ke Cloud!',
+    };
   };
 
   /**
@@ -26095,11 +26315,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       alias,
       avatarColor: 'bg-blue-600',
     };
-    setFavorites((prev) => [newFav, ...prev]);
+    const nextFavorites = [newFav, ...favorites];
+    setFavorites(nextFavorites);
+    void flushMasterStateToCloud({ favorites: nextFavorites });
   };
 
   const deleteFavorite = (id: string) => {
-    setFavorites((prev) => prev.filter((f) => f.id !== id));
+    const nextFavorites = favorites.filter((f) => f.id !== id);
+    setFavorites(nextFavorites);
+    void flushMasterStateToCloud({ favorites: nextFavorites });
   };
 
   const addScheduledPayment = (payment: Omit<ScheduledPayment, 'id' | 'accountId' | 'active'>) => {
@@ -28123,10 +28347,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     items: Array<{ key: string; delta: number; uniqueDailyTag?: string }>
   ) {
     if (!accountId || items.length === 0) return;
-    const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[accountId], todayWib);
+    const nowMs = Date.now();
+    const todayWib = getWibDateString(nowMs);
+    const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
+    const cycle = resolveMissionResetCycleWindow(cfg, nowMs);
+    const rawPrev = loyaltyMapRef.current[accountId];
+    const prev = ensureTodayLoyaltyAccountState(rawPrev, todayWib, cfg, nowMs);
     const counters = { ...(prev.dailyCounters || {}) };
-    let mutated = prev.dailyActivityDateWib !== todayWib;
+    let mutated =
+      rawPrev?.missionCycleKey !== cycle.cycleKey || prev.dailyActivityDateWib !== todayWib;
 
     for (const item of items) {
       if (!item.key || !Number.isFinite(item.delta) || item.delta <= 0) continue;
@@ -28142,6 +28371,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!mutated) return;
     const nextState: LoyaltyAccountState = {
       ...prev,
+      missionCycleKey: cycle.cycleKey,
       dailyActivityDateWib: todayWib,
       dailyCounters: counters,
     };
@@ -28185,7 +28415,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Sistem Auto-Streak sedang dinonaktifkan sementara oleh Admin.' };
     }
     const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib, cfg);
     if (prev.freezeStage === 3) {
       return {
         success: false,
@@ -28237,7 +28467,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib, cfg);
     const nextState: LoyaltyAccountState = {
       ...prev,
       recoveryCards: isAdminTier ? UNLIMITED_BALANCE : (prev.recoveryCards || 0) + qty,
@@ -28278,7 +28508,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
     const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
     const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib, cfg);
     const isAdminTier = isAdminCardAccount(activeAcc);
 
     if (prev.freezeStage !== 3 && !(prev.manualFreezeLock && (prev.freezeStage || 0) > 0)) {
@@ -28338,7 +28568,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
     const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    const prev = ensureTodayLoyaltyAccountState(
+      loyaltyMapRef.current[activeAcc.id],
+      todayWib,
+      loyaltyConfigRef.current
+    );
     const recentDates = Array.from(new Set([...(prev.recentActiveDatesWib || []), todayWib])).slice(-14);
     const nextState: LoyaltyAccountState = {
       ...prev,
@@ -28369,15 +28603,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
     const allMissions = getEffectiveDailyLoyaltyMissions(cfg);
     const mission = allMissions.find((m) => m.id === missionId && m.enabled);
-    if (!mission) return { success: false, message: 'Misi harian tidak ditemukan atau sedang nonaktif.' };
+    if (!mission) return { success: false, message: 'Misi Loyalty tidak ditemukan atau sedang nonaktif.' };
 
-    const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
-    const txStats = computeDailyTxActivityStats(activeAcc.id, transactions, todayWib);
-    const progress = evaluateDailyLoyaltyMissionProgress(mission, prev, txStats, todayWib);
+    const nowMs = Date.now();
+    const todayWib = getWibDateString(nowMs);
+    const cycle = resolveMissionResetCycleWindow(cfg, nowMs);
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib, cfg, nowMs);
+    const txStats = computeDailyTxActivityStats(activeAcc.id, transactions, {
+      startMs: cycle.cycleStartMs,
+      nextResetMs: cycle.nextResetMs,
+      manualResetAtMs: cycle.manualResetAtMs,
+    });
+    const progress = evaluateDailyLoyaltyMissionProgress(mission, prev, txStats, todayWib, cfg, nowMs);
 
     if (progress.claimed) {
-      return { success: false, message: 'Hadiah misi harian ini sudah Anda klaim hari ini.' };
+      return { success: false, message: `Hadiah misi ini sudah Anda klaim pada ${cycle.periodNoun}.` };
     }
     // Aturan Ketat: Wajib dikerjakan nyata (berlaku juga untuk Kartu Tier Admin!)
     if (!progress.completed) {
@@ -28393,6 +28633,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextState: LoyaltyAccountState = {
       ...prev,
       points: isAdminTier ? UNLIMITED_BALANCE : (prev.points || 0) + mission.rewardPoints,
+      missionCycleKey: cycle.cycleKey,
       dailyActivityDateWib: todayWib,
       dailyClaimedMissionIds: nextClaimed,
     };
@@ -28420,12 +28661,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
     const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
     const activeMissions = getEffectiveDailyLoyaltyMissions(cfg).filter((m) => m.enabled);
-    const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
-    const txStats = computeDailyTxActivityStats(activeAcc.id, transactions, todayWib);
+    const nowMs = Date.now();
+    const todayWib = getWibDateString(nowMs);
+    const cycle = resolveMissionResetCycleWindow(cfg, nowMs);
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib, cfg, nowMs);
+    const txStats = computeDailyTxActivityStats(activeAcc.id, transactions, {
+      startMs: cycle.cycleStartMs,
+      nextResetMs: cycle.nextResetMs,
+      manualResetAtMs: cycle.manualResetAtMs,
+    });
 
     const readyList = activeMissions.filter((m) => {
-      const p = evaluateDailyLoyaltyMissionProgress(m, prev, txStats, todayWib);
+      const p = evaluateDailyLoyaltyMissionProgress(m, prev, txStats, todayWib, cfg, nowMs);
       return p.completed && !p.claimed;
     });
 
@@ -28444,6 +28691,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextState: LoyaltyAccountState = {
       ...prev,
       points: isAdminTier ? UNLIMITED_BALANCE : (prev.points || 0) + totalEarned,
+      missionCycleKey: cycle.cycleKey,
       dailyActivityDateWib: todayWib,
       dailyClaimedMissionIds: nextClaimed,
     };
@@ -28467,7 +28715,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
     const def = DAILY_ACHIEVEMENT_CATALOG.find((a) => a.id === achievementId);
     if (!def) return { success: false, message: 'Pencapaian tidak ditemukan.' };
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id]);
+    const prev = ensureTodayLoyaltyAccountState(
+      loyaltyMapRef.current[activeAcc.id],
+      getWibDateString(),
+      loyaltyConfigRef.current
+    );
     if (prev.claimedAchievementIds.includes(achievementId)) {
       return { success: false, message: 'Hadiah pencapaian ini sudah pernah diklaim.' };
     }
@@ -28563,7 +28815,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const isAdminTier = isAdminCardAccount(activeAcc);
     const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib, cfg);
 
     // Cek batas penukaran harian bila diaktifkan Admin (Kartu Admin bebas batas)
     const todayCount = prev.dailyRedemptionDateWib === todayWib ? prev.dailyRedemptionCount || 0 : 0;
@@ -28733,7 +28985,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const acc = accountsRef.current.find((a) => a.id === accountId);
     if (!acc) return { success: false, message: 'Nasabah tidak ditemukan.' };
     const todayWib = getWibDateString();
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[accountId], todayWib);
+    const prev = ensureTodayLoyaltyAccountState(
+      loyaltyMapRef.current[accountId],
+      todayWib,
+      loyaltyConfigRef.current
+    );
     const isAdminTier = isAdminCardAccount(acc);
     let nextState: LoyaltyAccountState = { ...prev };
     let msg = '';
@@ -28808,7 +29064,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ): { success: boolean; message: string } => {
     const acc = accountsRef.current.find((a) => a.id === accountId);
     if (!acc) return { success: false, message: 'Nasabah tidak ditemukan.' };
-    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[accountId]);
+    const prev = ensureTodayLoyaltyAccountState(
+      loyaltyMapRef.current[accountId],
+      getWibDateString(),
+      loyaltyConfigRef.current
+    );
     const isAdminTier = isAdminCardAccount(acc);
     const nextPoints = isAdminTier
       ? UNLIMITED_BALANCE
@@ -28838,7 +29098,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let affectedCount = 0;
 
     for (const acc of accountsRef.current) {
-      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib);
+      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib, cfg);
       const visual = computeStreakVisualSnapshot(prev, cfg, todayWib);
       if (visual.stage > 0 || prev.manualFreezeLock || (prev.freezeStage || 0) > 0) {
         const restored = Math.max(1, prev.frozenStreakDays || prev.streakDays || visual.recoverableStreak || 1);
@@ -28879,7 +29139,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let affectedCount = 0;
 
     for (const acc of accountsRef.current) {
-      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib);
+      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib, loyaltyConfigRef.current);
       const isAdminTier = isAdminCardAccount(acc);
       nextMap[acc.id] = {
         ...prev,
@@ -28910,7 +29170,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let affectedCount = 0;
 
     for (const acc of accountsRef.current) {
-      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib);
+      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib, loyaltyConfigRef.current);
       const isAdminTier = isAdminCardAccount(acc);
       nextMap[acc.id] = {
         ...prev,
@@ -28937,14 +29197,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     message: string;
     affectedCount: number;
   } => {
-    const todayWib = getWibDateString();
+    const nowMs = Date.now();
+    const todayWib = getWibDateString(nowMs);
+    const nextCfg = normalizeLoyaltyAdminConfig({
+      ...loyaltyConfigRef.current,
+      missionManualResetAtMs: nowMs,
+      missionManualResetNonce: (loyaltyConfigRef.current.missionManualResetNonce || 0) + 1,
+      updatedAtMs: nowMs,
+    });
+    const cycle = resolveMissionResetCycleWindow(nextCfg, nowMs);
     const nextMap = { ...loyaltyMapRef.current };
     let affectedCount = 0;
 
     for (const acc of accountsRef.current) {
-      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib);
+      const prev = ensureTodayLoyaltyAccountState(nextMap[acc.id], todayWib, nextCfg, nowMs);
       nextMap[acc.id] = {
         ...prev,
+        missionCycleKey: cycle.cycleKey,
         dailyActivityDateWib: todayWib,
         dailyCounters: {},
         dailyClaimedMissionIds: [],
@@ -28952,14 +29221,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       affectedCount += 1;
     }
 
+    loyaltyConfigRef.current = nextCfg;
+    setLoyaltyConfig(nextCfg);
     loyaltyMapRef.current = nextMap;
     setLoyaltyMap(nextMap);
-    syncLoyaltyToServer(nextMap);
+    syncLoyaltyToServer(nextMap, nextCfg);
     playAtmSound('success');
     return {
       success: true,
       affectedCount,
-      message: `Progres 100 misi harian untuk ${affectedCount} akun berhasil direset paksa hari ini (${todayWib})!`,
+      message: `Progres & klaim 100 misi Loyalty untuk ${affectedCount} akun berhasil direset paksa (${cycle.shortScheduleLabel})!`,
     };
   };
 
@@ -39720,6 +39991,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         regenerateAccountNumberWithPin,
         changePin,
         updatePhone,
+        renameAccountWithDiamond,
+        updateAccountProfileDetails,
         loginToCardWithPin,
         switchCardWithAdminCode,
         adminBanCard,

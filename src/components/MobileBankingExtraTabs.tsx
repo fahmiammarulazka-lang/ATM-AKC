@@ -59,12 +59,13 @@ import {
   ensureTodayLoyaltyAccountState,
   evaluateDailyLoyaltyMissionProgress,
   formatLoyaltyRewardLabel,
+  formatMissionResetCountdown,
   getEffectiveAchievementRewardPoints,
   getEffectiveDailyLoyaltyMissions,
   getResolvedLoyaltyRedeemPackages,
   getWibDateString,
-  getWibResetCountdownText,
   normalizeLoyaltyAdminConfig,
+  resolveMissionResetCycleWindow,
 } from '../utils/loyaltySystemUtils';
 import {
   isSelfQrisTransferTarget,
@@ -285,6 +286,21 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     [loyaltyConfig]
   );
 
+  const [loyaltyClockMs, setLoyaltyClockMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (activeTab !== 'loyalty') return;
+    setLoyaltyClockMs(Date.now());
+    const id = window.setInterval(() => setLoyaltyClockMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [activeTab]);
+
+  const cycleBucket10s = Math.floor(loyaltyClockMs / 10_000);
+  const missionCycle = useMemo(
+    () => resolveMissionResetCycleWindow(normalizedLoyaltyConfig, loyaltyClockMs),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [normalizedLoyaltyConfig, cycleBucket10s]
+  );
+
   // Personal QRIS sekarang menyimpan Link Transfer Resmi Bank Nusantara agar saat discan nasabah lain langsung mengarah ke halaman Transfer terisi otomatis!
   const personalQrTransferLink = useMemo(() => {
     if (!currentAccount) return '';
@@ -400,7 +416,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     return { months, categoryTotals, curMonth, maxBar, savingsRatio };
   }, [currentAccountTransactions, currentAccount]);
 
-  const todayWib = getWibDateString();
+  const todayWib = getWibDateString(loyaltyClockMs);
 
   const dailyMissionRows = useMemo(() => {
     if (!currentAccount) return [];
@@ -408,14 +424,38 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     const txStats = computeDailyTxActivityStats(
       currentAccount.id,
       currentAccountTransactions,
-      todayWib
+      {
+        startMs: missionCycle.cycleStartMs,
+        nextResetMs: missionCycle.nextResetMs,
+        manualResetAtMs: missionCycle.manualResetAtMs,
+      }
     );
-    const state = ensureTodayLoyaltyAccountState(loyaltyMap[currentAccount.id], todayWib);
+    const state = ensureTodayLoyaltyAccountState(
+      loyaltyMap[currentAccount.id],
+      todayWib,
+      normalizedLoyaltyConfig,
+      loyaltyClockMs
+    );
     return effectiveMissions.map((mission) => ({
       mission,
-      evalResult: evaluateDailyLoyaltyMissionProgress(mission, state, txStats, todayWib),
+      evalResult: evaluateDailyLoyaltyMissionProgress(
+        mission,
+        state,
+        txStats,
+        todayWib,
+        normalizedLoyaltyConfig,
+        loyaltyClockMs
+      ),
     }));
-  }, [currentAccount, normalizedLoyaltyConfig, currentAccountTransactions, loyaltyMap, todayWib]);
+  }, [
+    currentAccount,
+    normalizedLoyaltyConfig,
+    currentAccountTransactions,
+    loyaltyMap,
+    todayWib,
+    missionCycle,
+    loyaltyClockMs,
+  ]);
 
   const missionSummary = useMemo(() => {
     const total = dailyMissionRows.length;
@@ -480,7 +520,9 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
       freezeStage: 0,
       frozenStreakDays: 0,
     },
-    todayWib
+    todayWib,
+    normalizedLoyaltyConfig,
+    loyaltyClockMs
   );
   const streakVisual = computeStreakVisualSnapshot(myLoyalty, normalizedLoyaltyConfig, todayWib);
   const myStatusesCount = chatStatuses.filter((s) => s.authorAccountId === currentAccount.id).length;
@@ -1857,7 +1899,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-black text-white">
-                        100 Misi Aktif Harian Poin Loyalty
+                        100 Misi Aktif Poin Loyalty
                       </h3>
                       <span className="rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-black text-emerald-300 tabular-nums">
                         {missionSummary.claimed}/{missionSummary.total} Diklaim
@@ -1868,11 +1910,26 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 text-[11px] text-slate-400 flex flex-wrap items-center gap-2">
-                      <span className="inline-flex items-center gap-1 text-cyan-300 font-semibold">
-                        <Clock className="h-3 w-3" /> {getWibResetCountdownText()}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-slate-400">
+                      <span className="font-bold text-amber-300">
+                        {missionCycle.scheduleLabel}
                       </span>
-                      <span>• Wajib kerjakan aktivitas nyata baru hari ini (termasuk Tier Admin)</span>
+                      <span aria-hidden="true" className="text-slate-600">·</span>
+                      <span className="inline-flex items-center gap-1 font-mono tabular-nums text-cyan-300 font-semibold">
+                        <Clock className="h-3 w-3 shrink-0" />
+                        {formatMissionResetCountdown(missionCycle, loyaltyClockMs)}
+                      </span>
+                      {missionCycle.mode !== 'manual' && (
+                        <>
+                          <span aria-hidden="true" className="text-slate-600">·</span>
+                          <span className="font-mono tabular-nums text-slate-300">
+                            Berikutnya: {missionCycle.nextResetDateTimeText}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      Wajib kerjakan aktivitas nyata baru {missionCycle.periodNoun} (termasuk Tier Admin) · Auto-Streak &amp; batas tukar poin tetap reset harian 00:00 WIB
                     </p>
                   </div>
 
@@ -1886,7 +1943,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                           : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                       }`}
                     >
-                      Misi Harian ({missionSummary.total})
+                      Misi Aktif ({missionSummary.total})
                     </button>
                     <button
                       type="button"
