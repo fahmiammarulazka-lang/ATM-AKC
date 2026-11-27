@@ -104,8 +104,26 @@ import {
 } from '../services/timeMachineBackupService';
 import { isIncomingDmBlockedForViewer } from '../utils/chatMediaUtils';
 import {
+  DEFAULT_LEADERBOARD_MIN_ENTRY_CONFIG,
+  normalizeLeaderboardMinEntryConfig,
+} from '../utils/leaderboardUtils';
+import {
+  applyAutoOnlineStreakTransition,
+  calculateMandatoryTransferFee,
+  computeDailyTxActivityStats,
+  DEFAULT_LOYALTY_ADMIN_CONFIG as DEFAULT_LOYALTY_ADMIN_CONFIG_UTIL,
+  ensureTodayLoyaltyAccountState,
+  evaluateDailyLoyaltyMissionProgress,
+  getEffectiveDailyLoyaltyMissions,
+  getWibDateString,
+  MANDATORY_TRANSFER_ADMIN_FEE_PERCENT,
+  normalizeLoyaltyAdminConfig,
+} from '../utils/loyaltySystemUtils';
+import {
   BankAccount,
   DebtHistoryEntry,
+  LoyaltyRedeemTarget,
+  LoyaltyStreakFreezeStage,
   Transaction,
   LoanApplication,
   ScheduledPayment,
@@ -1788,12 +1806,35 @@ interface BankContextType {
   loyaltyConfig: LoyaltyAdminConfig;
   claimDailyCheckIn: () => { success: boolean; message: string; pointsEarned?: number; streak?: number };
   claimAchievementReward: (achievementId: string) => { success: boolean; message: string; pointsEarned?: number };
+  claimDailyLoyaltyMission: (missionId: string) => { success: boolean; message: string; pointsEarned?: number };
+  claimAllReadyLoyaltyMissions: () => {
+    success: boolean;
+    message: string;
+    claimedCount?: number;
+    pointsEarned?: number;
+  };
+  buyStreakRecoveryCard: (quantity?: number) => { success: boolean; message: string };
+  useStreakRecoveryCard: () => {
+    success: boolean;
+    message: string;
+    streak?: number;
+    pointsEarned?: number;
+  };
+  forfeitFrozenStreak: () => { success: boolean; message: string };
+  recordLoyaltyDailyActivity: (metricKey: string, delta?: number, uniqueDailyTag?: string) => void;
   redeemLoyaltyPoints: (
     pointsToSpend: number,
-    target: 'cash' | 'coin' | 'diamond'
+    target: LoyaltyRedeemTarget
   ) => { success: boolean; message: string };
   adminUpdateLoyaltyConfig: (partial: Partial<LoyaltyAdminConfig>) => { success: boolean; message: string };
   adminAdjustLoyaltyPoints: (accountId: string, points: number, mode: 'add' | 'set') => { success: boolean; message: string };
+  adminManageAccountStreak: (
+    accountId: string,
+    action: {
+      type: 'thaw_restore' | 'set_freeze_stage' | 'set_streak_days' | 'set_recovery_cards' | 'add_recovery_cards';
+      value?: number;
+    }
+  ) => { success: boolean; message: string };
   adminAdjustAccountDiamonds: (
     accountId: string,
     diamonds: number,
@@ -2711,6 +2752,10 @@ const DEFAULT_LEADERBOARD_SYSTEM_CONFIG: LeaderboardSystemConfig = {
   topBadgeCustomPrefix: 'Top',
   showTopBadgesOnCard: true,
   showTopBadgesInProfile: true,
+  minEntryConfig: {
+    ...DEFAULT_LEADERBOARD_MIN_ENTRY_CONFIG,
+    whitelistedAccountIds: [],
+  },
   categories: [
     {
       id: 'lb-cat-balance',
@@ -2720,6 +2765,8 @@ const DEFAULT_LEADERBOARD_SYSTEM_CONFIG: LeaderboardSystemConfig = {
       enabled: true,
       sortOrder: 1,
       accentColor: 'emerald',
+      minEntryEnabled: true,
+      minEntryValue: 0,
     },
     {
       id: 'lb-cat-spinCoins',
@@ -2729,6 +2776,8 @@ const DEFAULT_LEADERBOARD_SYSTEM_CONFIG: LeaderboardSystemConfig = {
       enabled: true,
       sortOrder: 2,
       accentColor: 'amber',
+      minEntryEnabled: true,
+      minEntryValue: 0,
     },
     {
       id: 'lb-cat-diamonds',
@@ -2738,8 +2787,33 @@ const DEFAULT_LEADERBOARD_SYSTEM_CONFIG: LeaderboardSystemConfig = {
       enabled: true,
       sortOrder: 3,
       accentColor: 'cyan',
+      minEntryEnabled: true,
+      minEntryValue: 0,
     },
   ],
+};
+
+const mergeLeaderboardConfigSafe = (
+  inc: Partial<LeaderboardSystemConfig> | undefined | null
+): LeaderboardSystemConfig => {
+  const safeInc = inc && typeof inc === 'object' ? inc : {};
+  const cats =
+    Array.isArray(safeInc.categories) && safeInc.categories.length > 0
+      ? safeInc.categories.map((c) => ({
+          ...c,
+          minEntryEnabled: c.minEntryEnabled !== false,
+          minEntryValue:
+            typeof c.minEntryValue === 'number' && Number.isFinite(c.minEntryValue)
+              ? Math.max(0, c.minEntryValue)
+              : 0,
+        }))
+      : DEFAULT_LEADERBOARD_SYSTEM_CONFIG.categories.map((c) => ({ ...c }));
+  return {
+    ...DEFAULT_LEADERBOARD_SYSTEM_CONFIG,
+    ...safeInc,
+    categories: cats,
+    minEntryConfig: normalizeLeaderboardMinEntryConfig(safeInc.minEntryConfig),
+  };
 };
 
 const getWibDateKey = (date: Date = new Date(), resetHourWib = 0): string => {
@@ -3428,15 +3502,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
         restoreEntry('leaderboardConfig', (v) => {
           if (v && typeof v === 'object') {
-            const inc = v as Partial<LeaderboardSystemConfig>;
-            const next: LeaderboardSystemConfig = {
-              ...DEFAULT_LEADERBOARD_SYSTEM_CONFIG,
-              ...inc,
-              categories:
-                Array.isArray(inc.categories) && inc.categories.length > 0
-                  ? inc.categories
-                  : DEFAULT_LEADERBOARD_SYSTEM_CONFIG.categories,
-            };
+            const next = mergeLeaderboardConfigSafe(v as Partial<LeaderboardSystemConfig>);
             leaderboardConfigRef.current = next;
             setLeaderboardConfig(next);
           }
@@ -4109,12 +4175,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     updatedAtMs: 0,
   };
   const DEFAULT_LOYALTY_ADMIN_CONFIG: LoyaltyAdminConfig = {
-    enabled: true,
-    dailyCheckInPoints: 25,
-    streakBonus7DaysPoints: 150,
-    rupiahPerPoint: 500,
-    coinPer100Points: 15,
-    diamondPer100Points: 10,
+    ...DEFAULT_LOYALTY_ADMIN_CONFIG_UTIL,
     updatedAtMs: 0,
   };
 
@@ -5322,7 +5383,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLoyaltyMap(merged);
     }
     if (data.loyaltyConfig && typeof data.loyaltyConfig === 'object') {
-      const next = { ...DEFAULT_LOYALTY_ADMIN_CONFIG, ...(data.loyaltyConfig as Partial<LoyaltyAdminConfig>) };
+      const next = normalizeLoyaltyAdminConfig(data.loyaltyConfig as Partial<LoyaltyAdminConfig>);
       loyaltyConfigRef.current = next;
       setLoyaltyConfig(next);
     }
@@ -5402,15 +5463,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setMissionClaimLogs(incomingLogs);
     }
     if (data.leaderboardConfig && typeof data.leaderboardConfig === 'object') {
-      const incLb = data.leaderboardConfig as Partial<LeaderboardSystemConfig>;
-      const mergedLb: LeaderboardSystemConfig = {
-        ...DEFAULT_LEADERBOARD_SYSTEM_CONFIG,
-        ...incLb,
-        categories:
-          Array.isArray(incLb.categories) && incLb.categories.length > 0
-            ? incLb.categories
-            : DEFAULT_LEADERBOARD_SYSTEM_CONFIG.categories,
-      };
+      const mergedLb = mergeLeaderboardConfigSafe(
+        data.leaderboardConfig as Partial<LeaderboardSystemConfig>
+      );
       if (
         acceptIncomingAdminConfig(
           'leaderboardConfig',
@@ -11697,7 +11752,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setLoyaltyMap(merged);
         }
         if (data.loyaltyConfig && typeof data.loyaltyConfig === 'object') {
-          const merged = { ...DEFAULT_LOYALTY_ADMIN_CONFIG, ...(data.loyaltyConfig as Partial<LoyaltyAdminConfig>) };
+          const merged = normalizeLoyaltyAdminConfig(data.loyaltyConfig as Partial<LoyaltyAdminConfig>);
           loyaltyConfigRef.current = merged;
           setLoyaltyConfig(merged);
         }
@@ -11907,15 +11962,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           });
           applyGenericFromSrv('leaderboardConfig', leaderboardConfigRef.current, (v) => {
             if (v && typeof v === 'object') {
-              const inc = v as Partial<LeaderboardSystemConfig>;
-              const next: LeaderboardSystemConfig = {
-                ...DEFAULT_LEADERBOARD_SYSTEM_CONFIG,
-                ...inc,
-                categories:
-                  Array.isArray(inc.categories) && inc.categories.length > 0
-                    ? inc.categories
-                    : DEFAULT_LEADERBOARD_SYSTEM_CONFIG.categories,
-              };
+              const next = mergeLeaderboardConfigSafe(v as Partial<LeaderboardSystemConfig>);
               leaderboardConfigRef.current = next;
               setLeaderboardConfig(next);
             }
@@ -12201,7 +12248,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 setLoyaltyMap(merged);
               }
               if (msg.payload.loyaltyConfig && typeof msg.payload.loyaltyConfig === 'object') {
-                const merged = { ...DEFAULT_LOYALTY_ADMIN_CONFIG, ...(msg.payload.loyaltyConfig as Partial<LoyaltyAdminConfig>) };
+                const merged = normalizeLoyaltyAdminConfig(msg.payload.loyaltyConfig as Partial<LoyaltyAdminConfig>);
                 loyaltyConfigRef.current = merged;
                 setLoyaltyConfig(merged);
               }
@@ -12524,15 +12571,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                   setMissionConfig(next);
                 }
               } else if (cfgKey === 'leaderboardConfig' && incVal && typeof incVal === 'object') {
-                const inc = incVal as Partial<LeaderboardSystemConfig>;
-                const next: LeaderboardSystemConfig = {
-                  ...DEFAULT_LEADERBOARD_SYSTEM_CONFIG,
-                  ...inc,
-                  categories:
-                    Array.isArray(inc.categories) && inc.categories.length > 0
-                      ? inc.categories
-                      : DEFAULT_LEADERBOARD_SYSTEM_CONFIG.categories,
-                };
+                const next = mergeLeaderboardConfigSafe(incVal as Partial<LeaderboardSystemConfig>);
                 if (acceptIncomingAdminConfig(cfgKey, incTs, next, leaderboardConfigRef.current, incRev)) {
                   leaderboardConfigRef.current = next;
                   setLeaderboardConfig(next);
@@ -12871,7 +12910,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 setLoyaltyMap(merged);
               }
               if (msg.payload.loyaltyConfig && typeof msg.payload.loyaltyConfig === 'object') {
-                const merged = { ...DEFAULT_LOYALTY_ADMIN_CONFIG, ...(msg.payload.loyaltyConfig as Partial<LoyaltyAdminConfig>) };
+                const merged = normalizeLoyaltyAdminConfig(msg.payload.loyaltyConfig as Partial<LoyaltyAdminConfig>);
                 loyaltyConfigRef.current = merged;
                 setLoyaltyConfig(merged);
               }
@@ -14266,12 +14305,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const senderAcc = pool.find((a) => a.id === currentAccount.id);
     if (!senderAcc) return { success: false, message: 'Akun pengirim tidak ditemukan.' };
     const senderBalance = getChatAssetBalance(senderAcc, input.assetKind);
-    if (!isUnlimitedNumber(senderBalance) && senderBalance < cleanAmt) {
+    const adminFee = calculateMandatoryTransferFee(cleanAmt);
+    const totalSenderDeduct = cleanAmt + adminFee;
+    if (!isUnlimitedNumber(senderBalance) && senderBalance < totalSenderDeduct) {
       playAtmSound('alert');
       const assetLabel = input.assetKind === 'coin' ? 'Coin' : input.assetKind === 'diamond' ? 'Diamond' : 'Saldo Rupiah';
       return {
         success: false,
-        message: `${assetLabel} Anda tidak mencukupi! Tersedia: ${formatChatAssetValue(senderBalance, input.assetKind)}`,
+        message: `${assetLabel} tidak mencukupi! Total kirim + Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%: ${formatChatAssetValue(totalSenderDeduct, input.assetKind)} (Tersedia: ${formatChatAssetValue(senderBalance, input.assetKind)}).`,
       };
     }
 
@@ -14288,7 +14329,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const updatedAccounts = pool.map((a) => {
-      if (a.id === senderAcc.id) return applyAccountAssetDelta(a, input.assetKind, -cleanAmt);
+      if (a.id === senderAcc.id) return applyAccountAssetDelta(a, input.assetKind, -totalSenderDeduct);
       if (a.id === receiverAcc.id) return applyAccountAssetDelta(a, input.assetKind, cleanAmt);
       return a;
     });
@@ -14298,17 +14339,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nowIso = new Date().toISOString();
     const refNo = `CH${input.assetKind.toUpperCase()}${Date.now()}`;
     const valueLabel = formatChatAssetValue(cleanAmt, input.assetKind);
+    const feeLabel = formatChatAssetValue(adminFee, input.assetKind);
     const outTx: Transaction = {
       id: `tx-ch-out-${Date.now()}`,
       accountId: senderAcc.id,
       type: 'chat_transfer',
       title: `Kirim ${valueLabel} ke ${receiverAcc.fullName}`,
-      amount: cleanAmt,
+      amount: totalSenderDeduct,
+      adminFeeAmount: adminFee,
       senderAccount: senderAcc.accountNumber,
       senderName: senderAcc.fullName,
       recipientAccount: receiverAcc.accountNumber,
       recipientName: receiverAcc.fullName,
-      description: input.note || `Transfer ${valueLabel} via Chat`,
+      description: `${input.note || `Transfer ${valueLabel} via Chat`} (Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%: ${feeLabel})`,
       status: 'success',
       referenceNo: refNo,
       timestamp: nowIso,
@@ -14339,7 +14382,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       recipientAccount: input.groupId ? `group:${input.groupId}` : receiverAcc.accountNumber,
       recipientName: input.groupId ? input.recipientName : receiverAcc.fullName,
       groupId: input.groupId,
-      text: `💸 Mengirim ${valueLabel}${input.groupId ? ` untuk ${receiverAcc.fullName}` : ''}${input.note ? ` — "${input.note}"` : ''}`,
+      text: `💸 Mengirim ${valueLabel}${input.groupId ? ` untuk ${receiverAcc.fullName}` : ''} (Admin ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%: ${feeLabel})${input.note ? ` — "${input.note}"` : ''}`,
       transferAttachment: {
         amount: cleanAmt,
         assetKind: input.assetKind,
@@ -14356,13 +14399,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     flushMasterStateToCloud({ accounts: updatedAccounts, transactions: nextTxs });
+    recordLoyaltyDailyActivityForAccount(senderAcc.id, [
+      { key: 'chat_transfer_count', delta: 1 },
+      { key: 'transfer_count', delta: 1 },
+      { key: 'daily_tx_count', delta: 1 },
+      ...(input.assetKind === 'uang' ? [{ key: 'transfer_amount', delta: cleanAmt }] : []),
+    ]);
     if (!globalChatConfigRef.current?.featureFlags?.disableChatSystemNotifications) {
-      addNotification('Kirim Aset Chat Berhasil', `Berhasil mengirim ${valueLabel} ke ${receiverAcc.fullName}.`, 'success', {
+      addNotification('Kirim Aset Chat Berhasil', `Berhasil mengirim ${valueLabel} ke ${receiverAcc.fullName} (Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%: ${feeLabel}).`, 'success', {
         skipServerBroadcast: true,
       });
     }
     playAtmSound('success');
-    return { success: true, message: `${valueLabel} berhasil dikirim ke ${receiverAcc.fullName}!` };
+    return { success: true, message: `${valueLabel} berhasil dikirim ke ${receiverAcc.fullName} (Biaya Admin ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%: ${feeLabel})!` };
   };
 
   const payChatTransferRequest = async (
@@ -14396,28 +14445,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Akun pengirim atau penerima tidak ditemukan.' };
     }
     const payerBal = getChatAssetBalance(payerAcc, kind);
-    if (!isUnlimitedNumber(payerBal) && payerBal < amt) {
+    const reqAdminFee = calculateMandatoryTransferFee(amt);
+    const totalPayDeduct = amt + reqAdminFee;
+    if (!isUnlimitedNumber(payerBal) && payerBal < totalPayDeduct) {
       playAtmSound('alert');
       return {
         success: false,
-        message: `Saldo tidak cukup untuk membayar ${formatChatAssetValue(amt, kind)}.`,
+        message: `Saldo tidak cukup! Total bayar + Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%: ${formatChatAssetValue(totalPayDeduct, kind)}.`,
       };
     }
 
     const updatedAccounts = pool.map((a) => {
-      if (a.id === payerAcc.id) return applyAccountAssetDelta(a, kind, -amt);
+      if (a.id === payerAcc.id) return applyAccountAssetDelta(a, kind, -totalPayDeduct);
       if (a.id === receiverAcc.id) return applyAccountAssetDelta(a, kind, amt);
       return a;
     });
     accountsRef.current = updatedAccounts;
     setAccounts(updatedAccounts);
     flushMasterStateToCloud({ accounts: updatedAccounts });
+    recordLoyaltyDailyActivityForAccount(payerAcc.id, [
+      { key: 'chat_transfer_count', delta: 1 },
+      { key: 'transfer_count', delta: 1 },
+      { key: 'daily_tx_count', delta: 1 },
+      ...(kind === 'uang' ? [{ key: 'transfer_amount', delta: amt }] : []),
+    ]);
 
     await markChatRequestPaid(targetMsg.id, payerAcc.fullName);
     playAtmSound('success');
     return {
       success: true,
-      message: `Berhasil membayar ${formatChatAssetValue(amt, kind)} ke ${receiverAcc.fullName}!`,
+      message: `Berhasil membayar ${formatChatAssetValue(amt, kind)} ke ${receiverAcc.fullName} (Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%: ${formatChatAssetValue(reqAdminFee, kind)})!`,
     };
   };
 
@@ -25283,7 +25340,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
 
     const isInternal = input.recipientBank === 'Bank Nusantara' || input.recipientBank === 'BNUS';
-    const fee = isInternal ? 0 : 6500;
+    // Aturan Wajib: SEMUA transfer (sesama Bank Nusantara maupun bank lain) dikenakan biaya admin 5%
+    const fee = calculateMandatoryTransferFee(input.amount);
     const totalRequired = input.amount + fee;
 
     const isAdminCard = currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
@@ -25296,7 +25354,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         success: false,
         message: lockedVault > 0
           ? `Saldo bebas tidak cukup! Rp ${lockedVault.toLocaleString('id-ID')} sedang terkunci di Brankas Pengaman. Saldo bebas: Rp ${unlockedBalance.toLocaleString('id-ID')}.`
-          : `Saldo tidak cukup! Total transfer + biaya admin: Rp ${totalRequired.toLocaleString('id-ID')}`,
+          : `Saldo tidak cukup! Total transfer + Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}% (Rp ${fee.toLocaleString('id-ID')}): Rp ${totalRequired.toLocaleString('id-ID')}`,
       };
     }
 
@@ -25348,12 +25406,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         type: 'transfer_out',
         title: `Transfer ke ${recipientName}`,
         amount: totalRequired,
+        adminFeeAmount: fee,
         senderAccount: currentAccount.accountNumber,
         senderName: currentAccount.fullName,
         recipientAccount: cleanDest,
         recipientName: recipientName,
         recipientBank: input.recipientBank,
-        description: input.note || `Transfer instan ke ${input.recipientBank}`,
+        description: `${input.note || `Transfer instan ke ${input.recipientBank}`} (Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%: Rp ${fee.toLocaleString('id-ID')})`,
         status: 'success',
         referenceNo: refNo,
         timestamp: new Date().toISOString(),
@@ -25389,7 +25448,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       addNotification(
         'Transfer Berhasil Instan! ✅',
-        `Transfer sebesar Rp ${input.amount.toLocaleString('id-ID')} ke ${recipientName} (${input.recipientBank}) berhasil dikirim secara instan. Sisa saldo: ${isAdminCard ? '∞' : formatRupiah(nextSenderBalance)}.`,
+        `Transfer Rp ${input.amount.toLocaleString('id-ID')} ke ${recipientName} (${input.recipientBank}) berhasil + Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}% (Rp ${fee.toLocaleString('id-ID')}). Sisa saldo: ${isAdminCard ? '∞' : formatRupiah(nextSenderBalance)}.`,
         'success'
       );
 
@@ -25413,7 +25472,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       return {
         success: true,
-        message: `Transfer sebesar Rp ${input.amount.toLocaleString('id-ID')} ke ${recipientName} berhasil dikirim secara instan!`,
+        message: `Transfer Rp ${input.amount.toLocaleString('id-ID')} ke ${recipientName} berhasil (Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%: Rp ${fee.toLocaleString('id-ID')})!`,
         transaction: senderTx,
         requiresApproval: false,
       };
@@ -27826,6 +27885,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dreamPocketsRef.current = next;
     setDreamPockets(next);
     syncDreamPocketsToServer(next);
+    recordLoyaltyDailyActivityForAccount(activeAcc.id, [{ key: 'pocket_create_count', delta: 1 }]);
     playAtmSound('success');
     return { success: true, pocket, message: `Kantong Impian "${cleanName}" berhasil dibuat!` };
   };
@@ -27880,6 +27940,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       flushMasterStateToCloud({ transactions: nextTxs, dreamPockets: nextPockets });
     }
     syncDreamPocketsToServer(nextPockets);
+    recordLoyaltyDailyActivityForAccount(activeAcc.id, [
+      { key: 'pocket_deposit_count', delta: 1 },
+      { key: 'daily_tx_count', delta: 1 },
+    ]);
     playAtmSound('cash');
     return {
       success: true,
@@ -27992,6 +28056,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'safe_vault:sync', payload: { accountId: activeAcc.id, state: nextState } }));
     }
+    recordLoyaltyDailyActivityForAccount(activeAcc.id, [{ key: 'vault_action_count', delta: 1 }]);
     playAtmSound('success');
     return {
       success: true,
@@ -28033,32 +28098,204 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  function recordLoyaltyDailyActivityForAccount(
+    accountId: string,
+    items: Array<{ key: string; delta: number; uniqueDailyTag?: string }>
+  ) {
+    if (!accountId || items.length === 0) return;
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[accountId], todayWib);
+    const counters = { ...(prev.dailyCounters || {}) };
+    let mutated = prev.dailyActivityDateWib !== todayWib;
+
+    for (const item of items) {
+      if (!item.key || !Number.isFinite(item.delta) || item.delta <= 0) continue;
+      if (item.uniqueDailyTag) {
+        const tagKey = `__tag_${item.key}_${item.uniqueDailyTag}`;
+        if (counters[tagKey]) continue;
+        counters[tagKey] = 1;
+      }
+      counters[item.key] = (counters[item.key] || 0) + item.delta;
+      mutated = true;
+    }
+
+    if (!mutated) return;
+    const nextState: LoyaltyAccountState = {
+      ...prev,
+      dailyActivityDateWib: todayWib,
+      dailyCounters: counters,
+    };
+    const nextMap = { ...loyaltyMapRef.current, [accountId]: nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+  }
+
+  const recordLoyaltyDailyActivity = (metricKey: string, delta = 1, uniqueDailyTag?: string) => {
+    const activeId = currentAccountIdRef.current || currentAccount?.id;
+    if (!activeId) return;
+    recordLoyaltyDailyActivityForAccount(activeId, [{ key: metricKey, delta, uniqueDailyTag }]);
+  };
+
+  // Auto-Streak Online Instan: otomatis mengisi/mencairkan streak begitu nasabah online di hari WIB baru
+  useEffect(() => {
+    const activeId = currentAccount?.id;
+    if (!activeId) return;
+    const acc = accountsRef.current.find((a) => a.id === activeId) || currentAccount;
+    if (!acc) return;
+    const todayWib = getWibDateString();
+    const res = applyAutoOnlineStreakTransition(
+      loyaltyMapRef.current[activeId],
+      loyaltyConfigRef.current,
+      isAdminCardAccount(acc),
+      todayWib
+    );
+    if (!res.changed) return;
+    const nextMap = { ...loyaltyMapRef.current, [activeId]: res.nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+  }, [currentAccount?.id]);
+
   const claimDailyCheckIn = (): { success: boolean; message: string; pointsEarned?: number; streak?: number } => {
     const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
-    if (!loyaltyConfigRef.current.enabled) return { success: false, message: 'Program Loyalty sedang nonaktif.' };
-    const today = new Date().toISOString().slice(0, 10);
-    const prev: LoyaltyAccountState = loyaltyMapRef.current[activeAcc.id] || {
-      points: 0,
-      streakDays: 0,
-      claimedAchievementIds: [],
-      totalCheckIns: 0,
-      redeemedCount: 0,
-    };
-    if (prev.lastCheckInDate === today) {
-      return { success: false, message: 'Anda sudah melakukan check-in harian hari ini. Kembali lagi besok!' };
+    const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
+    if (!cfg.enabled) return { success: false, message: 'Program Loyalty sedang nonaktif.' };
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    if (prev.freezeStage === 3) {
+      return {
+        success: false,
+        message: `Api streak Anda sedang BEKU PENUH (Offline ${cfg.freezeRecoveryRequiredDays} hari). Gunakan Kartu Pemulihan Streak (${cfg.recoveryCardDiamondPrice} Diamond) untuk mencairkan!`,
+      };
     }
-    const yest = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
-    const nextStreak = prev.lastCheckInDate === yest ? prev.streakDays + 1 : 1;
-    const basePts = loyaltyConfigRef.current.dailyCheckInPoints || 25;
-    const bonusPts = nextStreak % 7 === 0 ? loyaltyConfigRef.current.streakBonus7DaysPoints || 150 : 0;
-    const totalPts = basePts + bonusPts;
+    const unlockedPrev = prev.manualFreezeLock ? { ...prev, manualFreezeLock: false, freezeStage: 0 as LoyaltyStreakFreezeStage } : prev;
+    const trans = applyAutoOnlineStreakTransition(
+      unlockedPrev,
+      cfg,
+      isAdminCardAccount(activeAcc),
+      todayWib
+    );
+    if (!trans.changed) {
+      return {
+        success: true,
+        streak: trans.nextState.streakDays,
+        message: `Streak Online Hari ke-${trans.nextState.streakDays} sudah otomatis terisi hari ini!`,
+      };
+    }
+    const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: trans.nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return {
+      success: true,
+      pointsEarned: trans.pointsEarned,
+      streak: trans.nextState.streakDays,
+      message: trans.noticeText || `Streak Hari ke-${trans.nextState.streakDays} aktif!`,
+    };
+  };
+
+  const buyStreakRecoveryCard = (quantity = 1): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const qty = Math.max(1, Math.min(50, Math.round(Number(quantity) || 1)));
+    const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
+    const priceEach = cfg.recoveryCardDiamondPrice || 25;
+    const totalDiamonds = priceEach * qty;
+    const isAdminTier = isAdminCardAccount(activeAcc);
+
+    if (!isAdminTier && (activeAcc.diamonds || 0) < totalDiamonds) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Diamond tidak cukup! Butuh ${totalDiamonds.toLocaleString('id-ID')} Diamond untuk ${qty} Kartu Pemulihan Streak (Tersedia: ${(activeAcc.diamonds || 0).toLocaleString('id-ID')} Diamond).`,
+      };
+    }
+
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
     const nextState: LoyaltyAccountState = {
       ...prev,
-      points: isAdminCardAccount(activeAcc) ? UNLIMITED_BALANCE : prev.points + totalPts,
+      recoveryCards: isAdminTier ? UNLIMITED_BALANCE : (prev.recoveryCards || 0) + qty,
+      dailyCounters: {
+        ...(prev.dailyCounters || {}),
+        reward_exchange_count: (prev.dailyCounters?.reward_exchange_count || 0) + 1,
+      },
+    };
+    const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+
+    if (!isAdminTier) {
+      commitAccountMutationPermanent(activeAcc.id, (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          diamonds: Math.max(0, (a.diamonds || 0) - totalDiamonds),
+        })
+      );
+    }
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: isAdminTier
+        ? 'Kartu Tier Admin memiliki stok Kartu Pemulihan Streak ∞ (Infinity) selamanya!'
+        : `Berhasil membeli ${qty} Kartu Pemulihan Streak seharga ${totalDiamonds.toLocaleString('id-ID')} Diamond!`,
+    };
+  };
+
+  const useStreakRecoveryCard = (): {
+    success: boolean;
+    message: string;
+    streak?: number;
+    pointsEarned?: number;
+  } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    const isAdminTier = isAdminCardAccount(activeAcc);
+
+    if (prev.freezeStage !== 3 && !(prev.manualFreezeLock && (prev.freezeStage || 0) > 0)) {
+      return { success: false, message: 'Api streak Anda tidak sedang dalam status beku penuh.' };
+    }
+    if (!isAdminTier && (prev.recoveryCards || 0) < 1) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Anda belum punya Kartu Pemulihan Streak! Beli 1 kartu seharga ${cfg.recoveryCardDiamondPrice || 25} Diamond terlebih dahulu.`,
+      };
+    }
+
+    const rescuedBase = Math.max(1, prev.frozenStreakDays || prev.streakDays || 1);
+    const nextStreak = rescuedBase + 1;
+    const basePts = cfg.dailyCheckInPoints || 25;
+    const bonusPts = nextStreak % 7 === 0 ? cfg.streakBonus7DaysPoints || 150 : 0;
+    const totalPts = basePts + bonusPts;
+    const recentDates = Array.from(new Set([...(prev.recentActiveDatesWib || []), todayWib])).slice(-14);
+
+    const nextState: LoyaltyAccountState = {
+      ...prev,
+      points: isAdminTier ? UNLIMITED_BALANCE : (prev.points || 0) + totalPts,
       streakDays: nextStreak,
-      lastCheckInDate: today,
-      totalCheckIns: prev.totalCheckIns + 1,
+      lastCheckInDate: todayWib,
+      lastOnlineDateWib: todayWib,
+      freezeStage: 0,
+      frozenStreakDays: 0,
+      lastThawedFromStage: 3,
+      manualFreezeLock: false,
+      recoveryCards: isAdminTier ? UNLIMITED_BALANCE : Math.max(0, (prev.recoveryCards || 0) - 1),
+      totalCheckIns: (prev.totalCheckIns || 0) + 1,
+      recentActiveDatesWib: recentDates,
+      dailyActivityDateWib: todayWib,
+      dailyCounters: {
+        ...(prev.dailyCounters || {}),
+        online_visit: Math.max(1, prev.dailyCounters?.online_visit || 1),
+        streak_online_today: 1,
+      },
     };
     const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
     loyaltyMapRef.current = nextMap;
@@ -28067,12 +28304,137 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     return {
       success: true,
-      pointsEarned: totalPts,
       streak: nextStreak,
-      message:
-        bonusPts > 0
-          ? `Check-in Hari ke-${nextStreak}! +${basePts} Poin + Bonus Streak 7 Hari +${bonusPts} Poin!`
-          : `Check-in Hari ke-${nextStreak} berhasil! +${totalPts} Poin Loyalty.`,
+      pointsEarned: totalPts,
+      message: `Api mencair penuh! Streak ${rescuedBase} hari berhasil diselamatkan dan langsung lanjut ke Hari ke-${nextStreak} (+${totalPts} Poin Loyalty)!`,
+    };
+  };
+
+  const forfeitFrozenStreak = (): { success: boolean; message: string } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    const recentDates = Array.from(new Set([...(prev.recentActiveDatesWib || []), todayWib])).slice(-14);
+    const nextState: LoyaltyAccountState = {
+      ...prev,
+      streakDays: 1,
+      lastCheckInDate: todayWib,
+      lastOnlineDateWib: todayWib,
+      freezeStage: 0,
+      frozenStreakDays: 0,
+      lastExpiredStreakDays: prev.frozenStreakDays || prev.streakDays || 0,
+      manualFreezeLock: false,
+      recentActiveDatesWib: recentDates,
+    };
+    const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    return {
+      success: true,
+      message: 'Streak lama dilepas dan dimulai ulang dari Hari ke-1 hari ini.',
+    };
+  };
+
+  const claimDailyLoyaltyMission = (
+    missionId: string
+  ): { success: boolean; message: string; pointsEarned?: number } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
+    const allMissions = getEffectiveDailyLoyaltyMissions(cfg);
+    const mission = allMissions.find((m) => m.id === missionId && m.enabled);
+    if (!mission) return { success: false, message: 'Misi harian tidak ditemukan atau sedang nonaktif.' };
+
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    const txStats = computeDailyTxActivityStats(activeAcc.id, transactions, todayWib);
+    const progress = evaluateDailyLoyaltyMissionProgress(mission, prev, txStats, todayWib);
+
+    if (progress.claimed) {
+      return { success: false, message: 'Hadiah misi harian ini sudah Anda klaim hari ini.' };
+    }
+    // Aturan Ketat: Wajib dikerjakan nyata (berlaku juga untuk Kartu Tier Admin!)
+    if (!progress.completed) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Misi "${mission.title}" belum selesai (${progress.current.toLocaleString('id-ID')}/${progress.target.toLocaleString('id-ID')} ${mission.unitLabel}). Kerjakan aktivitas nyatanya dulu!`,
+      };
+    }
+
+    const isAdminTier = isAdminCardAccount(activeAcc);
+    const nextClaimed = [...(prev.dailyClaimedMissionIds || []), mission.id];
+    const nextState: LoyaltyAccountState = {
+      ...prev,
+      points: isAdminTier ? UNLIMITED_BALANCE : (prev.points || 0) + mission.rewardPoints,
+      dailyActivityDateWib: todayWib,
+      dailyClaimedMissionIds: nextClaimed,
+    };
+    const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return {
+      success: true,
+      pointsEarned: mission.rewardPoints,
+      message: isAdminTier
+        ? `Misi nyata "${mission.title}" selesai diklaim! (Poin Loyalty Tier Admin tetap ∞)`
+        : `Misi "${mission.title}" selesai! +${mission.rewardPoints} Poin Loyalty ditambahkan.`,
+    };
+  };
+
+  const claimAllReadyLoyaltyMissions = (): {
+    success: boolean;
+    message: string;
+    claimedCount?: number;
+    pointsEarned?: number;
+  } => {
+    const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
+    if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
+    const activeMissions = getEffectiveDailyLoyaltyMissions(cfg).filter((m) => m.enabled);
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
+    const txStats = computeDailyTxActivityStats(activeAcc.id, transactions, todayWib);
+
+    const readyList = activeMissions.filter((m) => {
+      const p = evaluateDailyLoyaltyMissionProgress(m, prev, txStats, todayWib);
+      return p.completed && !p.claimed;
+    });
+
+    if (readyList.length === 0) {
+      return {
+        success: false,
+        message: 'Belum ada misi yang selesai dikerjakan untuk diklaim saat ini.',
+      };
+    }
+
+    const totalEarned = readyList.reduce((sum, m) => sum + m.rewardPoints, 0);
+    const isAdminTier = isAdminCardAccount(activeAcc);
+    const nextClaimed = Array.from(
+      new Set([...(prev.dailyClaimedMissionIds || []), ...readyList.map((m) => m.id)])
+    );
+    const nextState: LoyaltyAccountState = {
+      ...prev,
+      points: isAdminTier ? UNLIMITED_BALANCE : (prev.points || 0) + totalEarned,
+      dailyActivityDateWib: todayWib,
+      dailyClaimedMissionIds: nextClaimed,
+    };
+    const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return {
+      success: true,
+      claimedCount: readyList.length,
+      pointsEarned: totalEarned,
+      message: isAdminTier
+        ? `${readyList.length} misi nyata berhasil diklaim sekaligus! (Poin Loyalty Tier Admin tetap ∞)`
+        : `${readyList.length} misi nyata berhasil diklaim sekaligus! +${totalEarned.toLocaleString('id-ID')} Poin Loyalty.`,
     };
   };
 
@@ -28081,18 +28443,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
     const def = DAILY_ACHIEVEMENT_CATALOG.find((a) => a.id === achievementId);
     if (!def) return { success: false, message: 'Pencapaian tidak ditemukan.' };
-    const prev: LoyaltyAccountState = loyaltyMapRef.current[activeAcc.id] || {
-      points: 0,
-      streakDays: 0,
-      claimedAchievementIds: [],
-      totalCheckIns: 0,
-      redeemedCount: 0,
-    };
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id]);
     if (prev.claimedAchievementIds.includes(achievementId)) {
       return { success: false, message: 'Hadiah pencapaian ini sudah pernah diklaim.' };
     }
     const isAdminTier = isAdminCardAccount(activeAcc);
-    const eligible = isAdminTier || def.check({
+    const eligible = def.check({
       txCount: transactions.filter((t) => t.accountId === activeAcc.id).length,
       dreamPocketCount: dreamPocketsRef.current.filter((p) => p.accountId === activeAcc.id).length,
       loyaltyStreak: prev.streakDays,
@@ -28100,7 +28456,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       statusesPosted: chatStatusesRef.current.filter((s) => s.authorAccountId === activeAcc.id).length,
     });
     if (!eligible) {
-      return { success: false, message: 'Syarat pencapaian belum terpenuhi.' };
+      return { success: false, message: 'Syarat pencapaian nyata belum terpenuhi.' };
     }
     const nextState: LoyaltyAccountState = {
       ...prev,
@@ -28121,69 +28477,172 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const redeemLoyaltyPoints = (
     pointsToSpend: number,
-    target: 'cash' | 'coin' | 'diamond'
+    target: LoyaltyRedeemTarget
   ): { success: boolean; message: string } => {
     const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
     if (!activeAcc) return { success: false, message: 'Akun tidak ditemukan.' };
+    if (target !== 'cash' && target !== 'coin' && target !== 'voucher') {
+      return { success: false, message: 'Penukaran ke Diamond tidak tersedia. Pilih Saldo Tunai, Coin, atau Voucher Naik Level.' };
+    }
     const cleanPts = Math.round(Number(pointsToSpend) || 0);
     if (cleanPts < 50) return { success: false, message: 'Minimal penukaran 50 Poin Loyalty.' };
     const isAdminTier = isAdminCardAccount(activeAcc);
-    const prev: LoyaltyAccountState = loyaltyMapRef.current[activeAcc.id] || {
-      points: 0,
-      streakDays: 0,
-      claimedAchievementIds: [],
-      totalCheckIns: 0,
-      redeemedCount: 0,
-    };
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib);
     if (!isAdminTier && prev.points < cleanPts) {
       return { success: false, message: `Poin Loyalty tidak cukup (Tersedia: ${prev.points.toLocaleString('id-ID')} poin).` };
     }
-    const cfg = loyaltyConfigRef.current;
+    const cfg = normalizeLoyaltyAdminConfig(loyaltyConfigRef.current);
+    const voucherRate = cfg.pointsPerLevelVoucher || 200;
+    if (target === 'voucher' && cleanPts < voucherRate) {
+      return {
+        success: false,
+        message: `Minimal ${voucherRate.toLocaleString('id-ID')} Poin Loyalty untuk menukar 1 Voucher Naik Level.`,
+      };
+    }
+
     const rewardAmount =
       target === 'cash'
         ? cleanPts * (cfg.rupiahPerPoint || 500)
         : target === 'coin'
         ? Math.max(1, Math.floor((cleanPts / 100) * (cfg.coinPer100Points || 15)))
-        : Math.max(1, Math.floor((cleanPts / 100) * (cfg.diamondPer100Points || 10)));
+        : Math.max(1, Math.floor(cleanPts / voucherRate));
 
     const nextState: LoyaltyAccountState = {
       ...prev,
       points: isAdminTier ? UNLIMITED_BALANCE : Math.max(0, prev.points - cleanPts),
       redeemedCount: prev.redeemedCount + 1,
+      dailyActivityDateWib: todayWib,
+      dailyCounters: {
+        ...(prev.dailyCounters || {}),
+        loyalty_redeem_count: (prev.dailyCounters?.loyalty_redeem_count || 0) + 1,
+        reward_exchange_count: (prev.dailyCounters?.reward_exchange_count || 0) + 1,
+      },
     };
     const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: nextState };
     loyaltyMapRef.current = nextMap;
     setLoyaltyMap(nextMap);
 
-    commitAccountMutationPermanent(
-      activeAcc.id,
-      (a) =>
-        normalizeAdminAccountAssets({
-          ...a,
-          balance: target === 'cash' && !isAdminCardAccount(a) ? a.balance + rewardAmount : a.balance,
-          spinCoins: target === 'coin' && !isAdminCardAccount(a) ? (a.spinCoins || 0) + rewardAmount : a.spinCoins,
-          diamonds: target === 'diamond' && !isAdminCardAccount(a) ? (a.diamonds || 0) + rewardAmount : a.diamonds,
-        }),
-      { loyaltyMap: nextMap }
+    commitAccountMutationPermanent(activeAcc.id, (a) =>
+      normalizeAdminAccountAssets({
+        ...a,
+        balance: target === 'cash' && !isAdminCardAccount(a) ? a.balance + rewardAmount : a.balance,
+        spinCoins: target === 'coin' && !isAdminCardAccount(a) ? (a.spinCoins || 0) + rewardAmount : a.spinCoins,
+        levelUpVouchers:
+          target === 'voucher' && !isAdminCardAccount(a)
+            ? (a.levelUpVouchers || 0) + rewardAmount
+            : a.levelUpVouchers,
+      })
     );
     syncLoyaltyToServer(nextMap);
     playAtmSound('cash');
-    const unitLabel = target === 'cash' ? formatRupiah(rewardAmount) : target === 'coin' ? `${rewardAmount} Coin` : `${rewardAmount} Diamond`;
+    const unitLabel =
+      target === 'cash'
+        ? formatRupiah(rewardAmount)
+        : target === 'coin'
+        ? `${rewardAmount.toLocaleString('id-ID')} Coin`
+        : `${rewardAmount.toLocaleString('id-ID')} Voucher Naik Level`;
     return {
       success: true,
       message: isAdminTier
-        ? `Penukaran ke ${unitLabel} berhasil! (Kartu Tier Admin: Poin Loyalty tetap ∞ selamanya dan tidak pernah berkurang.)`
-        : `${cleanPts} Poin berhasil ditukar menjadi ${unitLabel}!`,
+        ? `Penukaran ke ${unitLabel} berhasil! (Kartu Tier Admin: Poin Loyalty & Voucher tetap ∞ selamanya dan tidak pernah berkurang.)`
+        : `${cleanPts.toLocaleString('id-ID')} Poin berhasil ditukar menjadi ${unitLabel}!`,
     };
   };
 
   const adminUpdateLoyaltyConfig = (partial: Partial<LoyaltyAdminConfig>): { success: boolean; message: string } => {
-    const nextCfg: LoyaltyAdminConfig = { ...loyaltyConfigRef.current, ...partial, updatedAtMs: Date.now() };
+    const nextCfg: LoyaltyAdminConfig = normalizeLoyaltyAdminConfig({
+      ...loyaltyConfigRef.current,
+      ...partial,
+      missionOverrides:
+        partial.missionOverrides !== undefined
+          ? partial.missionOverrides
+          : loyaltyConfigRef.current.missionOverrides,
+      updatedAtMs: Date.now(),
+    });
     loyaltyConfigRef.current = nextCfg;
     setLoyaltyConfig(nextCfg);
     syncLoyaltyToServer(loyaltyMapRef.current, nextCfg);
     playAtmSound('success');
-    return { success: true, message: 'Pengaturan Poin Loyalty berhasil diperbarui!' };
+    return { success: true, message: 'Pengaturan Poin Loyalty, Streak, Kartu Pemulihan & 100 Misi berhasil disimpan!' };
+  };
+
+  const adminManageAccountStreak = (
+    accountId: string,
+    action: {
+      type: 'thaw_restore' | 'set_freeze_stage' | 'set_streak_days' | 'set_recovery_cards' | 'add_recovery_cards';
+      value?: number;
+    }
+  ): { success: boolean; message: string } => {
+    const acc = accountsRef.current.find((a) => a.id === accountId);
+    if (!acc) return { success: false, message: 'Nasabah tidak ditemukan.' };
+    const todayWib = getWibDateString();
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[accountId], todayWib);
+    const isAdminTier = isAdminCardAccount(acc);
+    let nextState: LoyaltyAccountState = { ...prev };
+    let msg = '';
+
+    if (action.type === 'thaw_restore') {
+      const restored = Math.max(1, prev.frozenStreakDays || prev.streakDays || 1);
+      nextState = {
+        ...prev,
+        streakDays: restored,
+        lastCheckInDate: todayWib,
+        lastOnlineDateWib: todayWib,
+        freezeStage: 0,
+        frozenStreakDays: 0,
+        lastThawedFromStage: 3,
+        manualFreezeLock: false,
+      };
+      msg = `Streak ${acc.fullName} berhasil dicairkan & dipulihkan ke ${restored} Hari!`;
+    } else if (action.type === 'set_freeze_stage') {
+      const st = Math.max(0, Math.min(3, Math.round(Number(action.value ?? 0)))) as LoyaltyStreakFreezeStage;
+      const baseStreak = Math.max(1, prev.streakDays || prev.frozenStreakDays || 3);
+      nextState = {
+        ...prev,
+        streakDays: baseStreak,
+        freezeStage: st,
+        frozenStreakDays: st === 3 ? baseStreak : 0,
+        manualFreezeLock: st > 0,
+      };
+      msg =
+        st === 0
+          ? `Status streak ${acc.fullName} dikembalikan ke Aktif Menyala.`
+          : `Status streak ${acc.fullName} diset ke Beku Tahap ${st}${st === 3 ? ' (Wajib Kartu Pemulihan)' : ''}.`;
+    } else if (action.type === 'set_streak_days') {
+      const days = Math.max(0, Math.round(Number(action.value ?? 0)));
+      nextState = {
+        ...prev,
+        streakDays: days,
+        lastCheckInDate: days > 0 ? todayWib : prev.lastCheckInDate,
+        lastOnlineDateWib: days > 0 ? todayWib : prev.lastOnlineDateWib,
+        freezeStage: 0,
+        frozenStreakDays: 0,
+        manualFreezeLock: false,
+      };
+      msg = `Streak ${acc.fullName} diatur menjadi ${days} Hari.`;
+    } else if (action.type === 'set_recovery_cards' || action.type === 'add_recovery_cards') {
+      const val = Math.max(0, Math.round(Number(action.value ?? 0)));
+      const nextCards = isAdminTier
+        ? UNLIMITED_BALANCE
+        : action.type === 'set_recovery_cards'
+        ? val
+        : (prev.recoveryCards || 0) + val;
+      nextState = {
+        ...prev,
+        recoveryCards: nextCards,
+      };
+      msg = isAdminTier
+        ? `Kartu Tier Admin (${acc.fullName}) otomatis memiliki Kartu Pemulihan ∞.`
+        : `Stok Kartu Pemulihan Streak ${acc.fullName} diperbarui menjadi ${nextCards} kartu.`;
+    }
+
+    const nextMap = { ...loyaltyMapRef.current, [accountId]: nextState };
+    loyaltyMapRef.current = nextMap;
+    setLoyaltyMap(nextMap);
+    syncLoyaltyToServer(nextMap);
+    playAtmSound('success');
+    return { success: true, message: msg };
   };
 
   const adminAdjustLoyaltyPoints = (
@@ -28193,13 +28652,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   ): { success: boolean; message: string } => {
     const acc = accountsRef.current.find((a) => a.id === accountId);
     if (!acc) return { success: false, message: 'Nasabah tidak ditemukan.' };
-    const prev: LoyaltyAccountState = loyaltyMapRef.current[accountId] || {
-      points: 0,
-      streakDays: 0,
-      claimedAchievementIds: [],
-      totalCheckIns: 0,
-      redeemedCount: 0,
-    };
+    const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[accountId]);
     const isAdminTier = isAdminCardAccount(acc);
     const nextPoints = isAdminTier
       ? UNLIMITED_BALANCE
@@ -32953,7 +33406,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Tidak dapat melakukan Transfer Bebas ke rekening sendiri.' };
     }
 
-    const feePercent = Math.max(0, Math.min(50, goldMarketConfig.transferBebasAdminFeePercent ?? 5));
+    // Biaya Admin Wajib minimal 5% untuk semua jenis transfer
+    const feePercent = Math.max(
+      MANDATORY_TRANSFER_ADMIN_FEE_PERCENT,
+      Math.min(50, goldMarketConfig.transferBebasAdminFeePercent ?? MANDATORY_TRANSFER_ADMIN_FEE_PERCENT)
+    );
     const feeRate = feePercent / 100;
     const minNom = Math.max(1000, goldMarketConfig.minNominalRupiah || 1000);
     const activeGoldPrice = getEffectiveGoldPrice(currentAccount);
@@ -37624,9 +38081,35 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     accountId: string,
     events: Array<{ metricKey: MissionMetricKey; delta: number }>
   ) {
-    if (!accountId || !missionConfigRef.current.enabled) return;
+    if (!accountId || events.length === 0) return;
+
+    // Cerminkan aktivitas nyata ke penghitung 100 Misi Harian Poin Loyalty (reset 00:00 WIB)
+    const loyaltyMapped: Array<{ key: string; delta: number }> = [];
+    for (const ev of events) {
+      const d = Math.max(0, Number(ev.delta) || 0);
+      if (d <= 0) continue;
+      if (ev.metricKey === 'transfer_count') loyaltyMapped.push({ key: 'transfer_count', delta: d });
+      else if (ev.metricKey === 'transfer_amount') loyaltyMapped.push({ key: 'transfer_amount', delta: d });
+      else if (ev.metricKey === 'any_tx') loyaltyMapped.push({ key: 'daily_tx_count', delta: d });
+      else if (ev.metricKey === 'spin_count') loyaltyMapped.push({ key: 'spin_count', delta: d });
+      else if (ev.metricKey === 'gold_tx') loyaltyMapped.push({ key: 'gold_buy_count', delta: d });
+      else if (ev.metricKey === 'job_clicks' || ev.metricKey === 'job_complete') {
+        loyaltyMapped.push({ key: 'career_work_count', delta: d });
+      } else if (ev.metricKey === 'redeem_claim') {
+        loyaltyMapped.push({ key: 'reward_exchange_count', delta: d });
+      } else if (ev.metricKey === 'deposit_count' || ev.metricKey === 'withdraw_count') {
+        loyaltyMapped.push({ key: 'daily_tx_count', delta: d });
+      } else if (ev.metricKey === 'family_action') {
+        loyaltyMapped.push({ key: 'chat_msg_count', delta: d });
+      }
+    }
+    if (loyaltyMapped.length > 0) {
+      recordLoyaltyDailyActivityForAccount(accountId, loyaltyMapped);
+    }
+
+    if (!missionConfigRef.current.enabled) return;
     const activeList = missionsRef.current.filter((m) => m.isActive);
-    if (activeList.length === 0 || events.length === 0) return;
+    if (activeList.length === 0) return;
 
     const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
     const targetAcc = latestPool.find((a) => a.id === accountId);
@@ -38597,12 +39080,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // ==================== KONTROL ADMIN LEADERBOARD MULTI-ASET ====================
   const adminUpdateLeaderboardConfig = (patch: Partial<LeaderboardSystemConfig>) => {
-    const nextCfg: LeaderboardSystemConfig = {
+    const nextCfg: LeaderboardSystemConfig = mergeLeaderboardConfigSafe({
       ...leaderboardConfigRef.current,
       ...patch,
       categories: patch.categories ?? leaderboardConfigRef.current.categories,
+      minEntryConfig:
+        patch.minEntryConfig !== undefined
+          ? normalizeLeaderboardMinEntryConfig({
+              ...normalizeLeaderboardMinEntryConfig(leaderboardConfigRef.current.minEntryConfig),
+              ...patch.minEntryConfig,
+            })
+          : normalizeLeaderboardMinEntryConfig(leaderboardConfigRef.current.minEntryConfig),
       updatedAt: new Date().toISOString(),
-    };
+    });
     leaderboardConfigRef.current = nextCfg;
     setLeaderboardConfig(nextCfg);
     persistAdminConfigChange('leaderboardConfig', nextCfg, {
@@ -38641,6 +39131,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       enabled: true,
       sortOrder: leaderboardConfigRef.current.categories.length + 1,
       accentColor: input.accentColor || 'indigo',
+      minEntryEnabled: true,
+      minEntryValue: 0,
     };
     const nextCats = [...leaderboardConfigRef.current.categories, nextCat];
     adminUpdateLeaderboardConfig({ categories: nextCats });
@@ -38665,11 +39157,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const adminResetLeaderboardDefault = () => {
-    const resetCfg: LeaderboardSystemConfig = {
+    const resetCfg: LeaderboardSystemConfig = mergeLeaderboardConfigSafe({
       ...DEFAULT_LEADERBOARD_SYSTEM_CONFIG,
       categories: DEFAULT_LEADERBOARD_SYSTEM_CONFIG.categories.map((c) => ({ ...c })),
+      minEntryConfig: {
+        ...DEFAULT_LEADERBOARD_MIN_ENTRY_CONFIG,
+        whitelistedAccountIds: [],
+      },
       updatedAt: new Date().toISOString(),
-    };
+    });
     leaderboardConfigRef.current = resetCfg;
     setLeaderboardConfig(resetCfg);
     persistAdminConfigChange('leaderboardConfig', resetCfg, {
@@ -39111,9 +39607,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         loyaltyConfig,
         claimDailyCheckIn,
         claimAchievementReward,
+        claimDailyLoyaltyMission,
+        claimAllReadyLoyaltyMissions,
+        buyStreakRecoveryCard,
+        useStreakRecoveryCard,
+        forfeitFrozenStreak,
+        recordLoyaltyDailyActivity,
         redeemLoyaltyPoints,
         adminUpdateLoyaltyConfig,
         adminAdjustLoyaltyPoints,
+        adminManageAccountStreak,
         adminAdjustAccountDiamonds,
         spendAccountDiamonds,
         upgradeJobLevelWithDiamonds,

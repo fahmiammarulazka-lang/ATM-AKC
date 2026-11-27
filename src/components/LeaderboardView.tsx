@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  CheckCircle2,
   Coins,
   Crown,
   EyeOff,
@@ -7,14 +8,18 @@ import {
   Lock,
   Medal,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Trophy,
   Wallet,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
+import { CardTier } from '../types/bank';
 import {
   computeLeaderboardRankingForCategory,
+  evaluateAccountLeaderboardEligibility,
   formatLeaderboardMetricValue,
+  getActiveLeaderboardRequirementSummaries,
 } from '../utils/leaderboardUtils';
 import {
   CARD_TIER_CONFIGS,
@@ -30,14 +35,17 @@ export const LeaderboardView: React.FC = () => {
   const { accounts, currentAccount, leaderboardConfig, transactions } = useBank();
   const { adminTierGrantsMap } = useAdminAnalyticsAndTierSync();
 
-  const disguisedAdminIds = useMemo(() => {
+  const { disguisedAdminIds, disguisedPublicTierMap } = useMemo(() => {
     const set = new Set<string>();
+    const tierMap: Record<string, CardTier> = {};
     accounts.forEach((acc) => {
       if (isAdminCardAccount(acc) && isAccountDisguisedAdmin(acc.id, adminTierGrantsMap)) {
         set.add(acc.id);
+        const prev = adminTierGrantsMap[acc.id]?.previousCardTier;
+        tierMap[acc.id] = prev && prev !== 'admin' ? prev : 'regular';
       }
     });
-    return set;
+    return { disguisedAdminIds: set, disguisedPublicTierMap: tierMap };
   }, [accounts, adminTierGrantsMap]);
 
   const adminHonorAccounts = useMemo(() => {
@@ -62,7 +70,7 @@ export const LeaderboardView: React.FC = () => {
   );
 
   const [selectedCatId, setSelectedCatId] = useState<string>(
-    activeCategories[0]?.id || 'cat_balance'
+    activeCategories[0]?.id || 'lb-cat-balance'
   );
 
   useEffect(() => {
@@ -81,9 +89,26 @@ export const LeaderboardView: React.FC = () => {
       activeCategory,
       leaderboardConfig,
       transactions,
-      disguisedAdminIds
+      disguisedAdminIds,
+      disguisedPublicTierMap
     );
-  }, [accounts, activeCategory, leaderboardConfig, transactions, disguisedAdminIds]);
+  }, [accounts, activeCategory, leaderboardConfig, transactions, disguisedAdminIds, disguisedPublicTierMap]);
+
+  const requirementSummary = useMemo(() => {
+    if (!activeCategory) return null;
+    return getActiveLeaderboardRequirementSummaries(activeCategory, leaderboardConfig);
+  }, [activeCategory, leaderboardConfig]);
+
+  const myEligibility = useMemo(() => {
+    if (!currentAccount || !activeCategory) return null;
+    return evaluateAccountLeaderboardEligibility(
+      currentAccount,
+      activeCategory,
+      leaderboardConfig,
+      transactions,
+      { disguisedAdminIds, disguisedPublicTierMap }
+    );
+  }, [currentAccount, activeCategory, leaderboardConfig, transactions, disguisedAdminIds, disguisedPublicTierMap]);
 
   const maxLimit = Math.max(1, Math.min(200, leaderboardConfig.maxEntries || 100));
   const displayedRanking = useMemo(
@@ -186,6 +211,37 @@ export const LeaderboardView: React.FC = () => {
         )}
       </div>
 
+      {/* Banner Ringkasan Syarat Minimal Masuk Leaderboard (Kontrol Saklar Admin) */}
+      {requirementSummary && requirementSummary.active && requirementSummary.showBanner && activeCategory && (
+        <div className="rounded-2xl bg-slate-900/95 border border-sky-500/35 px-4 sm:px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-sky-500/15 border border-sky-400/35 flex items-center justify-center shrink-0 mt-0.5">
+              <ShieldCheck className="w-4 h-4 text-sky-400" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-black text-white">
+                  Syarat Minimal Masuk Leaderboard ({activeCategory.label})
+                </span>
+                <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-sky-500/15 text-sky-300 border border-sky-500/35">
+                  {requirementSummary.evaluationMode === 'ANY'
+                    ? 'Cukup Salah Satu Syarat'
+                    : 'Wajib Semua Syarat'}
+                </span>
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-slate-300 tabular-nums">
+                {requirementSummary.items.map((item, idx) => (
+                  <span key={`${item}-${idx}`} className="inline-flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400" />
+                    <span>{item}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Blok Lencana Khusus Kehormatan Admin (Di Luar Persaingan Nasabah) */}
       {adminHonorAccounts.length > 0 && (
         <div className="rounded-3xl bg-gradient-to-r from-amber-950/50 via-slate-900 to-slate-950 border border-amber-500/40 p-4 sm:p-5 shadow-xl">
@@ -235,9 +291,15 @@ export const LeaderboardView: React.FC = () => {
         </div>
       )}
 
-      {/* Kartu Peringkat Saya (Sticky highlight obeying Privacy Mask & showing Top Badges visibly) */}
+      {/* Kartu Peringkat Saya + Progres Kekurangan Syarat Minimal */}
       {leaderboardConfig.showMyRankCard !== false && currentAccount && activeCategory && (
-        <div className="rounded-3xl bg-gradient-to-r from-indigo-950/85 via-slate-900 to-slate-900 border border-indigo-500/45 p-4 sm:p-5 shadow-xl">
+        <div
+          className={`rounded-3xl p-4 sm:p-5 shadow-xl border space-y-4 ${
+            myEligibility && !myEligibility.eligible && !(isCurrentAccountAdmin && !isCurrentAccountDisguised)
+              ? 'bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 border-amber-500/45'
+              : 'bg-gradient-to-r from-indigo-950/85 via-slate-900 to-slate-900 border-indigo-500/45'
+          }`}
+        >
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start sm:items-center gap-3.5">
               {isCurrentAccountAdmin && !isCurrentAccountDisguised ? (
@@ -248,8 +310,9 @@ export const LeaderboardView: React.FC = () => {
               ) : myRankEntry ? (
                 <LeaderboardRankMarker rank={myRankEntry.rank} size="lg" />
               ) : (
-                <span className="px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-extrabold text-slate-300">
-                  Di Luar Peringkat
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-xs font-extrabold text-amber-200">
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  Belum Masuk Peringkat
                 </span>
               )}
 
@@ -268,6 +331,12 @@ export const LeaderboardView: React.FC = () => {
                     {CARD_TIER_CONFIGS[currentAccount.cardTier]?.name ||
                       currentAccount.cardTier.toUpperCase()}
                   </span>
+                  {myEligibility?.isWhitelisted && !myEligibility.noRequirementsActive && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/40">
+                      <ShieldCheck className="w-3 h-3" />
+                      Pengecualian Resmi
+                    </span>
+                  )}
                   {isCurrentAccountDisguised && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-200 border border-amber-400/40">
                       <EyeOff className="w-3 h-3" />
@@ -298,7 +367,7 @@ export const LeaderboardView: React.FC = () => {
             <div className="text-left md:text-right shrink-0">
               <div className="text-[11px] text-slate-400">{activeCategory.label}</div>
               <div className="text-lg sm:text-xl font-black text-amber-300 tabular-nums">
-                {isCurrentAccountAdmin
+                {isCurrentAccountAdmin && !isCurrentAccountDisguised
                   ? activeCategory.key === 'jobLevel'
                     ? 'Level ∞'
                     : activeCategory.key === 'txCount' && myRankEntry
@@ -311,10 +380,88 @@ export const LeaderboardView: React.FC = () => {
                       activeCategory.unitLabel,
                       myRankEntry.isUnlimited
                     )
+                  : myEligibility && !myEligibility.eligible
+                  ? `${myEligibility.overallProgressPercent}% Menuju Syarat`
                   : '—'}
               </div>
             </div>
           </div>
+
+          {/* Batang Progres Lengkap Sisa Kekurangan Jika Belum Lolos Syarat Minimal */}
+          {myEligibility &&
+            !myEligibility.eligible &&
+            !myEligibility.excludedByAccountStatus &&
+            myEligibility.checks.length > 0 &&
+            !(isCurrentAccountAdmin && !isCurrentAccountDisguised) && (
+              <div className="pt-3.5 border-t border-slate-800/80 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-amber-200">
+                    {myEligibility.evaluationMode === 'ANY'
+                      ? 'Penuhi minimal 1 syarat berikut untuk masuk Leaderboard & meraih Badge Top 1–100:'
+                      : `Penuhi semua syarat berikut (${myEligibility.passedCount}/${myEligibility.totalChecks} terpenuhi) untuk masuk Leaderboard & meraih Badge Top 1–100:`}
+                  </div>
+                  <span className="text-xs font-black text-amber-300 tabular-nums">
+                    Progres Total: {myEligibility.overallProgressPercent}%
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {myEligibility.checks.map((chk) => (
+                    <div
+                      key={chk.id}
+                      className={`rounded-2xl border p-3 space-y-2 ${
+                        chk.passed
+                          ? 'bg-emerald-950/35 border-emerald-500/35'
+                          : 'bg-slate-950/80 border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                          {chk.passed ? (
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                          ) : (
+                            <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          )}
+                          <span>{chk.label}</span>
+                        </span>
+                        <span
+                          className={`text-[11px] font-black tabular-nums ${
+                            chk.passed ? 'text-emerald-300' : 'text-amber-300'
+                          }`}
+                        >
+                          {chk.progressPercent}%
+                        </span>
+                      </div>
+
+                      <div className="h-2 w-full rounded-full bg-slate-800 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            chk.passed
+                              ? 'bg-emerald-400'
+                              : 'bg-gradient-to-r from-amber-500 to-yellow-400'
+                          }`}
+                          style={{ width: `${Math.max(4, chk.progressPercent)}%` }}
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] tabular-nums">
+                        <span className="text-slate-400">
+                          Saat ini: <strong className="text-slate-200">{chk.currentDisplay}</strong> /{' '}
+                          {chk.targetDisplay}
+                        </span>
+                        <span
+                          className={`font-bold ${
+                            chk.passed ? 'text-emerald-400' : 'text-rose-300'
+                          }`}
+                        >
+                          {chk.remainingText}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
         </div>
       )}
 
@@ -328,14 +475,14 @@ export const LeaderboardView: React.FC = () => {
         <div className="rounded-3xl bg-slate-900/90 border border-slate-800 p-10 text-center">
           <Trophy className="w-8 h-8 text-slate-500 mx-auto mb-3" />
           <p className="text-sm font-bold text-slate-300">
-            Belum ada nasabah yang memenuhi kriteria peringkat kategori ini.
+            Belum ada nasabah yang memenuhi kriteria minimal peringkat kategori ini.
           </p>
         </div>
       ) : (
         <div className="rounded-3xl bg-slate-900/95 border border-slate-800 overflow-hidden shadow-2xl">
           <div className="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between text-xs font-bold text-slate-400">
             <span>
-              Menampilkan {displayedRanking.length} dari {fullRanking.length} nasabah
+              Menampilkan {displayedRanking.length} dari {fullRanking.length} nasabah lolos
             </span>
             <span>Kategori: {activeCategory.label}</span>
           </div>
@@ -344,10 +491,7 @@ export const LeaderboardView: React.FC = () => {
             {displayedRanking.map((entry) => {
               const isMe = currentAccount?.id === entry.account.id;
               const publicTierKey = entry.isDisguised
-                ? adminTierGrantsMap[entry.account.id]?.previousCardTier &&
-                  adminTierGrantsMap[entry.account.id]?.previousCardTier !== 'admin'
-                  ? adminTierGrantsMap[entry.account.id].previousCardTier
-                  : 'regular'
+                ? disguisedPublicTierMap[entry.account.id] || 'regular'
                 : entry.account.cardTier;
               const tierCfg = CARD_TIER_CONFIGS[publicTierKey];
               const rowHighlight =
@@ -377,13 +521,13 @@ export const LeaderboardView: React.FC = () => {
                         {entry.account.isVerified && <VerifiedBadge size="sm" />}
                         <span
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-extrabold border ${
-                            entry.account.cardTier === 'admin'
+                            publicTierKey === 'admin'
                               ? 'bg-rose-500/20 text-rose-200 border-rose-500/40'
                               : 'bg-slate-800 text-slate-200 border-slate-700'
                           }`}
                         >
                           <Crown className="w-2.5 h-2.5 text-amber-300" />
-                          {tierCfg?.name || entry.account.cardTier.toUpperCase()}
+                          {tierCfg?.name || publicTierKey.toUpperCase()}
                         </span>
                         {isMe && (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-500/25 text-indigo-200 border border-indigo-400/50">

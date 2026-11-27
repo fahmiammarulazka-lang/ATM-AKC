@@ -42,6 +42,8 @@ import {
   CardTier,
   LeaderboardCategoryConfig,
   LeaderboardCategoryKey,
+  LeaderboardMinCardTier,
+  LeaderboardMinEntryConfig,
   LeaderboardSystemConfig,
   MissionCategory,
   MissionDayRewardConfig,
@@ -58,10 +60,16 @@ import {
   isAdminCardAccount,
 } from '../utils/bankUtils';
 import {
+  buildLeaderboardMinEntryPreset,
+  computeLeaderboardEligibilityPreview,
   computeLeaderboardRankingForCategory,
   formatLeaderboardMetricValue,
+  LEADERBOARD_MIN_CARD_TIER_LABELS,
+  normalizeLeaderboardMinEntryConfig,
 } from '../utils/leaderboardUtils';
 import { TopLeaderboardBadges, LeaderboardRankMarker } from './TopLeaderboardBadges';
+import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
+import { isAccountDisguisedAdmin } from '../types/adminAnalyticsAndTier';
 
 const METRIC_OPTIONS: Array<{ value: MissionMetricKey; label: string; unit: string }> = [
   { value: 'daily_checkin', label: 'Absen / Check-In Harian (Manual)', unit: 'hari' },
@@ -1677,6 +1685,20 @@ export const AdminLeaderboardTab: React.FC = () => {
     adminDeleteLeaderboardCategory,
     adminResetLeaderboardDefault,
   } = useBank();
+  const { adminTierGrantsMap } = useAdminAnalyticsAndTierSync();
+
+  const { disguisedAdminIds, disguisedPublicTierMap } = useMemo(() => {
+    const ids = new Set<string>();
+    const tierMap: Record<string, CardTier> = {};
+    accounts.forEach((acc) => {
+      if (isAdminCardAccount(acc) && isAccountDisguisedAdmin(acc.id, adminTierGrantsMap)) {
+        ids.add(acc.id);
+        const prev = adminTierGrantsMap[acc.id]?.previousCardTier;
+        tierMap[acc.id] = prev && prev !== 'admin' ? prev : 'regular';
+      }
+    });
+    return { disguisedAdminIds: ids, disguisedPublicTierMap: tierMap };
+  }, [accounts, adminTierGrantsMap]);
 
   const isDirtyRef = useRef(false);
   const [draft, setDraft] = useState(() => ({
@@ -1693,6 +1715,25 @@ export const AdminLeaderboardTab: React.FC = () => {
     topBadgeCustomPrefix: leaderboardConfig.topBadgeCustomPrefix ?? 'Top',
   }));
 
+  const [minEntryDraft, setMinEntryDraft] = useState<LeaderboardMinEntryConfig>(() =>
+    normalizeLeaderboardMinEntryConfig(leaderboardConfig.minEntryConfig)
+  );
+  const [catMinDrafts, setCatMinDrafts] = useState<
+    Record<string, { minEntryEnabled: boolean; minEntryValue: string }>
+  >(() => {
+    const map: Record<string, { minEntryEnabled: boolean; minEntryValue: string }> = {};
+    (leaderboardConfig.categories || []).forEach((c) => {
+      map[c.id] = {
+        minEntryEnabled: c.minEntryEnabled !== false,
+        minEntryValue: String(c.minEntryValue ?? 0),
+      };
+    });
+    return map;
+  });
+
+  const [whitelistSearch, setWhitelistSearch] = useState('');
+  const [showDisqualifiedSamples, setShowDisqualifiedSamples] = useState(false);
+
   useEffect(() => {
     if (!isDirtyRef.current) {
       setDraft({
@@ -1708,6 +1749,15 @@ export const AdminLeaderboardTab: React.FC = () => {
         maxBadgeRank: String(leaderboardConfig.maxBadgeRank ?? 100),
         topBadgeCustomPrefix: leaderboardConfig.topBadgeCustomPrefix ?? 'Top',
       });
+      setMinEntryDraft(normalizeLeaderboardMinEntryConfig(leaderboardConfig.minEntryConfig));
+      const nextCatMap: Record<string, { minEntryEnabled: boolean; minEntryValue: string }> = {};
+      (leaderboardConfig.categories || []).forEach((c) => {
+        nextCatMap[c.id] = {
+          minEntryEnabled: c.minEntryEnabled !== false,
+          minEntryValue: String(c.minEntryValue ?? 0),
+        };
+      });
+      setCatMinDrafts(nextCatMap);
     }
   }, [leaderboardConfig]);
 
@@ -1720,7 +1770,7 @@ export const AdminLeaderboardTab: React.FC = () => {
 
   // Preview tab
   const [previewCatId, setPreviewCatId] = useState<string>(
-    () => leaderboardConfig.categories[0]?.id || 'lb-balance'
+    () => leaderboardConfig.categories[0]?.id || 'lb-cat-balance'
   );
   const [confirmReset, setConfirmReset] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -1728,6 +1778,41 @@ export const AdminLeaderboardTab: React.FC = () => {
   const flash = (ok: boolean, text: string) => {
     setFeedback({ type: ok ? 'success' : 'error', text });
   };
+
+  const mergedCategoriesDraft = useMemo<LeaderboardCategoryConfig[]>(() => {
+    return [...(leaderboardConfig.categories || [])]
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((cat) => {
+        const d = catMinDrafts[cat.id];
+        if (!d) return cat;
+        const parsedVal = Number(d.minEntryValue);
+        return {
+          ...cat,
+          minEntryEnabled: d.minEntryEnabled,
+          minEntryValue: Number.isFinite(parsedVal) && parsedVal >= 0 ? parsedVal : 0,
+        };
+      });
+  }, [leaderboardConfig.categories, catMinDrafts]);
+
+  const previewConfig = useMemo<LeaderboardSystemConfig>(
+    () => ({
+      ...leaderboardConfig,
+      enabled: draft.enabled,
+      showAdminTier: draft.showAdminTier,
+      maxEntries: parseIntStrict(draft.maxEntries, 5, 500),
+      showMyRankCard: draft.showMyRankCard,
+      hideBannedAccounts: draft.hideBannedAccounts,
+      hidePendingAccounts: draft.hidePendingAccounts,
+      showTopBadges: draft.showTopBadges,
+      showTopBadgesOnCard: draft.showTopBadgesOnCard,
+      showTopBadgesInProfile: draft.showTopBadgesInProfile,
+      maxBadgeRank: parseIntStrict(draft.maxBadgeRank, 1, 500),
+      topBadgeCustomPrefix: draft.topBadgeCustomPrefix,
+      categories: mergedCategoriesDraft,
+      minEntryConfig: normalizeLeaderboardMinEntryConfig(minEntryDraft),
+    }),
+    [leaderboardConfig, draft, mergedCategoriesDraft, minEntryDraft]
+  );
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1743,28 +1828,102 @@ export const AdminLeaderboardTab: React.FC = () => {
       showTopBadgesInProfile: draft.showTopBadgesInProfile,
       maxBadgeRank: parseIntStrict(draft.maxBadgeRank, 1, 500),
       topBadgeCustomPrefix: draft.topBadgeCustomPrefix,
+      categories: mergedCategoriesDraft,
+      minEntryConfig: normalizeLeaderboardMinEntryConfig(minEntryDraft),
     });
     isDirtyRef.current = false;
     flash(res.success, res.message);
   };
 
-  const sortedCategories = useMemo(
-    () => [...(leaderboardConfig.categories || [])].sort((a, b) => a.sortOrder - b.sortOrder),
-    [leaderboardConfig.categories]
-  );
+  const applyMinEntryPreset = (preset: 'open' | 'standard' | 'sultan') => {
+    const built = buildLeaderboardMinEntryPreset(
+      preset,
+      mergedCategoriesDraft,
+      minEntryDraft.whitelistedAccountIds
+    );
+    isDirtyRef.current = true;
+    setMinEntryDraft(built.minEntryConfig);
+    const nextCatMap: Record<string, { minEntryEnabled: boolean; minEntryValue: string }> = {};
+    built.categories.forEach((c) => {
+      nextCatMap[c.id] = {
+        minEntryEnabled: c.minEntryEnabled !== false,
+        minEntryValue: String(c.minEntryValue ?? 0),
+      };
+    });
+    setCatMinDrafts(nextCatMap);
+    const label =
+      preset === 'open'
+        ? 'Mode Terbuka (Syarat Minimal NONAKTIF)'
+        : preset === 'standard'
+        ? 'Mode Standar (Syarat Moderat AKTIF)'
+        : 'Mode Khusus Sultan (Syarat Elite AKTIF)';
+    flash(true, `Preset "${label}" diterapkan ke pratinjau. Klik Simpan Pengaturan untuk memberlakukan permanen.`);
+  };
+
+  const toggleWhitelistAccount = (accId: string) => {
+    isDirtyRef.current = true;
+    setMinEntryDraft((prev) => {
+      const exists = prev.whitelistedAccountIds.includes(accId);
+      return {
+        ...prev,
+        whitelistedAccountIds: exists
+          ? prev.whitelistedAccountIds.filter((id) => id !== accId)
+          : [...prev.whitelistedAccountIds, accId],
+      };
+    });
+  };
+
+  const sortedCategories = mergedCategoriesDraft;
 
   const previewCategory =
     sortedCategories.find((c) => c.id === previewCatId) || sortedCategories[0];
+
+  const previewSummary = useMemo(() => {
+    if (!previewCategory) return null;
+    return computeLeaderboardEligibilityPreview(
+      accounts,
+      previewCategory,
+      previewConfig,
+      transactions,
+      disguisedAdminIds,
+      disguisedPublicTierMap
+    );
+  }, [accounts, previewCategory, previewConfig, transactions, disguisedAdminIds, disguisedPublicTierMap]);
 
   const previewRows = useMemo(() => {
     if (!previewCategory) return [];
     return computeLeaderboardRankingForCategory(
       accounts,
       previewCategory,
-      leaderboardConfig,
-      transactions
+      previewConfig,
+      transactions,
+      disguisedAdminIds,
+      disguisedPublicTierMap
     ).slice(0, 15);
-  }, [accounts, previewCategory, leaderboardConfig, transactions]);
+  }, [accounts, previewCategory, previewConfig, transactions, disguisedAdminIds, disguisedPublicTierMap]);
+
+  const filteredWhitelistCandidates = useMemo(() => {
+    const q = whitelistSearch.trim().toLowerCase();
+    return accounts
+      .filter((acc) => !isAdminCardAccount(acc) || disguisedAdminIds.has(acc.id))
+      .filter((acc) => {
+        if (!q) return true;
+        return (
+          acc.fullName.toLowerCase().includes(q) ||
+          acc.accountNumber.toLowerCase().includes(q) ||
+          (acc.email || '').toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 10);
+  }, [accounts, whitelistSearch, disguisedAdminIds]);
+
+  const whitelistedAccountObjects = useMemo(
+    () =>
+      minEntryDraft.whitelistedAccountIds
+        .map((id) => accounts.find((a) => a.id === id))
+        .filter((a): a is NonNullable<typeof a> => Boolean(a)),
+    [minEntryDraft.whitelistedAccountIds, accounts]
+  );
 
   return (
     <div className="space-y-6 text-xs">
@@ -1774,13 +1933,13 @@ export const AdminLeaderboardTab: React.FC = () => {
           <div className="space-y-1">
             <span className="px-3 py-1 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase inline-flex items-center gap-1.5">
               <Trophy className="w-3.5 h-3.5" />
-              <span>PUSAT KENDALI LEADERBOARD MULTI-ASET &amp; BADGE TOP 1–100</span>
+              <span>PUSAT KENDALI LEADERBOARD MULTI-ASET, SYARAT MINIMAL &amp; BADGE TOP 1–100</span>
             </span>
             <h2 className="text-xl sm:text-2xl font-black text-white">
-              Atur Kategori Leaderboard, Visibilitas Tier ADMIN (∞) &amp; Lencana Top 1–100
+              Atur Kategori, Syarat Minimal Masuk Leaderboard &amp; Lencana Top 1–100
             </h2>
             <p className="text-slate-300">
-              Bawaan sistem memiliki 3 papan peringkat (<strong>Uang</strong>, <strong>Coin</strong>, <strong>Diamond</strong>) dengan tier <strong>ADMIN (∞) disembunyikan</strong> secara default, serta Badge Top 1 Emas, Top 2 Abu-abu, Top 3 Coklat, &amp; Top #4–#100 Abu-abu Kehitaman.
+              Kelola saklar syarat minimal masuk Leaderboard secara global maupun per kategori (bisa ON atau OFF), 6 kriteria seleksi, Preset cepat, Whitelist pengecualian, serta pratinjau langsung sebelum disimpan.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -1825,7 +1984,7 @@ export const AdminLeaderboardTab: React.FC = () => {
             <div>
               <p className="font-black text-sm">Reset Pengaturan Leaderboard ke Standar Awal?</p>
               <p className="text-[11px] text-rose-200">
-                Kategori akan kembali menjadi Uang, Coin, Diamond; Badge Top 1–100 Aktif; Tier ADMIN disembunyikan.
+                Kategori kembali ke Uang, Coin, Diamond; Syarat Minimal dimatikan (Mode Terbuka); Badge Top 1–100 Aktif.
               </p>
             </div>
           </div>
@@ -1870,6 +2029,483 @@ export const AdminLeaderboardTab: React.FC = () => {
           </button>
         </div>
       )}
+
+      {/* PANEL UTAMA SYARAT MINIMAL MASUK LEADERBOARD (GLOBAL + 6 KRITERIA + PRESET + WHITELIST + PRATINJAU LANGSUNG) */}
+      <div className="rounded-3xl border border-sky-500/40 bg-slate-900/95 p-5 sm:p-6 shadow-xl space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-sky-400" />
+              <h3 className="text-base sm:text-lg font-black text-white">
+                Syarat Minimal Masuk Leaderboard
+              </h3>
+              <span
+                className={`px-2.5 py-0.5 rounded-md text-[10px] font-black border ${
+                  minEntryDraft.enabled
+                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                    : 'bg-slate-800 text-slate-300 border-slate-700'
+                }`}
+              >
+                {minEntryDraft.enabled ? 'AKTIF (DISARING)' : 'NONAKTIF — SEMUA BEBAS MASUK'}
+              </span>
+            </div>
+            <p className="text-slate-400 text-[11px]">
+              Nasabah yang belum memenuhi syarat minimal tidak masuk peringkat &amp; Badge Top 1–100 otomatis hilang sampai syarat terpenuhi. Kartu Tier Admin bebas syarat; Admin Mode Penyamaran mengikuti aturan publik.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                isDirtyRef.current = true;
+                setMinEntryDraft((prev) => ({ ...prev, enabled: !prev.enabled }));
+              }}
+              className={`px-4 py-2.5 rounded-xl font-black cursor-pointer border transition ${
+                minEntryDraft.enabled
+                  ? 'bg-emerald-500 text-slate-950 border-emerald-300 hover:bg-emerald-400'
+                  : 'bg-slate-950 text-slate-200 border-slate-700 hover:border-sky-400'
+              }`}
+            >
+              {minEntryDraft.enabled ? 'Syarat Minimal: ON (Aktif)' : 'Syarat Minimal: OFF (Bebas)'}
+            </button>
+          </div>
+        </div>
+
+        {/* Bar Preset Cepat */}
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-950/90 border border-slate-800 p-3.5">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-amber-400" />
+            <span className="font-black text-white">Preset Cepat Syarat Minimal:</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => applyMinEntryPreset('open')}
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold cursor-pointer"
+            >
+              Mode Terbuka (OFF)
+            </button>
+            <button
+              type="button"
+              onClick={() => applyMinEntryPreset('standard')}
+              className="px-3 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-400/40 text-sky-200 font-bold cursor-pointer"
+            >
+              Mode Standar
+            </button>
+            <button
+              type="button"
+              onClick={() => applyMinEntryPreset('sultan')}
+              className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-bold cursor-pointer"
+            >
+              Mode Khusus Sultan
+            </button>
+          </div>
+        </div>
+
+        {/* Pratinjau Langsung Lolos vs Gugur (Sebelum Simpan) */}
+        {previewSummary && previewCategory && (
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-cyan-400" />
+                <span className="font-black text-white">
+                  Pratinjau Langsung Sebelum Simpan ({previewCategory.label})
+                </span>
+              </div>
+              <select
+                value={previewCategory.id}
+                onChange={(e) => setPreviewCatId(e.target.value)}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold"
+              >
+                {sortedCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    Uji Kategori: {c.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+              <div className="rounded-xl bg-emerald-950/40 border border-emerald-500/35 p-3">
+                <div className="text-[10px] font-bold text-emerald-300 uppercase">Lolos Masuk</div>
+                <div className="mt-1 text-xl font-black text-white tabular-nums">
+                  {previewSummary.eligibleCount}
+                  <span className="text-xs font-semibold text-emerald-300 ml-1">
+                    / {previewSummary.totalCandidates}
+                  </span>
+                </div>
+              </div>
+              <div className="rounded-xl bg-rose-950/35 border border-rose-500/35 p-3">
+                <div className="text-[10px] font-bold text-rose-300 uppercase">Gugur / Tersaring</div>
+                <div className="mt-1 text-xl font-black text-white tabular-nums">
+                  {previewSummary.disqualifiedCount}
+                </div>
+              </div>
+              <div className="rounded-xl bg-indigo-950/40 border border-indigo-500/35 p-3">
+                <div className="text-[10px] font-bold text-indigo-300 uppercase">Lolos via Whitelist</div>
+                <div className="mt-1 text-xl font-black text-white tabular-nums">
+                  {previewSummary.whitelistedBypassCount}
+                </div>
+              </div>
+              <div className="rounded-xl bg-amber-950/35 border border-amber-500/35 p-3">
+                <div className="text-[10px] font-bold text-amber-300 uppercase">Admin Bebas Syarat</div>
+                <div className="mt-1 text-xl font-black text-white tabular-nums">
+                  {previewSummary.adminBypassCount}
+                </div>
+              </div>
+            </div>
+
+            {previewSummary.disqualifiedCount > 0 && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDisqualifiedSamples((v) => !v)}
+                  className="text-[11px] font-bold text-sky-400 hover:underline cursor-pointer"
+                >
+                  {showDisqualifiedSamples
+                    ? 'Sembunyikan sampel nasabah gugur'
+                    : `Lihat sampel nasabah gugur (${Math.min(12, previewSummary.disqualifiedCount)} akun)`}
+                </button>
+                {showDisqualifiedSamples && (
+                  <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                    {previewSummary.disqualifiedSamples.map(({ account, eligibility }) => (
+                      <div
+                        key={account.id}
+                        className="rounded-xl bg-slate-900 border border-slate-800 px-3 py-2 flex items-start justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="font-bold text-white truncate">{account.fullName}</div>
+                          <div className="text-[10px] font-mono text-slate-400">
+                            {account.accountNumber}
+                          </div>
+                          <div className="text-[10px] text-rose-300 mt-0.5">
+                            {eligibility.checks
+                              .filter((c) => !c.passed)
+                              .map((c) => `${c.label}: ${c.remainingText}`)
+                              .slice(0, 2)
+                              .join(' • ')}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleWhitelistAccount(account.id)}
+                          className="px-2 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 font-bold text-[10px] shrink-0 cursor-pointer"
+                        >
+                          + Whitelist
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Mode Evaluasi & Saklar Banner Publik */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 space-y-2">
+            <span className="font-bold text-slate-300 block">Mode Evaluasi Jika &gt;1 Syarat Aktif:</span>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({ ...p, evaluationMode: 'ALL' }));
+                }}
+                className={`py-2 px-3 rounded-xl font-black border cursor-pointer ${
+                  minEntryDraft.evaluationMode === 'ALL'
+                    ? 'bg-sky-500 text-slate-950 border-sky-300'
+                    : 'bg-slate-900 text-slate-300 border-slate-700'
+                }`}
+              >
+                Wajib Semua (AND)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({ ...p, evaluationMode: 'ANY' }));
+                }}
+                className={`py-2 px-3 rounded-xl font-black border cursor-pointer ${
+                  minEntryDraft.evaluationMode === 'ANY'
+                    ? 'bg-sky-500 text-slate-950 border-sky-300'
+                    : 'bg-slate-900 text-slate-300 border-slate-700'
+                }`}
+              >
+                Salah Satu (OR)
+              </button>
+            </div>
+          </div>
+
+          <label className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 flex items-center justify-between gap-3 cursor-pointer">
+            <div>
+              <span className="font-bold text-white block">
+                Tampilkan Ringkasan Syarat di Leaderboard Nasabah
+              </span>
+              <span className="text-[10px] text-slate-400">
+                Jika dimatikan, banner ringkasan syarat disembunyikan di halaman Leaderboard publik.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={minEntryDraft.showRequirementsBanner}
+              onChange={(e) => {
+                isDirtyRef.current = true;
+                setMinEntryDraft((p) => ({ ...p, showRequirementsBanner: e.target.checked }));
+              }}
+              className="accent-sky-400 w-4 h-4 shrink-0"
+            />
+          </label>
+        </div>
+
+        {/* Grid 6 Kriteria Syarat Minimal */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {/* 1. Nominal Aset Kategori */}
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 space-y-2">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="font-bold text-white">1. Nominal Minimal Aset Kategori</span>
+              <input
+                type="checkbox"
+                checked={minEntryDraft.categoryAssetMinEnabled}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({ ...p, categoryAssetMinEnabled: e.target.checked }));
+                }}
+                className="accent-sky-400"
+              />
+            </label>
+            <p className="text-[10px] text-slate-400">
+              Angka minimal &amp; saklar tiap kategori (Saldo, Coin, Diamond, Emas, dll.) diatur bebas pada daftar Kategori di bawah.
+            </p>
+          </div>
+
+          {/* 2. Minimal Level Pekerjaan */}
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 space-y-2">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="font-bold text-white">2. Minimal Level Pekerjaan</span>
+              <input
+                type="checkbox"
+                checked={minEntryDraft.minJobLevelEnabled}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({ ...p, minJobLevelEnabled: e.target.checked }));
+                }}
+                className="accent-sky-400"
+              />
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400">Level ≥</span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={minEntryDraft.minJobLevel}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({
+                    ...p,
+                    minJobLevel: Math.max(1, Math.min(50, Number(e.target.value) || 1)),
+                  }));
+                }}
+                className="w-24 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-mono font-bold tabular-nums"
+              />
+            </div>
+          </div>
+
+          {/* 3. Minimal Tier Kartu ATM */}
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 space-y-2">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="font-bold text-white">3. Minimal Tier Kartu ATM</span>
+              <input
+                type="checkbox"
+                checked={minEntryDraft.minCardTierEnabled}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({ ...p, minCardTierEnabled: e.target.checked }));
+                }}
+                className="accent-sky-400"
+              />
+            </label>
+            <select
+              value={minEntryDraft.minCardTier}
+              onChange={(e) => {
+                isDirtyRef.current = true;
+                setMinEntryDraft((p) => ({
+                  ...p,
+                  minCardTier: e.target.value as LeaderboardMinCardTier,
+                }));
+              }}
+              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold"
+            >
+              {(['regular', 'gold', 'premium', 'platinum'] as LeaderboardMinCardTier[]).map((t) => (
+                <option key={t} value={t}>
+                  Minimal Kartu {LEADERBOARD_MIN_CARD_TIER_LABELS[t]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 4. Minimal Total Transaksi Selesai */}
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 space-y-2">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="font-bold text-white">4. Minimal Transaksi Selesai</span>
+              <input
+                type="checkbox"
+                checked={minEntryDraft.minTxCountEnabled}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({ ...p, minTxCountEnabled: e.target.checked }));
+                }}
+                className="accent-sky-400"
+              />
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400">Minimal</span>
+              <input
+                type="number"
+                min={0}
+                value={minEntryDraft.minTxCount}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({
+                    ...p,
+                    minTxCount: Math.max(0, Number(e.target.value) || 0),
+                  }));
+                }}
+                className="w-24 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-emerald-300 font-mono font-bold tabular-nums"
+              />
+              <span className="text-[11px] text-slate-400">Tx</span>
+            </div>
+          </div>
+
+          {/* 5. Minimal Umur Akun (Hari) */}
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 space-y-2">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="font-bold text-white">5. Minimal Umur Akun Terdaftar</span>
+              <input
+                type="checkbox"
+                checked={minEntryDraft.minAccountAgeDaysEnabled}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({ ...p, minAccountAgeDaysEnabled: e.target.checked }));
+                }}
+                className="accent-sky-400"
+              />
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400">Minimal</span>
+              <input
+                type="number"
+                min={0}
+                value={minEntryDraft.minAccountAgeDays}
+                onChange={(e) => {
+                  isDirtyRef.current = true;
+                  setMinEntryDraft((p) => ({
+                    ...p,
+                    minAccountAgeDays: Math.max(0, Number(e.target.value) || 0),
+                  }));
+                }}
+                className="w-24 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-cyan-300 font-mono font-bold tabular-nums"
+              />
+              <span className="text-[11px] text-slate-400">Hari</span>
+            </div>
+          </div>
+
+          {/* 6. Wajib Verifikasi Centang Biru */}
+          <label className="rounded-2xl bg-slate-950 border border-slate-800 p-3.5 flex items-center justify-between gap-2 cursor-pointer">
+            <div>
+              <span className="font-bold text-white block">6. Wajib Centang Biru</span>
+              <span className="text-[10px] text-slate-400">
+                Hanya akun terverifikasi Centang Biru yang boleh masuk Leaderboard.
+              </span>
+            </div>
+            <input
+              type="checkbox"
+              checked={minEntryDraft.requireVerified}
+              onChange={(e) => {
+                isDirtyRef.current = true;
+                setMinEntryDraft((p) => ({ ...p, requireVerified: e.target.checked }));
+              }}
+              className="accent-sky-400 w-4 h-4 shrink-0"
+            />
+          </label>
+        </div>
+
+        {/* Daftar Pengecualian (Whitelist) */}
+        <div className="rounded-2xl bg-slate-950 border border-indigo-500/30 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="font-black text-indigo-300 block">
+                Daftar Pengecualian Nasabah / Whitelist ({whitelistedAccountObjects.length} Akun)
+              </span>
+              <span className="text-[10px] text-slate-400">
+                Akun dalam daftar ini tetap masuk Leaderboard meski belum mencapai syarat minimal.
+              </span>
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={whitelistSearch}
+                onChange={(e) => setWhitelistSearch(e.target.value)}
+                placeholder="Cari nama / no. rekening..."
+                className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs"
+              />
+            </div>
+          </div>
+
+          {whitelistedAccountObjects.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {whitelistedAccountObjects.map((acc) => (
+                <span
+                  key={acc.id}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-indigo-500/20 border border-indigo-400/40 text-indigo-200 font-bold text-[11px]"
+                >
+                  <span>
+                    {acc.fullName} ({acc.accountNumber})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleWhitelistAccount(acc.id)}
+                    className="text-rose-300 hover:text-rose-200 cursor-pointer font-black"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {whitelistSearch.trim().length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto">
+              {filteredWhitelistCandidates.map((acc) => {
+                const isAdded = minEntryDraft.whitelistedAccountIds.includes(acc.id);
+                return (
+                  <button
+                    key={acc.id}
+                    type="button"
+                    onClick={() => toggleWhitelistAccount(acc.id)}
+                    className={`flex items-center justify-between px-3 py-1.5 rounded-xl border text-left cursor-pointer ${
+                      isAdded
+                        ? 'bg-indigo-950/60 border-indigo-400/50 text-indigo-200'
+                        : 'bg-slate-900 border-slate-800 text-slate-200 hover:border-indigo-400/40'
+                    }`}
+                  >
+                    <span className="truncate font-bold">
+                      {acc.fullName} <span className="font-mono text-[10px] text-slate-400">({acc.accountNumber})</span>
+                    </span>
+                    <span className="text-[10px] font-black shrink-0 ml-2">
+                      {isAdded ? '✓ Terdaftar' : '+ Pilih'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         {/* LEFT: Pengaturan Global & Badge Top 1-100 */}
@@ -2030,76 +2666,135 @@ export const AdminLeaderboardTab: React.FC = () => {
             className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-slate-950 font-black text-sm cursor-pointer flex items-center justify-center gap-2 shadow-lg"
           >
             <Save className="w-4 h-4" />
-            <span>Simpan Pengaturan Leaderboard &amp; Badge</span>
+            <span>Simpan Pengaturan Leaderboard, Syarat Minimal &amp; Badge</span>
           </button>
         </form>
 
-        {/* RIGHT: Kelola Kategori & Pratinjau Peringkat */}
+        {/* RIGHT: Kelola Kategori (Plus Saklar & Nominal Minimal Per Kategori) & Pratinjau Peringkat */}
         <div className="xl:col-span-7 space-y-5">
           {/* Tambah & Kelola Kategori */}
           <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-5 space-y-4">
             <h3 className="font-black text-white text-base flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-cyan-400" />
-              <span>Kategori Papan Peringkat ({sortedCategories.length})</span>
+              <span>Kategori Papan Peringkat &amp; Ambang Minimal Per Kategori ({sortedCategories.length})</span>
             </h3>
 
-            <div className="space-y-2">
-              {sortedCategories.map((cat) => (
-                <div
-                  key={cat.id}
-                  className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-2"
-                >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span className="px-2 py-0.5 rounded bg-slate-800 font-mono text-[10px] text-cyan-300">
-                      {cat.key}
-                    </span>
-                    <input
-                      type="text"
-                      value={cat.label}
-                      onChange={(e) =>
-                        adminUpdateLeaderboardCategory(cat.id, { label: e.target.value })
-                      }
-                      className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold text-xs w-36"
-                    />
-                    <input
-                      type="text"
-                      value={cat.unitLabel}
-                      onChange={(e) =>
-                        adminUpdateLeaderboardCategory(cat.id, { unitLabel: e.target.value })
-                      }
-                      className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-mono text-xs w-20"
-                    />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        adminUpdateLeaderboardCategory(cat.id, { enabled: !cat.enabled })
-                      }
-                      className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer ${
-                        cat.enabled
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-slate-800 text-slate-400'
-                      }`}
-                    >
-                      {cat.enabled ? 'Aktif' : 'Sembunyi'}
-                    </button>
-                    {sortedCategories.length > 1 && (
+            <div className="space-y-2.5">
+              {sortedCategories.map((cat) => {
+                const catDraft = catMinDrafts[cat.id] || {
+                  minEntryEnabled: cat.minEntryEnabled !== false,
+                  minEntryValue: String(cat.minEntryValue ?? 0),
+                };
+                return (
+                  <div
+                    key={cat.id}
+                    className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0 flex-1 flex-wrap">
+                        <span className="px-2 py-0.5 rounded bg-slate-800 font-mono text-[10px] text-cyan-300">
+                          {cat.key}
+                        </span>
+                        <input
+                          type="text"
+                          value={cat.label}
+                          onChange={(e) =>
+                            adminUpdateLeaderboardCategory(cat.id, { label: e.target.value })
+                          }
+                          className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-white font-bold text-xs w-32"
+                        />
+                        <input
+                          type="text"
+                          value={cat.unitLabel}
+                          onChange={(e) =>
+                            adminUpdateLeaderboardCategory(cat.id, { unitLabel: e.target.value })
+                          }
+                          className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-amber-300 font-mono text-xs w-20"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            adminUpdateLeaderboardCategory(cat.id, { enabled: !cat.enabled })
+                          }
+                          className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer ${
+                            cat.enabled
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {cat.enabled ? 'Tab Aktif' : 'Sembunyi'}
+                        </button>
+                        {sortedCategories.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const res = adminDeleteLeaderboardCategory(cat.id);
+                              flash(res.success, res.message);
+                            }}
+                            className="p-1.5 rounded-lg bg-rose-500/20 text-rose-300 cursor-pointer"
+                            title="Hapus Kategori"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Saklar Khusus Kategori & Angka Minimal Aset Kategori */}
+                    <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
                       <button
                         type="button"
                         onClick={() => {
-                          const res = adminDeleteLeaderboardCategory(cat.id);
-                          flash(res.success, res.message);
+                          isDirtyRef.current = true;
+                          setCatMinDrafts((prev) => ({
+                            ...prev,
+                            [cat.id]: {
+                              minEntryEnabled: !catDraft.minEntryEnabled,
+                              minEntryValue: catDraft.minEntryValue,
+                            },
+                          }));
                         }}
-                        className="p-1.5 rounded-lg bg-rose-500/20 text-rose-300 cursor-pointer"
-                        title="Hapus Kategori"
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-black border cursor-pointer ${
+                          catDraft.minEntryEnabled
+                            ? 'bg-sky-500/20 text-sky-300 border-sky-400/40'
+                            : 'bg-slate-900 text-slate-400 border-slate-700'
+                        }`}
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        {catDraft.minEntryEnabled ? 'Syarat Kategori: ON' : 'Syarat Kategori: OFF'}
                       </button>
-                    )}
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-400">
+                          Minimal {cat.label}:
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={cat.key === 'goldGrams' ? '0.01' : '1'}
+                          value={catDraft.minEntryValue}
+                          onChange={(e) => {
+                            isDirtyRef.current = true;
+                            setCatMinDrafts((prev) => ({
+                              ...prev,
+                              [cat.id]: {
+                                minEntryEnabled: catDraft.minEntryEnabled,
+                                minEntryValue: e.target.value,
+                              },
+                            }));
+                          }}
+                          className="w-36 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-emerald-300 font-mono font-bold text-xs tabular-nums"
+                          placeholder="0"
+                        />
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {cat.unitLabel}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Form Tambah Kategori Baru */}
@@ -2159,11 +2854,11 @@ export const AdminLeaderboardTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Live Admin Preview Leaderboard (Nomor & ID Utuh Tanpa Sensor) */}
+          {/* Live Admin Preview Leaderboard (Mengikuti Draft Syarat Minimal Secara Langsung!) */}
           <div className="rounded-3xl border border-slate-800 bg-slate-900/95 p-5 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
               <h3 className="font-black text-white text-sm">
-                Pratinjau Peringkat Langsung (Data Asli Admin Tanpa Sensor)
+                Pratinjau Peringkat Langsung ({previewRows.length} Teratas Lolos Draft)
               </h3>
               <select
                 value={previewCategory?.id || ''}
@@ -2178,44 +2873,55 @@ export const AdminLeaderboardTab: React.FC = () => {
               </select>
             </div>
             <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {previewRows.map((row) => (
-                <div
-                  key={row.account.id}
-                  className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2"
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <LeaderboardRankMarker rank={row.rank} prefix={draft.topBadgeCustomPrefix} />
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-bold text-white truncate">{row.account.fullName}</span>
-                        {isAdminCardAccount(row.account) && (
-                          <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-black text-[9px]">
-                            ADMIN
-                          </span>
-                        )}
-                        <TopLeaderboardBadges
-                          accountId={row.account.id}
-                          variant="compact"
-                          context="profile"
-                        />
-                      </div>
-                      <span className="font-mono text-[10px] text-slate-400">
-                        Rek: {row.account.accountNumber} • ID: {row.account.userId16 || '-'}
-                      </span>
-                    </div>
-                  </div>
-                  <span className="font-mono font-black text-emerald-300 tabular-nums shrink-0">
-                    {previewCategory
-                      ? formatLeaderboardMetricValue(
-                          row.score,
-                          previewCategory.key,
-                          previewCategory.unitLabel,
-                          row.isUnlimited
-                        )
-                      : ''}
-                  </span>
+              {previewRows.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 font-bold">
+                  Belum ada nasabah yang lolos syarat minimal pada konfigurasi draft saat ini.
                 </div>
-              ))}
+              ) : (
+                previewRows.map((row) => (
+                  <div
+                    key={row.account.id}
+                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <LeaderboardRankMarker rank={row.rank} prefix={draft.topBadgeCustomPrefix} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-white truncate">{row.account.fullName}</span>
+                          {row.isWhitelisted && (
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-black text-[9px]">
+                              WHITELIST
+                            </span>
+                          )}
+                          {isAdminCardAccount(row.account) && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-black text-[9px]">
+                              ADMIN
+                            </span>
+                          )}
+                          <TopLeaderboardBadges
+                            accountId={row.account.id}
+                            variant="compact"
+                            context="profile"
+                          />
+                        </div>
+                        <span className="font-mono text-[10px] text-slate-400">
+                          Rek: {row.account.accountNumber} • ID: {row.account.userId16 || '-'}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="font-mono font-black text-emerald-300 tabular-nums shrink-0">
+                      {previewCategory
+                        ? formatLeaderboardMetricValue(
+                            row.score,
+                            previewCategory.key,
+                            previewCategory.unitLabel,
+                            row.isUnlimited
+                          )
+                        : ''}
+                    </span>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

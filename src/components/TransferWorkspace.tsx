@@ -28,6 +28,10 @@ import {
   SUPPORTED_BANKS,
 } from '../utils/bankUtils';
 import { TransferBebasPanel } from './TransferBebasPanel';
+import {
+  MANDATORY_TRANSFER_ADMIN_FEE_PERCENT,
+  calculateMandatoryTransferFee,
+} from '../utils/loyaltySystemUtils';
 
 interface TransferWorkspaceProps {
   standalone?: boolean;
@@ -36,6 +40,10 @@ interface TransferWorkspaceProps {
   routeKey?: number;
   prefillAccount?: string;
   prefillBank?: string;
+  prefillRecipientName?: string;
+  prefillAmount?: number;
+  prefillNote?: string;
+  prefillFromQris?: boolean;
   onNavigateToMutasi?: () => void;
   onNavigateToDashboard?: () => void;
   onNavigateToGold?: () => void;
@@ -49,6 +57,10 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
   routeKey = 0,
   prefillAccount = '',
   prefillBank = 'Bank Nusantara',
+  prefillRecipientName = '',
+  prefillAmount,
+  prefillNote = '',
+  prefillFromQris = false,
   onNavigateToMutasi,
   onNavigateToDashboard,
   onNavigateToGold,
@@ -70,14 +82,17 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
   const [recipientLookup, setRecipientLookup] = useState<{ found: boolean; name?: string } | null>(
     null
   );
-  const [transferAmount, setTransferAmount] = useState<string>('');
-  const [transferNote, setTransferNote] = useState<string>('');
+  const [transferAmount, setTransferAmount] = useState<string>(
+    prefillAmount && prefillAmount > 0 ? String(Math.round(prefillAmount)) : ''
+  );
+  const [transferNote, setTransferNote] = useState<string>(prefillNote || '');
   const [transferPin, setTransferPin] = useState<string>('');
   const [showTransferConfirmModal, setShowTransferConfirmModal] = useState<boolean>(false);
   const [transferError, setTransferError] = useState<string>('');
   const [transferSuccess, setTransferSuccess] = useState<string>('');
   const [saveAsFav, setSaveAsFav] = useState<boolean>(false);
   const [peekSenderAccount, setPeekSenderAccount] = useState<boolean>(false);
+  const [isQrisPrefillBanner, setIsQrisPrefillBanner] = useState<boolean>(Boolean(prefillFromQris));
 
   useEffect(() => {
     if (initialMode) {
@@ -87,11 +102,38 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
 
   useEffect(() => {
     if (prefillAccount) {
+      const targetBank = prefillBank || 'Bank Nusantara';
       setDestAccount(prefillAccount);
-      setDestBank(prefillBank || 'Bank Nusantara');
-      setRecipientLookup(null);
+      setDestBank(targetBank);
+      if (prefillAmount && prefillAmount > 0) {
+        setTransferAmount(String(Math.round(prefillAmount)));
+      }
+      if (prefillNote) {
+        setTransferNote(prefillNote);
+      }
+      setIsQrisPrefillBanner(Boolean(prefillFromQris));
+      const looked = lookupAccount(
+        prefillAccount,
+        targetBank === 'Bank Nusantara' ? 'BNUS' : targetBank
+      );
+      if (looked.found) {
+        setRecipientLookup(looked);
+      } else if (prefillRecipientName) {
+        setRecipientLookup({ found: true, name: prefillRecipientName });
+      } else {
+        setRecipientLookup(null);
+      }
     }
-  }, [prefillAccount, prefillBank]);
+  }, [
+    prefillAccount,
+    prefillBank,
+    prefillAmount,
+    prefillNote,
+    prefillFromQris,
+    prefillRecipientName,
+    routeKey,
+    lookupAccount,
+  ]);
 
   if (!currentAccount) {
     return (
@@ -315,10 +357,32 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
         </div>
         <span className="text-xs text-slate-400">
           {transferMode === 'bebas'
-            ? `Kirim Uang, Coin Spin, Emas 24K, atau ketiganya sekaligus · Admin ${goldMarketConfig.transferBebasAdminFeePercent ?? 5}%`
-            : 'Transfer perbankan reguler antar rekening Bank Nusantara & Bank Lain'}
+            ? `Kirim Uang, Coin Spin, Emas 24K, atau ketiganya sekaligus · Biaya Admin Wajib ${Math.max(MANDATORY_TRANSFER_ADMIN_FEE_PERCENT, goldMarketConfig.transferBebasAdminFeePercent ?? 5)}%`
+            : `Semua transfer dikenakan Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}% dari nominal kirim`}
         </span>
       </div>
+
+      {isQrisPrefillBanner && destAccount && (
+        <div className="p-3.5 rounded-2xl bg-sky-500/15 border border-sky-400/40 text-sky-100 text-xs flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <ShieldCheck className="w-4 h-4 text-sky-300 shrink-0" />
+            <span>
+              <strong>Lanjutkan Transaksi dari Scan QRIS Pribadi</strong> — Penerima{' '}
+              <span className="font-bold text-amber-300">
+                {recipientLookup?.name || prefillRecipientName || destAccount}
+              </span>{' '}
+              (<span className="font-mono">{destAccount}</span>) telah terisi otomatis. Periksa nominal lalu konfirmasi dengan PIN Anda.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsQrisPrefillBanner(false)}
+            className="text-sky-300 hover:text-white font-bold cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
 
       {transferMode === 'bebas' ? (
         <TransferBebasPanel
@@ -334,13 +398,12 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
                   <Send className="w-5 h-5 text-emerald-400" />
                   <span>Transfer Antar Rekening &amp; Bank Lain</span>
                 </h2>
-                <span className="text-xs text-emerald-400 font-semibold whitespace-nowrap shrink-0">
-                  Antar Bank Nusantara Gratis Rp 0
+                <span className="text-xs text-amber-300 font-bold whitespace-nowrap shrink-0">
+                  Biaya Admin Wajib {MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                Langkah 1 hingga 8: Masukkan nomor tujuan yang diacak sistem, cek nama penerima,
-                nominal, dan konfirmasi PIN Anda.
+                Langkah 1 hingga 8: Masukkan nomor tujuan, cek nama penerima, isi nominal (biaya admin wajib {MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%), dan konfirmasi PIN Anda.
               </p>
             </div>
 
@@ -367,8 +430,7 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
                 >
                   {SUPPORTED_BANKS.map((b) => (
                     <option key={b.code} value={b.name}>
-                      {b.icon} {b.name} •{' '}
-                      {b.fee === 0 ? 'Bebas Biaya (Rp 0)' : `Biaya ${formatRupiah(b.fee)}`}
+                      {b.icon} {b.name} • Biaya Admin Wajib {MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%
                     </option>
                   ))}
                 </select>
@@ -661,9 +723,20 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Biaya Administrasi:</span>
-                <span className="font-mono text-emerald-400">
-                  {destBank.includes('Nusantara') ? 'Rp 0 (Bebas Biaya)' : 'Rp 6.500'}
+                <span className="text-slate-400">
+                  Biaya Admin Wajib ({MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%):
+                </span>
+                <span className="font-mono font-bold text-amber-300">
+                  {formatRupiah(calculateMandatoryTransferFee(parseInt(transferAmount, 10) || 0))}
+                </span>
+              </div>
+              <div className="flex justify-between border-t border-slate-800 pt-2">
+                <span className="text-slate-200 font-bold">Total Dipotong dari Saldo:</span>
+                <span className="font-mono font-black text-emerald-300">
+                  {formatRupiah(
+                    (parseInt(transferAmount, 10) || 0) +
+                      calculateMandatoryTransferFee(parseInt(transferAmount, 10) || 0)
+                  )}
                 </span>
               </div>
             </div>

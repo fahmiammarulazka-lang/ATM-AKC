@@ -186,6 +186,12 @@ function BankAppContent() {
   const [transferRouteContext, setTransferRouteContext] = useState<{
     mode: 'reguler' | 'bebas';
     assetMode?: TransferBebasAssetMode;
+    prefillAccount?: string;
+    prefillBank?: string;
+    prefillRecipientName?: string;
+    prefillAmount?: number;
+    prefillNote?: string;
+    prefillFromQris?: boolean;
     key: number;
   }>({ mode: 'reguler', key: 0 });
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState<boolean>(false);
@@ -339,12 +345,60 @@ function BankAppContent() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
+    const applyQrisTransferDeepLink = (payload: {
+      recipientAccount?: string;
+      recipientBank?: string;
+      recipientName?: string;
+      amount?: number;
+      note?: string;
+    }) => {
+      const cleanAcc = String(payload.recipientAccount || '').trim();
+      if (!cleanAcc) return;
+      setTransferRouteContext({
+        mode: 'reguler',
+        prefillAccount: cleanAcc,
+        prefillBank: String(payload.recipientBank || 'Bank Nusantara').trim() || 'Bank Nusantara',
+        prefillRecipientName: String(payload.recipientName || '').trim() || undefined,
+        prefillAmount:
+          payload.amount && Number(payload.amount) > 0
+            ? Math.round(Number(payload.amount))
+            : undefined,
+        prefillNote: String(payload.note || '').trim() || 'Transfer via Scan QRIS Pribadi',
+        prefillFromQris: true,
+        key: Date.now(),
+      });
+      setActiveView('transfer');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
     try {
       const params = new URLSearchParams(window.location.search);
-      const qView = params.get('notifView');
-      const qTab = params.get('notifTab');
-      if (qView || qTab) {
-        applyDeepLink(qView || 'dashboard', qTab || 'mutasi');
+      const isQrisTransfer = params.get('qris_transfer') === '1';
+      const qTo = params.get('to') || '';
+      const qAmt = Number(params.get('amt') || '0') || 0;
+      const qName = params.get('name') || '';
+      const qBank = params.get('bank') || 'Bank Nusantara';
+      const qNote = params.get('note') || '';
+      if (isQrisTransfer && qTo) {
+        applyQrisTransferDeepLink({
+          recipientAccount: qTo,
+          recipientBank: qBank,
+          recipientName: qName,
+          amount: qAmt > 0 ? qAmt : undefined,
+          note: qNote || 'Transfer via Scan QRIS Pribadi',
+        });
+        try {
+          const cleanUrl = `${window.location.pathname}${window.location.hash || ''}`;
+          window.history.replaceState({}, '', cleanUrl);
+        } catch {
+          // ignore
+        }
+      } else {
+        const qView = params.get('notifView');
+        const qTab = params.get('notifTab');
+        if (qView || qTab) {
+          applyDeepLink(qView || 'dashboard', qTab || 'mutasi');
+        }
       }
     } catch { /* empty */ }
 
@@ -355,6 +409,19 @@ function BankAppContent() {
       }
     };
 
+    const handleQrisTransferEvent = (e: Event) => {
+      const custom = e as CustomEvent<{
+        recipientAccount?: string;
+        recipientBank?: string;
+        recipientName?: string;
+        amount?: number;
+        note?: string;
+      }>;
+      if (custom.detail?.recipientAccount) {
+        applyQrisTransferDeepLink(custom.detail);
+      }
+    };
+
     const handleSwMessage = (event: MessageEvent) => {
       if (event.data && event.data.type === 'NAVIGATE_FROM_NOTIFICATION') {
         applyDeepLink(event.data.targetView, event.data.targetDashboardTab);
@@ -362,12 +429,14 @@ function BankAppContent() {
     };
 
     window.addEventListener('bn:navigate', handleCustomNav);
+    window.addEventListener('bn:qris-transfer', handleQrisTransferEvent);
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', handleSwMessage);
     }
 
     return () => {
       window.removeEventListener('bn:navigate', handleCustomNav);
+      window.removeEventListener('bn:qris-transfer', handleQrisTransferEvent);
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.removeEventListener('message', handleSwMessage);
       }
@@ -693,6 +762,12 @@ function BankAppContent() {
             initialMode={transferRouteContext.mode}
             initialBebasAssetMode={transferRouteContext.assetMode}
             routeKey={transferRouteContext.key}
+            prefillAccount={transferRouteContext.prefillAccount}
+            prefillBank={transferRouteContext.prefillBank}
+            prefillRecipientName={transferRouteContext.prefillRecipientName}
+            prefillAmount={transferRouteContext.prefillAmount}
+            prefillNote={transferRouteContext.prefillNote}
+            prefillFromQris={transferRouteContext.prefillFromQris}
             onNavigateToDashboard={() => {
               setRequestedDashboardTab({ tab: 'ringkasan', nonce: Date.now() });
               setActiveView('dashboard');

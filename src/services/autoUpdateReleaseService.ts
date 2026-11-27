@@ -16,7 +16,7 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v16.42.50';
+export const STRUCTURED_BASE_VERSION = 'v16.43.00';
 
 export interface StructuredVersion {
   p: number; // AAA: Major (fitur besar / penambahan > 3 fitur sekaligus)
@@ -630,10 +630,39 @@ export function getPublicCurrentUpdate(records: AppUpdateRecord[]): AppUpdateRec
 }
 
 /**
- * Katalog rilis khusus Admin (menggunakan penomoran terpisah vAdmin agar TIDAK pernah
- * menaikkan nomor versi aplikasi publik v16.42.50).
+ * Katalog rilis khusus Admin (menggunakan penomoran terpisah vAdmin agar terpisah
+ * dari nomor versi aplikasi publik v16.43.00).
  */
 export const BUILT_IN_ADMIN_UPDATES_CATALOG: AppUpdateRecord[] = [
+  {
+    id: 'upd-admin-v1-1-0',
+    version: 'vAdmin 1.1.0',
+    releaseType: 'minor',
+    visibilityMode: 'admin_only',
+    title:
+      'Kontrol Admin Syarat Minimal Leaderboard + Panel Manajemen 100 Misi Loyalty, Auto-Streak Beku & Kartu Pemulihan 25 Diamond',
+    description:
+      'Pembaruan eksklusif Panel Admin (vAdmin 1.1.0). Admin kini dapat mengatur syarat minimal masuk Leaderboard secara global maupun per kategori (6 kriteria, AND/OR, Preset, Whitelist, & Pratinjau Langsung) sekaligus mengelola penuh sistem 100 Misi Aktif Harian Loyalty, harga Diamond Kartu Pemulihan Streak, ambang hari beku tahap 1–3, kurs penukaran (Saldo Tunai, Coin, Voucher — tanpa Diamond), editor individual 100 misi, serta kontrol manual pulihkan/bekukan/atur streak nasabah.',
+    highlights: [
+      'Syarat Minimal Leaderboard (Global & Per Kategori): Saklar ganda, 6 kriteria syarat minimal, mode Wajib Semua (AND) / Salah Satu (OR), Preset Terbuka / Standar / Sultan, Whitelist pengecualian akun, serta pratinjau langsung nasabah lolos vs gugur sebelum simpan.',
+      'Kendali Penuh Auto-Streak Beku & Kartu Pemulihan: Atur harga Diamond Kartu Pemulihan (default 25 Diamond), batas hari beku Tahap 1, Tahap 2, Wajib Pulihkan Tahap 3, hingga batas hangus reset 0.',
+      'Editor 100 Misi Harian Loyalty & Kurs Tukar (Tanpa Diamond): Atur jumlah misi aktif harian (1–100), pengali hadiah poin, aktif/nonaktif serta edit target & poin tiap misi secara individual, plus kurs tukar Saldo Tunai, Coin, dan Voucher Naik Level.',
+      'Kontrol Manual Streak & Kartu Pemulihan Nasabah: Admin dapat mencairkan & memulihkan streak nasabah, menguji status Beku Tahap 1/2/3, menetapkan angka hari streak, serta menambah/menyetel stok Kartu Pemulihan nasabah secara instan.',
+    ],
+    changes: [
+      'Menambahkan kontrol Syarat Minimal Masuk Leaderboard di Tab Leaderboard Panel Admin (saklar global, saklar & angka minimal tiap kategori, 6 kriteria, mode Wajib Semua/Salah Satu, Preset Cepat, Whitelist, dan Pratinjau Langsung).',
+      'Menambahkan panel AdminLoyaltyStreakPanel di Panel Admin untuk mengatur harga Kartu Pemulihan (Diamond), batas hari beku 1–3, jumlah misi aktif (1–100), pengali hadiah, editor 100 misi individual, dan kurs tukar Saldo Tunai / Coin / Voucher.',
+      'Menambahkan kontrol manual Streak nasabah (Pulihkan & Cairkan, Set Beku 1/2/3, Set Angka Streak, Tambah/Set Kartu Pemulihan).',
+      'Menyinkronkan pencabutan otomatis Badge Top 1–100 pada Kartu ATM & Profil bagi akun yang belum memenuhi syarat minimal Leaderboard.',
+    ],
+    dateText: '27 Nov 2026',
+    fullDate: 'Jumat, 27 November 2026 • Pukul 19:00 WIB',
+    categoryBadge: 'Rilis Internal Admin Terbaru',
+    isCurrent: false,
+    author: 'Super Admin Utama (AzkaAKC)',
+    createdAt: '2026-11-27T12:00:00.000Z',
+    isAutoDetected: true,
+  },
   {
     id: 'upd-admin-v1-0-0',
     version: 'vAdmin 1.0.0',

@@ -1,11 +1,14 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Award, Medal, Trophy } from 'lucide-react';
 import { useBank } from '../context/BankContext';
-import { AccountTopLeaderboardEntry, BankAccount } from '../types/bank';
+import { AccountTopLeaderboardEntry, BankAccount, CardTier } from '../types/bank';
 import {
   computeAccountTopLeaderboardBadges,
   getLeaderboardBadgeTierStyle,
 } from '../utils/leaderboardUtils';
+import { isAdminCardAccount } from '../utils/bankUtils';
+import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
+import { isAccountDisguisedAdmin } from '../types/adminAnalyticsAndTier';
 
 interface LeaderboardRankMarkerProps {
   rank: number;
@@ -196,7 +199,21 @@ export const TopLeaderboardBadges: React.FC<TopLeaderboardBadgesProps> = ({
   className = '',
 }) => {
   const { accounts, leaderboardConfig, transactions } = useBank();
+  const { adminTierGrantsMap } = useAdminAnalyticsAndTierSync();
   const targetId = account?.id || accountId;
+
+  const { disguisedAdminIds, disguisedPublicTierMap } = useMemo(() => {
+    const ids = new Set<string>();
+    const tierMap: Record<string, CardTier> = {};
+    accounts.forEach((acc) => {
+      if (isAdminCardAccount(acc) && isAccountDisguisedAdmin(acc.id, adminTierGrantsMap)) {
+        ids.add(acc.id);
+        const prevTier = adminTierGrantsMap[acc.id]?.previousCardTier;
+        tierMap[acc.id] = prevTier && prevTier !== 'admin' ? prevTier : 'regular';
+      }
+    });
+    return { disguisedAdminIds: ids, disguisedPublicTierMap: tierMap };
+  }, [accounts, adminTierGrantsMap]);
 
   if (!targetId) return null;
   if (leaderboardConfig.enabled === false || leaderboardConfig.showTopBadges === false) {
@@ -213,7 +230,9 @@ export const TopLeaderboardBadges: React.FC<TopLeaderboardBadgesProps> = ({
     targetId,
     accounts,
     leaderboardConfig,
-    transactions
+    transactions,
+    disguisedAdminIds,
+    disguisedPublicTierMap
   );
 
   if (entries.length === 0) return null;

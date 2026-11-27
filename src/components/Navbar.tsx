@@ -251,7 +251,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v16.42.50';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v16.43.00';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({

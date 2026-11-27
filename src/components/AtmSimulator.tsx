@@ -34,6 +34,10 @@ import {
   CARD_TIER_CONFIGS,
   SUPPORTED_BANKS,
 } from '../utils/bankUtils';
+import {
+  MANDATORY_TRANSFER_ADMIN_FEE_PERCENT,
+  calculateMandatoryTransferFee,
+} from '../utils/loyaltySystemUtils';
 import { Transaction } from '../types/bank';
 
 type AtmScreen =
@@ -1046,7 +1050,7 @@ export const AtmSimulator: React.FC = () => {
                       >
                         {SUPPORTED_BANKS.map((b) => (
                           <option key={b.code} value={b.name}>
-                            {b.icon} {b.name} (Biaya: {b.fee === 0 ? 'Gratis' : formatRupiah(b.fee)})
+                            {b.icon} {b.name} (Biaya Admin Wajib {MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%)
                           </option>
                         ))}
                       </select>
@@ -1177,9 +1181,22 @@ export const AtmSimulator: React.FC = () => {
                         </span>
                       </div>
                       <div className="flex justify-between border-t border-blue-800/80 pt-1">
-                        <span className="text-blue-300">Biaya Administrasi:</span>
-                        <span className="font-mono text-emerald-400">
-                          {transferTargetBank.includes('Nusantara') ? 'Rp 0 (Bebas Biaya)' : 'Rp 6.500'}
+                        <span className="text-blue-300">
+                          Biaya Admin Wajib ({MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%):
+                        </span>
+                        <span className="font-mono font-bold text-amber-300">
+                          {formatRupiah(
+                            calculateMandatoryTransferFee(parseInt(transferAmountInput, 10) || 0)
+                          )}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-blue-200 font-bold">Total Dipotong:</span>
+                        <span className="font-mono font-black text-emerald-300">
+                          {formatRupiah(
+                            (parseInt(transferAmountInput, 10) || 0) +
+                              calculateMandatoryTransferFee(parseInt(transferAmountInput, 10) || 0)
+                          )}
                         </span>
                       </div>
                     </div>

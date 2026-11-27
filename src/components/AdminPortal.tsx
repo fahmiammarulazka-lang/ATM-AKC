@@ -160,6 +160,7 @@ import { AdminWarningStudioSection } from './AdminWarningStudioSection';
 import { PinPromptModal } from './PinPromptModal';
 import { AdminTierPromotionPanel } from './AdminTierPromotionPanel';
 import { AdminVisitorAnalyticsPanel } from './AdminVisitorAnalyticsPanel';
+import { AdminLoyaltyStreakPanel } from './AdminLoyaltyStreakPanel';
 import {
   useAdminAnalyticsAndTierSync,
   apiLogDelegatedAdminTabActivity,
@@ -810,19 +811,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
   const [chatReportFilter, setChatReportFilter] = useState<'pending' | 'all'>('pending');
   const [adminStatusBannerText, setAdminStatusBannerText] = useState<string>('');
   const [adminStatusBannerTheme, setAdminStatusBannerTheme] = useState<string>('gold');
-  const [loyaltyTargetAccId, setLoyaltyTargetAccId] = useState<string>(accounts[0]?.id || 'acc-admin');
-  const [loyaltyAdjustVal, setLoyaltyAdjustVal] = useState<number>(250);
   const [dreamInterestDraft, setDreamInterestDraft] = useState<string>(
     String(dreamPocketConfig.annualInterestRatePercent ?? 6)
   );
   const [dreamMaxPocketsDraft, setDreamMaxPocketsDraft] = useState<string>(
     String(dreamPocketConfig.maxPocketsPerAccount ?? 10)
-  );
-  const [loyaltyCheckInDraft, setLoyaltyCheckInDraft] = useState<string>(
-    String(loyaltyConfig.dailyCheckInPoints ?? 25)
-  );
-  const [loyaltyRedeemRateDraft, setLoyaltyRedeemRateDraft] = useState<string>(
-    String(loyaltyConfig.pointsPer1000Rupiah ?? 10)
   );
   const [extraMgmtFeedback, setExtraMgmtFeedback] = useState<string>('');
 
@@ -2884,109 +2877,37 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 </button>
               </div>
 
-              {/* Pengaturan Poin Loyalty */}
-              <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-3">
-                <h4 className="font-black text-amber-300">Pengaturan Check-In &amp; Kurs Poin Loyalty</h4>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Poin Check-In Harian</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={10000}
-                      value={loyaltyCheckInDraft}
-                      onChange={(e) => setLoyaltyCheckInDraft(e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
-                    />
+              {/* Pengaturan Poin Loyalty, Auto-Streak Beku, Kartu Pemulihan & 100 Misi Harian */}
+              <div className="rounded-2xl border border-amber-500/30 bg-slate-950/70 p-4 flex flex-col justify-between space-y-2">
+                <div>
+                  <h4 className="font-black text-amber-300">Ringkasan Sistem Loyalty &amp; Streak v16.43.00</h4>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Kelola harga Diamond Kartu Pemulihan ({loyaltyConfig.recoveryCardDiamondPrice ?? 25} Diamond), hari beku tahap 1–3, hingga {loyaltyConfig.activeDailyMissionCount ?? 100} misi aktif harian nyata, kurs tukar (Saldo Tunai, Coin, Voucher — tanpa Diamond), serta pulihkan/bekukan streak nasabah di panel lengkap di bawah ini.
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
+                  <div className="rounded-xl border border-slate-800 bg-slate-900 p-2">
+                    <span className="text-slate-400 block text-[10px]">Misi Aktif</span>
+                    <strong className="text-amber-300 font-mono">{loyaltyConfig.activeDailyMissionCount ?? 100}</strong>
                   </div>
-                  <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">Poin per Rp 1.000</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={10000}
-                      value={loyaltyRedeemRateDraft}
-                      onChange={(e) => setLoyaltyRedeemRateDraft(e.target.value)}
-                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
-                    />
+                  <div className="rounded-xl border border-slate-800 bg-slate-900 p-2">
+                    <span className="text-slate-400 block text-[10px]">Kartu Pulih</span>
+                    <strong className="text-cyan-300 font-mono">{loyaltyConfig.recoveryCardDiamondPrice ?? 25} 💎</strong>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-900 p-2">
+                    <span className="text-slate-400 block text-[10px]">Kurs Tunai</span>
+                    <strong className="text-emerald-300 font-mono">Rp {(loyaltyConfig.rupiahPerPoint ?? 500).toLocaleString('id-ID')}</strong>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const r = adminUpdateLoyaltyConfig({
-                      dailyCheckInPoints: Math.max(1, Number(loyaltyCheckInDraft) || 25),
-                      pointsPer1000Rupiah: Math.max(1, Number(loyaltyRedeemRateDraft) || 10),
-                    });
-                    setExtraMgmtFeedback(r.message);
-                    window.setTimeout(() => setExtraMgmtFeedback(''), 4000);
-                  }}
-                  className="w-full rounded-xl bg-amber-400 hover:bg-amber-300 py-2 font-black text-slate-950 cursor-pointer"
-                >
-                  Simpan Aturan Poin Loyalty
-                </button>
               </div>
             </div>
 
-            {/* Atur / Suntik Poin Loyalty Nasabah */}
-            <div className="rounded-2xl border border-slate-800 bg-slate-950 p-4 space-y-2.5">
-              <h4 className="font-black text-white flex items-center gap-1.5">
-                <Star className="w-4 h-4 text-amber-400" />
-                <span>Suntik / Set Poin Loyalty Nasabah</span>
-              </h4>
-              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                <select
-                  value={loyaltyTargetAccId}
-                  onChange={(e) => setLoyaltyTargetAccId(e.target.value)}
-                  className="sm:col-span-5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-white font-bold"
-                >
-                  {accounts.map((acc) => {
-                    const st = loyaltyMap[acc.id];
-                    return (
-                      <option key={acc.id} value={acc.id}>
-                        {acc.fullName} ({acc.accountNumber}) — {isAdminCardAccount(acc) ? '∞' : (st?.points || 0)} Poin
-                      </option>
-                    );
-                  })}
-                </select>
-                <input
-                  type="number"
-                  min={0}
-                  value={loyaltyAdjustVal}
-                  onChange={(e) => setLoyaltyAdjustVal(Math.max(0, Number(e.target.value) || 0))}
-                  className="sm:col-span-3 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono font-bold text-white"
-                />
-                <div className="sm:col-span-4 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const r = adminAdjustLoyaltyPoints(loyaltyTargetAccId, loyaltyAdjustVal, 'add');
-                      setExtraMgmtFeedback(r.message);
-                      window.setTimeout(() => setExtraMgmtFeedback(''), 4000);
-                    }}
-                    className="flex-1 rounded-xl bg-amber-400 hover:bg-amber-300 py-2 font-black text-slate-950 cursor-pointer"
-                  >
-                    + Tambah Poin
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const r = adminAdjustLoyaltyPoints(loyaltyTargetAccId, loyaltyAdjustVal, 'set');
-                      setExtraMgmtFeedback(r.message);
-                      window.setTimeout(() => setExtraMgmtFeedback(''), 4000);
-                    }}
-                    className="flex-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-400/40 py-2 font-black text-amber-300 cursor-pointer"
-                  >
-                    Set Persis
-                  </button>
-                </div>
-              </div>
-              {isAdminCardAccount(accounts.find((a) => a.id === loyaltyTargetAccId)) && (
-                <p className="text-[11px] font-semibold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-xl px-3 py-1.5">
-                  Kartu Tier Admin otomatis terkunci Infinity (∞) untuk Poin Loyalty dan tidak berubah secara manual.
-                </p>
-              )}
-            </div>
+            <AdminLoyaltyStreakPanel
+              onFeedback={(msg) => {
+                setExtraMgmtFeedback(msg);
+                window.setTimeout(() => setExtraMgmtFeedback(''), 4500);
+              }}
+            />
           </div>
         </div>
       )}

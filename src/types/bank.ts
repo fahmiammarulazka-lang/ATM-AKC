@@ -2632,6 +2632,68 @@ export type LeaderboardCategoryKey =
   | 'txCount'
   | string;
 
+export type LeaderboardMinEntryEvaluationMode = 'ALL' | 'ANY';
+
+export type LeaderboardMinCardTier = 'regular' | 'gold' | 'premium' | 'platinum';
+
+export type LeaderboardMinEntryCriterionId =
+  | 'categoryAsset'
+  | 'minJobLevel'
+  | 'minCardTier'
+  | 'minTxCount'
+  | 'minAccountAgeDays'
+  | 'requireVerified';
+
+export interface LeaderboardMinEntryConfig {
+  /** Saklar Global ON/OFF untuk syarat minimal masuk Leaderboard */
+  enabled: boolean;
+  /** Mode evaluasi multi-syarat: Wajib Semua (ALL) atau Salah Satu (ANY) */
+  evaluationMode: LeaderboardMinEntryEvaluationMode;
+  /** Tampilkan atau sembunyikan banner ringkasan syarat di halaman Leaderboard nasabah */
+  showRequirementsBanner: boolean;
+  /** Syarat 1: Nominal minimal aset kategori terkait */
+  categoryAssetMinEnabled: boolean;
+  /** Syarat 2: Minimal Level Pekerjaan nasabah */
+  minJobLevelEnabled: boolean;
+  minJobLevel: number;
+  /** Syarat 3: Minimal Tier Kartu ATM */
+  minCardTierEnabled: boolean;
+  minCardTier: LeaderboardMinCardTier;
+  /** Syarat 4: Minimal total transaksi selesai */
+  minTxCountEnabled: boolean;
+  minTxCount: number;
+  /** Syarat 5: Minimal umur akun terdaftar dalam hari */
+  minAccountAgeDaysEnabled: boolean;
+  minAccountAgeDays: number;
+  /** Syarat 6: Wajib akun sudah terverifikasi Centang Biru */
+  requireVerified: boolean;
+  /** Daftar ID akun pengecualian (Whitelist) agar tetap masuk Leaderboard meski belum mencapai minimal */
+  whitelistedAccountIds: string[];
+}
+
+export interface LeaderboardMinEntryCheckResult {
+  id: LeaderboardMinEntryCriterionId;
+  label: string;
+  passed: boolean;
+  currentDisplay: string;
+  targetDisplay: string;
+  progressPercent: number;
+  remainingText: string;
+}
+
+export interface LeaderboardAccountEligibilityResult {
+  eligible: boolean;
+  noRequirementsActive: boolean;
+  isAdminBypass: boolean;
+  isWhitelisted: boolean;
+  excludedByAccountStatus?: boolean;
+  evaluationMode: LeaderboardMinEntryEvaluationMode;
+  checks: LeaderboardMinEntryCheckResult[];
+  passedCount: number;
+  totalChecks: number;
+  overallProgressPercent: number;
+}
+
 export interface LeaderboardCategoryConfig {
   id: string;
   key: LeaderboardCategoryKey;
@@ -2640,6 +2702,10 @@ export interface LeaderboardCategoryConfig {
   enabled: boolean;
   sortOrder: number;
   accentColor?: 'emerald' | 'amber' | 'cyan' | 'yellow' | 'indigo' | 'fuchsia' | 'rose';
+  /** Saklar khusus kategori untuk mengaktifkan/menonaktifkan syarat minimal masuk pada kategori ini */
+  minEntryEnabled?: boolean;
+  /** Angka nominal minimal khusus untuk kategori ini */
+  minEntryValue?: number;
 }
 
 export type LeaderboardBadgeTierStyle = 'gold_1' | 'gray_2' | 'brown_3' | 'charcoal_4_100';
@@ -2668,6 +2734,7 @@ export interface LeaderboardSystemConfig {
   showTopBadgesOnCard?: boolean;
   showTopBadgesInProfile?: boolean;
   categories: LeaderboardCategoryConfig[];
+  minEntryConfig?: LeaderboardMinEntryConfig;
   updatedAt?: string;
 }
 
@@ -2985,10 +3052,49 @@ export interface SafeVaultAccountState {
   lastLockedAtMs?: number;
 }
 
+export type LoyaltyStreakFreezeStage = 0 | 1 | 2 | 3;
+
+export type LoyaltyDailyMissionCategory =
+  | 'transfer_qris'
+  | 'gold_pocket'
+  | 'spin_game'
+  | 'chat_social'
+  | 'career_online';
+
+export type LoyaltyRedeemTarget = 'cash' | 'coin' | 'voucher';
+
+export interface LoyaltyDailyMissionOverride {
+  enabled?: boolean;
+  target?: number;
+  rewardPoints?: number;
+}
+
 export interface LoyaltyAccountState {
   points: number;
   streakDays: number;
   lastCheckInDate?: string;
+  /** Tanggal WIB terakhir nasabah terdeteksi online */
+  lastOnlineDateWib?: string;
+  /** Tahap beku api streak: 0=Aktif, 1=Beku 1 hari, 2=Makin Beku 2 hari, 3=Beku Penuh (wajib Kartu Pemulihan) */
+  freezeStage?: LoyaltyStreakFreezeStage;
+  /** Angka streak yang tertahan saat Beku Tahap 3 menunggu Kartu Pemulihan */
+  frozenStreakDays?: number;
+  /** Catatan jika api baru dicairkan otomatis dari tahap 1/2 atau dipulihkan kartu */
+  lastThawedFromStage?: 1 | 2 | 3;
+  /** Jumlah streak terakhir yang hangus karena offline melewati batas hari */
+  lastExpiredStreakDays?: number;
+  /** Jika true, status beku sedang dikunci manual oleh Admin untuk simulasi/penindakan */
+  manualFreezeLock?: boolean;
+  /** Jumlah stok Kartu Pemulihan Streak yang dimiliki akun */
+  recoveryCards?: number;
+  /** Riwayat 14 tanggal WIB terakhir saat nasabah aktif online */
+  recentActiveDatesWib?: string[];
+  /** Tanggal WIB aktif untuk penghitung 100 misi harian (reset otomatis 00:00 WIB) */
+  dailyActivityDateWib?: string;
+  /** Penghitung aktivitas nyata harian (kunci metrik -> jumlah hari ini) */
+  dailyCounters?: Record<string, number>;
+  /** Daftar ID misi harian (dari 100 misi) yang sudah diklaim hari ini */
+  dailyClaimedMissionIds?: string[];
   claimedAchievementIds: string[];
   totalCheckIns: number;
   redeemedCount: number;
@@ -3000,6 +3106,25 @@ export interface LoyaltyAdminConfig {
   streakBonus7DaysPoints: number;
   rupiahPerPoint: number;
   coinPer100Points: number;
-  diamondPer100Points: number;
+  /** Jumlah Poin Loyalty untuk menukar 1 Voucher Naik Level */
+  pointsPerLevelVoucher?: number;
+  /** Harga 1 Kartu Pemulihan Streak dalam Diamond (default 25) */
+  recoveryCardDiamondPrice?: number;
+  /** Hari offline untuk Api Mulai Beku Tahap 1 (default 1) */
+  freezeStage1Days?: number;
+  /** Hari offline untuk Api Makin Beku Tahap 2 (default 2) */
+  freezeStage2Days?: number;
+  /** Hari offline untuk Beku Penuh wajib Kartu Pemulihan (default 3) */
+  freezeRecoveryRequiredDays?: number;
+  /** Batas maksimal hari offline sebelum streak hangus reset ke 0 (default 3 -> lewat 3 hari reset 0) */
+  streakExpireAfterDays?: number;
+  /** Jumlah misi aktif harian dari katalog 100 misi (1..100, default 100) */
+  activeDailyMissionCount?: number;
+  /** Pengali hadiah poin global untuk 100 misi harian (default 1) */
+  missionRewardMultiplier?: number;
+  /** Override per misi dari Panel Admin (aktif/nonaktif, target, hadiah poin) */
+  missionOverrides?: Record<string, LoyaltyDailyMissionOverride>;
+  /** @deprecated Penukaran ke Diamond ditiadakan */
+  diamondPer100Points?: number;
   updatedAtMs?: number;
 }

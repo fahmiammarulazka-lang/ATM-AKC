@@ -3081,6 +3081,36 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-43-00',
+    version: 'v16.43.00',
+    releaseType: 'major',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan Besar v16.43.00: 100 Misi Aktif Harian Nyata Poin Loyalty, Auto-Streak Online + Api Beku 3 Tahap & Kartu Pemulihan 25 Diamond, Penukaran Poin Ikon+Nama, Biaya Admin Transfer Wajib 5% & Link Transfer QRIS Pribadi',
+    fullDate: 'Jumat, 27 November 2026 • Pukul 19:00 WIB',
+    dateText: 'Jumat, 27 November 2026 • Pukul 19:00 WIB',
+    description:
+      'Pembaruan besar v16.43.00 menghadirkan 100 Misi Aktif Harian Poin Loyalty yang wajib dikerjakan secara nyata setiap hari (reset 00:00 WIB), sistem Auto-Streak Online otomatis dengan mekanisme Api Beku 3 tahap (offline 1 hari mulai beku, 2 hari makin beku, 3 hari wajib Kartu Pemulihan seharga 25 Diamond, lewat 3 hari reset 0), penukaran Poin Loyalty berikon lengkap (Saldo Tunai, Coin, dan Voucher Naik Level — penukaran Diamond ditiadakan), kebijakan Biaya Admin Wajib 5% untuk seluruh jenis transfer, serta QRIS Pribadi berbasis Link Transfer otomatis.',
+    highlights: [
+      '100 Misi Aktif Harian Nyata Poin Loyalty (Reset 00:00 WIB): 5 kategori aktivitas nyata (Transfer & QRIS, Emas & Kantong Impian, Spin & Game, Sosial & Chat, Karier & Online) lengkap dengan filter kategori, pencarian, tab status, tombol Kerjakan, dan Klaim Semua Siap Klaim.',
+      'Auto-Streak Online & Mekanisme Api Beku 3 Tahap + Kartu Pemulihan (25 Diamond): Streak otomatis terisi saat nasabah membuka aplikasi online. Offline 1 hari api mulai beku, 2 hari makin beku (cair otomatis saat online), 3 hari membeku penuh dan bisa diselamatkan dengan 1 Kartu Pemulihan Streak (25 Diamond, bisa dibeli stok kapan saja atau langsung saat hari ke-3).',
+      'Penukaran Poin Loyalty Ikon & Nama Lengkap (Tanpa Diamond): Kini tampil jelas dengan ikon dan nama untuk Saldo Tunai, Coin, dan Voucher Naik Level lengkap dengan estimasi hasil langsung.',
+      'Biaya Admin Wajib 5% Semua Transfer & Link Transfer QRIS Pribadi: Setiap transfer (Antar Rekening, Antar Bank, ATM, Transfer Bebas, maupun Transfer Chat) kini menerapkan biaya admin wajib 5%. QRIS Pribadi kini berisi Link Transfer resmi sehingga saat di-scan nasabah lain langsung mengarah ke halaman Transfer dengan data penerima terisi otomatis.',
+    ],
+    changes: [
+      'Menghadirkan 100 Misi Aktif Harian Nyata Poin Loyalty dengan verifikasi aktivitas harian real-time dan reset otomatis pukul 00:00 WIB.',
+      'Mengaktifkan Auto-Streak Online otomatis lengkap dengan 3 tahap pembekuan api streak dan fitur Kartu Pemulihan Streak (default 25 Diamond/kartu).',
+      'Memperbarui penukaran Poin Loyalty dengan tampilan Ikon + Nama (Saldo Tunai, Coin, Voucher Naik Level) serta meniadakan penukaran ke Diamond.',
+      'Menerapkan Biaya Admin Wajib 5% secara konsisten di seluruh kanal transfer (Transfer Reguler, Transfer Bebas, ATM, QRIS Pribadi, dan Chat).',
+      'Memperbarui QRIS Pribadi menjadi Link Transfer resmi agar saat di-scan nasabah lain langsung membuka halaman Transfer terisi otomatis.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-27T12:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v16-42-50',
     version: 'v16.42.50',
     releaseType: 'major',
@@ -3103,8 +3133,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       '5 Fitur Baru Mobile Banking & Perapian Menu: Penambahan Kantong Impian Berbunga, Kotak Scan & Terima QRIS Rekening Pribadi, Analitik Keuangan Bulanan + Ekspor CSV, Pencapaian Harian + Streak & Poin Loyalty, Brankas Pengaman Kunci Saldo, serta penghapusan menu Lowongan Kerja dari dalam Mobile Banking (tetap aman di Navbar).',
       'Ekspansi Chat & Kendali Admin Maksimal: Penambahan Stiker Ekspresif, Motion GIF, Efek Teks Berwarna, Pesan Terjadwal Otomatis, Pangkat Reputasi Chat, Filter Chat Cerdas (Media/Tautan/Transaksi), Mood/Musik Profil, Mode Diam Terjadwal, Moderasi Status 24 Jam & Banner Admin, serta Manajemen Kantong Impian & Poin Loyalty di Panel Admin (Kartu tier Admin tetap ∞ di seluruh fitur).',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Riwayat Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-26T07:00:00.000Z',
     isAutoDetected: true,
