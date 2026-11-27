@@ -16,7 +16,7 @@ import {
   AppUpdateVisibilityMode,
 } from '../types/bank';
 
-export const STRUCTURED_BASE_VERSION = 'v16.44.20';
+export const STRUCTURED_BASE_VERSION = 'v16.45.20';
 
 export interface StructuredVersion {
   p: number; // AAA: Major (fitur besar / penambahan > 3 fitur sekaligus)
@@ -631,9 +631,37 @@ export function getPublicCurrentUpdate(records: AppUpdateRecord[]): AppUpdateRec
 
 /**
  * Katalog rilis khusus Admin (menggunakan penomoran terpisah vAdmin agar terpisah
- * dari nomor versi aplikasi publik v16.44.20).
+ * dari nomor versi aplikasi publik v16.45.20).
  */
 export const BUILT_IN_ADMIN_UPDATES_CATALOG: AppUpdateRecord[] = [
+  {
+    id: 'upd-admin-v1-5-0',
+    version: 'vAdmin 1.5.0',
+    releaseType: 'minor',
+    visibilityMode: 'admin_only',
+    title:
+      'Panel Kontrol Spin Bingkai 25 Kotak (Harga 18/87 Koin, Peluang 5%, Toko 300 Token, Mode Paksa Menang & Kirim/Cabut Bingkai Aura Nasabah)',
+    description:
+      'Pembaruan Panel Admin vAdmin 1.5.0 (bersamaan rilis publik v16.45.20) menambahkan kendali lengkap mode baru Spin Bingkai di dalam tab Kontrol Spin the Wheel: atur status aktif/tutup Spin Bingkai, ubah harga 1x (18 Koin) & 5x (87 Koin), persentase peluang menang Bingkai Aura (default 5%), rentang hadiah Token kotak 1–25 (default 5–25), kompensasi duplikat (+5 Token), biaya tukar Toko Bingkai (300 Token), saklar Mode Paksa Dapat Bingkai (100%), serta panel pemberian/penarikan Token dan 5 Bingkai Aura langsung per rekening nasabah.',
+    highlights: [
+      'Pengaturan Penuh Spin Bingkai di Tab Spin Admin: Ubah biaya 1x (18 Koin) & 5x (87 Koin), biaya tukar toko (300 Token), peluang menang Bingkai (default 5%), rentang Token (5–25), serta kompensasi bingkai duplikat (+5 Token).',
+      'Saklar Buka/Tutup & Mode Paksa Menang Bingkai: Aktifkan atau tutup sementara mode Spin Bingkai maupun aktifkan Mode Paksa Dapat Bingkai (100%) untuk acara khusus.',
+      'Kelola Token & 5 Bingkai Aura per Akun Nasabah: Tambah +100 / +300 Token serta kirim atau tarik langsung Bingkai Petir Cyber, Api Naga, Emas Imperial, Kristal Es, dan Galaksi Kosmik per rekening.',
+      'Sinkronisasi Real-Time Cloud & Toast Konfirmasi Admin: Setiap perubahan langsung tersimpan ke Cloud beserta umpan balik notifikasi mengambang di pojok kanan atas.',
+    ],
+    changes: [
+      'Menambahkan sub-bagian 5 (Kontrol Spin Bingkai) dan sub-bagian 6 (Kelola Token & 5 Bingkai Aura per Nasabah) di AdminPortal tab spin_wheel_admin.',
+      'Menambahkan aksi adminGrantSpinTokensAndFrame dan normalisasi frameSpin pada adminUpdateSpinWheelConfig / adminResetSpinWheelConfig di BankContext.',
+      'Menjamin pemegang Kartu Tier Admin tetap mempertahankan saldo Koin Spin Infinity (∞) saat memutar Spin Bingkai maupun Spin Uang.',
+    ],
+    dateText: '28 Nov 2026',
+    fullDate: 'Sabtu, 28 November 2026 • Pukul 13:00 WIB',
+    categoryBadge: 'Rilis Internal Admin Terbaru',
+    isCurrent: true,
+    author: 'Super Admin Utama (AzkaAKC)',
+    createdAt: '2026-11-28T06:00:00.000Z',
+    isAutoDetected: true,
+  },
   {
     id: 'upd-admin-v1-4-0',
     version: 'vAdmin 1.4.0',
@@ -658,7 +686,7 @@ export const BUILT_IN_ADMIN_UPDATES_CATALOG: AppUpdateRecord[] = [
     dateText: '27 Nov 2026',
     fullDate: 'Jumat, 27 November 2026 • Pukul 23:10 WIB',
     categoryBadge: 'Rilis Internal Admin Terbaru',
-    isCurrent: true,
+    isCurrent: false,
     author: 'Super Admin Utama (AzkaAKC)',
     createdAt: '2026-11-27T16:10:00.000Z',
     isAutoDetected: true,

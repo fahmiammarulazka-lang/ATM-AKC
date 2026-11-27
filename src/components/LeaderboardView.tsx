@@ -28,6 +28,7 @@ import {
 } from '../utils/bankUtils';
 import { VerifiedBadge } from './VerifiedBadge';
 import { LeaderboardRankMarker, TopLeaderboardBadges } from './TopLeaderboardBadges';
+import { ProfileAvatarBadge } from './ProfileAvatarBadge';
 import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
 import { isAccountDisguisedAdmin, isPrimarySystemOwnerAccount } from '../types/adminAnalyticsAndTier';
 
@@ -512,6 +513,7 @@ export const LeaderboardView: React.FC = () => {
                 >
                   <div className="flex items-start sm:items-center gap-3 min-w-0">
                     <LeaderboardRankMarker rank={entry.rank} size="md" />
+                    <ProfileAvatarBadge account={entry.account} size="sm" />
 
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-1.5">

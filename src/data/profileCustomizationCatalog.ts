@@ -12,7 +12,75 @@ export interface ProfileAvatarFrame {
   description: string;
   ringClass: string;
   badgeColorClass: string;
+  isSpinExclusive?: boolean;
+  auraTheme?: 'petir' | 'api' | 'emas' | 'es' | 'galaksi';
+  auraCssClass?: string;
+  auraGradientClass?: string;
+  glowColorHex?: string;
 }
+
+export const SPIN_AURA_FRAMES: ProfileAvatarFrame[] = [
+  {
+    id: 'frame-spin-petir-cyber',
+    label: 'Petir Cyber',
+    description: 'Kilatan petir neon biru-cyan berkecepatan tinggi',
+    ringClass: 'ring-[3px] ring-cyan-400 ring-offset-2 ring-offset-slate-950 aura-frame-petir-cyber',
+    badgeColorClass: 'bg-cyan-500 text-slate-950',
+    isSpinExclusive: true,
+    auraTheme: 'petir',
+    auraCssClass: 'aura-frame-petir-cyber',
+    auraGradientClass: 'from-cyan-400 via-sky-500 to-blue-600',
+    glowColorHex: '#22d3ee',
+  },
+  {
+    id: 'frame-spin-api-naga',
+    label: 'Api Naga',
+    description: 'Kobaran aura api naga merah-jingga menyala',
+    ringClass: 'ring-[3px] ring-orange-500 ring-offset-2 ring-offset-slate-950 aura-frame-api-naga',
+    badgeColorClass: 'bg-gradient-to-r from-orange-500 to-rose-600 text-white',
+    isSpinExclusive: true,
+    auraTheme: 'api',
+    auraCssClass: 'aura-frame-api-naga',
+    auraGradientClass: 'from-amber-400 via-orange-500 to-rose-600',
+    glowColorHex: '#f97316',
+  },
+  {
+    id: 'frame-spin-emas-imperial',
+    label: 'Emas Imperial',
+    description: 'Kilau mahkota emas 24K kerajaan Nusantara',
+    ringClass: 'ring-[3px] ring-amber-400 ring-offset-2 ring-offset-slate-950 aura-frame-emas-imperial',
+    badgeColorClass: 'bg-gradient-to-r from-amber-400 to-yellow-500 text-slate-950',
+    isSpinExclusive: true,
+    auraTheme: 'emas',
+    auraCssClass: 'aura-frame-emas-imperial',
+    auraGradientClass: 'from-yellow-300 via-amber-400 to-amber-600',
+    glowColorHex: '#facc15',
+  },
+  {
+    id: 'frame-spin-kristal-es',
+    label: 'Kristal Es',
+    description: 'Pecahan kristal es abadi dengan pendar salju dingin',
+    ringClass: 'ring-[3px] ring-sky-300 ring-offset-2 ring-offset-slate-950 aura-frame-kristal-es',
+    badgeColorClass: 'bg-gradient-to-r from-sky-300 to-indigo-400 text-slate-950',
+    isSpinExclusive: true,
+    auraTheme: 'es',
+    auraCssClass: 'aura-frame-kristal-es',
+    auraGradientClass: 'from-cyan-200 via-sky-300 to-indigo-400',
+    glowColorHex: '#7dd3fc',
+  },
+  {
+    id: 'frame-spin-galaksi-kosmik',
+    label: 'Galaksi Kosmik',
+    description: 'Orbit nebula bintang ungu-magenta berputar abadi',
+    ringClass: 'ring-[3px] ring-purple-400 ring-offset-2 ring-offset-slate-950 aura-frame-galaksi-kosmik',
+    badgeColorClass: 'bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white',
+    isSpinExclusive: true,
+    auraTheme: 'galaksi',
+    auraCssClass: 'aura-frame-galaksi-kosmik',
+    auraGradientClass: 'from-indigo-400 via-purple-500 to-fuchsia-500',
+    glowColorHex: '#c084fc',
+  },
+];
 
 export interface ProfileFeaturedTitle {
   id: string;
@@ -189,7 +257,11 @@ export function getAvatarPresetById(id?: string): ProfileAvatarPreset | undefine
 }
 
 export function getAvatarFrameById(id?: string): ProfileAvatarFrame {
-  return AVATAR_FRAMES.find((f) => f.id === id) || AVATAR_FRAMES[0];
+  return (
+    SPIN_AURA_FRAMES.find((f) => f.id === id) ||
+    AVATAR_FRAMES.find((f) => f.id === id) ||
+    AVATAR_FRAMES[0]
+  );
 }
 
 export function getFeaturedTitleById(id?: string): ProfileFeaturedTitle | undefined {

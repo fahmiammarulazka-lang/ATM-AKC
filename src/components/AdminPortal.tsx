@@ -125,7 +125,10 @@ import {
   normalizeVersionInput,
 } from '../services/autoUpdateReleaseService';
 import { JOB_VACANCIES_CATALOG } from '../data/featuresCatalog';
+import { SPIN_AURA_FRAMES } from '../data/profileCustomizationCatalog';
 import {
+  DEFAULT_FRAME_SPIN_CONFIG,
+  normalizeFrameSpinConfig,
   SPIN_WHEEL_PRIZES,
   COIN_PURCHASE_PACKAGES_300,
   calculateCoinPackagePrice,
@@ -330,6 +333,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
     adminResetSpinWheelConfig,
     adminAdjustAccountSpinCoins,
     adminMassSpinCoinRain,
+    adminGrantSpinTokensAndFrame,
     diamondConfig,
     adminUpdateDiamondConfig,
     adminResetDiamondConfig,
@@ -2835,6 +2839,291 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 </div>
               </div>
             </div>
+
+            {/* 5. KONTROL SPIN BINGKAI (25 KOTAK, 5% PELUANG & TOKO 300 TOKEN) */}
+            {(() => {
+              const fCfg = normalizeFrameSpinConfig(spinWheelConfig.frameSpin);
+              return (
+                <div className="p-5 rounded-2xl bg-slate-950/90 border-2 border-fuchsia-400/50 space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[10px] font-mono uppercase text-fuchsia-300 font-bold block">
+                        5. KONTROL SPIN BINGKAI (25 KOTAK LINGKARAN · HANYA KOIN)
+                      </span>
+                      <h3 className="text-sm font-black text-white mt-0.5">
+                        Atur Harga Koin (18 / 87), Peluang Bingkai (5%), Rentang Token &amp; Biaya Tukar (300 Token)
+                      </h3>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = adminUpdateSpinWheelConfig({
+                            frameSpin: { ...fCfg, enabled: !fCfg.enabled },
+                          });
+                          setSpinAdminFeedback(res.message);
+                        }}
+                        className={`px-3.5 py-2 rounded-xl font-black text-xs cursor-pointer transition ${
+                          fCfg.enabled
+                            ? 'bg-emerald-500/20 border border-emerald-400/60 text-emerald-200'
+                            : 'bg-rose-500/20 border border-rose-400/60 text-rose-200'
+                        }`}
+                      >
+                        {fCfg.enabled ? 'Status: Spin Bingkai AKTIF' : 'Status: Spin Bingkai DITUTUP'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = adminUpdateSpinWheelConfig({
+                            frameSpin: { ...fCfg, forceWinFrame: !fCfg.forceWinFrame },
+                          });
+                          setSpinAdminFeedback(res.message);
+                        }}
+                        className={`px-3.5 py-2 rounded-xl font-black text-xs cursor-pointer transition ${
+                          fCfg.forceWinFrame
+                            ? 'bg-amber-400 text-slate-950'
+                            : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                        }`}
+                      >
+                        {fCfg.forceWinFrame
+                          ? 'Mode Paksa Dapat Bingkai: ON (100%)'
+                          : 'Mode Paksa Dapat Bingkai: OFF'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-300 block">
+                        Harga 1x Spin (Koin)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={fCfg.cost1xCoins}
+                        onChange={(e) => {
+                          const val = Math.max(1, Math.round(Number(e.target.value) || 18));
+                          adminUpdateSpinWheelConfig({ frameSpin: { ...fCfg, cost1xCoins: val } });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-300 block">
+                        Harga 5x Spin (Koin)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={fCfg.cost5xCoins}
+                        onChange={(e) => {
+                          const val = Math.max(1, Math.round(Number(e.target.value) || 87));
+                          adminUpdateSpinWheelConfig({ frameSpin: { ...fCfg, cost5xCoins: val } });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-fuchsia-300 font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-300 block">
+                        Peluang Bingkai (%)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        value={fCfg.frameWinProbabilityPercent}
+                        onChange={(e) => {
+                          const val = Math.max(0, Math.min(100, Number(e.target.value) || 0));
+                          adminUpdateSpinWheelConfig({
+                            frameSpin: { ...fCfg, frameWinProbabilityPercent: val },
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-emerald-300 font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-300 block">
+                        Biaya Tukar Toko (Token)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={fCfg.exchangeTokenCost}
+                        onChange={(e) => {
+                          const val = Math.max(1, Math.round(Number(e.target.value) || 300));
+                          adminUpdateSpinWheelConfig({
+                            frameSpin: { ...fCfg, exchangeTokenCost: val },
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-300 block">
+                        Token Hadiah Min (1–25)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={fCfg.tokenRewardMin}
+                        onChange={(e) => {
+                          const val = Math.max(1, Math.round(Number(e.target.value) || 5));
+                          adminUpdateSpinWheelConfig({
+                            frameSpin: {
+                              ...fCfg,
+                              tokenRewardMin: val,
+                              tokenRewardMax: Math.max(val, fCfg.tokenRewardMax),
+                            },
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-300 block">
+                        Token Hadiah Maks (1–25)
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={fCfg.tokenRewardMax}
+                        onChange={(e) => {
+                          const val = Math.max(
+                            fCfg.tokenRewardMin,
+                            Math.round(Number(e.target.value) || 25)
+                          );
+                          adminUpdateSpinWheelConfig({
+                            frameSpin: { ...fCfg, tokenRewardMax: val },
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-300 block">
+                        Kompensasi Bingkai Kembar (Token)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={fCfg.duplicateTokenCompensation}
+                        onChange={(e) => {
+                          const val = Math.max(0, Math.round(Number(e.target.value) || 0));
+                          adminUpdateSpinWheelConfig({
+                            frameSpin: { ...fCfg, duplicateTokenCompensation: val },
+                          });
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 font-mono font-bold text-xs"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = adminUpdateSpinWheelConfig({
+                            frameSpin: { ...DEFAULT_FRAME_SPIN_CONFIG },
+                          });
+                          setSpinAdminFeedback(res.message);
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs cursor-pointer"
+                      >
+                        Reset Default (18/87/5%/300)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 6. KELOLA TOKEN & KIRIM 5 BINGKAI AURA LANGSUNG KE AKUN NASABAH */}
+                  <div className="pt-4 border-t border-slate-800 space-y-3">
+                    <span className="text-[11px] font-black text-amber-300 uppercase tracking-wider block">
+                      6. Kelola Token Bingkai &amp; Kirim/Tarik 5 Bingkai Aura Spesial per Nasabah
+                    </span>
+                    <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+                      {accounts.map((acc) => {
+                        const owned = acc.ownedSpinFrameIds || [];
+                        return (
+                          <div
+                            key={acc.id}
+                            className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 text-xs"
+                          >
+                            <div className="min-w-0">
+                              <span className="font-bold text-white block truncate">
+                                {acc.fullName}{' '}
+                                <span className="text-slate-400 font-mono text-[11px]">
+                                  ({acc.accountNumber})
+                                </span>
+                              </span>
+                              <span className="text-[11px] font-mono text-amber-300">
+                                Token: {(acc.spinTokens || 0).toLocaleString('id-ID')} · Bingkai:{' '}
+                                {owned.length}/{SPIN_AURA_FRAMES.length}
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = adminGrantSpinTokensAndFrame(acc.id, {
+                                    tokenDelta: 100,
+                                  });
+                                  setSpinAdminFeedback(res.message);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[10px] cursor-pointer"
+                              >
+                                +100 Token
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = adminGrantSpinTokensAndFrame(acc.id, {
+                                    tokenDelta: 300,
+                                  });
+                                  setSpinAdminFeedback(res.message);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-[10px] cursor-pointer"
+                              >
+                                +300 Token
+                              </button>
+
+                              {SPIN_AURA_FRAMES.map((frame) => {
+                                const hasFrame = owned.includes(frame.id);
+                                return (
+                                  <button
+                                    key={frame.id}
+                                    type="button"
+                                    onClick={() => {
+                                      const res = adminGrantSpinTokensAndFrame(
+                                        acc.id,
+                                        hasFrame
+                                          ? { revokeFrameId: frame.id }
+                                          : { grantFrameId: frame.id }
+                                      );
+                                      setSpinAdminFeedback(res.message);
+                                    }}
+                                    className={`px-2 py-1 rounded-lg border text-[10px] font-bold cursor-pointer transition ${
+                                      hasFrame
+                                        ? 'bg-fuchsia-500/25 border-fuchsia-400/60 text-fuchsia-200 hover:bg-rose-500/30 hover:border-rose-400'
+                                        : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500'
+                                    }`}
+                                    title={
+                                      hasFrame
+                                        ? `Klik untuk mencabut ${frame.label}`
+                                        : `Klik untuk memberi ${frame.label}`
+                                    }
+                                  >
+                                    {hasFrame ? `✓ ${frame.label}` : `+ ${frame.label}`}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

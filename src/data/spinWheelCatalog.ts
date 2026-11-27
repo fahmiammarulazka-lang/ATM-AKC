@@ -4,7 +4,55 @@
  * dengan Format Harga Bulat "Rp xxx.xxx".
  */
 
-import { SpinPrizeSegment, CoinPackageOption, SpinWheelAdminConfig } from '../types/bank';
+import {
+  SpinPrizeSegment,
+  CoinPackageOption,
+  SpinWheelAdminConfig,
+  FrameSpinAdminConfig,
+} from '../types/bank';
+import { SPIN_AURA_FRAMES } from './profileCustomizationCatalog';
+
+export const DEFAULT_FRAME_SPIN_CONFIG: FrameSpinAdminConfig = {
+  enabled: true,
+  cost1xCoins: 18,
+  cost5xCoins: 87,
+  frameWinProbabilityPercent: 5,
+  exchangeTokenCost: 300,
+  duplicateTokenCompensation: 5,
+  tokenRewardMin: 5,
+  tokenRewardMax: 25,
+  forceWinFrame: false,
+};
+
+export function normalizeFrameSpinConfig(
+  raw?: Partial<FrameSpinAdminConfig> | null
+): FrameSpinAdminConfig {
+  const tokenMin = Math.max(1, Math.min(500, Math.round(Number(raw?.tokenRewardMin ?? 5) || 5)));
+  const tokenMax = Math.max(
+    tokenMin,
+    Math.min(1000, Math.round(Number(raw?.tokenRewardMax ?? 25) || 25))
+  );
+  return {
+    enabled: raw?.enabled !== false,
+    cost1xCoins: Math.max(1, Math.min(10_000, Math.round(Number(raw?.cost1xCoins ?? 18) || 18))),
+    cost5xCoins: Math.max(1, Math.min(50_000, Math.round(Number(raw?.cost5xCoins ?? 87) || 87))),
+    frameWinProbabilityPercent: Math.max(
+      0,
+      Math.min(100, Number(raw?.frameWinProbabilityPercent ?? 5))
+    ),
+    exchangeTokenCost: Math.max(
+      10,
+      Math.min(100_000, Math.round(Number(raw?.exchangeTokenCost ?? 300) || 300))
+    ),
+    duplicateTokenCompensation: Math.max(
+      1,
+      Math.min(1_000, Math.round(Number(raw?.duplicateTokenCompensation ?? 5) || 5))
+    ),
+    tokenRewardMin: tokenMin,
+    tokenRewardMax: tokenMax,
+    forceWinFrame: Boolean(raw?.forceWinFrame),
+  };
+}
 
 export const INITIAL_SPIN_WHEEL_CONFIG: SpinWheelAdminConfig = {
   baseCoinPriceRupiah: 10_000, // 1 Koin = Rp 10.000
@@ -21,6 +69,7 @@ export const INITIAL_SPIN_WHEEL_CONFIG: SpinWheelAdminConfig = {
   luckMultiplier: 1, // 1x Normal (Bisa dinaikkan di Panel Admin)
   forceJackpotMode: 'none',
   customSegmentWeights: {},
+  frameSpin: DEFAULT_FRAME_SPIN_CONFIG,
 };
 
 export const SPIN_WHEEL_PRIZES: SpinPrizeSegment[] = [
@@ -559,4 +608,68 @@ export function calculateCashSpinCost(
     coinSavingsRupiah,
     totalDiscountPercent: coinCost.totalDiscountPercent,
   };
+}
+
+export interface FrameSpinRingSlot {
+  slotNumber: number; // 1..25
+  kind: 'frame' | 'token';
+  tokenAmount: number;
+  frameId?: string;
+  frameLabel?: string;
+  glowColorHex?: string;
+}
+
+/**
+ * Membangun tepat 25 kotak luar lingkaran (nomor 1 s/d 25) untuk mode Spin Bingkai.
+ * Kotak kelipatan 5 (5, 10, 15, 20, 25) merepresentasikan 5 Bingkai Aura Spesial,
+ * sedangkan 20 kotak lainnya berisi Token Bingkai terdistribusi rapi dalam rentang Admin.
+ */
+export function buildFrameSpinRingSlots25(
+  rawCfg?: Partial<FrameSpinAdminConfig> | null
+): FrameSpinRingSlot[] {
+  const cfg = normalizeFrameSpinConfig(rawCfg);
+  const minT = cfg.tokenRewardMin;
+  const maxT = cfg.tokenRewardMax;
+  const span = Math.max(0, maxT - minT);
+
+  // Kurva nilai token rapi untuk 20 kotak agar angka bervariasi (misal 5, 8, 10, 12, 15, 20, 25)
+  const tokenFactors = [
+    0.0, 0.2, 0.4, 0.65,
+    0.1, 0.35, 0.55, 0.85,
+    0.0, 0.25, 0.5, 1.0,
+    0.15, 0.4, 0.7, 0.9,
+    0.05, 0.3, 0.6, 0.75,
+  ];
+
+  const slots: FrameSpinRingSlot[] = [];
+  let tokenCursor = 0;
+
+  for (let slot = 1; slot <= 25; slot++) {
+    if (slot % 5 === 0) {
+      const frameIdx = slot / 5 - 1;
+      const frame = SPIN_AURA_FRAMES[frameIdx] || SPIN_AURA_FRAMES[0];
+      slots.push({
+        slotNumber: slot,
+        kind: 'frame',
+        tokenAmount: 0,
+        frameId: frame.id,
+        frameLabel: frame.label,
+        glowColorHex: frame.glowColorHex,
+      });
+    } else {
+      const factor = tokenFactors[tokenCursor % tokenFactors.length];
+      tokenCursor++;
+      const computedToken = Math.max(
+        1,
+        Math.round(minT + span * factor)
+      );
+      slots.push({
+        slotNumber: slot,
+        kind: 'token',
+        tokenAmount: computedToken,
+      });
+    }
+  }
+
+  return slots;
 }

@@ -267,9 +267,13 @@
     animation-duration: 0.4s;
   }
   .top-badge-gold-shimmer::after,
-  .bn-warn-shimmer::after {
-    animation: none;
-    opacity: 0;
+  .bn-warn-shimmer::after,
+  .aura-frame-petir-cyber::after,
+  .aura-frame-api-naga::after,
+  .aura-frame-emas-imperial::after,
+  .aura-frame-kristal-es::after,
+  .aura-frame-galaksi-kosmik::after {
+    animation: none !important;
   }
   .bn-warn-zoom,
   .bn-warn-drop,
@@ -279,6 +283,128 @@
   .bn-warn-shimmer {
     animation: none;
   }
+}
+
+/* Global Top-Right Auto-Dismiss Toast Countdown */
+@keyframes bnToastSlideIn {
+  0% {
+    opacity: 0;
+    transform: translate3d(20px, -8px, 0) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.bn-toast-enter {
+  animation: bnToastSlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes bnToastCountdownBar {
+  0% {
+    transform: scaleX(1);
+  }
+  100% {
+    transform: scaleX(0);
+  }
+}
+
+.bn-toast-progress {
+  transform-origin: left center;
+  animation-name: bnToastCountdownBar;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.group:hover .bn-toast-progress {
+  animation-play-state: paused;
+}
+
+/* 5 Spin Bingkai Special Aura Animations (Compositor-Friendly) */
+@keyframes bnAuraPulse {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.06) rotate(180deg);
+    opacity: 1;
+  }
+}
+
+@keyframes bnAuraOrbit {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.aura-frame-petir-cyber {
+  box-shadow: 0 0 0 2px #22d3ee, 0 0 16px rgba(34, 211, 238, 0.72);
+}
+.aura-frame-petir-cyber::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px dashed rgba(56, 189, 248, 0.85);
+  pointer-events: none;
+  animation: bnAuraOrbit 3.6s linear infinite;
+}
+
+.aura-frame-api-naga {
+  box-shadow: 0 0 0 2px #f97316, 0 0 18px rgba(239, 68, 68, 0.75);
+}
+.aura-frame-api-naga::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid rgba(251, 146, 60, 0.85);
+  pointer-events: none;
+  animation: bnAuraPulse 2.4s ease-in-out infinite;
+}
+
+.aura-frame-emas-imperial {
+  box-shadow: 0 0 0 2px #facc15, 0 0 18px rgba(245, 158, 11, 0.78);
+}
+.aura-frame-emas-imperial::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px solid rgba(253, 224, 71, 0.88);
+  pointer-events: none;
+  animation: bnAuraPulse 2.8s ease-in-out infinite;
+}
+
+.aura-frame-kristal-es {
+  box-shadow: 0 0 0 2px #7dd3fc, 0 0 18px rgba(125, 211, 252, 0.75);
+}
+.aura-frame-kristal-es::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px dotted rgba(186, 230, 253, 0.92);
+  pointer-events: none;
+  animation: bnAuraOrbit 5.5s linear infinite;
+}
+
+.aura-frame-galaksi-kosmik {
+  box-shadow: 0 0 0 2px #c084fc, 0 0 20px rgba(168, 85, 247, 0.78);
+}
+.aura-frame-galaksi-kosmik::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 2px dashed rgba(232, 121, 249, 0.85);
+  pointer-events: none;
+  animation: bnAuraOrbit 4.4s linear infinite reverse;
 }
 
 /* Custom scrollbars */

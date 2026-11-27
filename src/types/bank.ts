@@ -350,6 +350,9 @@ export interface BankAccount {
   avatarFrameId?: string;
   featuredTitle?: string;
   nameChangeHistory?: NameChangeHistoryEntry[];
+  // Spin Bingkai & Token Bingkai (v16.45.20)
+  spinTokens?: number;
+  ownedSpinFrameIds?: string[];
 }
 
 export interface NameChangeHistoryEntry {
@@ -1052,6 +1055,18 @@ export interface CoinPackageOption {
   category: 'satuan' | 'paket_spin' | 'sultan_100k' | 'mega_1juta';
 }
 
+export interface FrameSpinAdminConfig {
+  enabled: boolean;
+  cost1xCoins: number;
+  cost5xCoins: number;
+  frameWinProbabilityPercent: number;
+  exchangeTokenCost: number;
+  duplicateTokenCompensation: number;
+  tokenRewardMin: number;
+  tokenRewardMax: number;
+  forceWinFrame: boolean;
+}
+
 export interface SpinWheelAdminConfig {
   baseCoinPriceRupiah: number; // Default 10,000 (1 Koin = Rp 10.000), bisa dimurahin di Panel Admin
   coinPurchaseDiscountPercent: number; // 0 - 99% diskon beli koin di Panel Admin
@@ -1061,6 +1076,7 @@ export interface SpinWheelAdminConfig {
   luckMultiplier: number; // Default 1x. Bisa dinaikkan di Panel Admin (10x, 100x, 1000x, 1000000x) agar hadiah besar makin mudah didapat
   forceJackpotMode: 'none' | 'min_1m' | 'min_5m' | 'only_15m_20m'; // Mode khusus Admin untuk memperbesar/memastikan jackpot
   customSegmentWeights?: Record<string, number>; // Override bobot per hadiah di Panel Admin
+  frameSpin?: FrameSpinAdminConfig;
 }
 
 export interface SpinHistoryRecord {
@@ -1074,6 +1090,39 @@ export interface SpinHistoryRecord {
   prizesWon: { amount: number; label: string }[];
   totalWonAmount: number;
   timestamp: string;
+}
+
+export interface FrameSpinHistoryRecord {
+  id: string;
+  accountId: string;
+  accountName: string;
+  spinCount: 1 | 5;
+  coinsSpent: number;
+  results: Array<{
+    rollIndex?: number;
+    slotNumber: number;
+    kind: 'frame' | 'token' | 'duplicate_frame';
+    frameId?: string;
+    frameLabel?: string;
+    frameName?: string;
+    isDuplicate?: boolean;
+    tokensAwarded: number;
+  }>;
+  totalTokensEarned: number;
+  unlockedFrameIds: string[];
+  framesUnlockedCount?: number;
+  timestamp: string;
+}
+
+export interface AppFloatingToastItem {
+  id: string;
+  type: 'error' | 'warning' | 'success' | 'info';
+  title: string;
+  message: string;
+  durationMs?: number;
+  createdAtMs: number;
+  actionLabel?: string;
+  actionKind?: 'open_coin_shop' | 'open_diamond_shop' | 'open_frame_spin' | 'open_dashboard';
 }
 
 export interface AdminHelpRequestRecord {

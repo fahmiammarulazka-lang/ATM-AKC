@@ -67,6 +67,7 @@ import { TopLeaderboardBadges } from './TopLeaderboardBadges';
 import { ProfileAvatarBadge } from './ProfileAvatarBadge';
 import {
   AVATAR_FRAMES,
+  SPIN_AURA_FRAMES,
   AVATAR_PRESETS,
   FEATURED_TITLES,
   PROFILE_RENAME_DIAMOND_COST,
@@ -175,6 +176,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     toggleHideSensitiveNumbers,
     renameAccountWithDiamond,
     updateAccountProfileDetails,
+    equipSpinAvatarFrame,
     changePin,
     toggleCardFreezeWithPin,
     setIsDiamondStoreOpen,
@@ -1475,6 +1477,83 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                           <div className="min-w-0">
                             <p className="text-[11px] font-bold truncate">{frame.label}</p>
                             <p className="text-[10px] text-slate-500 truncate">{frame.description}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Koleksi Bingkai Aura Eksklusif (Hasil Spin Bingkai / Tukar 300 Token) */}
+                <div className="pt-2 border-t border-slate-200/80">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <p className="text-xs font-semibold text-slate-800">
+                      Koleksi Bingkai Aura Eksklusif (Spin Bingkai)
+                    </p>
+                    <span className="text-[11px] font-mono text-slate-500 tabular-nums">
+                      Dimiliki:{' '}
+                      {
+                        SPIN_AURA_FRAMES.filter((f) =>
+                          (currentAccount.ownedSpinFrameIds || []).includes(f.id)
+                        ).length
+                      }
+                      /{SPIN_AURA_FRAMES.length} · Token:{' '}
+                      {(currentAccount.spinTokens || 0).toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {SPIN_AURA_FRAMES.map((frame) => {
+                      const owned = (currentAccount.ownedSpinFrameIds || []).includes(frame.id);
+                      const active = avatarFrameDraft === frame.id;
+                      return (
+                        <button
+                          key={frame.id}
+                          type="button"
+                          onClick={() => {
+                            const res = equipSpinAvatarFrame(frame.id);
+                            if (res.success) {
+                              setAvatarFrameDraft(frame.id);
+                            }
+                            setIdentityFeedback({
+                              type: res.success ? 'success' : 'error',
+                              text: res.message,
+                            });
+                          }}
+                          className={`min-h-[52px] p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                            active
+                              ? 'border-blue-600 bg-blue-50 text-blue-950'
+                              : owned
+                              ? 'border-emerald-300 bg-emerald-50/40 hover:bg-emerald-50 text-slate-800'
+                              : 'border-slate-200 bg-slate-50/70 hover:bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          <ProfileAvatarBadge
+                            account={{
+                              fullName: currentAccount.fullName,
+                              cardStatus: 'active',
+                              avatarPresetId: avatarPresetDraft,
+                              avatarFrameId: frame.id,
+                            }}
+                            size="sm"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <p className="text-[11px] font-bold truncate">{frame.label}</p>
+                              <span
+                                className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                                  active
+                                    ? 'bg-blue-600 text-white'
+                                    : owned
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'bg-slate-200 text-slate-600'
+                                }`}
+                              >
+                                {active ? 'Dipakai' : owned ? 'Dimiliki' : 'Terkunci'}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-500 truncate">
+                              {owned ? frame.description : 'Spin Bingkai 5% / Tukar 300 Token'}
+                            </p>
                           </div>
                         </button>
                       );

@@ -85,18 +85,20 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
 
   return (
     <div
-      className={`relative flex items-center justify-center font-bold shrink-0 overflow-hidden ${sizeClass} ${bgClass} ${frameRing} ${className}`}
+      className={`relative flex items-center justify-center font-bold shrink-0 ${sizeClass} ${bgClass} ${frameRing} ${className}`}
     >
-      {showGooglePhoto ? (
-        <img
-          src={googlePicture}
-          alt={account.fullName}
-          className="w-full h-full object-cover"
-          referrerPolicy="no-referrer"
-        />
-      ) : (
-        renderSymbol()
-      )}
+      <div className="w-full h-full rounded-[inherit] overflow-hidden flex items-center justify-center">
+        {showGooglePhoto ? (
+          <img
+            src={googlePicture}
+            alt={account.fullName}
+            className="w-full h-full object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          renderSymbol()
+        )}
+      </div>
     </div>
   );
 };

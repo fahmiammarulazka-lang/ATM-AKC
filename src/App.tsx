@@ -41,6 +41,8 @@ import {
 } from './components/GlobalChatAndNotificationLayer';
 import { GiftLetterOverlayAndCornerPopup } from './components/GiftLetterOverlayAndCornerPopup';
 import { SecurityCommandCenter } from './components/SecurityCommandCenter';
+import { GlobalFloatingToastContainer } from './components/GlobalFloatingToastContainer';
+import { AppFloatingToastItem } from './types/bank';
 import {
   CreditCard,
   Building,
@@ -97,7 +99,24 @@ function BankAppContent() {
     uiVisibilityConfig,
     reportLivePresence,
     adminDirectChangeAccountTier,
+    setIsDiamondStoreOpen,
+    requestOpenSpinCoinShop,
   } = useBank();
+
+  const handleFloatingToastAction = (
+    actionKind: NonNullable<AppFloatingToastItem['actionKind']>
+  ) => {
+    if (actionKind === 'open_coin_shop') {
+      setActiveView('spin_wheel');
+      requestOpenSpinCoinShop();
+    } else if (actionKind === 'open_diamond_shop') {
+      setIsDiamondStoreOpen(true);
+    } else if (actionKind === 'open_frame_spin') {
+      setActiveView('spin_wheel');
+    } else if (actionKind === 'open_dashboard') {
+      setActiveView('dashboard');
+    }
+  };
   const [initialBootPendingQris] = useState<PendingQrisTransferPayload | null>(() => {
     const fromUrl = capturePendingQrisFromCurrentUrl();
     return fromUrl || readPendingQrisTransfer();
@@ -741,6 +760,7 @@ function BankAppContent() {
         )}
         <WebsiteSystemNotificationModal />
         <GlobalChatAndNotificationLayer />
+        <GlobalFloatingToastContainer onAction={handleFloatingToastAction} />
         <GoogleAuthOnboardingGate />
         <AdminPinModal
           isOpen={showAdminPinModal}
@@ -756,6 +776,7 @@ function BankAppContent() {
       <div className="min-h-screen bg-[#070c18] text-slate-100 flex flex-col font-sans">
         <WebsiteSystemNotificationModal />
         <GlobalChatAndNotificationLayer />
+        <GlobalFloatingToastContainer onAction={handleFloatingToastAction} />
         <div className="bg-slate-950 border-b border-slate-800 px-4 py-3 flex flex-wrap items-center justify-between gap-2 max-w-7xl w-full mx-auto">
           <span className="text-xs font-bold text-amber-400 font-mono">
             PANEL ADMIN (RIWAYAT UPDATE, CHAT GLOBAL, LAPORAN BUG &amp; 56 SUPER TOOLS)
@@ -815,6 +836,7 @@ function BankAppContent() {
       <DebtIncurredPopupModal onOpenDebtTab={() => setActiveView('debt')} />
       <DiamondStoreModal />
       <BuatQrisPaymentModal />
+      <GlobalFloatingToastContainer onAction={handleFloatingToastAction} />
 
       {/* Bar Pemberitahuan Sistem Sticky & Pop-up Tengah (tidak pernah menghalangi layar Panel Admin) */}
       <AdminWarningOverlay isInsideAdminPanel={activeView === 'admin'} />

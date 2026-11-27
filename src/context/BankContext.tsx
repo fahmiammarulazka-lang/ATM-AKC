@@ -296,8 +296,15 @@ import {
   NameChangeHistoryEntry,
   LoyaltyAccountState,
   LoyaltyAdminConfig,
+  FrameSpinAdminConfig,
+  FrameSpinHistoryRecord,
+  AppFloatingToastItem,
 } from '../types/bank';
-import { PROFILE_RENAME_DIAMOND_COST } from '../data/profileCustomizationCatalog';
+import {
+  PROFILE_RENAME_DIAMOND_COST,
+  SPIN_AURA_FRAMES,
+  getAvatarFrameById,
+} from '../data/profileCustomizationCatalog';
 import {
   DAILY_ACHIEVEMENT_CATALOG,
   computeChatReputationRank,
@@ -416,6 +423,9 @@ import {
 } from '../data/featuresCatalog';
 import {
   INITIAL_SPIN_WHEEL_CONFIG,
+  DEFAULT_FRAME_SPIN_CONFIG,
+  normalizeFrameSpinConfig,
+  buildFrameSpinRingSlots25,
   SPIN_WHEEL_PRIZES,
   COIN_PURCHASE_PACKAGES_300,
   calculateCoinPackagePrice,
@@ -1726,6 +1736,46 @@ interface BankContextType {
     mode: 'add' | 'set'
   ) => { success: boolean; message: string };
   adminMassSpinCoinRain: (coins: number) => { success: boolean; message: string };
+
+  // Spin Bingkai 25 Kotak + Toko Tukar 300 Token + Notifikasi Floating Pojok Kanan Atas
+  frameSpinHistory: FrameSpinHistoryRecord[];
+  floatingToasts: AppFloatingToastItem[];
+  pushAppToast: (toast: Omit<AppFloatingToastItem, 'id' | 'createdAtMs'>) => void;
+  dismissFloatingToast: (id: string) => void;
+  coinShopOpenRequestNonce: number;
+  requestOpenSpinCoinShop: () => void;
+  spinBingkaiWheel: (spinCount: 1 | 5) => {
+    success: boolean;
+    message: string;
+    coinsSpent?: number;
+    results?: {
+      rollIndex: number;
+      slotNumber: number;
+      kind: 'frame' | 'token' | 'duplicate_frame';
+      frameId?: string;
+      frameLabel?: string;
+      tokensAwarded: number;
+    }[];
+    totalTokensEarned?: number;
+    newlyUnlockedFrameIds?: string[];
+    newCoinBalance?: number;
+    newTokenBalance?: number;
+  };
+  exchangeTokenForSpinFrame: (frameId: string) => {
+    success: boolean;
+    message: string;
+    newTokenBalance?: number;
+  };
+  equipSpinAvatarFrame: (frameId: string) => { success: boolean; message: string };
+  adminGrantSpinTokensAndFrame: (
+    accountId: string,
+    input: {
+      tokenDelta?: number;
+      tokenSet?: number;
+      grantFrameId?: string;
+      revokeFrameId?: string;
+    }
+  ) => { success: boolean; message: string };
 
   // Sistem Diamond, Toko 250 Paket + Custom, Integrasi Pembayaran BuatQRIS & Fitur Keluarga (v13.34.00)
   diamondConfig: DiamondSystemConfig;
@@ -3471,7 +3521,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         });
         restoreEntry('spinWheelConfig', (v) => {
           if (v && typeof v === 'object') {
-            const next = { ...INITIAL_SPIN_WHEEL_CONFIG, ...(v as Partial<SpinWheelAdminConfig>) };
+            const rawSpin = v as Partial<SpinWheelAdminConfig>;
+            const next: SpinWheelAdminConfig = {
+              ...INITIAL_SPIN_WHEEL_CONFIG,
+              ...rawSpin,
+              frameSpin: normalizeFrameSpinConfig(rawSpin.frameSpin),
+            };
             spinWheelConfigRef.current = next;
             setSpinWheelConfig(next);
           }
@@ -4166,6 +4221,37 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const spinWheelConfigRef = useRef<SpinWheelAdminConfig>(spinWheelConfig);
   spinWheelConfigRef.current = spinWheelConfig;
   const [spinHistory, setSpinHistory] = useState<SpinHistoryRecord[]>([]);
+  const [frameSpinHistory, setFrameSpinHistory] = useState<FrameSpinHistoryRecord[]>([]);
+  const [floatingToasts, setFloatingToasts] = useState<AppFloatingToastItem[]>([]);
+  const [coinShopOpenRequestNonce, setCoinShopOpenRequestNonce] = useState<number>(0);
+
+  const requestOpenSpinCoinShop = () => {
+    setCoinShopOpenRequestNonce((n) => n + 1);
+  };
+
+  const dismissFloatingToast = (id: string) => {
+    setFloatingToasts((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const pushAppToast = (toast: Omit<AppFloatingToastItem, 'id' | 'createdAtMs'>) => {
+    const nowMs = Date.now();
+    const newItem: AppFloatingToastItem = {
+      ...toast,
+      id: `toast-${nowMs}-${Math.random().toString(36).slice(2, 7)}`,
+      createdAtMs: nowMs,
+      durationMs: toast.durationMs ?? 4000,
+    };
+    setFloatingToasts((prev) => {
+      const hasRecentSame = prev.some(
+        (t) =>
+          t.title === newItem.title &&
+          t.message === newItem.message &&
+          nowMs - t.createdAtMs < 600
+      );
+      if (hasRecentSame) return prev;
+      return [newItem, ...prev].slice(0, 3);
+    });
+  };
   const [diamondConfig, setDiamondConfig] = useState<DiamondSystemConfig>(
     DEFAULT_DIAMOND_SYSTEM_CONFIG
   );
@@ -5246,9 +5332,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
     if (data.spinWheelConfig && typeof data.spinWheelConfig === 'object') {
+      const rawSpin = data.spinWheelConfig as Partial<SpinWheelAdminConfig>;
       const mergedSpin: SpinWheelAdminConfig = {
         ...INITIAL_SPIN_WHEEL_CONFIG,
-        ...(data.spinWheelConfig as Partial<SpinWheelAdminConfig>),
+        ...rawSpin,
+        frameSpin: normalizeFrameSpinConfig(rawSpin.frameSpin),
       };
       if (
         acceptIncomingAdminConfig(
@@ -5264,6 +5352,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
     if (Array.isArray(data.spinHistory)) setSpinHistory(data.spinHistory as SpinHistoryRecord[]);
+    if (Array.isArray((data as { frameSpinHistory?: unknown }).frameSpinHistory)) {
+      setFrameSpinHistory((data as { frameSpinHistory: FrameSpinHistoryRecord[] }).frameSpinHistory);
+    }
     if (data.diamondConfig && typeof data.diamondConfig === 'object') {
       const inc = data.diamondConfig as Partial<DiamondSystemConfig>;
       const needs55PercentPriceCut =
@@ -5803,6 +5894,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     cardlessTokens?: CardlessToken[];
     spinWheelConfig?: SpinWheelAdminConfig;
     spinHistory?: SpinHistoryRecord[];
+    frameSpinHistory?: FrameSpinHistoryRecord[];
     diamondConfig?: DiamondSystemConfig;
     uiVisibilityConfig?: UiVisibilityConfig;
     adminWarnings?: AdminSystemWarning[];
@@ -6011,6 +6103,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         : {}),
       ...(overrides?.spinHistory !== undefined
         ? { spinHistory: overrides.spinHistory.slice(0, 80) }
+        : {}),
+      ...(overrides?.frameSpinHistory !== undefined
+        ? { frameSpinHistory: overrides.frameSpinHistory.slice(0, 80) }
         : {}),
       ...(overrides?.qrisOrders !== undefined
         ? { qrisOrders: overrides.qrisOrders.slice(0, 120) }
@@ -11931,7 +12026,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           };
           applyGenericFromSrv('spinWheelConfig', spinWheelConfigRef.current, (v) => {
             if (v && typeof v === 'object') {
-              const next = { ...INITIAL_SPIN_WHEEL_CONFIG, ...(v as Partial<SpinWheelAdminConfig>) };
+              const rawSpin = v as Partial<SpinWheelAdminConfig>;
+              const next: SpinWheelAdminConfig = {
+                ...INITIAL_SPIN_WHEEL_CONFIG,
+                ...rawSpin,
+                frameSpin: normalizeFrameSpinConfig(rawSpin.frameSpin),
+              };
               spinWheelConfigRef.current = next;
               setSpinWheelConfig(next);
             }
@@ -12552,7 +12652,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               const incTs = Number(msg.payload.updatedAtMs) || Date.now();
               const incRev = Number(msg.payload.revision) || 0;
               if (cfgKey === 'spinWheelConfig' && incVal && typeof incVal === 'object') {
-                const next = { ...INITIAL_SPIN_WHEEL_CONFIG, ...(incVal as Partial<SpinWheelAdminConfig>) };
+                const rawSpin = incVal as Partial<SpinWheelAdminConfig>;
+                const next: SpinWheelAdminConfig = {
+                  ...INITIAL_SPIN_WHEEL_CONFIG,
+                  ...rawSpin,
+                  frameSpin: normalizeFrameSpinConfig(rawSpin.frameSpin),
+                };
                 if (acceptIncomingAdminConfig(cfgKey, incTs, next, spinWheelConfigRef.current, incRev)) {
                   spinWheelConfigRef.current = next;
                   setSpinWheelConfig(next);
@@ -21307,7 +21412,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (target.pin !== pin) {
       playAtmSound('alert');
       emitPinSecurityAlert(target.fullName, 'Penguncian/Pembukaan Kunci Kartu');
-      return { success: false, message: 'Kode PIN kartu salah! Tindakan keamanan dibatalkan.' };
+      const msg = 'Kode PIN kartu salah! Tindakan keamanan dibatalkan.';
+      pushAppToast({ type: 'error', title: 'PIN Kartu Salah', message: msg });
+      return { success: false, message: msg };
     }
 
     const nextStatus: CardStatus = target.cardStatus === 'active' ? 'frozen' : 'active';
@@ -25151,10 +25258,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) return { success: false, message: 'Akun tidak ditemukan' };
     if (target.pin !== oldPin) {
       playAtmSound('alert');
-      return { success: false, message: 'PIN lama yang Anda masukkan salah!' };
+      const msg = 'PIN lama yang Anda masukkan salah!';
+      pushAppToast({ type: 'error', title: 'PIN Lama Salah', message: msg });
+      return { success: false, message: msg };
     }
     if (newPin.length !== 6 || !/^\d{6}$/.test(newPin)) {
-      return { success: false, message: 'PIN baru harus terdiri dari tepat 6 digit angka!' };
+      const msg = 'PIN baru harus terdiri dari tepat 6 digit angka!';
+      pushAppToast({ type: 'warning', title: 'Format PIN Tidak Valid', message: msg });
+      return { success: false, message: msg };
     }
 
     const nextAccounts = accounts.map((acc) =>
@@ -25214,15 +25325,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const cleanName = newName.trim().replace(/\s+/g, ' ');
     if (cleanName.length < 3) {
       playAtmSound('alert');
-      return { success: false, message: 'Nama baru wajib berisi minimal 3 huruf/karakter!' };
+      const msg = 'Nama baru wajib berisi minimal 3 huruf/karakter!';
+      pushAppToast({ type: 'warning', title: 'Nama Terlalu Pendek', message: msg });
+      return { success: false, message: msg };
     }
     if (cleanName.length > 60) {
       playAtmSound('alert');
-      return { success: false, message: 'Nama baru maksimal 60 karakter.' };
+      const msg = 'Nama baru maksimal 60 karakter.';
+      pushAppToast({ type: 'warning', title: 'Nama Terlalu Panjang', message: msg });
+      return { success: false, message: msg };
     }
     if (cleanName === activeAcc.fullName.trim()) {
       playAtmSound('alert');
-      return { success: false, message: 'Nama baru masih sama dengan nama akun Anda saat ini.' };
+      const msg = 'Nama baru masih sama dengan nama akun Anda saat ini.';
+      pushAppToast({ type: 'info', title: 'Nama Belum Berubah', message: msg });
+      return { success: false, message: msg };
     }
 
     const isAdminTier = isAdminCardAccount(activeAcc);
@@ -25231,10 +25348,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (!isAdminTier && currentDiamonds < diamondCost) {
       playAtmSound('alert');
+      const msg = `Saldo Diamond tidak cukup! Dibutuhkan ${diamondCost} Diamond untuk ganti nama (Saldo Anda: ${currentDiamonds.toLocaleString('id-ID')} Diamond).`;
+      pushAppToast({
+        type: 'error',
+        title: 'Diamond Tidak Cukup',
+        message: msg,
+        actionLabel: 'Top Up Diamond',
+        actionKind: 'open_diamond_shop',
+      });
       return {
         success: false,
         insufficientDiamonds: true,
-        message: `Saldo Diamond tidak cukup! Dibutuhkan ${diamondCost} Diamond untuk ganti nama (Saldo Anda: ${currentDiamonds.toLocaleString('id-ID')} Diamond).`,
+        message: msg,
       };
     }
 
@@ -25396,28 +25521,38 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (currentAccount.cardStatus === 'frozen') {
       playAtmSound('alert');
-      return { success: false, message: 'Kartu sedang dikunci sementara! Buka blokir kartu terlebih dahulu menggunakan PIN.' };
+      const msg = 'Kartu sedang dikunci sementara! Buka blokir kartu terlebih dahulu menggunakan PIN.';
+      pushAppToast({ type: 'error', title: 'Kartu Dibekukan', message: msg });
+      return { success: false, message: msg };
     }
 
     if (currentAccount.cardStatus !== 'active') {
       playAtmSound('alert');
-      return { success: false, message: 'Kartu belum aktif atau telah dinonaktifkan.' };
+      const msg = 'Kartu belum aktif atau telah dinonaktifkan.';
+      pushAppToast({ type: 'error', title: 'Kartu Tidak Aktif', message: msg });
+      return { success: false, message: msg };
     }
 
     if (currentAccount.pin !== pin) {
       playAtmSound('alert');
-      return { success: false, message: 'PIN kartu yang Anda masukkan salah.' };
+      const msg = 'PIN kartu yang Anda masukkan salah.';
+      pushAppToast({ type: 'error', title: 'PIN Salah', message: msg });
+      return { success: false, message: msg };
     }
 
     if (amount <= 0 || amount % 50000 !== 0) {
-      return { success: false, message: 'Jumlah penarikan harus kelipatan Rp 50.000 atau Rp 100.000' };
+      const msg = 'Jumlah penarikan harus kelipatan Rp 50.000 atau Rp 100.000';
+      pushAppToast({ type: 'warning', title: 'Nominal Penarikan Invalid', message: msg });
+      return { success: false, message: msg };
     }
 
     const isAdminCard = currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
 
     if (!isAdminCard && currentAccount.balance < amount) {
       playAtmSound('alert');
-      return { success: false, message: 'Saldo rekening Anda tidak mencukupi untuk penarikan ini.' };
+      const msg = 'Saldo rekening Anda tidak mencukupi untuk penarikan ini.';
+      pushAppToast({ type: 'error', title: 'Saldo Tidak Mencukupi', message: msg });
+      return { success: false, message: msg };
     }
 
     const tierConfig = CARD_TIER_CONFIGS[currentAccount.cardTier];
@@ -25427,9 +25562,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!isAdminCard && !tierConfig.isUnlimited && withdrawnToday + amount > tierConfig.dailyWithdrawalLimit) {
       playAtmSound('alert');
       const sisaLimit = Math.max(0, tierConfig.dailyWithdrawalLimit - withdrawnToday);
+      const msg = `Melebihi batas tarik harian ${tierConfig.nameIndo} (Batas: Rp ${tierConfig.dailyWithdrawalLimit.toLocaleString('id-ID')}). Sisa limit Anda hari ini: Rp ${sisaLimit.toLocaleString('id-ID')}`;
+      pushAppToast({ type: 'warning', title: 'Melebihi Limit Tarik Harian', message: msg });
       return {
         success: false,
-        message: `Melebihi batas tarik harian ${tierConfig.nameIndo} (Batas: Rp ${tierConfig.dailyWithdrawalLimit.toLocaleString('id-ID')}). Sisa limit Anda hari ini: Rp ${sisaLimit.toLocaleString('id-ID')}`,
+        message: msg,
       };
     }
 
@@ -25566,17 +25703,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (currentAccount.cardStatus === 'frozen') {
       playAtmSound('alert');
-      return { success: false, message: 'Kartu sedang dikunci sementara! Buka blokir kartu terlebih dahulu menggunakan PIN.' };
+      const msg = 'Kartu sedang dikunci sementara! Buka blokir kartu terlebih dahulu menggunakan PIN.';
+      pushAppToast({ type: 'error', title: 'Kartu Dibekukan', message: msg });
+      return { success: false, message: msg };
     }
 
     if (currentAccount.pin !== input.pin) {
       playAtmSound('alert');
-      return { success: false, message: 'PIN transaksi yang Anda masukkan salah!' };
+      const msg = 'PIN transaksi yang Anda masukkan salah!';
+      pushAppToast({ type: 'error', title: 'PIN Transaksi Salah', message: msg });
+      return { success: false, message: msg };
     }
 
     const cleanDest = input.recipientAccount.replace(/\s+/g, '');
     if (cleanDest === currentAccount.accountNumber && (input.recipientBank === 'Bank Nusantara' || input.recipientBank === 'BNUS')) {
-      return { success: false, message: 'Tidak dapat mentransfer ke nomor rekening Anda sendiri!' };
+      const msg = 'Tidak dapat mentransfer ke nomor rekening Anda sendiri!';
+      pushAppToast({ type: 'warning', title: 'Rekening Tujuan Invalid', message: msg });
+      return { success: false, message: msg };
     }
 
     const isInternal = input.recipientBank === 'Bank Nusantara' || input.recipientBank === 'BNUS';
@@ -25590,11 +25733,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (!isAdminCard && unlockedBalance < totalRequired) {
       playAtmSound('alert');
+      const msg = lockedVault > 0
+        ? `Saldo bebas tidak cukup! Rp ${lockedVault.toLocaleString('id-ID')} sedang terkunci di Brankas Pengaman. Saldo bebas: Rp ${unlockedBalance.toLocaleString('id-ID')}.`
+        : `Saldo tidak cukup! Total transfer + Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}% (Rp ${fee.toLocaleString('id-ID')}): Rp ${totalRequired.toLocaleString('id-ID')}`;
+      pushAppToast({ type: 'error', title: 'Saldo Transfer Kurang', message: msg });
       return {
         success: false,
-        message: lockedVault > 0
-          ? `Saldo bebas tidak cukup! Rp ${lockedVault.toLocaleString('id-ID')} sedang terkunci di Brankas Pengaman. Saldo bebas: Rp ${unlockedBalance.toLocaleString('id-ID')}.`
-          : `Saldo tidak cukup! Total transfer + Biaya Admin Wajib ${MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}% (Rp ${fee.toLocaleString('id-ID')}): Rp ${totalRequired.toLocaleString('id-ID')}`,
+        message: msg,
       };
     }
 
@@ -25605,9 +25750,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (isInternal) {
       if (!internalReceiver) {
+        const msg = 'Nomor rekening Bank Nusantara tidak ditemukan! Pastikan 10 digit nomor sudah benar.';
+        pushAppToast({ type: 'error', title: 'Rekening Tidak Ditemukan', message: msg });
         return {
           success: false,
-          message: 'Nomor rekening Bank Nusantara tidak ditemukan! Pastikan 10 digit nomor sudah benar.',
+          message: msg,
         };
       }
       recipientName = internalReceiver.fullName;
@@ -27070,6 +27217,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       notifications?: AppNotification[];
       qrisOrders?: QrisPaymentOrder[];
       families?: FamilyGroup[];
+      frameSpinHistory?: FrameSpinHistoryRecord[];
     }
   ): { updatedAccounts: BankAccount[]; updatedTarget?: BankAccount } => {
     const stampMs = Date.now();
@@ -28460,9 +28608,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (!isAdminTier && (activeAcc.diamonds || 0) < totalDiamonds) {
       playAtmSound('alert');
+      const msg = `Diamond tidak cukup! Butuh ${totalDiamonds.toLocaleString('id-ID')} Diamond untuk ${qty} Kartu Pemulihan Streak (Tersedia: ${(activeAcc.diamonds || 0).toLocaleString('id-ID')} Diamond).`;
+      pushAppToast({
+        type: 'error',
+        title: 'Diamond Tidak Cukup',
+        message: msg,
+        actionLabel: 'Top Up Diamond',
+        actionKind: 'open_diamond_shop',
+      });
       return {
         success: false,
-        message: `Diamond tidak cukup! Butuh ${totalDiamonds.toLocaleString('id-ID')} Diamond untuk ${qty} Kartu Pemulihan Streak (Tersedia: ${(activeAcc.diamonds || 0).toLocaleString('id-ID')} Diamond).`,
+        message: msg,
       };
     }
 
@@ -31637,13 +31793,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     if (!isAdminCard && currentAccount.balance < finalPrice) {
       playAtmSound('alert');
+      const msg = `Saldo rekening tidak mencukupi untuk membeli Paket #${pkg.id} (${pkg.coins.toLocaleString(
+        'id-ID'
+      )} Koin seharga ${formatRupiahWithDecimals(finalPrice)}). Saldo Anda: ${formatRupiahWithDecimals(
+        currentAccount.balance
+      )}.`;
+      pushAppToast({
+        type: 'error',
+        title: 'Saldo Kurang untuk Beli Koin',
+        message: msg,
+        actionLabel: 'Ke Dashboard',
+        actionKind: 'open_dashboard',
+      });
       return {
         success: false,
-        message: `Saldo rekening tidak mencukupi untuk membeli Paket #${pkg.id} (${pkg.coins.toLocaleString(
-          'id-ID'
-        )} Koin seharga ${formatRupiahWithDecimals(finalPrice)}). Saldo Anda: ${formatRupiahWithDecimals(
-          currentAccount.balance
-        )}.`,
+        message: msg,
       };
     }
 
@@ -31782,9 +31946,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         Math.ceil((new Date(currentAccount.spinPausedUntil).getTime() - Date.now()) / 60_000)
       );
       playAtmSound('alert');
+      const msg = `Fitur Spin the Wheel pada akun Anda sedang dijeda sementara oleh Administrator (${remMins} menit tersisa).`;
+      pushAppToast({ type: 'warning', title: 'Spin Sedang Dijeda', message: msg });
       return {
         success: false,
-        message: `Fitur Spin the Wheel pada akun Anda sedang dijeda sementara oleh Administrator (${remMins} menit tersisa).`,
+        message: msg,
       };
     }
 
@@ -31800,13 +31966,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       rupiahToSpend = cashCost.finalRupiah;
       if (!isAdminCard && currentAccount.balance < rupiahToSpend) {
         playAtmSound('alert');
+        const msg = `Saldo rekening Anda tidak mencukupi untuk ${spinCount}x Spin Pakai Uang Langsung! Dibutuhkan ${formatRupiahWithDecimals(
+          rupiahToSpend
+        )} (Saldo Anda: ${formatRupiahWithDecimals(
+          currentAccount.balance
+        )}). Tip: Beli Koin Spin lebih murah 0,50%!`;
+        pushAppToast({
+          type: 'error',
+          title: 'Saldo Tidak Mencukupi',
+          message: msg,
+          actionLabel: 'Beli Koin',
+          actionKind: 'open_coin_shop',
+        });
         return {
           success: false,
-          message: `Saldo rekening Anda tidak mencukupi untuk ${spinCount}x Spin Pakai Uang Langsung! Dibutuhkan ${formatRupiahWithDecimals(
-            rupiahToSpend
-          )} (Saldo Anda: ${formatRupiahWithDecimals(
-            currentAccount.balance
-          )}). Tip: Beli Koin Spin lebih murah 0,50%!`,
+          message: msg,
         };
       }
     } else {
@@ -31814,13 +31988,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       coinsToSpend = finalCoins;
       if (!isAdminCard && !isUnlimitedNumber(currentCoins) && currentCoins < coinsToSpend) {
         playAtmSound('alert');
+        const msg = `Koin Spin Anda belum mencukupi untuk ${spinCount}x Spin! Dibutuhkan ${coinsToSpend.toLocaleString(
+          'id-ID'
+        )} Koin (Koin Anda saat ini: ${currentCoins.toLocaleString(
+          'id-ID'
+        )} Koin). Beli koin di tombol [+] (lebih murah 0,50%) atau pilih Spin Pakai Uang Langsung!`;
+        pushAppToast({
+          type: 'error',
+          title: 'Koin Spin Tidak Cukup',
+          message: msg,
+          actionLabel: 'Beli Koin',
+          actionKind: 'open_coin_shop',
+        });
         return {
           success: false,
-          message: `Koin Spin Anda belum mencukupi untuk ${spinCount}x Spin! Dibutuhkan ${coinsToSpend.toLocaleString(
-            'id-ID'
-          )} Koin (Koin Anda saat ini: ${currentCoins.toLocaleString(
-            'id-ID'
-          )} Koin). Beli koin di tombol [+] (lebih murah 0,50%) atau pilih Spin Pakai Uang Langsung!`,
+          message: msg,
         };
       }
     }
@@ -32033,6 +32215,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       customSegmentWeights: partial.customSegmentWeights
         ? { ...(prev.customSegmentWeights || {}), ...partial.customSegmentWeights }
         : prev.customSegmentWeights,
+      frameSpin: partial.frameSpin
+        ? normalizeFrameSpinConfig({ ...(prev.frameSpin || DEFAULT_FRAME_SPIN_CONFIG), ...partial.frameSpin })
+        : normalizeFrameSpinConfig(prev.frameSpin),
     };
     spinWheelConfigRef.current = nextCfg;
     setSpinWheelConfig(nextCfg);
@@ -32041,15 +32226,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       label: 'Spin the Wheel',
     });
     playAtmSound('success');
+    pushAppToast({
+      type: 'success',
+      title: 'Pengaturan Spin Disimpan',
+      message: 'Konfigurasi Spin Uang & Spin Bingkai telah disinkronkan ke Cloud.',
+    });
     return {
       success: true,
       message:
-        'Pengaturan Spin the Wheel, Harga Koin, & Probabilitas berhasil disimpan permanen ke Cloud & Perangkat!',
+        'Pengaturan Spin the Wheel, Spin Bingkai, Harga Koin, & Probabilitas berhasil disimpan permanen ke Cloud & Perangkat!',
     };
   };
 
   const adminResetSpinWheelConfig = () => {
-    const resetCfg = { ...INITIAL_SPIN_WHEEL_CONFIG };
+    const resetCfg: SpinWheelAdminConfig = {
+      ...INITIAL_SPIN_WHEEL_CONFIG,
+      frameSpin: { ...DEFAULT_FRAME_SPIN_CONFIG },
+    };
     spinWheelConfigRef.current = resetCfg;
     setSpinWheelConfig(resetCfg);
     persistAdminConfigChange('spinWheelConfig', resetCfg, {
@@ -32059,7 +32252,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('beep');
     return {
       success: true,
-      message: 'Pengaturan Spin the Wheel & Harga Koin dikembalikan ke pengaturan standar awal.',
+      message: 'Pengaturan Spin the Wheel, Spin Bingkai & Harga Koin dikembalikan ke pengaturan standar awal.',
     };
   };
 
@@ -32114,6 +32307,455 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       message: `Hujan Koin Spin Berhasil! Seluruh ${accounts.length} nasabah menerima +${cleanCoins.toLocaleString(
         'id-ID'
       )} Koin Spin gratis (Kartu ADMIN tetap ∞)!`,
+    };
+  };
+
+  // ==================== SPIN BINGKAI (25 KOTAK, 5% BINGKAI AURA, TOKO 300 TOKEN) ====================
+  const spinBingkaiWheel = (spinCount: 1 | 5) => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAcc =
+      latestPool.find((a) => a.id === currentAccountIdRef.current) ||
+      latestPool.find((a) => a.id === currentAccount?.id) ||
+      currentAccount;
+
+    if (!activeAcc) {
+      const msg = 'Silakan login ke kartu rekening terlebih dahulu.';
+      pushAppToast({ type: 'error', title: 'Belum Login', message: msg });
+      return { success: false, message: msg };
+    }
+    if (activeAcc.cardStatus !== 'active') {
+      const msg = 'Kartu Anda sedang tidak aktif / diblokir sehingga tidak dapat memutar Spin Bingkai.';
+      pushAppToast({ type: 'error', title: 'Kartu Tidak Aktif', message: msg });
+      return { success: false, message: msg };
+    }
+    if (
+      activeAcc.spinPausedUntil &&
+      new Date(activeAcc.spinPausedUntil).getTime() > Date.now()
+    ) {
+      const remMins = Math.max(
+        1,
+        Math.ceil((new Date(activeAcc.spinPausedUntil).getTime() - Date.now()) / 60_000)
+      );
+      playAtmSound('alert');
+      const msg = `Fitur Spin pada akun Anda sedang dijeda sementara oleh Administrator (${remMins} menit tersisa).`;
+      pushAppToast({ type: 'warning', title: 'Spin Dijeda Admin', message: msg });
+      return { success: false, message: msg };
+    }
+
+    const frameCfg = normalizeFrameSpinConfig(spinWheelConfigRef.current.frameSpin);
+    if (!frameCfg.enabled) {
+      playAtmSound('alert');
+      const msg = 'Mode Spin Bingkai sedang ditutup sementara oleh Administrator.';
+      pushAppToast({ type: 'warning', title: 'Spin Bingkai Ditutup', message: msg });
+      return { success: false, message: msg };
+    }
+
+    const coinCost = spinCount === 5 ? frameCfg.cost5xCoins : frameCfg.cost1xCoins;
+    const currentCoins = activeAcc.spinCoins || 0;
+    const isAdminCard =
+      isAdminCardAccount(activeAcc) || isUnlimitedNumber(activeAcc.balance);
+    const isCoinUnlim = isAdminCard || isUnlimitedNumber(currentCoins);
+
+    if (!isCoinUnlim && currentCoins < coinCost) {
+      playAtmSound('alert');
+      const msg = `Koin Spin Anda kurang untuk ${spinCount}x Spin Bingkai! Dibutuhkan ${coinCost.toLocaleString(
+        'id-ID'
+      )} Koin (Koin Anda saat ini: ${currentCoins.toLocaleString('id-ID')} Koin).`;
+      pushAppToast({
+        type: 'error',
+        title: 'Koin Spin Tidak Cukup',
+        message: msg,
+        actionLabel: 'Beli Koin',
+        actionKind: 'open_coin_shop',
+      });
+      return { success: false, message: msg };
+    }
+
+    const ringSlots = buildFrameSpinRingSlots25(frameCfg);
+    const tokenSlots = ringSlots.filter((s) => s.kind === 'token');
+    const frameSlots = ringSlots.filter((s) => s.kind === 'frame');
+    const ownedSet = new Set<string>(activeAcc.ownedSpinFrameIds || []);
+    const winProb = frameCfg.forceWinFrame ? 100 : frameCfg.frameWinProbabilityPercent;
+
+    const results: {
+      rollIndex: number;
+      slotNumber: number;
+      kind: 'frame' | 'token' | 'duplicate_frame';
+      frameId?: string;
+      frameLabel?: string;
+      tokensAwarded: number;
+    }[] = [];
+
+    let totalTokensEarned = 0;
+    const newlyUnlockedFrameIds: string[] = [];
+
+    for (let i = 0; i < spinCount; i++) {
+      const roll = Math.random() * 100;
+      const isFrameHit = roll < winProb;
+
+      if (isFrameHit && frameSlots.length > 0) {
+        const chosenSlot = frameSlots[Math.floor(Math.random() * frameSlots.length)];
+        const frameId = chosenSlot.frameId || SPIN_AURA_FRAMES[0].id;
+        const frameMeta = getAvatarFrameById(frameId);
+        if (ownedSet.has(frameId)) {
+          const compTokens = frameCfg.duplicateTokenCompensation;
+          totalTokensEarned += compTokens;
+          results.push({
+            rollIndex: i + 1,
+            slotNumber: chosenSlot.slotNumber,
+            kind: 'duplicate_frame',
+            frameId,
+            frameLabel: frameMeta.label,
+            tokensAwarded: compTokens,
+          });
+        } else {
+          ownedSet.add(frameId);
+          newlyUnlockedFrameIds.push(frameId);
+          results.push({
+            rollIndex: i + 1,
+            slotNumber: chosenSlot.slotNumber,
+            kind: 'frame',
+            frameId,
+            frameLabel: frameMeta.label,
+            tokensAwarded: 0,
+          });
+        }
+      } else {
+        const chosenTokenSlot =
+          tokenSlots[Math.floor(Math.random() * tokenSlots.length)] || ringSlots[0];
+        const awarded = Math.max(1, chosenTokenSlot.tokenAmount || frameCfg.tokenRewardMin);
+        totalTokensEarned += awarded;
+        results.push({
+          rollIndex: i + 1,
+          slotNumber: chosenTokenSlot.slotNumber,
+          kind: 'token',
+          tokensAwarded: awarded,
+        });
+      }
+    }
+
+    const newCoinBalance = isCoinUnlim
+      ? UNLIMITED_BALANCE
+      : Math.max(0, currentCoins - coinCost);
+    const nextTokenBalance = (activeAcc.spinTokens || 0) + totalTokensEarned;
+    const nextOwnedFrames = Array.from(ownedSet);
+    const nowIso = new Date().toISOString();
+
+    const histEntry: FrameSpinHistoryRecord = {
+      id: `fspin-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      accountId: activeAcc.id,
+      accountName: activeAcc.fullName,
+      spinCount,
+      coinsSpent: isCoinUnlim ? 0 : coinCost,
+      totalTokensEarned,
+      unlockedFrameIds: newlyUnlockedFrameIds,
+      results,
+      timestamp: nowIso,
+    };
+
+    const nextFrameHistory = [histEntry, ...frameSpinHistory].slice(0, 80);
+    setFrameSpinHistory(nextFrameHistory);
+
+    const unlockedNamesText = newlyUnlockedFrameIds
+      .map((fid) => getAvatarFrameById(fid).label)
+      .join(', ');
+    const frameTx: Transaction = {
+      id: `tx-fspin-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      accountId: activeAcc.id,
+      type: 'belanja_fitur',
+      title:
+        newlyUnlockedFrameIds.length > 0
+          ? `Spin Bingkai (${spinCount}x): Dapat ${unlockedNamesText}!`
+          : `Spin Bingkai (${spinCount}x): +${totalTokensEarned} Token`,
+      amount: 0,
+      balanceAfter: activeAcc.balance,
+      status: 'success',
+      referenceNo: `FBK${Date.now().toString().slice(-7)}`,
+      timestamp: nowIso,
+      balanceDeducted: false,
+      category: 'redeem',
+      description: `Putar Spin Bingkai ${spinCount}x (${
+        isCoinUnlim ? 'Tier Admin ∞ Koin' : `-${coinCost} Koin`
+      }). Hasil: +${totalTokensEarned} Token Bingkai${
+        unlockedNamesText ? ` & Bingkai Baru [${unlockedNamesText}]` : ''
+      }.`,
+    };
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+    const nextTxs = [frameTx, ...latestTxs];
+    transactionsRef.current = nextTxs;
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      activeAcc.id,
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          spinCoins: newCoinBalance,
+          spinTokens: nextTokenBalance,
+          ownedSpinFrameIds: nextOwnedFrames,
+          totalSpinsPlayed: (a.totalSpinsPlayed || 0) + spinCount,
+        }),
+      {
+        transactions: nextTxs,
+        frameSpinHistory: nextFrameHistory,
+      }
+    );
+
+    if (newlyUnlockedFrameIds.length > 0) {
+      playAtmSound('cash');
+      try {
+        confetti({
+          particleCount: 120,
+          spread: 85,
+          origin: { y: 0.6 },
+        });
+      } catch {
+        // ignore
+      }
+      addNotification(
+        `✨ Jackpot Bingkai Aura Baru!`,
+        `Dari ${spinCount}x Spin Bingkai Anda membuka [${unlockedNamesText}]${
+          totalTokensEarned > 0 ? ` dan +${totalTokensEarned} Token Bingkai` : ''
+        }!`,
+        'success'
+      );
+      pushAppToast({
+        type: 'success',
+        title: 'Bingkai Aura Baru Terbuka!',
+        message: `Selamat! Anda mendapatkan ${unlockedNamesText}${
+          totalTokensEarned > 0 ? ` + ${totalTokensEarned} Token` : ''
+        }.`,
+      });
+    } else {
+      playAtmSound('success');
+    }
+
+    recordMissionActivities(activeAcc.id, [
+      { metricKey: 'spin_count', delta: Math.max(1, spinCount) },
+    ]);
+
+    return {
+      success: true,
+      message:
+        newlyUnlockedFrameIds.length > 0
+          ? `Jackpot! Membuka ${unlockedNamesText}${
+              totalTokensEarned > 0 ? ` + ${totalTokensEarned} Token Bingkai` : ''
+            }!`
+          : `Berhasil memperoleh +${totalTokensEarned} Token Bingkai! (Total Token: ${nextTokenBalance.toLocaleString(
+              'id-ID'
+            )})`,
+      coinsSpent: isCoinUnlim ? 0 : coinCost,
+      results,
+      totalTokensEarned,
+      newlyUnlockedFrameIds,
+      newCoinBalance,
+      newTokenBalance: nextTokenBalance,
+    };
+  };
+
+  const exchangeTokenForSpinFrame = (frameId: string) => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAcc =
+      latestPool.find((a) => a.id === currentAccountIdRef.current) ||
+      latestPool.find((a) => a.id === currentAccount?.id) ||
+      currentAccount;
+
+    if (!activeAcc) {
+      const msg = 'Silakan login terlebih dahulu.';
+      pushAppToast({ type: 'error', title: 'Belum Login', message: msg });
+      return { success: false, message: msg };
+    }
+
+    const frameMeta = SPIN_AURA_FRAMES.find((f) => f.id === frameId);
+    if (!frameMeta) {
+      const msg = 'Bingkai aura spesial tidak ditemukan.';
+      pushAppToast({ type: 'error', title: 'Bingkai Tidak Valid', message: msg });
+      return { success: false, message: msg };
+    }
+
+    const owned = new Set<string>(activeAcc.ownedSpinFrameIds || []);
+    if (owned.has(frameId)) {
+      const msg = `Anda sudah memiliki bingkai ${frameMeta.label}! Langsung tekan Pasang untuk memakainya.`;
+      pushAppToast({ type: 'info', title: 'Bingkai Sudah Dimiliki', message: msg });
+      return { success: false, message: msg };
+    }
+
+    const frameCfg = normalizeFrameSpinConfig(spinWheelConfigRef.current.frameSpin);
+    const tokenCost = frameCfg.exchangeTokenCost;
+    const currentTokens = activeAcc.spinTokens || 0;
+
+    if (currentTokens < tokenCost) {
+      playAtmSound('alert');
+      const shortfall = tokenCost - currentTokens;
+      const msg = `Token Bingkai belum cukup! Butuh ${tokenCost.toLocaleString(
+        'id-ID'
+      )} Token untuk menukar ${frameMeta.label} (kurang ${shortfall.toLocaleString('id-ID')} Token lagi).`;
+      pushAppToast({ type: 'error', title: 'Token Bingkai Kurang', message: msg });
+      return { success: false, message: msg };
+    }
+
+    const nextTokens = Math.max(0, currentTokens - tokenCost);
+    const nextOwned = [...Array.from(owned), frameId];
+    const nowIso = new Date().toISOString();
+
+    const exTx: Transaction = {
+      id: `tx-ftoken-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      accountId: activeAcc.id,
+      type: 'belanja_fitur',
+      title: `Tukar ${tokenCost} Token → Bingkai ${frameMeta.label}`,
+      amount: 0,
+      balanceAfter: activeAcc.balance,
+      status: 'success',
+      referenceNo: `TKN${Date.now().toString().slice(-7)}`,
+      timestamp: nowIso,
+      balanceDeducted: false,
+      category: 'redeem',
+      description: `Menukar ${tokenCost} Token Bingkai menjadi Bingkai Aura Eksklusif "${frameMeta.label}". Sisa Token: ${nextTokens}.`,
+    };
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+    const nextTxs = [exTx, ...latestTxs];
+    transactionsRef.current = nextTxs;
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      activeAcc.id,
+      (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          spinTokens: nextTokens,
+          ownedSpinFrameIds: nextOwned,
+          avatarFrameId: frameId,
+        }),
+      { transactions: nextTxs }
+    );
+
+    playAtmSound('cash');
+    try {
+      confetti({ particleCount: 95, spread: 75, origin: { y: 0.65 } });
+    } catch {
+      // ignore
+    }
+    addNotification(
+      `🎁 Bingkai ${frameMeta.label} Ditukar & Dipasang!`,
+      `Berhasil menukar ${tokenCost} Token Bingkai untuk membuka dan langsung memasang Bingkai ${frameMeta.label}.`,
+      'success'
+    );
+    pushAppToast({
+      type: 'success',
+      title: 'Penukaran Token Berhasil',
+      message: `${frameMeta.label} berhasil dibuka dengan ${tokenCost} Token dan langsung dipasang!`,
+    });
+
+    return {
+      success: true,
+      newTokenBalance: nextTokens,
+      message: `Bingkai ${frameMeta.label} berhasil ditukar dengan ${tokenCost} Token dan langsung terpasang di profil Anda!`,
+    };
+  };
+
+  const equipSpinAvatarFrame = (frameId: string) => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAcc =
+      latestPool.find((a) => a.id === currentAccountIdRef.current) ||
+      latestPool.find((a) => a.id === currentAccount?.id) ||
+      currentAccount;
+
+    if (!activeAcc) {
+      return { success: false, message: 'Silakan login terlebih dahulu.' };
+    }
+
+    const isExclusiveSpinFrame = SPIN_AURA_FRAMES.some((f) => f.id === frameId);
+    if (isExclusiveSpinFrame && !(activeAcc.ownedSpinFrameIds || []).includes(frameId)) {
+      playAtmSound('alert');
+      const frameMeta = getAvatarFrameById(frameId);
+      const msg = `Anda belum memiliki Bingkai ${frameMeta.label}. Menangkan lewat Spin Bingkai (5%) atau tukar ${normalizeFrameSpinConfig(spinWheelConfigRef.current.frameSpin).exchangeTokenCost} Token!`;
+      pushAppToast({
+        type: 'warning',
+        title: 'Bingkai Belum Dimiliki',
+        message: msg,
+        actionLabel: 'Buka Spin Bingkai',
+        actionKind: 'open_frame_spin',
+      });
+      return { success: false, message: msg };
+    }
+
+    commitAccountMutationPermanent(activeAcc.id, (a) => ({
+      ...a,
+      avatarFrameId: frameId,
+    }));
+
+    const frameMeta = getAvatarFrameById(frameId);
+    playAtmSound('success');
+    pushAppToast({
+      type: 'success',
+      title: 'Bingkai Avatar Terpasang',
+      message: `Bingkai ${frameMeta.label} aktif di Profil, Navbar, Kartu Nama Digital, PayChat, dan Leaderboard!`,
+    });
+    return {
+      success: true,
+      message: `Bingkai ${frameMeta.label} berhasil dipasang ke seluruh tampilan akun Anda!`,
+    };
+  };
+
+  const adminGrantSpinTokensAndFrame = (
+    accountId: string,
+    input: {
+      tokenDelta?: number;
+      tokenSet?: number;
+      grantFrameId?: string;
+      revokeFrameId?: string;
+    }
+  ) => {
+    const target = accounts.find((a) => a.id === accountId);
+    if (!target) {
+      return { success: false, message: 'Rekening nasabah tidak ditemukan.' };
+    }
+
+    let nextTokens = target.spinTokens || 0;
+    if (input.tokenSet !== undefined && Number.isFinite(input.tokenSet)) {
+      nextTokens = Math.max(0, Math.round(input.tokenSet));
+    } else if (input.tokenDelta !== undefined && Number.isFinite(input.tokenDelta)) {
+      nextTokens = Math.max(0, nextTokens + Math.round(input.tokenDelta));
+    }
+
+    const ownedSet = new Set<string>(target.ownedSpinFrameIds || []);
+    if (input.grantFrameId && SPIN_AURA_FRAMES.some((f) => f.id === input.grantFrameId)) {
+      ownedSet.add(input.grantFrameId);
+    }
+    if (input.revokeFrameId) {
+      ownedSet.delete(input.revokeFrameId);
+    }
+    const nextOwned = Array.from(ownedSet);
+    const shouldClearEquipped =
+      Boolean(input.revokeFrameId) && target.avatarFrameId === input.revokeFrameId;
+
+    const updatedAccounts = accounts.map((a) =>
+      a.id === accountId
+        ? normalizeAdminAccountAssets({
+            ...a,
+            spinTokens: nextTokens,
+            ownedSpinFrameIds: nextOwned,
+            ...(shouldClearEquipped ? { avatarFrameId: 'frame-clean' } : {}),
+            accountUpdatedAtMs: Date.now(),
+          })
+        : a
+    );
+    latestServerAccountsRef.current = updatedAccounts;
+    accountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+    flushMasterStateToCloud({ accounts: updatedAccounts });
+
+    playAtmSound('success');
+    pushAppToast({
+      type: 'success',
+      title: 'Token & Bingkai Nasabah Diperbarui',
+      message: `Akun ${target.fullName} kini memiliki ${nextTokens.toLocaleString('id-ID')} Token & ${nextOwned.length} Bingkai Spesial.`,
+    });
+    return {
+      success: true,
+      message: `Token & Bingkai milik ${target.fullName} berhasil diperbarui (${nextTokens.toLocaleString(
+        'id-ID'
+      )} Token, ${nextOwned.length}/5 Bingkai Spesial) dan disinkronkan ke Cloud!`,
     };
   };
 
@@ -33601,17 +34243,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const minNom = Math.max(1000, goldMarketConfig.minNominalRupiah || 1000);
     const cleanAmount = Math.round(Number(input.rupiahAmount) || 0);
     if (cleanAmount < minNom) {
+      const msg = `Nominal pembelian minimal adalah ${formatRupiah(minNom)}.`;
+      pushAppToast({ type: 'warning', title: 'Nominal Emas Minimal', message: msg });
       return {
         success: false,
-        message: `Nominal pembelian minimal adalah ${formatRupiah(minNom)}.`,
+        message: msg,
       };
     }
     const isInf = isUnlimitedNumber(currentAccount.balance);
     if (!isInf && currentAccount.balance < cleanAmount) {
       playAtmSound('alert');
+      const msg = `Saldo rekening tidak mencukupi. Dibutuhkan ${formatRupiah(cleanAmount)}.`;
+      pushAppToast({ type: 'error', title: 'Saldo Beli Emas Kurang', message: msg });
       return {
         success: false,
-        message: `Saldo rekening tidak mencukupi. Dibutuhkan ${formatRupiah(cleanAmount)}.`,
+        message: msg,
       };
     }
 
@@ -33958,15 +34604,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     if (input.pin !== currentAccount.pin) {
       playAtmSound('alert');
-      return { success: false, message: 'PIN Kartu 6 digit yang Anda masukkan salah!' };
+      const msg = 'PIN Kartu 6 digit yang Anda masukkan salah!';
+      pushAppToast({ type: 'error', title: 'PIN Salah', message: msg });
+      return { success: false, message: msg };
     }
     const cleanRecAcc = (input.recipientAccount || '').trim();
     const cleanRecName = (input.recipientName || '').trim() || 'Penerima Transfer Bebas';
     if (!cleanRecAcc) {
-      return { success: false, message: 'Nomor rekening / ID tujuan wajib diisi.' };
+      const msg = 'Nomor rekening / ID tujuan wajib diisi.';
+      pushAppToast({ type: 'warning', title: 'Tujuan Belum Diisi', message: msg });
+      return { success: false, message: msg };
     }
     if (cleanRecAcc === currentAccount.accountNumber) {
-      return { success: false, message: 'Tidak dapat melakukan Transfer Bebas ke rekening sendiri.' };
+      const msg = 'Tidak dapat melakukan Transfer Bebas ke rekening sendiri.';
+      pushAppToast({ type: 'warning', title: 'Rekening Tujuan Invalid', message: msg });
+      return { success: false, message: msg };
     }
 
     // Biaya Admin Wajib minimal 5% untuk semua jenis transfer
@@ -33987,15 +34639,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const goldRupiahSent = includeGold ? Math.round(Number(input.goldRupiahAmount) || 0) : 0;
 
     if (includeUang && uangSent < minNom) {
-      return { success: false, message: `Nominal Transfer Uang minimal ${formatRupiah(minNom)}.` };
+      const msg = `Nominal Transfer Uang minimal ${formatRupiah(minNom)}.`;
+      pushAppToast({ type: 'warning', title: 'Nominal Transfer Kurang', message: msg });
+      return { success: false, message: msg };
     }
     if (includeCoin && coinSent < 1) {
-      return { success: false, message: 'Jumlah Transfer Coin minimal 1 Koin.' };
+      const msg = 'Jumlah Transfer Coin minimal 1 Koin.';
+      pushAppToast({ type: 'warning', title: 'Coin Transfer Kurang', message: msg });
+      return { success: false, message: msg };
     }
     if (includeGold && goldRupiahSent < minNom) {
+      const msg = `Nominal Transfer Emas minimal senilai ${formatRupiah(minNom)}.`;
+      pushAppToast({ type: 'warning', title: 'Nominal Emas Kurang', message: msg });
       return {
         success: false,
-        message: `Nominal Transfer Emas minimal senilai ${formatRupiah(minNom)}.`,
+        message: msg,
       };
     }
 
@@ -34003,10 +34661,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isInf = isSenderAdmin || isUnlimitedNumber(currentAccount.balance);
     const isCoinInf = isSenderAdmin || isUnlimitedNumber(currentAccount.spinCoins);
     if (!isInf && uangSent > currentAccount.balance) {
-      return { success: false, message: 'Saldo Uang Rupiah tidak mencukupi untuk Transfer Bebas.' };
+      const msg = 'Saldo Uang Rupiah tidak mencukupi untuk Transfer Bebas.';
+      pushAppToast({ type: 'error', title: 'Saldo Rupiah Kurang', message: msg });
+      return { success: false, message: msg };
     }
     if (!isCoinInf && coinSent > (currentAccount.spinCoins || 0)) {
-      return { success: false, message: 'Saldo Coin Spin tidak mencukupi untuk Transfer Bebas.' };
+      const msg = 'Saldo Coin Spin tidak mencukupi untuk Transfer Bebas.';
+      pushAppToast({
+        type: 'error',
+        title: 'Koin Spin Tidak Cukup',
+        message: msg,
+        actionLabel: 'Beli Koin',
+        actionKind: 'open_coin_shop',
+      });
+      return { success: false, message: msg };
     }
     const ownedGoldGrams =
       (currentAccount.goldBatches && currentAccount.goldBatches.length > 0
@@ -40122,6 +40790,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminResetSpinWheelConfig,
         adminAdjustAccountSpinCoins,
         adminMassSpinCoinRain,
+        frameSpinHistory,
+        floatingToasts,
+        pushAppToast,
+        dismissFloatingToast,
+        coinShopOpenRequestNonce,
+        requestOpenSpinCoinShop,
+        spinBingkaiWheel,
+        exchangeTokenForSpinFrame,
+        equipSpinAvatarFrame,
+        adminGrantSpinTokensAndFrame,
         diamondConfig,
         qrisOrders,
         isDiamondStoreOpen,

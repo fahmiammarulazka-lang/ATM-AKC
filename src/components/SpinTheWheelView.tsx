@@ -16,7 +16,7 @@
  *   Rp 7.500.000, Rp 10.000.000, serta Rp 15.000.000 & Rp 20.000.000 (kemungkinan 0,000000000001% — 1 dari 1.000 Kuadriliun).
  * - Kemungkinan pendapatan saat nyepin bisa diperbesar di Panel Admin.
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Plus,
   Sparkles,
@@ -46,6 +46,7 @@ import {
 } from '../data/spinWheelCatalog';
 import { formatRupiah } from '../utils/bankUtils';
 import { SpinPrizeSegment } from '../types/bank';
+import { SpinBingkaiArena } from './SpinBingkaiArena';
 
 const SPIN_COUNTS: (1 | 3 | 5 | 7 | 10)[] = [1, 3, 5, 7, 10];
 
@@ -56,9 +57,17 @@ export const SpinTheWheelView: React.FC = () => {
     spinHistory,
     buySpinCoins,
     spinTheWheel,
+    coinShopOpenRequestNonce,
   } = useBank();
 
+  const [spinMode, setSpinMode] = useState<'money' | 'frame'>('money');
   const [isCoinShopOpen, setIsCoinShopOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (coinShopOpenRequestNonce > 0) {
+      setIsCoinShopOpen(true);
+    }
+  }, [coinShopOpenRequestNonce]);
   const [coinFilterTab, setCoinFilterTab] = useState<
     'all' | 'satuan' | 'paket_spin' | 'sultan_100k' | 'mega_1juta'
   >('all');
@@ -351,6 +360,35 @@ export const SpinTheWheelView: React.FC = () => {
         </div>
       </div>
 
+      {/* MODE SWITCHER: SPIN UANG VS SPIN BINGKAI */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-2 rounded-2xl bg-slate-900/95 border border-slate-800 shadow-xl">
+        <button
+          type="button"
+          onClick={() => setSpinMode('money')}
+          className={`min-h-[48px] px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition cursor-pointer ${
+            spinMode === 'money'
+              ? 'bg-gradient-to-r from-amber-400 to-yellow-400 text-slate-950 shadow-lg'
+              : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+          }`}
+        >
+          <Coins className="w-4 h-4 shrink-0" />
+          <span>1. Spin Uang (Rp 100rb – Rp 20jt)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setSpinMode('frame')}
+          className={`min-h-[48px] px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition cursor-pointer ${
+            spinMode === 'frame'
+              ? 'bg-gradient-to-r from-fuchsia-500 via-purple-500 to-indigo-500 text-white shadow-lg shadow-fuchsia-500/25'
+              : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 shrink-0" />
+          <span>2. Spin Bingkai (25 Kotak · 5% Aura · Token {(currentAccount.spinTokens || 0).toLocaleString('id-ID')})</span>
+        </button>
+      </div>
+
       {/* FEEDBACK BANNER */}
       {feedback && (
         <div
@@ -566,8 +604,11 @@ export const SpinTheWheelView: React.FC = () => {
       )}
 
       {/* =====================================================================
-          BAGIAN UTAMA: RODA SPIN THE WHEEL 20 SEGMEN & TOMBOL SPIN (1x, 3x, 5x, 7x, 10x)
+          BAGIAN UTAMA: SPIN BINGKAI ATAU SPIN UANG 20 SEGMEN
          ===================================================================== */}
+      {spinMode === 'frame' ? (
+        <SpinBingkaiArena onOpenCoinShop={() => setIsCoinShopOpen(true)} />
+      ) : (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left: Visual Interactive Wheel (7 Cols) */}
         <div className="lg:col-span-7 bg-slate-900/90 border-2 border-indigo-500/40 rounded-3xl p-6 shadow-2xl flex flex-col items-center space-y-6">
@@ -964,6 +1005,7 @@ export const SpinTheWheelView: React.FC = () => {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 };

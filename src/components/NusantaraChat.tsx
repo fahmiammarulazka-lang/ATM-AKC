@@ -102,6 +102,7 @@ import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
 import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
 import { isAccountDisguisedAdmin } from '../types/adminAnalyticsAndTier';
 import { PinPromptModal } from './PinPromptModal';
+import { ProfileAvatarBadge } from './ProfileAvatarBadge';
 import {
   AddContactModal,
   AdminModerationModal,
@@ -4223,17 +4224,22 @@ export const NusantaraChat: React.FC = () => {
                         }`}
                       >
                         <div className="relative shrink-0">
-                          <div
-                            className={`w-10 h-10 rounded-2xl flex items-center justify-center font-extrabold text-sm ${
-                              dm.isAdminPeer
-                                ? 'bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-950'
-                                : 'bg-slate-800 text-slate-200'
-                            }`}
-                          >
-                            {dm.displayName.charAt(0).toUpperCase()}
-                          </div>
+                          {(() => {
+                            const peerAcc = accounts.find((a) => a.id === dm.peerAccountId);
+                            return (
+                              <ProfileAvatarBadge
+                                account={{
+                                  fullName: peerAcc?.fullName || dm.displayName,
+                                  cardStatus: peerAcc?.cardStatus || 'active',
+                                  avatarPresetId: peerAcc?.avatarPresetId,
+                                  avatarFrameId: peerAcc?.avatarFrameId,
+                                }}
+                                size="md"
+                              />
+                            );
+                          })()}
                           {presence.online && !isBlocked && (
-                            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900" />
+                            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-slate-900 z-10" />
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -4438,15 +4444,23 @@ export const NusantaraChat: React.FC = () => {
                           {renderChatGroupIcon(activeGroup.iconKey, 'w-5 h-5')}
                         </div>
                       ) : (
-                        <div
-                          className={`w-10 h-10 rounded-2xl flex items-center justify-center font-extrabold text-sm shrink-0 ${
-                            activeDmItem?.isAdminPeer
-                              ? 'bg-gradient-to-br from-amber-500 to-yellow-500 text-slate-950'
-                              : 'bg-emerald-600 text-white'
-                          }`}
-                        >
-                          {(activeDmItem?.displayName || 'N').charAt(0).toUpperCase()}
-                        </div>
+                        (() => {
+                          const headerPeerAcc = accounts.find(
+                            (a) => a.id === activeDmItem?.peerAccountId
+                          );
+                          return (
+                            <ProfileAvatarBadge
+                              account={{
+                                fullName:
+                                  headerPeerAcc?.fullName || activeDmItem?.displayName || 'N',
+                                cardStatus: headerPeerAcc?.cardStatus || 'active',
+                                avatarPresetId: headerPeerAcc?.avatarPresetId,
+                                avatarFrameId: headerPeerAcc?.avatarFrameId,
+                              }}
+                              size="md"
+                            />
+                          );
+                        })()
                       )}
 
                       <div className="min-w-0">

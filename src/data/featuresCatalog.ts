@@ -3081,6 +3081,35 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-45-20',
+    version: 'v16.45.20',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v16.45.20: Spin the Wheel Mode Ganda (Spin Uang & Spin Bingkai 25 Kotak · 5% Aura Eksklusif · Toko 300 Token) + Notifikasi Mengambang Pojok Kanan Atas 4 Detik',
+    fullDate: 'Sabtu, 28 November 2026 • Pukul 13:00 WIB',
+    dateText: 'Sabtu, 28 November 2026 • Pukul 13:00 WIB',
+    description:
+      'Pembaruan v16.45.20 menghadirkan Mode Ganda pada Spin the Wheel: selain Spin Uang, kini tersedia Mode Spin Bingkai dengan lingkaran 25 kotak sorot lampu berputar cepat mengelilingi 5 Bingkai Aura Eksklusif di tengah (Petir Cyber, Api Naga, Emas Imperial, Kristal Es, Galaksi Kosmik). Putaran hanya memakai Koin Spin (1x = 18 Koin, 5x = 87 Koin; Kartu Tier Admin tetap ∞) dengan peluang 5% mendapat Bingkai serta hadiah Token Bingkai untuk ditukar di Toko 300 Token. Ditambah sistem Notifikasi Mengambang Global di pojok kanan atas yang otomatis menghilang dalam 4 detik lengkap dengan bar hitung mundur, jeda saat kursor diarahkan, dan tombol aksi cepat Beli Koin saat saldo koin kurang.',
+    highlights: [
+      'Spin Bingkai 25 Kotak & 5 Bingkai Aura Eksklusif: Putar arena lingkaran 1–25 hanya dengan Koin Spin (18 Koin / 1x, 87 Koin / 5x) untuk peluang 5% memenangkan Bingkai Petir Cyber, Api Naga, Emas Imperial, Kristal Es, atau Galaksi Kosmik.',
+      'Token Bingkai & Toko Tukar 300 Token: Kotak 1–25 berhadiah Token Bingkai (5–25 Token), dan bingkai kembar otomatis dikonversi menjadi +5 Token. Kumpulkan 300 Token untuk menukar bingkai pilihan Anda.',
+      'Tampil & Pasang di Seluruh Aplikasi: Bingkai Aura yang terbuka langsung bisa dipasang dari arena Spin Bingkai maupun Profil, lalu tampil bersinar di Profil, Navbar, Kartu Nama Digital, PayChat, dan Leaderboard.',
+      'Notifikasi Mengambang Pojok Kanan Atas (Auto 4 Detik): Pemberitahuan error, kurang koin/saldo/diamond, atau salah PIN kini melayang rapi di pojok kanan atas (maks 3 tumpukan) dengan bar hitung mundur 4 detik, jeda saat hover, tombol silang, dan pintasan Beli Koin.',
+    ],
+    changes: [
+      'Menambahkan Dual Mode Switcher (Spin Uang vs Spin Bingkai) dan komponen SpinBingkaiArena dengan 25 kotak luar dan 5 Bingkai Aura beranimasi di tengah.',
+      'Menambahkan sistem Token Bingkai, kompensasi duplikat (+5 Token), Toko Tukar 300 Token, serta tampilan Bingkai Aura di ProfileAvatarBadge (Profil, Navbar, Kartu Nama Digital, PayChat, dan Leaderboard).',
+      'Menambahkan GlobalFloatingToastContainer di pojok kanan atas untuk seluruh aplikasi dengan durasi 4 detik, countdown bar, pause on hover, tombol tutup, dan tombol aksi cepat Beli Koin / Top Up Diamond.',
+      'Menambahkan kendali lengkap Spin Bingkai dan kelola Token/Bingkai per nasabah di tab Kontrol Spin the Wheel pada Panel Admin.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-28T06:00:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v16-44-20',
     version: 'v16.44.20',
     releaseType: 'minor',
@@ -3103,7 +3132,7 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Menyusun ulang modal Profil menjadi 4 tab responsif (Ringkasan, Identitas & Kartu, Aksi & Favorit, Keamanan & PIN) untuk HP maupun Desktop.',
       'Menambahkan kustomisasi Bio, No HP, Email, Kota, Avatar Preset, Bingkai Avatar, Gelar Unggulan, Kartu Nama Digital + Unduh QRIS PNG, grafik arus kas bulan ini, ekspor CSV/PDF, pengelola Rekening Favorit, Ubah PIN, dan saklar Bekukan Kartu Darurat.',
     ],
-    isCurrent: true,
+    isCurrent: false,
     categoryBadge: 'Update Sekarang',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-27T16:45:00.000Z',
