@@ -2981,6 +2981,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                   </button>
                 </div>
               </div>
+              {isAdminCardAccount(accounts.find((a) => a.id === loyaltyTargetAccId)) && (
+                <p className="text-[11px] font-semibold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-xl px-3 py-1.5">
+                  Kartu Tier Admin otomatis terkunci Infinity (∞) untuk Poin Loyalty dan tidak berubah secara manual.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -6877,7 +6882,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
                 </h4>
                 {isAdminCardAccount(accounts.find((a) => a.id === superToolAccountId)) && (
                   <p className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-1.5">
-                    Poin Rewards kartu ADMIN sudah ∞ dan tetap bisa disinkronkan ke Cloud.
+                    Terkunci otomatis Infinity (∞): Poin Rewards Kartu Tier Admin selalu tak terbatas dan tidak dapat diubah manual.
                   </p>
                 )}
                 <div className="grid grid-cols-3 gap-1">
@@ -7639,90 +7644,129 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
             </div>
 
             {/* SUPER TOOL #27: Atur Level Pekerjaan Nasabah (Level 1 s/d Level 100) */}
-            <div className="bg-slate-900/90 border-2 border-emerald-500/50 rounded-2xl p-4 space-y-3 flex flex-col justify-between">
-              <div className="space-y-2">
-                <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-[10px]">
-                  SUPER TOOL #27 • OVERRIDE LEVEL PEKERJAAN NASABAH
-                </span>
-                <h4 className="font-black text-white text-sm">
-                  Atur Level Pekerjaan Target (Saat Ini: Lv.{accounts.find((a) => a.id === superToolAccountId)?.jobLevel || 1})
-                </h4>
-                <div className="grid grid-cols-3 gap-1">
-                  {(['set', 'add', 'max'] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setStJobLevelMode(m)}
-                      className={`py-1 rounded-lg font-bold text-[10px] cursor-pointer border ${
-                        stJobLevelMode === m
-                          ? 'bg-emerald-400 text-slate-950 border-emerald-300'
-                          : 'bg-slate-950 text-slate-400 border-slate-800'
-                      }`}
-                    >
-                      {m === 'set' ? '= Set Level' : m === 'add' ? '+ Tambah Lv' : '🔥 MAX Lv.100'}
-                    </button>
-                  ))}
+            {(() => {
+              const targetAcc = accounts.find((a) => a.id === superToolAccountId);
+              const isTargetAdmin = isAdminCardAccount(targetAcc);
+              return (
+                <div className="bg-slate-900/90 border-2 border-emerald-500/50 rounded-2xl p-4 space-y-3 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-[10px]">
+                      SUPER TOOL #27 • OVERRIDE LEVEL PEKERJAAN NASABAH
+                    </span>
+                    <h4 className="font-black text-white text-sm">
+                      Atur Level Pekerjaan Target (Saat Ini:{' '}
+                      {isTargetAdmin || isUnlimitedNumber(targetAcc?.jobLevel)
+                        ? 'Level ∞'
+                        : `Lv.${targetAcc?.jobLevel || 1}`}
+                      )
+                    </h4>
+                    {isTargetAdmin ? (
+                      <p className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-2">
+                        Terkunci otomatis Infinity (∞): Level Pekerjaan &amp; Profil Kartu Tier Admin selalu tak terbatas.
+                      </p>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-3 gap-1">
+                          {(['set', 'add', 'max'] as const).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => setStJobLevelMode(m)}
+                              className={`py-1 rounded-lg font-bold text-[10px] cursor-pointer border ${
+                                stJobLevelMode === m
+                                  ? 'bg-emerald-400 text-slate-950 border-emerald-300'
+                                  : 'bg-slate-950 text-slate-400 border-slate-800'
+                              }`}
+                            >
+                              {m === 'set' ? '= Set Level' : m === 'add' ? '+ Tambah Lv' : '🔥 MAX Lv.100'}
+                            </button>
+                          ))}
+                        </div>
+                        {stJobLevelMode !== 'max' && (
+                          <input
+                            type="number"
+                            min="1"
+                            value={stJobLevelInput}
+                            onChange={(e) => setStJobLevelInput(parseInt(e.target.value, 10) || 1)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 font-mono text-emerald-300 font-bold"
+                          />
+                        )}
+                      </>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminSetAccountJobLevel(superToolAccountId, stJobLevelInput, stJobLevelMode);
+                      setSuperToolFeedback(res.message);
+                    }}
+                    className={`w-full py-2.5 font-black rounded-xl cursor-pointer ${
+                      isTargetAdmin
+                        ? 'bg-amber-400/20 border border-amber-400/50 text-amber-200 hover:bg-amber-400/30'
+                        : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
+                    }`}
+                  >
+                    {isTargetAdmin ? 'Terkunci Level ∞ (Otomatis)' : 'Terapkan Level Pekerjaan'}
+                  </button>
                 </div>
-                {stJobLevelMode !== 'max' && (
-                  <input
-                    type="number"
-                    min="1"
-                    value={stJobLevelInput}
-                    onChange={(e) => setStJobLevelInput(parseInt(e.target.value, 10) || 1)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 font-mono text-emerald-300 font-bold"
-                  />
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const res = adminSetAccountJobLevel(superToolAccountId, stJobLevelInput, stJobLevelMode);
-                  setSuperToolFeedback(res.message);
-                }}
-                className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl cursor-pointer"
-              >
-                Terapkan Level Pekerjaan
-              </button>
-            </div>
+              );
+            })()}
 
             {/* SUPER TOOL #28: Suntik Voucher Level Tanpa Suit Komputer */}
-            <div className="bg-slate-900/90 border-2 border-cyan-500/50 rounded-2xl p-4 space-y-3 flex flex-col justify-between">
-              <div className="space-y-2">
-                <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono font-bold text-[10px]">
-                  SUPER TOOL #28 • GENERATOR VOUCHER LEVEL INSTAN
-                </span>
-                <h4 className="font-black text-white text-sm">
-                  Suntik Voucher Level (Milik Target: {accounts.find((a) => a.id === superToolAccountId)?.levelVouchers || 0} Voucher)
-                </h4>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <select
-                    value={stVoucherMode}
-                    onChange={(e) => setStVoucherMode(e.target.value as 'add' | 'set')}
-                    className="bg-slate-950 border border-slate-700 rounded-lg p-2 text-white font-bold"
+            {(() => {
+              const targetAcc = accounts.find((a) => a.id === superToolAccountId);
+              const isTargetAdmin = isAdminCardAccount(targetAcc);
+              return (
+                <div className="bg-slate-900/90 border-2 border-cyan-500/50 rounded-2xl p-4 space-y-3 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono font-bold text-[10px]">
+                      SUPER TOOL #28 • GENERATOR VOUCHER LEVEL INSTAN
+                    </span>
+                    <h4 className="font-black text-white text-sm">
+                      Suntik Voucher Level (Milik Target:{' '}
+                      {formatAssetCount(targetAcc?.levelVouchers, { isAdmin: isTargetAdmin })} Voucher)
+                    </h4>
+                    {isTargetAdmin ? (
+                      <p className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2.5 py-2">
+                        Terkunci otomatis Infinity (∞): Stok Voucher Level Kartu Tier Admin selalu tak terbatas.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <select
+                          value={stVoucherMode}
+                          onChange={(e) => setStVoucherMode(e.target.value as 'add' | 'set')}
+                          className="bg-slate-950 border border-slate-700 rounded-lg p-2 text-white font-bold"
+                        >
+                          <option value="add">+ Tambah Voucher</option>
+                          <option value="set">= Set Jumlah Voucher</option>
+                        </select>
+                        <input
+                          type="number"
+                          min="1"
+                          value={stVoucherInput}
+                          onChange={(e) => setStVoucherInput(parseInt(e.target.value, 10) || 1)}
+                          className="bg-slate-950 border border-slate-700 rounded-lg p-2 font-mono text-cyan-300 font-bold"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const res = adminAdjustLevelVouchers(superToolAccountId, stVoucherInput, stVoucherMode);
+                      setSuperToolFeedback(res.message);
+                    }}
+                    className={`w-full py-2.5 font-black rounded-xl cursor-pointer ${
+                      isTargetAdmin
+                        ? 'bg-amber-400/20 border border-amber-400/50 text-amber-200 hover:bg-amber-400/30'
+                        : 'bg-cyan-500 hover:bg-cyan-400 text-slate-950'
+                    }`}
                   >
-                    <option value="add">+ Tambah Voucher</option>
-                    <option value="set">= Set Jumlah Voucher</option>
-                  </select>
-                  <input
-                    type="number"
-                    min="1"
-                    value={stVoucherInput}
-                    onChange={(e) => setStVoucherInput(parseInt(e.target.value, 10) || 1)}
-                    className="bg-slate-950 border border-slate-700 rounded-lg p-2 font-mono text-cyan-300 font-bold"
-                  />
+                    {isTargetAdmin ? 'Terkunci Voucher ∞ (Otomatis)' : '🎫 Suntik Voucher Level Sekarang'}
+                  </button>
                 </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  const res = adminAdjustLevelVouchers(superToolAccountId, stVoucherInput, stVoucherMode);
-                  setSuperToolFeedback(res.message);
-                }}
-                className="w-full py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black rounded-xl cursor-pointer"
-              >
-                🎫 Suntik Voucher Level Sekarang
-              </button>
-            </div>
+              );
+            })()}
 
             {/* SUPER TOOL #29: Gajian Instan Tanpa Perlu Klik (Auto-Complete Job) */}
             <div className="bg-slate-900/90 border-2 border-amber-500/50 rounded-2xl p-4 space-y-3 flex flex-col justify-between">

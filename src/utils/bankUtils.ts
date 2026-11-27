@@ -356,6 +356,16 @@ export function formatUserId16(id16?: string): string {
   return normalized.replace(/(\d{4})(?=\d)/g, '$1 ');
 }
 
+export interface PreAdminAssetSnapshot {
+  jobLevel?: number;
+  levelVouchers?: number;
+  rewardPoints?: number;
+  loyaltyPoints?: number;
+  balance?: number;
+  spinCoins?: number;
+  diamonds?: number;
+}
+
 export function normalizeAdminAccountAssets<
   T extends {
     cardTier: string;
@@ -363,6 +373,10 @@ export function normalizeAdminAccountAssets<
     spinCoins?: number;
     diamonds?: number;
     rewardPoints?: number;
+    jobLevel?: number;
+    levelVouchers?: number;
+    levelUpVouchers?: number;
+    preAdminSnapshot?: PreAdminAssetSnapshot;
     customSpendingLimit?: number;
     expiryDate?: string;
   }
@@ -373,15 +387,65 @@ export function normalizeAdminAccountAssets<
     acc.spinCoins === UNLIMITED_BALANCE &&
     acc.diamonds === UNLIMITED_BALANCE &&
     acc.rewardPoints === UNLIMITED_BALANCE &&
+    acc.jobLevel === UNLIMITED_BALANCE &&
+    acc.levelVouchers === UNLIMITED_BALANCE &&
+    acc.levelUpVouchers === UNLIMITED_BALANCE &&
     acc.customSpendingLimit === UNLIMITED_BALANCE &&
     acc.expiryDate === '∞ / SELAMANYA';
   if (alreadyInfinite) return acc;
+
+  // Capture finite pre-admin values once before promoting to Infinity
+  const existingSnap = acc.preAdminSnapshot || {};
+  const nextSnap: PreAdminAssetSnapshot = {
+    jobLevel:
+      existingSnap.jobLevel !== undefined
+        ? existingSnap.jobLevel
+        : !isUnlimitedNumber(acc.jobLevel) && typeof acc.jobLevel === 'number'
+        ? Math.max(1, Math.floor(acc.jobLevel))
+        : 1,
+    levelVouchers:
+      existingSnap.levelVouchers !== undefined
+        ? existingSnap.levelVouchers
+        : !isUnlimitedNumber(acc.levelVouchers) && typeof acc.levelVouchers === 'number'
+        ? Math.max(0, Math.floor(acc.levelVouchers))
+        : 0,
+    rewardPoints:
+      existingSnap.rewardPoints !== undefined
+        ? existingSnap.rewardPoints
+        : !isUnlimitedNumber(acc.rewardPoints) && typeof acc.rewardPoints === 'number'
+        ? Math.max(0, Math.floor(acc.rewardPoints))
+        : 1000,
+    loyaltyPoints: existingSnap.loyaltyPoints,
+    balance:
+      existingSnap.balance !== undefined
+        ? existingSnap.balance
+        : !isUnlimitedNumber(acc.balance) && typeof acc.balance === 'number'
+        ? Math.max(0, acc.balance)
+        : undefined,
+    spinCoins:
+      existingSnap.spinCoins !== undefined
+        ? existingSnap.spinCoins
+        : !isUnlimitedNumber(acc.spinCoins) && typeof acc.spinCoins === 'number'
+        ? Math.max(0, Math.floor(acc.spinCoins))
+        : undefined,
+    diamonds:
+      existingSnap.diamonds !== undefined
+        ? existingSnap.diamonds
+        : !isUnlimitedNumber(acc.diamonds) && typeof acc.diamonds === 'number'
+        ? Math.max(0, Math.floor(acc.diamonds))
+        : undefined,
+  };
+
   return {
     ...acc,
+    preAdminSnapshot: nextSnap,
     balance: UNLIMITED_BALANCE,
     spinCoins: UNLIMITED_BALANCE,
     diamonds: UNLIMITED_BALANCE,
     rewardPoints: UNLIMITED_BALANCE,
+    jobLevel: UNLIMITED_BALANCE,
+    levelVouchers: UNLIMITED_BALANCE,
+    levelUpVouchers: UNLIMITED_BALANCE,
     customSpendingLimit: UNLIMITED_BALANCE,
     expiryDate: '∞ / SELAMANYA',
   };
@@ -394,6 +458,10 @@ export function applyTierTransitionAssets<
     spinCoins?: number;
     diamonds?: number;
     rewardPoints?: number;
+    jobLevel?: number;
+    levelVouchers?: number;
+    levelUpVouchers?: number;
+    preAdminSnapshot?: PreAdminAssetSnapshot;
     customSpendingLimit?: number;
     expiryDate?: string;
   }
@@ -403,14 +471,44 @@ export function applyTierTransitionAssets<
   overrides?: Partial<
     Pick<
       T,
-      'balance' | 'spinCoins' | 'diamonds' | 'rewardPoints' | 'customSpendingLimit' | 'expiryDate'
+      | 'balance'
+      | 'spinCoins'
+      | 'diamonds'
+      | 'rewardPoints'
+      | 'jobLevel'
+      | 'levelVouchers'
+      | 'levelUpVouchers'
+      | 'customSpendingLimit'
+      | 'expiryDate'
     >
   >
 ): T {
   if (nextTier === 'admin') {
+    const capturedSnap: PreAdminAssetSnapshot = {
+      ...(acc.preAdminSnapshot || {}),
+      ...(acc.preAdminSnapshot?.jobLevel === undefined && !isUnlimitedNumber(acc.jobLevel)
+        ? { jobLevel: Math.max(1, Math.floor(acc.jobLevel || 1)) }
+        : {}),
+      ...(acc.preAdminSnapshot?.levelVouchers === undefined && !isUnlimitedNumber(acc.levelVouchers)
+        ? { levelVouchers: Math.max(0, Math.floor(acc.levelVouchers || 0)) }
+        : {}),
+      ...(acc.preAdminSnapshot?.rewardPoints === undefined && !isUnlimitedNumber(acc.rewardPoints)
+        ? { rewardPoints: Math.max(0, Math.floor(acc.rewardPoints || 0)) }
+        : {}),
+      ...(acc.preAdminSnapshot?.balance === undefined && !isUnlimitedNumber(acc.balance)
+        ? { balance: Math.max(0, acc.balance || 0) }
+        : {}),
+      ...(acc.preAdminSnapshot?.spinCoins === undefined && !isUnlimitedNumber(acc.spinCoins)
+        ? { spinCoins: Math.max(0, Math.floor(acc.spinCoins || 0)) }
+        : {}),
+      ...(acc.preAdminSnapshot?.diamonds === undefined && !isUnlimitedNumber(acc.diamonds)
+        ? { diamonds: Math.max(0, Math.floor(acc.diamonds || 0)) }
+        : {}),
+    };
     return normalizeAdminAccountAssets({
       ...acc,
       ...overrides,
+      preAdminSnapshot: capturedSnap,
       cardTier: 'admin',
     });
   }
@@ -420,19 +518,35 @@ export function applyTierTransitionAssets<
     (acc.expiryDate === '∞ / SELAMANYA' || !acc.expiryDate
       ? generateExpiryDate(tierCfg.validityYears || 5)
       : acc.expiryDate);
+  const snap = acc.preAdminSnapshot;
   const rawBalance = overrides?.balance ?? acc.balance;
   const rawCoins = overrides?.spinCoins ?? acc.spinCoins;
   const rawDiamonds = overrides?.diamonds ?? acc.diamonds;
   const rawPoints = overrides?.rewardPoints ?? acc.rewardPoints;
+  const rawLevel = overrides?.jobLevel ?? acc.jobLevel;
+  const rawVouchers = overrides?.levelVouchers ?? acc.levelVouchers;
   const rawLimit = overrides?.customSpendingLimit ?? acc.customSpendingLimit;
+
+  const restoredLevel = isUnlimitedNumber(rawLevel)
+    ? Math.max(1, Math.floor(snap?.jobLevel ?? 1))
+    : Math.max(1, Math.floor(rawLevel || 1));
+  const restoredVouchers = isUnlimitedNumber(rawVouchers)
+    ? Math.max(0, Math.floor(snap?.levelVouchers ?? 0))
+    : Math.max(0, Math.floor(rawVouchers || 0));
+  const restoredPoints = isUnlimitedNumber(rawPoints)
+    ? Math.max(0, Math.floor(snap?.rewardPoints ?? 1000))
+    : Math.max(0, Math.floor(rawPoints || 0));
 
   return {
     ...acc,
     cardTier: nextTier,
-    balance: isUnlimitedNumber(rawBalance) ? 10_000_000 : Math.max(0, rawBalance),
-    spinCoins: isUnlimitedNumber(rawCoins) ? 100 : Math.max(0, rawCoins || 0),
-    diamonds: isUnlimitedNumber(rawDiamonds) ? 50 : Math.max(0, rawDiamonds || 0),
-    rewardPoints: isUnlimitedNumber(rawPoints) ? 1000 : Math.max(0, rawPoints || 0),
+    balance: isUnlimitedNumber(rawBalance) ? (snap?.balance ?? 10_000_000) : Math.max(0, rawBalance),
+    spinCoins: isUnlimitedNumber(rawCoins) ? (snap?.spinCoins ?? 100) : Math.max(0, rawCoins || 0),
+    diamonds: isUnlimitedNumber(rawDiamonds) ? (snap?.diamonds ?? 50) : Math.max(0, rawDiamonds || 0),
+    rewardPoints: restoredPoints,
+    jobLevel: restoredLevel,
+    levelVouchers: restoredVouchers,
+    levelUpVouchers: restoredVouchers,
     customSpendingLimit:
       rawLimit === undefined
         ? tierCfg.dailyWithdrawalLimit
@@ -441,6 +555,49 @@ export function applyTierTransitionAssets<
         : Math.max(0, rawLimit),
     expiryDate: nextExpiry,
   };
+}
+
+/**
+ * Resolves display value for Level, Voucher, or Points taking Admin Tier Infinity
+ * and Disguise Mode (for public viewers) into account.
+ */
+export function formatAdminInfinityLevel(
+  level?: number,
+  options?: { isAdmin?: boolean; disguisedForPublic?: boolean; snapshotLevel?: number }
+): string {
+  if (options?.isAdmin && !options?.disguisedForPublic) return '∞';
+  if (options?.disguisedForPublic) {
+    const safe = Math.max(1, Math.floor(options.snapshotLevel ?? (isUnlimitedNumber(level) ? 1 : level || 1)));
+    return String(safe);
+  }
+  if (isUnlimitedNumber(level)) return '∞';
+  return String(Math.max(1, Math.floor(level || 1)));
+}
+
+export function formatAdminInfinityVoucher(
+  vouchers?: number,
+  options?: { isAdmin?: boolean; disguisedForPublic?: boolean; snapshotVouchers?: number }
+): string {
+  if (options?.isAdmin && !options?.disguisedForPublic) return '∞';
+  if (options?.disguisedForPublic) {
+    const safe = Math.max(0, Math.floor(options.snapshotVouchers ?? (isUnlimitedNumber(vouchers) ? 0 : vouchers || 0)));
+    return safe.toLocaleString('id-ID');
+  }
+  if (isUnlimitedNumber(vouchers)) return '∞';
+  return Math.max(0, Math.floor(vouchers || 0)).toLocaleString('id-ID');
+}
+
+export function formatAdminInfinityPoints(
+  points?: number,
+  options?: { isAdmin?: boolean; disguisedForPublic?: boolean; snapshotPoints?: number }
+): string {
+  if (options?.isAdmin && !options?.disguisedForPublic) return '∞';
+  if (options?.disguisedForPublic) {
+    const safe = Math.max(0, Math.floor(options.snapshotPoints ?? (isUnlimitedNumber(points) ? 1000 : points || 0)));
+    return safe.toLocaleString('id-ID');
+  }
+  if (isUnlimitedNumber(points)) return '∞';
+  return Math.max(0, Math.floor(points || 0)).toLocaleString('id-ID');
 }
 
 /**

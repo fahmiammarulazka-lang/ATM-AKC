@@ -6,9 +6,17 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import type {
-  DeviceReviewStatus,
-  VisitorAnalyticsStatePayload,
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import {
+  loadLocalVisitorBackup,
+  registerVisitorTrackerDirectListener,
+  saveLocalVisitorBackup,
+  type AccountVisitSummaryRecord,
+  type DeviceReviewStatus,
+  type DeviceSessionRecord,
+  type GlobalVisitLogEntry,
+  type VisitorAnalyticsStatePayload,
 } from '../services/visitorTracker';
 import type {
   AdminTierAuditLogEntry,
@@ -36,7 +44,7 @@ const EMPTY_VISITOR_ANALYTICS: VisitorAnalyticsStatePayload = {
 
 // Module-level shared store so App, Navbar, AdminPortal, and Admin tabs share 1 WebSocket connection
 let sharedState: AdminAnalyticsAndTierSyncState = {
-  visitorAnalytics: EMPTY_VISITOR_ANALYTICS,
+  visitorAnalytics: loadLocalVisitorBackup() || EMPTY_VISITOR_ANALYTICS,
   adminTierGrantsMap: {},
   adminTierAuditLogs: [],
   pendingOfficialLetter: null,
@@ -61,6 +69,9 @@ function notifyListeners() {
 }
 
 function updateSharedState(partial: Partial<AdminAnalyticsAndTierSyncState>) {
+  if (partial.visitorAnalytics) {
+    saveLocalVisitorBackup(partial.visitorAnalytics);
+  }
   sharedState = {
     ...sharedState,
     ...partial,
@@ -69,14 +80,84 @@ function updateSharedState(partial: Partial<AdminAnalyticsAndTierSyncState>) {
   notifyListeners();
 }
 
+async function readFirestoreVisitorBackup(): Promise<VisitorAnalyticsStatePayload | null> {
+  try {
+    const [gvSnap, avSnap, dsSnap] = await Promise.all([
+      getDocs(collection(db, 'global_visits')).catch(() => null),
+      getDocs(collection(db, 'account_visits')).catch(() => null),
+      getDocs(collection(db, 'device_sessions')).catch(() => null),
+    ]);
+    const globalVisits: GlobalVisitLogEntry[] = [];
+    const accountVisitsMap: Record<string, AccountVisitSummaryRecord> = {};
+    const deviceSessionsMap: Record<string, DeviceSessionRecord> = {};
+
+    gvSnap?.forEach((d) => {
+      const data = d.data() as GlobalVisitLogEntry;
+      if (data?.id) globalVisits.push(data);
+    });
+    avSnap?.forEach((d) => {
+      const data = d.data() as AccountVisitSummaryRecord;
+      if (data?.accountKey) accountVisitsMap[data.accountKey] = data;
+    });
+    dsSnap?.forEach((d) => {
+      const data = d.data() as DeviceSessionRecord;
+      if (data?.sessionKey) deviceSessionsMap[data.sessionKey] = data;
+    });
+
+    if (
+      globalVisits.length === 0 &&
+      Object.keys(accountVisitsMap).length === 0 &&
+      Object.keys(deviceSessionsMap).length === 0
+    ) {
+      return null;
+    }
+
+    return {
+      globalVisits,
+      accountVisitsMap,
+      deviceSessionsMap,
+      totalAllTimeHits: globalVisits.length,
+      updatedAtMs: Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function mergeBackups(
+  a: VisitorAnalyticsStatePayload | null,
+  b: VisitorAnalyticsStatePayload | null
+): VisitorAnalyticsStatePayload | null {
+  if (!a && !b) return null;
+  if (!a) return b;
+  if (!b) return a;
+  const byId = new Map<string, GlobalVisitLogEntry>();
+  for (const item of [...a.globalVisits, ...b.globalVisits]) {
+    if (item?.id) byId.set(item.id, item);
+  }
+  const mergedGlobal = Array.from(byId.values()).sort(
+    (x, y) => Number(x.timestampMs || 0) - Number(y.timestampMs || 0)
+  );
+  return {
+    globalVisits: mergedGlobal,
+    accountVisitsMap: { ...a.accountVisitsMap, ...b.accountVisitsMap },
+    deviceSessionsMap: { ...a.deviceSessionsMap, ...b.deviceSessionsMap },
+    totalAllTimeHits: Math.max(a.totalAllTimeHits || 0, b.totalAllTimeHits || 0, mergedGlobal.length),
+    updatedAtMs: Math.max(a.updatedAtMs || 0, b.updatedAtMs || 0),
+  };
+}
+
 async function fetchInitialRestState() {
   try {
-    const [vaRes, grantsRes] = await Promise.all([
+    const [vaRes, grantsRes, cloudBackup] = await Promise.all([
       fetch('/api/visitor-analytics/state').catch(() => null),
       fetch('/api/admin-tier-grants/state').catch(() => null),
+      readFirestoreVisitorBackup(),
     ]);
 
     const nextPartial: Partial<AdminAnalyticsAndTierSyncState> = {};
+    const localBackup = loadLocalVisitorBackup();
+    const combinedBackup = mergeBackups(localBackup, cloudBackup);
 
     if (vaRes && vaRes.ok) {
       const vaData = (await vaRes.json()) as {
@@ -84,8 +165,37 @@ async function fetchInitialRestState() {
         visitorAnalytics?: VisitorAnalyticsStatePayload;
       };
       if (vaData.visitorAnalytics) {
-        nextPartial.visitorAnalytics = vaData.visitorAnalytics;
+        const serverVa = vaData.visitorAnalytics;
+        const serverHits = Math.max(serverVa.totalAllTimeHits || 0, serverVa.globalVisits?.length || 0);
+        const backupHits = combinedBackup
+          ? Math.max(combinedBackup.totalAllTimeHits || 0, combinedBackup.globalVisits?.length || 0)
+          : 0;
+
+        if (combinedBackup && backupHits > serverHits) {
+          // Server restarted fresh — hydrate it from 3-layer backup!
+          try {
+            const hydrateRes = await fetch('/api/visitor-analytics/hydrate', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ visitorAnalytics: combinedBackup }),
+            });
+            if (hydrateRes.ok) {
+              const hData = (await hydrateRes.json()) as {
+                visitorAnalytics?: VisitorAnalyticsStatePayload;
+              };
+              nextPartial.visitorAnalytics = hData.visitorAnalytics || combinedBackup;
+            } else {
+              nextPartial.visitorAnalytics = mergeBackups(combinedBackup, serverVa) || serverVa;
+            }
+          } catch {
+            nextPartial.visitorAnalytics = mergeBackups(combinedBackup, serverVa) || serverVa;
+          }
+        } else {
+          nextPartial.visitorAnalytics = serverVa;
+        }
       }
+    } else if (combinedBackup) {
+      nextPartial.visitorAnalytics = combinedBackup;
     }
 
     if (grantsRes && grantsRes.ok) {
@@ -197,6 +307,9 @@ function connectSharedWebSocket() {
 function ensureStoreInitialized() {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
+  registerVisitorTrackerDirectListener((va) => {
+    updateSharedState({ visitorAnalytics: va });
+  });
   void fetchInitialRestState();
   connectSharedWebSocket();
 }

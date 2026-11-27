@@ -92,16 +92,32 @@ function isPrivateOrInvalidIp(ip: string): boolean {
 }
 
 function extractClientIp(req: Request): string {
+  const cfIp = typeof req.headers['cf-connecting-ip'] === 'string' ? req.headers['cf-connecting-ip'].trim() : '';
+  const realIp = typeof req.headers['x-real-ip'] === 'string' ? req.headers['x-real-ip'].trim() : '';
   const forwarded = req.headers['x-forwarded-for'];
-  const cfIp = req.headers['cf-connecting-ip'];
-  const realIp = req.headers['x-real-ip'];
-  const candidate =
-    (typeof cfIp === 'string' && cfIp.trim()) ||
-    (typeof forwarded === 'string' && forwarded.split(',')[0]?.trim()) ||
-    (typeof realIp === 'string' && realIp.trim()) ||
-    req.socket?.remoteAddress ||
-    '';
-  return candidate.replace(/^::ffff:/i, '').trim() || '127.0.0.1';
+  const forwardedList =
+    typeof forwarded === 'string'
+      ? forwarded
+          .split(',')
+          .map((s) => s.trim().replace(/^::ffff:/i, ''))
+          .filter(Boolean)
+      : Array.isArray(forwarded)
+      ? forwarded
+          .flatMap((v) => v.split(','))
+          .map((s) => s.trim().replace(/^::ffff:/i, ''))
+          .filter(Boolean)
+      : [];
+
+  // Prefer the first genuinely public IP across headers
+  const candidates = [
+    cfIp.replace(/^::ffff:/i, ''),
+    ...forwardedList,
+    realIp.replace(/^::ffff:/i, ''),
+    String(req.socket?.remoteAddress || '').replace(/^::ffff:/i, '').trim(),
+  ].filter(Boolean);
+
+  const firstPublic = candidates.find((ip) => !isPrivateOrInvalidIp(ip));
+  return firstPublic || candidates[0] || '127.0.0.1';
 }
 
 interface GeoIpInfo {
@@ -111,10 +127,14 @@ interface GeoIpInfo {
   country: string;
   countryCode: string;
   isp: string;
+  locationSource: 'gps' | 'geoip' | 'timezone';
+  gpsLat?: number | null;
+  gpsLng?: number | null;
   fetchedAtMs: number;
 }
 
 const geoIpCache = new Map<string, GeoIpInfo>();
+const gpsGeoCache = new Map<string, { city: string; region: string; country: string; countryCode: string; fetchedAtMs: number }>();
 
 function inferGeoFromTimezone(timezone: string, rawIp: string): GeoIpInfo {
   const tz = (timezone || 'Asia/Jakarta').trim();
@@ -126,6 +146,9 @@ function inferGeoFromTimezone(timezone: string, rawIp: string): GeoIpInfo {
     'Asia/Singapore': { city: 'Singapore', region: 'Central Region', country: 'Singapore', code: 'SG' },
     'Asia/Kuala_Lumpur': { city: 'Kuala Lumpur', region: 'Wilayah Persekutuan', country: 'Malaysia', code: 'MY' },
     'Asia/Tokyo': { city: 'Tokyo', region: 'Kanto', country: 'Japan', code: 'JP' },
+    'America/Los_Angeles': { city: 'Los Angeles', region: 'California', country: 'United States', code: 'US' },
+    'America/New_York': { city: 'New York', region: 'New York', country: 'United States', code: 'US' },
+    'Europe/London': { city: 'London', region: 'England', country: 'United Kingdom', code: 'GB' },
   };
   const match = tzMap[tz];
   if (match) {
@@ -135,71 +158,203 @@ function inferGeoFromTimezone(timezone: string, rawIp: string): GeoIpInfo {
       region: match.region,
       country: match.country,
       countryCode: match.code,
-      isp: isPrivateOrInvalidIp(rawIp) ? 'Jaringan Lokal / Gateway Proxy' : 'ISP Terdeteksi (Fallback TZ)',
+      isp: isPrivateOrInvalidIp(rawIp) ? 'Jaringan Lokal / Gateway Proxy' : 'ISP Terdeteksi (Zona Waktu)',
+      locationSource: 'timezone',
       fetchedAtMs: Date.now(),
     };
   }
   const cityPart = tz.includes('/') ? tz.split('/')[1].replace(/_/g, ' ') : tz;
   return {
     ip: rawIp || '127.0.0.1',
-    city: cityPart || 'Tidak Diketahui',
-    region: tz.includes('/') ? tz.split('/')[0] : '-',
-    country: 'Internasional',
-    countryCode: 'INTL',
+    city: cityPart || 'Jakarta (WIB)',
+    region: tz.includes('/') ? tz.split('/')[0] : 'Indonesia',
+    country: tz.startsWith('Asia/') ? 'Indonesia' : 'Internasional',
+    countryCode: tz.startsWith('Asia/') ? 'ID' : 'INTL',
     isp: isPrivateOrInvalidIp(rawIp) ? 'Jaringan Lokal / Gateway Proxy' : 'ISP Umum',
+    locationSource: 'timezone',
     fetchedAtMs: Date.now(),
   };
 }
 
-async function resolveGeoIpServerSide(rawIp: string, timezone: string): Promise<GeoIpInfo> {
-  if (isPrivateOrInvalidIp(rawIp)) {
-    return inferGeoFromTimezone(timezone, rawIp);
-  }
-
-  const cached = geoIpCache.get(rawIp);
-  if (cached && Date.now() - cached.fetchedAtMs < 60 * 60 * 1000) {
-    return cached;
-  }
-
-  // Strict allowlisted public GeoIP provider (SSRF-safe: validated public IP literal only)
+async function fetchJsonWithTimeout(url: string, timeoutMs = 2000): Promise<Record<string, unknown> | null> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2400);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const resp = await fetch(`https://ipwho.is/${encodeURIComponent(rawIp)}`, {
+    const resp = await fetch(url, {
       signal: controller.signal,
       headers: { Accept: 'application/json' },
     });
-    if (resp.ok) {
-      const data = (await resp.json()) as {
-        success?: boolean;
-        city?: string;
-        region?: string;
-        country?: string;
-        country_code?: string;
-        connection?: { isp?: string; org?: string };
-      };
-      if (data && data.success !== false && (data.city || data.country)) {
-        const resolved: GeoIpInfo = {
-          ip: rawIp,
-          city: cleanStr(data.city || 'Tidak Diketahui', 80),
-          region: cleanStr(data.region || '-', 80),
-          country: cleanStr(data.country || 'Indonesia', 80),
-          countryCode: cleanStr(data.country_code || 'ID', 8),
-          isp: cleanStr(data.connection?.isp || data.connection?.org || 'ISP Publik', 120),
-          fetchedAtMs: Date.now(),
-        };
-        geoIpCache.set(rawIp, resolved);
-        return resolved;
-      }
-    }
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data && typeof data === 'object' ? (data as Record<string, unknown>) : null;
   } catch {
-    // timeout or offline fallback
+    return null;
   } finally {
     clearTimeout(timer);
   }
+}
 
+async function resolveGeoIpServerSide(
+  rawIp: string,
+  timezone: string,
+  rawSpecs?: Record<string, unknown>,
+  reqHeaders?: Request['headers']
+): Promise<GeoIpInfo> {
+  // 1) Check opt-in browser precise GPS coordinates first
+  const rawLat = Number(rawSpecs?.gpsLat);
+  const rawLng = Number(rawSpecs?.gpsLng);
+  if (
+    rawSpecs?.gpsLat !== undefined &&
+    rawSpecs?.gpsLat !== null &&
+    rawSpecs?.gpsLng !== undefined &&
+    rawSpecs?.gpsLng !== null &&
+    Number.isFinite(rawLat) &&
+    Number.isFinite(rawLng) &&
+    rawLat >= -90 &&
+    rawLat <= 90 &&
+    rawLng >= -180 &&
+    rawLng <= 180
+  ) {
+    const specCity = cleanStr(rawSpecs.city, 80);
+    const specRegion = cleanStr(rawSpecs.region, 80);
+    const specCountry = cleanStr(rawSpecs.country, 80);
+    const specCountryCode = cleanStr(rawSpecs.countryCode, 8);
+    const hasClientCity = Boolean(specCity && !specCity.toLowerCase().includes('mendeteksi'));
+
+    let city = hasClientCity ? specCity : '';
+    let region = specRegion && specRegion !== '-' ? specRegion : '';
+    let country = specCountry || 'Indonesia';
+    let countryCode = specCountryCode || 'ID';
+
+    if (!city) {
+      const gpsKey = `${rawLat.toFixed(3)},${rawLng.toFixed(3)}`;
+      const cachedGps = gpsGeoCache.get(gpsKey);
+      if (cachedGps && Date.now() - cachedGps.fetchedAtMs < 6 * 60 * 60 * 1000) {
+        city = cachedGps.city;
+        region = cachedGps.region;
+        country = cachedGps.country;
+        countryCode = cachedGps.countryCode;
+      } else {
+        // Strict allowlisted reverse-geocode API (only validated finite lat/lng numbers)
+        const rev = await fetchJsonWithTimeout(
+          `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(
+            String(rawLat)
+          )}&longitude=${encodeURIComponent(String(rawLng))}&localityLanguage=id`,
+          2200
+        );
+        if (rev) {
+          city = cleanStr(rev.city || rev.locality || 'Lokasi GPS', 80);
+          region = cleanStr(rev.principalSubdivision || '-', 80);
+          country = cleanStr(rev.countryName || 'Indonesia', 80);
+          countryCode = cleanStr(rev.countryCode || 'ID', 8);
+          gpsGeoCache.set(gpsKey, { city, region, country, countryCode, fetchedAtMs: Date.now() });
+        }
+      }
+    }
+
+    const baseIpGeo = geoIpCache.get(rawIp);
+    return {
+      ip: rawIp || '127.0.0.1',
+      city: city || `GPS (${rawLat.toFixed(3)}, ${rawLng.toFixed(3)})`,
+      region: region || '-',
+      country: country || 'Indonesia',
+      countryCode: countryCode || 'ID',
+      isp: baseIpGeo?.isp || (isPrivateOrInvalidIp(rawIp) ? 'GPS Presisi Perangkat' : 'ISP Publik (GPS Presisi)'),
+      locationSource: 'gps',
+      gpsLat: rawLat,
+      gpsLng: rawLng,
+      fetchedAtMs: Date.now(),
+    };
+  }
+
+  // 2) Check cached GeoIP for public IP
+  if (!isPrivateOrInvalidIp(rawIp)) {
+    const cached = geoIpCache.get(rawIp);
+    if (cached && Date.now() - cached.fetchedAtMs < 60 * 60 * 1000 && cached.locationSource === 'geoip') {
+      return cached;
+    }
+
+    // Multi-Server Allowlisted GeoIP Chain (SSRF-safe: validated public IP literal only)
+    const encodedIp = encodeURIComponent(rawIp);
+
+    // Provider 1: ipwho.is
+    const p1 = await fetchJsonWithTimeout(`https://ipwho.is/${encodedIp}`, 2000);
+    if (p1 && p1.success !== false && (p1.city || p1.country)) {
+      const conn = (p1.connection && typeof p1.connection === 'object' ? p1.connection : {}) as Record<string, unknown>;
+      const resolved: GeoIpInfo = {
+        ip: rawIp,
+        city: cleanStr(p1.city || p1.region || 'Tidak Diketahui', 80),
+        region: cleanStr(p1.region || '-', 80),
+        country: cleanStr(p1.country || 'Indonesia', 80),
+        countryCode: cleanStr(p1.country_code || 'ID', 8),
+        isp: cleanStr(conn.isp || conn.org || 'ISP Publik', 120),
+        locationSource: 'geoip',
+        fetchedAtMs: Date.now(),
+      };
+      geoIpCache.set(rawIp, resolved);
+      return resolved;
+    }
+
+    // Provider 2: ipapi.co
+    const p2 = await fetchJsonWithTimeout(`https://ipapi.co/${encodedIp}/json/`, 2000);
+    if (p2 && !p2.error && (p2.city || p2.country_name)) {
+      const resolved: GeoIpInfo = {
+        ip: rawIp,
+        city: cleanStr(p2.city || p2.region || 'Tidak Diketahui', 80),
+        region: cleanStr(p2.region || '-', 80),
+        country: cleanStr(p2.country_name || 'Indonesia', 80),
+        countryCode: cleanStr(p2.country_code || 'ID', 8),
+        isp: cleanStr(p2.org || 'ISP Publik', 120),
+        locationSource: 'geoip',
+        fetchedAtMs: Date.now(),
+      };
+      geoIpCache.set(rawIp, resolved);
+      return resolved;
+    }
+
+    // Provider 3: ip-api.com
+    const p3 = await fetchJsonWithTimeout(
+      `http://ip-api.com/json/${encodedIp}?fields=status,country,countryCode,regionName,city,isp,org`,
+      2000
+    );
+    if (p3 && p3.status === 'success' && (p3.city || p3.country)) {
+      const resolved: GeoIpInfo = {
+        ip: rawIp,
+        city: cleanStr(p3.city || p3.regionName || 'Tidak Diketahui', 80),
+        region: cleanStr(p3.regionName || '-', 80),
+        country: cleanStr(p3.country || 'Indonesia', 80),
+        countryCode: cleanStr(p3.countryCode || 'ID', 8),
+        isp: cleanStr(p3.isp || p3.org || 'ISP Publik', 120),
+        locationSource: 'geoip',
+        fetchedAtMs: Date.now(),
+      };
+      geoIpCache.set(rawIp, resolved);
+      return resolved;
+    }
+  }
+
+  // 3) Cloud proxy edge geo headers (Cloudflare / AppEngine / Cloud Run edge)
+  const edgeCity = cleanStr(reqHeaders?.['cf-ipcity'] || reqHeaders?.['x-appengine-city'] || '', 80);
+  const edgeRegion = cleanStr(reqHeaders?.['cf-region'] || reqHeaders?.['x-appengine-region'] || '', 80);
+  const edgeCountry = cleanStr(reqHeaders?.['cf-ipcountry'] || reqHeaders?.['x-appengine-country'] || '', 80);
+  if (edgeCity) {
+    return {
+      ip: rawIp || '127.0.0.1',
+      city: edgeCity,
+      region: edgeRegion || '-',
+      country: edgeCountry || 'Indonesia',
+      countryCode: edgeCountry.length === 2 ? edgeCountry.toUpperCase() : 'ID',
+      isp: 'ISP Publik (Cloud Edge)',
+      locationSource: 'geoip',
+      fetchedAtMs: Date.now(),
+    };
+  }
+
+  // 4) Accurate Indonesian / global timezone fallback (never blank)
   const fallback = inferGeoFromTimezone(timezone, rawIp);
-  geoIpCache.set(rawIp, fallback);
+  if (!isPrivateOrInvalidIp(rawIp)) {
+    geoIpCache.set(rawIp, fallback);
+  }
   return fallback;
 }
 
@@ -341,6 +496,9 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
       country: geo.country,
       countryCode: geo.countryCode,
       isp: geo.isp,
+      locationSource: geo.locationSource,
+      ...(typeof geo.gpsLat === 'number' ? { gpsLat: geo.gpsLat } : {}),
+      ...(typeof geo.gpsLng === 'number' ? { gpsLng: geo.gpsLng } : {}),
     };
 
     const existing = va.deviceSessionsMap[sessionKey] as Record<string, unknown> | undefined;
@@ -379,6 +537,8 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
       ? [...(existing.accountsHistory as Array<Record<string, unknown>>)]
       : [];
 
+    let currentAccountId = (existing?.currentAccountId as string | null) || null;
+    let currentAccountNumber = (existing?.currentAccountNumber as string | null) || null;
     let currentAccountKey = (existing?.currentAccountKey as string | null) || null;
     let currentAccountName = cleanStr(existing?.currentAccountName || 'Pengunjung Tamu (Belum Login)', 120);
     let currentAccountEmail = cleanStr(existing?.currentAccountEmail || '-', 160);
@@ -386,27 +546,35 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
       (existing?.currentAccountRole as 'admin' | 'customer' | 'guest') || 'guest';
     let isAdminActive = Boolean(existing?.isAdminActive);
 
-    if (account && (account.accountId || account.accountEmail)) {
+    if (account && (account.accountId || account.accountEmail || account.accountNumber)) {
       const accId = cleanStr(account.accountId, 128);
       const accEmail = cleanStr(account.accountEmail || '-', 160);
-      const accKey = (accEmail && accEmail !== '-' ? accEmail : accId).toLowerCase();
-      const accName = cleanStr(account.accountName || 'Nasabah', 120);
       const accNum = cleanStr(account.accountNumber || '-', 40);
+      const accKey = (accId || (accEmail && accEmail !== '-' ? accEmail : accNum)).toLowerCase();
+      const accName = cleanStr(account.accountName || 'Nasabah', 120);
       const accUid = cleanStr(account.accountUid || accId, 128);
       const accIsAdmin = Boolean(account.isAdmin || account.role === 'admin');
       const accRole: 'admin' | 'customer' = accIsAdmin ? 'admin' : 'customer';
 
+      currentAccountId = accId || null;
+      currentAccountNumber = accNum && accNum !== '-' ? accNum : null;
       currentAccountKey = accKey;
       currentAccountName = accName;
       currentAccountEmail = accEmail;
       currentAccountRole = accRole;
       isAdminActive = accIsAdmin;
 
-      const idx = accountsHistory.findIndex((a) => String(a.accountKey) === accKey);
+      const idx = accountsHistory.findIndex(
+        (a) =>
+          String(a.accountKey) === accKey ||
+          (accId && String(a.accountId) === accId) ||
+          (accNum && accNum !== '-' && String(a.accountNumber) === accNum)
+      );
       if (idx >= 0) {
         const entry = accountsHistory[idx];
         accountsHistory[idx] = {
           ...entry,
+          accountKey: accKey,
           accountId: accId || entry.accountId,
           accountUid: accUid || entry.accountUid,
           accountName: accName,
@@ -442,6 +610,9 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
       fingerprintHash: cleanStr(rawSpecs.fingerprintHash || deviceId, 64),
       locationKey,
       locationLabel,
+      locationSource: geo.locationSource,
+      ...(typeof geo.gpsLat === 'number' ? { gpsLat: geo.gpsLat } : {}),
+      ...(typeof geo.gpsLng === 'number' ? { gpsLng: geo.gpsLng } : {}),
       previousLocations: Array.from(prevLocationsSet),
       linkedSessionKeys: Array.from(linkedKeysSet),
       totalVisits: Number(existing?.totalVisits || 0) + (incrementVisit ? 1 : existing ? 0 : 1),
@@ -450,6 +621,8 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
       lastSeenIso: nowIso,
       lastSeenMs: nowMs,
       isOnline: true,
+      currentAccountId,
+      currentAccountNumber,
       currentAccountKey,
       currentAccountName,
       currentAccountEmail,
@@ -488,7 +661,7 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
 
       const clientIp = extractClientIp(req);
       const timezone = cleanStr(rawSpecs.timezone || 'Asia/Jakarta', 64);
-      const geo = await resolveGeoIpServerSide(clientIp, timezone);
+      const geo = await resolveGeoIpServerSide(clientIp, timezone, rawSpecs, req.headers);
 
       const st = ensureBuckets();
       const va = st.visitorAnalytics;
@@ -551,8 +724,8 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
 
       // 3) Upsert `account_visits` if logged in
       let accountSummary: Record<string, unknown> | null = null;
-      if (account && (accId || (accEmail && accEmail !== '-'))) {
-        const accountKey = (accId || accEmail).toLowerCase();
+      if (account && (accId || (accEmail && accEmail !== '-') || (accNum && accNum !== '-'))) {
+        const accountKey = (accId || (accEmail !== '-' ? accEmail : accNum)).toLowerCase();
         const prevAcc = va.accountVisitsMap[accountKey] as Record<string, unknown> | undefined;
 
         const deviceIdsSet = new Set<string>(
@@ -643,6 +816,7 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
         globalVisit,
         accountSummary,
         deviceSession,
+        visitorAnalytics: va,
       });
     } catch (err) {
       console.error('Error recording visitor analytics:', err);
@@ -662,32 +836,220 @@ export function attachVisitorAnalyticsAndTierRoutes(params: {
 
       const nowMs = Date.now();
       const nowIso = new Date(nowMs).toISOString();
+      const { dateKey, monthKey, hourOfDay } = getWibDateParts(nowMs);
       const clientIp = extractClientIp(req);
       const timezone = cleanStr(rawSpecs.timezone || 'Asia/Jakarta', 64);
-      const geo = await resolveGeoIpServerSide(clientIp, timezone);
+      const geo = await resolveGeoIpServerSide(clientIp, timezone, rawSpecs, req.headers);
 
       const st = ensureBuckets();
+      const va = st.visitorAnalytics;
       const deviceSession = upsertDeviceSession(rawSpecs, geo, account, false, nowIso, nowMs);
 
-      // Update account lastActiveMs if already tracked
-      if (account && (account.accountId || account.accountEmail)) {
-        const key = cleanStr(account.accountId || account.accountEmail, 128).toLowerCase();
-        const existingAcc = st.visitorAnalytics.accountVisitsMap[key];
+      let accountSummary: Record<string, unknown> | null = null;
+      // Ensure logged-in account always has an active account_visits entry (never 0 while online!)
+      if (account && (account.accountId || account.accountEmail || account.accountNumber)) {
+        const accId = cleanStr(account.accountId, 128);
+        const accEmail = cleanStr(account.accountEmail || '-', 160);
+        const accNum = cleanStr(account.accountNumber || '-', 40);
+        const accName = cleanStr(account.accountName || 'Nasabah', 120);
+        const accUid = cleanStr(account.accountUid || accId, 128);
+        const isAdmin = Boolean(account.isAdmin || account.role === 'admin');
+        const key = (accId || (accEmail !== '-' ? accEmail : accNum)).toLowerCase();
+        const existingAcc = va.accountVisitsMap[key];
+
         if (existingAcc) {
           existingAcc.lastActiveIso = nowIso;
           existingAcc.lastActiveMs = nowMs;
+          existingAcc.accountNumber = accNum !== '-' ? accNum : existingAcc.accountNumber;
+          const locs = new Set<string>(
+            Array.isArray(existingAcc.locations) ? (existingAcc.locations as string[]) : []
+          );
+          if (deviceSession.locationLabel) locs.add(String(deviceSession.locationLabel));
+          existingAcc.locations = Array.from(locs);
+          const devs = new Set<string>(
+            Array.isArray(existingAcc.deviceIds) ? (existingAcc.deviceIds as string[]) : []
+          );
+          devs.add(String(deviceSession.deviceId));
+          existingAcc.deviceIds = Array.from(devs);
+          accountSummary = existingAcc;
+        } else {
+          // Auto-initialize account summary & 1 global visit if heartbeat arrived before record-visit
+          const accessType = rawSpecs.accessType === 'apk_webview' ? 'apk_webview' : 'web_browser';
+          const accessTypeLabel = cleanStr(rawSpecs.accessTypeLabel || 'Web Browser', 80);
+          const deviceBrandModel = cleanStr(rawSpecs.deviceBrandModel || 'Perangkat', 100);
+          const osLabel = `${cleanStr(rawSpecs.osName || 'OS', 40)} ${cleanStr(rawSpecs.osVersion || '', 30)}`.trim();
+          const browserLabel = `${cleanStr(rawSpecs.browserName || 'Browser', 50)} ${cleanStr(rawSpecs.browserVersion || '', 24)}`.trim();
+          const visitId = `gv-hb-${nowMs}-${Math.random().toString(36).slice(2, 7)}`;
+
+          accountSummary = {
+            accountKey: key,
+            accountId: accId || key,
+            accountUid: accUid || accId || key,
+            accountNumber: accNum,
+            accountName: accName,
+            accountEmail: accEmail,
+            role: isAdmin ? 'admin' : 'customer',
+            roleLabel: cleanStr(account.roleLabel || (isAdmin ? 'Admin' : 'Nasabah'), 60),
+            isAdmin,
+            totalVisits: 1,
+            firstVisitIso: nowIso,
+            lastActiveIso: nowIso,
+            lastActiveMs: nowMs,
+            deviceIds: [String(deviceSession.deviceId)],
+            locations: [String(deviceSession.locationLabel)],
+            recentVisits: [
+              {
+                id: visitId,
+                timestampIso: nowIso,
+                timestampMs: nowMs,
+                deviceId: String(deviceSession.deviceId),
+                deviceSessionKey: String(deviceSession.sessionKey),
+                deviceBrandModel,
+                osLabel,
+                browserLabel,
+                accessType,
+                accessTypeLabel,
+                publicIp: geo.ip,
+                city: geo.city,
+                region: geo.region,
+                country: geo.country,
+                isp: geo.isp,
+                triggerType: 'app_open',
+              },
+            ],
+          };
+          va.accountVisitsMap[key] = accountSummary;
+
+          if (va.globalVisits.length === 0) {
+            va.globalVisits.push({
+              id: visitId,
+              sessionId: cleanStr(body.sessionId || `SES-${nowMs}`, 80),
+              timestampIso: nowIso,
+              timestampMs: nowMs,
+              dateKey,
+              monthKey,
+              hourOfDay,
+              deviceId: String(deviceSession.deviceId),
+              deviceSessionKey: String(deviceSession.sessionKey),
+              accessType,
+              accessTypeLabel,
+              deviceBrandModel,
+              osLabel,
+              browserLabel,
+              publicIp: geo.ip,
+              city: geo.city,
+              region: geo.region,
+              country: geo.country,
+              isp: geo.isp,
+              accountId: accId || null,
+              accountUid: accUid || null,
+              accountName: accName,
+              accountEmail: accEmail,
+              accountNumber: accNum,
+              accountRole: isAdmin ? 'admin' : 'customer',
+              isAdmin,
+              triggerType: 'app_open',
+            });
+            va.totalAllTimeHits = Math.max(va.totalAllTimeHits + 1, va.globalVisits.length);
+          }
         }
       }
 
-      st.visitorAnalytics.updatedAtMs = nowMs;
+      va.updatedAtMs = nowMs;
       savePersistedState();
 
       broadcastToAll({
         type: 'visitor_analytics:updated',
-        payload: st.visitorAnalytics,
+        payload: va,
       });
 
-      res.json({ success: true, deviceSession });
+      res.json({ success: true, deviceSession, accountSummary, visitorAnalytics: va });
+    } catch {
+      res.status(500).json({ success: false });
+    }
+  });
+
+  // 3-Layer Persistence Hydrate Endpoint (Merge Client/Firestore Backup into Server after restart)
+  app.post('/api/visitor-analytics/hydrate', (req: Request, res: Response) => {
+    try {
+      const body = (req.body && typeof req.body === 'object' ? req.body : {}) as Record<string, unknown>;
+      const backup = (body.visitorAnalytics && typeof body.visitorAnalytics === 'object'
+        ? body.visitorAnalytics
+        : {}) as Record<string, unknown>;
+
+      const st = ensureBuckets();
+      const va = st.visitorAnalytics;
+      let mergedAny = false;
+
+      // 1) Merge globalVisits by ID
+      const existingIds = new Set(va.globalVisits.map((v) => String(v.id || '')));
+      const incomingGlobal = Array.isArray(backup.globalVisits)
+        ? (backup.globalVisits as Array<Record<string, unknown>>)
+        : [];
+      for (const item of incomingGlobal) {
+        const id = cleanStr(item?.id, 100);
+        if (!id || existingIds.has(id)) continue;
+        existingIds.add(id);
+        va.globalVisits.push(item);
+        mergedAny = true;
+      }
+      if (mergedAny) {
+        va.globalVisits.sort((a, b) => Number(a.timestampMs || 0) - Number(b.timestampMs || 0));
+      }
+
+      // 2) Merge accountVisitsMap (keep highest totalVisits & merge devices/locations)
+      const incomingAccounts =
+        backup.accountVisitsMap && typeof backup.accountVisitsMap === 'object'
+          ? (backup.accountVisitsMap as Record<string, Record<string, unknown>>)
+          : {};
+      for (const [k, inc] of Object.entries(incomingAccounts)) {
+        if (!k || !inc || typeof inc !== 'object') continue;
+        const cur = va.accountVisitsMap[k];
+        if (!cur) {
+          va.accountVisitsMap[k] = inc;
+          mergedAny = true;
+        } else if (Number(inc.totalVisits || 0) > Number(cur.totalVisits || 0)) {
+          cur.totalVisits = Number(inc.totalVisits || 0);
+          mergedAny = true;
+        }
+      }
+
+      // 3) Merge deviceSessionsMap (never mark historical hydrated sessions online unless recently seen)
+      const nowMs = Date.now();
+      const incomingDevices =
+        backup.deviceSessionsMap && typeof backup.deviceSessionsMap === 'object'
+          ? (backup.deviceSessionsMap as Record<string, Record<string, unknown>>)
+          : {};
+      for (const [k, inc] of Object.entries(incomingDevices)) {
+        if (!k || !inc || typeof inc !== 'object') continue;
+        const cur = va.deviceSessionsMap[k];
+        if (!cur) {
+          const recent = nowMs - Number(inc.lastSeenMs || 0) <= OFFLINE_TIMEOUT_MS;
+          va.deviceSessionsMap[k] = { ...inc, isOnline: Boolean(inc.isOnline) && recent };
+          mergedAny = true;
+        } else if (Number(inc.totalVisits || 0) > Number(cur.totalVisits || 0)) {
+          cur.totalVisits = Number(inc.totalVisits || 0);
+          mergedAny = true;
+        }
+      }
+
+      const incomingTotal = Number(backup.totalAllTimeHits || 0);
+      const nextTotal = Math.max(va.totalAllTimeHits, va.globalVisits.length, incomingTotal);
+      if (nextTotal > va.totalAllTimeHits) {
+        va.totalAllTimeHits = nextTotal;
+        mergedAny = true;
+      }
+
+      if (mergedAny) {
+        va.updatedAtMs = nowMs;
+        savePersistedState();
+        broadcastToAll({
+          type: 'visitor_analytics:updated',
+          payload: va,
+        });
+      }
+
+      res.json({ success: true, merged: mergedAny, visitorAnalytics: va });
     } catch {
       res.status(500).json({ success: false });
     }

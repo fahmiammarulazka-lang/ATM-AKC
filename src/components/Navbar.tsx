@@ -63,7 +63,11 @@ import {
 } from '../data/notificationCategories';
 import { RefreshCw } from 'lucide-react';
 import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
-import { resolveEffectiveAdminPermissions } from '../types/adminAnalyticsAndTier';
+import {
+  isPrimarySystemOwnerAccount,
+  resolveEffectiveAdminPermissions,
+} from '../types/adminAnalyticsAndTier';
+import { getAdminAppUpdates } from '../services/autoUpdateReleaseService';
 
 export type AppNavView =
   | 'dashboard'
@@ -81,7 +85,8 @@ export type AppNavView =
   | 'admin'
   | 'guide'
   | 'chat'
-  | 'updates';
+  | 'updates'
+  | 'admin_updates';
 
 interface NavbarProps {
   activeView: AppNavView;
@@ -116,6 +121,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     notificationPermissionStatus,
     requestAndEnableNotifications,
     sendTestNotificationNow,
+    appUpdates,
     publicCurrentUpdate,
     activeBuildInfo,
     hasUnreadAppUpdate,
@@ -150,6 +156,49 @@ export const Navbar: React.FC<NavbarProps> = ({
     adminUnlocked,
     grant: navbarTierAdminGrant,
   });
+
+  // Tab "Riwayat Update Admin" di Navbar:
+  // Hanya terlihat untuk Kartu Tier Admin & Super Admin Utama AzkaAKC (1234567890),
+  // dan OTOMATIS disembunyikan saat Mode Penyamaran (hideAdminStatus) aktif!
+  const canSeeAdminUpdatesNavTab = Boolean(
+    currentAccount &&
+      (isAdminCardAccount(currentAccount) ||
+        isPrimarySystemOwnerAccount(currentAccount, googleUser?.email || firebaseUser?.email)) &&
+      !navbarTierAdminPerms.hideAdminStatus
+  );
+
+  const latestAdminUpdateId = React.useMemo(() => {
+    if (!canSeeAdminUpdatesNavTab) return '';
+    const list = getAdminAppUpdates(appUpdates || []);
+    return list[0]?.record?.id || '';
+  }, [canSeeAdminUpdatesNavTab, appUpdates]);
+
+  const [lastSeenAdminUpdateId, setLastSeenAdminUpdateId] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      return window.localStorage.getItem('bn_last_seen_admin_update_id_v1') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  useEffect(() => {
+    if (activeView === 'admin_updates' && latestAdminUpdateId) {
+      setLastSeenAdminUpdateId(latestAdminUpdateId);
+      try {
+        window.localStorage.setItem('bn_last_seen_admin_update_id_v1', latestAdminUpdateId);
+      } catch {
+        // ignore
+      }
+    }
+  }, [activeView, latestAdminUpdateId]);
+
+  const hasUnreadAdminUpdate = Boolean(
+    canSeeAdminUpdatesNavTab &&
+      latestAdminUpdateId &&
+      lastSeenAdminUpdateId !== latestAdminUpdateId &&
+      activeView !== 'admin_updates'
+  );
 
   const activeMissionsCount = React.useMemo(
     () => (missions || []).filter((m) => m.isActive).length,
@@ -1460,6 +1509,37 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {hasUnreadAppUpdate && activeView !== 'updates' && (
                   <span className="px-1.5 py-0.5 rounded bg-emerald-400 text-slate-950 font-mono text-[9px] font-black tracking-wider leading-none">
                     BARU
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* 12. Riwayat Update Admin (Khusus Kartu Tier Admin & Super Admin Utama, tersembunyi saat Mode Penyamaran) */}
+            {canSeeAdminUpdatesNavTab && (
+              <button
+                type="button"
+                onClick={(e) => handleSelectNavView('admin_updates', e)}
+                className={`group relative overflow-hidden px-3 py-1.5 rounded-lg transition-all duration-200 cursor-pointer flex items-center gap-2 whitespace-nowrap shrink-0 ${
+                  activeView === 'admin_updates'
+                    ? 'bg-gradient-to-b from-amber-400 to-amber-500 text-slate-950 font-bold border border-amber-200/70 shadow-[0_0_20px_rgba(245,158,11,0.32),inset_0_1px_0_rgba(255,255,255,0.45)]'
+                    : 'bg-gradient-to-b from-amber-500/14 via-slate-900/85 to-slate-950/90 text-amber-200 hover:text-white border border-amber-400/40 hover:border-amber-300/75 shadow-[inset_0_1px_0_rgba(252,211,77,0.18)]'
+                }`}
+                title="Catatan pembaruan khusus Admin tanpa filter (eksklusif Kartu Tier Admin)"
+              >
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-300/70 to-transparent"
+                />
+                <Crown
+                  className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 group-hover:scale-105 ${
+                    activeView === 'admin_updates' ? 'text-slate-950' : 'text-amber-400'
+                  }`}
+                />
+                <span className="tracking-tight">Riwayat Update Admin</span>
+                {hasUnreadAdminUpdate && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-600 text-white font-mono text-[9px] font-black tracking-wider leading-none">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                    <span>BARU</span>
                   </span>
                 )}
               </button>

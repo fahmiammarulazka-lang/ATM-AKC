@@ -39,6 +39,7 @@ import { useBank } from '../context/BankContext';
 import { isAdminCardAccount } from '../utils/bankUtils';
 import {
   OFFLINE_TIMEOUT_MS,
+  requestPreciseGpsLocation,
   type AccountVisitSummaryRecord,
   type DeviceReviewStatus,
   type DeviceSessionRecord,
@@ -115,6 +116,7 @@ export const AdminVisitorAnalyticsPanel: React.FC<AdminVisitorAnalyticsPanelProp
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [requestingGps, setRequestingGps] = useState<boolean>(false);
 
   // Modals
   const [selectedAccountDetail, setSelectedAccountDetail] = useState<{
@@ -269,34 +271,65 @@ export const AdminVisitorAnalyticsPanel: React.FC<AdminVisitorAnalyticsPanelProp
     const rows = accounts.map((acc) => {
       const accIdLow = acc.id.toLowerCase();
       const accEmailLow = (acc.email || '').trim().toLowerCase();
+      const accNumClean = (acc.accountNumber || '').replace(/\s+/g, '').toLowerCase();
       const isOwner = isPrimarySystemOwnerAccount(acc, acc.email);
       const grant = adminTierGrantsMap[acc.id];
       const isAdminAcc = isOwner || isAdminCardAccount(acc) || (grant && grant.status === 'active');
 
       const summary =
-        visitRecords.find(
-          (r) =>
-            r.accountId?.toLowerCase() === accIdLow ||
-            (accEmailLow && r.accountEmail?.toLowerCase() === accEmailLow)
-        ) || null;
+        visitRecords.find((r) => {
+          const rId = (r.accountId || '').toLowerCase();
+          const rKey = (r.accountKey || '').toLowerCase();
+          const rEmail = (r.accountEmail || '').trim().toLowerCase();
+          const rNum = (r.accountNumber || '').replace(/\s+/g, '').toLowerCase();
+          return (
+            rId === accIdLow ||
+            rKey === accIdLow ||
+            (accNumClean && rNum === accNumClean) ||
+            (accEmailLow && accEmailLow !== '-' && rEmail === accEmailLow)
+          );
+        }) || null;
 
-      const isOnline = allDevicesList.some((d) => {
-        if (!isDeviceCurrentlyOnline(d)) return false;
+      const matchingDevices = allDevicesList.filter((d) => {
+        const dAccId = (d.currentAccountId || '').toLowerCase();
+        const dAccKey = (d.currentAccountKey || '').toLowerCase();
+        const dAccEmail = (d.currentAccountEmail || '').trim().toLowerCase();
+        const dAccNum = (d.currentAccountNumber || '').replace(/\s+/g, '').toLowerCase();
         return (
-          d.currentAccountKey === accIdLow ||
-          (accEmailLow && d.currentAccountKey === accEmailLow)
+          dAccId === accIdLow ||
+          dAccKey === accIdLow ||
+          (accNumClean && dAccNum === accNumClean) ||
+          (accEmailLow && accEmailLow !== '-' && (dAccKey === accEmailLow || dAccEmail === accEmailLow))
         );
       });
 
-      const lastActiveMs = summary?.lastActiveMs || 0;
+      const onlineMatched = matchingDevices.some((d) => isDeviceCurrentlyOnline(d));
+      const isSelfActiveNow = Boolean(currentAccount && currentAccount.id === acc.id);
+      const isOnline = onlineMatched || isSelfActiveNow;
+
+      const latestDeviceLoc = matchingDevices[0]?.locationLabel || '';
+      const combinedLocations = Array.from(
+        new Set<string>([
+          ...(latestDeviceLoc ? [latestDeviceLoc] : []),
+          ...(summary?.locations || []),
+        ])
+      ).filter(Boolean);
+
+      const lastActiveMs = Math.max(
+        summary?.lastActiveMs || 0,
+        matchingDevices[0]?.lastSeenMs || 0,
+        isSelfActiveNow ? nowTick : 0
+      );
       const visitedToday =
+        isSelfActiveNow ||
         summary?.recentVisits?.some((rv) => {
           const d = new Date(rv.timestampMs);
           const dk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
             d.getDate()
           ).padStart(2, '0')}`;
           return dk === todayKey;
-        }) || false;
+        }) ||
+        false;
 
       return {
         account: acc,
@@ -310,11 +343,16 @@ export const AdminVisitorAnalyticsPanel: React.FC<AdminVisitorAnalyticsPanelProp
           : isAdminAcc
           ? 'Admin'
           : 'Nasabah',
-        totalVisits: summary?.totalVisits || 0,
+        totalVisits: Math.max(summary?.totalVisits || 0, isSelfActiveNow ? 1 : 0),
         lastActiveMs,
-        lastActiveIso: summary?.lastActiveIso || '',
-        uniqueDeviceCount: summary?.deviceIds?.length || 0,
-        locations: summary?.locations || [],
+        lastActiveIso: summary?.lastActiveIso || (isSelfActiveNow ? new Date(nowTick).toISOString() : ''),
+        uniqueDeviceCount: Math.max(
+          summary?.deviceIds?.length || 0,
+          new Set(matchingDevices.map((d) => d.deviceId)).size,
+          isSelfActiveNow ? 1 : 0
+        ),
+        locations: combinedLocations,
+        latestLocationSource: matchingDevices[0]?.locationSource || matchingDevices[0]?.specs?.locationSource,
         isOnline,
         visitedToday,
         summary,
@@ -605,6 +643,38 @@ export const AdminVisitorAnalyticsPanel: React.FC<AdminVisitorAnalyticsPanelProp
     }
   };
 
+  const handleEnablePreciseGps = async () => {
+    setRequestingGps(true);
+    try {
+      const res = await requestPreciseGpsLocation(
+        currentAccount
+          ? {
+              accountId: currentAccount.id,
+              accountUid: currentAccount.id,
+              accountNumber: currentAccount.accountNumber,
+              accountName: currentAccount.fullName,
+              accountEmail: currentAccount.email || googleUser?.email || '-',
+              role: isAdminCardAccount(currentAccount) ? 'admin' : 'customer',
+              roleLabel: isPrimarySystemOwnerAccount(currentAccount, currentAccount.email)
+                ? 'Super Admin Utama'
+                : isAdminCardAccount(currentAccount)
+                ? 'Admin'
+                : 'Nasabah',
+              isAdmin:
+                isAdminCardAccount(currentAccount) ||
+                isPrimarySystemOwnerAccount(currentAccount, currentAccount.email),
+            }
+          : null
+      );
+      setNotice({ ok: res.success, text: res.message });
+      if (res.success) {
+        await refresh();
+      }
+    } finally {
+      setRequestingGps(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -613,18 +683,29 @@ export const AdminVisitorAnalyticsPanel: React.FC<AdminVisitorAnalyticsPanelProp
           <div className="flex items-center gap-2 text-xs text-cyan-400 font-semibold">
             <Radio className="w-4 h-4" />
             <span>
-              Hybrid Server WebSocket ({wsConnected ? 'Terhubung Real-Time' : 'Menyambung...'}) + Firestore Sync
+              Persistensi 3 Lapis: WebSocket ({wsConnected ? 'Terhubung Real-Time' : 'Menyambung...'}) · Cloud Firestore · Local Backup
             </span>
           </div>
           <h2 className="text-xl font-bold text-white tracking-tight">
             Analitik &amp; Trafik Pengunjung Real-Time
           </h2>
           <p className="text-xs text-slate-400">
-            Mencatat otomatis seluruh kunjungan Web Browser &amp; APK (sebelum maupun sesudah login) dengan debounce 10 detik, heartbeat 20 detik, timeout offline 45 detik, dan fingerprint perangkat lengkap.
+            Mencatat otomatis seluruh kunjungan Web Browser &amp; APK secara instan dengan Multi-Server GeoIP + opsi GPS Presisi, heartbeat 20 detik, timeout offline 45 detik, dan fingerprint perangkat lengkap.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={requestingGps}
+            onClick={() => void handleEnablePreciseGps()}
+            className="px-3 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 text-amber-300 text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer whitespace-nowrap disabled:opacity-60"
+            title="Izinkan GPS browser untuk mendeteksi kota & koordinat presisi perangkat ini"
+          >
+            <MapPin className="w-3.5 h-3.5 text-amber-400" />
+            <span>{requestingGps ? 'Mendeteksi GPS...' : 'Aktifkan GPS Presisi'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setHideAdminVisits((prev) => !prev)}
@@ -1071,6 +1152,7 @@ export const AdminVisitorAnalyticsPanel: React.FC<AdminVisitorAnalyticsPanelProp
                 <tr className="border-b border-slate-800 bg-slate-950/70 text-[11px] text-slate-400">
                   <th className="py-3 px-4">Nama / Email Akun</th>
                   <th className="py-3 px-3">Role &amp; Status</th>
+                  <th className="py-3 px-3">Lokasi Terakhir</th>
                   <th className="py-3 px-3 text-right">Total Kunjungan</th>
                   <th className="py-3 px-3">Waktu Terakhir Aktif</th>
                   <th className="py-3 px-3 text-center">Perangkat Unik</th>
@@ -1106,9 +1188,31 @@ export const AdminVisitorAnalyticsPanel: React.FC<AdminVisitorAnalyticsPanelProp
                       >
                         {row.roleLabel}
                       </span>
-                      <div className="text-[10px] text-slate-500">
+                      <div
+                        className={`text-[10px] font-semibold ${
+                          row.isOnline ? 'text-emerald-400' : 'text-slate-500'
+                        }`}
+                      >
                         {row.isOnline ? 'Sedang Online' : 'Offline'}
                       </div>
+                    </td>
+                    <td className="py-3 px-3">
+                      {row.locations.length > 0 ? (
+                        <div>
+                          <div className="text-[11px] text-slate-200 font-medium">
+                            {row.locations[0]}
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {row.latestLocationSource === 'gps'
+                              ? 'Sumber: GPS Presisi'
+                              : row.latestLocationSource === 'geoip'
+                              ? 'Sumber: Multi-Server GeoIP'
+                              : 'Sumber: GeoIP / Zona Waktu'}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-slate-500">Belum terdeteksi</span>
+                      )}
                     </td>
                     <td className="py-3 px-3 text-right font-mono tabular-nums">
                       <span className="text-sm font-bold text-white">{row.totalVisits}</span>
@@ -1249,8 +1353,34 @@ export const AdminVisitorAnalyticsPanel: React.FC<AdminVisitorAnalyticsPanelProp
                               )}
                             </button>
                           </div>
-                          <div className="text-[11px] text-slate-300">{d.locationLabel}</div>
-                          <div className="text-[10px] text-slate-500">{d.specs?.isp || '-'}</div>
+                          <div className="text-[11px] text-slate-200 font-medium">
+                            {d.locationLabel || `${d.specs?.city || 'Jakarta (WIB)'}, ${d.specs?.country || 'Indonesia'}`}
+                          </div>
+                          <div className="text-[10px] text-slate-400 flex flex-wrap items-center gap-x-1.5">
+                            <span>{d.specs?.isp || 'ISP Terdeteksi'}</span>
+                            <span aria-hidden="true">·</span>
+                            <span
+                              className={
+                                (d.locationSource || d.specs?.locationSource) === 'gps'
+                                  ? 'text-amber-300 font-semibold'
+                                  : (d.locationSource || d.specs?.locationSource) === 'geoip'
+                                  ? 'text-emerald-400 font-semibold'
+                                  : 'text-slate-400'
+                              }
+                            >
+                              {(d.locationSource || d.specs?.locationSource) === 'gps'
+                                ? 'GPS Presisi'
+                                : (d.locationSource || d.specs?.locationSource) === 'geoip'
+                                ? 'Multi-GeoIP'
+                                : 'Zona Waktu'}
+                            </span>
+                          </div>
+                          {typeof (d.gpsLat ?? d.specs?.gpsLat) === 'number' &&
+                            typeof (d.gpsLng ?? d.specs?.gpsLng) === 'number' && (
+                              <div className="text-[10px] font-mono tabular-nums text-amber-300/90 mt-0.5">
+                                Lat {(d.gpsLat ?? d.specs?.gpsLat)?.toFixed(4)}, Lng {(d.gpsLng ?? d.specs?.gpsLng)?.toFixed(4)}
+                              </div>
+                            )}
                           {d.previousLocations && d.previousLocations.length > 0 && (
                             <div className="text-[10px] text-amber-300 mt-0.5">
                               Tertaut {d.previousLocations.length} lokasi lain

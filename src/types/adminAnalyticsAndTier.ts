@@ -360,6 +360,10 @@ export interface AdminTierGrantRecord {
   accountName: string;
   accountEmail: string;
   previousCardTier: CardTier;
+  previousJobLevel?: number;
+  previousLevelVouchers?: number;
+  previousRewardPoints?: number;
+  previousLoyaltyPoints?: number;
   allowedTabs: AdminPortalTabKey[] | 'ALL';
   accessLevel: AdminTierAccessLevel;
   canManageAdminTiers: boolean;
@@ -460,6 +464,20 @@ export function isPrimarySystemOwnerAccount(
   if (normalizedAccNum === SUPER_ADMIN_ACCOUNT_NUMBER) return true;
   if (normalizedName === SUPER_ADMIN_FULL_NAME.toLowerCase()) return true;
   return false;
+}
+
+/**
+ * Checks whether an account currently has Mode Penyamaran (hideAdminStatus) enabled
+ * via its active AdminTierGrantRecord.
+ */
+export function isAccountDisguisedAdmin(
+  accountId?: string | null,
+  grantsMap?: Record<string, AdminTierGrantRecord> | null
+): boolean {
+  if (!accountId || !grantsMap) return false;
+  const grant = grantsMap[accountId];
+  if (!grant || grant.status === 'revoked' || grant.status === 'expired') return false;
+  return Boolean(grant.hideAdminStatus);
 }
 
 /**

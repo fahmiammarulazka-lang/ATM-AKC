@@ -24,50 +24,64 @@ export function getLeaderboardBadgeTierStyle(rank: number): LeaderboardBadgeTier
 export function getLeaderboardMetricScore(
   account: BankAccount,
   key: LeaderboardCategoryKey,
-  transactions: Transaction[]
+  transactions: Transaction[],
+  options?: { treatAsPublicDisguised?: boolean }
 ): { score: number; isUnlimited: boolean } {
-  const isAdmin = isAdminCardAccount(account);
+  const isDisguised = Boolean(options?.treatAsPublicDisguised);
+  const isAdmin = !isDisguised && isAdminCardAccount(account);
+  const snap = account.preAdminSnapshot;
   switch (key) {
     case 'balance': {
-      const val = Number(account.balance ?? 0);
+      const rawVal = isDisguised
+        ? Number(snap?.balance ?? (isUnlimitedNumber(account.balance) ? 0 : account.balance ?? 0))
+        : Number(account.balance ?? 0);
       return {
-        score: isAdmin || isUnlimitedNumber(val) ? Number.MAX_SAFE_INTEGER : Math.max(0, val),
-        isUnlimited: isAdmin || isUnlimitedNumber(val),
+        score: isAdmin || (!isDisguised && isUnlimitedNumber(rawVal)) ? Number.MAX_SAFE_INTEGER : Math.max(0, rawVal),
+        isUnlimited: isAdmin || (!isDisguised && isUnlimitedNumber(rawVal)),
       };
     }
     case 'spinCoins': {
-      const val = Number(account.spinCoins ?? 0);
+      const rawVal = isDisguised
+        ? Number(snap?.spinCoins ?? (isUnlimitedNumber(account.spinCoins) ? 0 : account.spinCoins ?? 0))
+        : Number(account.spinCoins ?? 0);
       return {
-        score: isAdmin || isUnlimitedNumber(val) ? Number.MAX_SAFE_INTEGER : Math.max(0, val),
-        isUnlimited: isAdmin || isUnlimitedNumber(val),
+        score: isAdmin || (!isDisguised && isUnlimitedNumber(rawVal)) ? Number.MAX_SAFE_INTEGER : Math.max(0, rawVal),
+        isUnlimited: isAdmin || (!isDisguised && isUnlimitedNumber(rawVal)),
       };
     }
     case 'diamonds': {
-      const val = Number(account.diamonds ?? 0);
+      const rawVal = isDisguised
+        ? Number(snap?.diamonds ?? (isUnlimitedNumber(account.diamonds) ? 0 : account.diamonds ?? 0))
+        : Number(account.diamonds ?? 0);
       return {
-        score: isAdmin || isUnlimitedNumber(val) ? Number.MAX_SAFE_INTEGER : Math.max(0, val),
-        isUnlimited: isAdmin || isUnlimitedNumber(val),
+        score: isAdmin || (!isDisguised && isUnlimitedNumber(rawVal)) ? Number.MAX_SAFE_INTEGER : Math.max(0, rawVal),
+        isUnlimited: isAdmin || (!isDisguised && isUnlimitedNumber(rawVal)),
       };
     }
     case 'goldGrams': {
       const val = Number(account.goldGrams ?? 0);
       return {
-        score: isAdmin || isUnlimitedNumber(val) ? Number.MAX_SAFE_INTEGER : Math.max(0, val),
-        isUnlimited: isAdmin || isUnlimitedNumber(val),
+        score: isAdmin || (!isDisguised && isUnlimitedNumber(val)) ? Number.MAX_SAFE_INTEGER : Math.max(0, val),
+        isUnlimited: isAdmin || (!isDisguised && isUnlimitedNumber(val)),
       };
     }
     case 'rewardPoints': {
-      const val = Number(account.rewardPoints ?? 0);
+      const rawVal = isDisguised
+        ? Number(snap?.rewardPoints ?? (isUnlimitedNumber(account.rewardPoints) ? 0 : account.rewardPoints ?? 0))
+        : Number(account.rewardPoints ?? 0);
       return {
-        score: isAdmin || isUnlimitedNumber(val) ? Number.MAX_SAFE_INTEGER : Math.max(0, val),
-        isUnlimited: isAdmin || isUnlimitedNumber(val),
+        score: isAdmin || (!isDisguised && isUnlimitedNumber(rawVal)) ? Number.MAX_SAFE_INTEGER : Math.max(0, rawVal),
+        isUnlimited: isAdmin || (!isDisguised && isUnlimitedNumber(rawVal)),
       };
     }
     case 'jobLevel': {
-      const val = Number(account.jobLevel ?? 1);
+      const rawVal = isDisguised
+        ? Number(snap?.jobLevel ?? (isUnlimitedNumber(account.jobLevel) ? 1 : account.jobLevel ?? 1))
+        : Number(account.jobLevel ?? 1);
+      const isInf = isAdmin || (!isDisguised && isUnlimitedNumber(rawVal));
       return {
-        score: Math.max(1, val),
-        isUnlimited: false,
+        score: isInf ? Number.MAX_SAFE_INTEGER : Math.max(1, rawVal),
+        isUnlimited: isInf,
       };
     }
     case 'txCount': {
@@ -94,7 +108,7 @@ export function formatLeaderboardMetricValue(
   isUnlimited = false,
   compact = false
 ): string {
-  if (isUnlimited) return '∞';
+  if (isUnlimited) return key === 'jobLevel' ? 'Level ∞' : '∞';
   if (key === 'balance') {
     return compact
       ? formatMobileCompactRupiah(score, { isAdmin: false })
@@ -117,11 +131,17 @@ export function formatLeaderboardMetricValue(
 
 export function filterEligibleLeaderboardAccounts(
   accounts: BankAccount[],
-  config: LeaderboardSystemConfig
+  config: LeaderboardSystemConfig,
+  disguisedAdminIds?: Set<string>
 ): BankAccount[] {
   return accounts.filter((acc) => {
     if (!acc || !acc.id) return false;
-    if (!config.showAdminTier && isAdminCardAccount(acc)) return false;
+    const isDisguised = Boolean(disguisedAdminIds?.has(acc.id));
+    if (!isDisguised && isAdminCardAccount(acc)) {
+      // Kartu Tier Admin yang tidak menyamar tampil pada blok Kehormatan Admin di luar persaingan nasabah
+      if (!config.showAdminTier) return false;
+      return false;
+    }
     if (config.hideBannedAccounts && (acc.cardStatus === 'banned' || acc.status === 'banned')) {
       return false;
     }
@@ -136,15 +156,20 @@ export function computeLeaderboardRankingForCategory(
   accounts: BankAccount[],
   category: LeaderboardCategoryConfig,
   config: LeaderboardSystemConfig,
-  transactions: Transaction[]
-): Array<{ account: BankAccount; rank: number; score: number; isUnlimited: boolean }> {
-  const eligible = filterEligibleLeaderboardAccounts(accounts, config);
+  transactions: Transaction[],
+  disguisedAdminIds?: Set<string>
+): Array<{ account: BankAccount; rank: number; score: number; isUnlimited: boolean; isDisguised?: boolean }> {
+  const eligible = filterEligibleLeaderboardAccounts(accounts, config, disguisedAdminIds);
   const scored = eligible.map((account) => {
-    const metric = getLeaderboardMetricScore(account, category.key, transactions);
+    const isDisguised = Boolean(disguisedAdminIds?.has(account.id));
+    const metric = getLeaderboardMetricScore(account, category.key, transactions, {
+      treatAsPublicDisguised: isDisguised,
+    });
     return {
       account,
       score: metric.score,
       isUnlimited: metric.isUnlimited,
+      isDisguised,
     };
   });
 

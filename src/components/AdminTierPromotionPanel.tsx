@@ -98,6 +98,7 @@ export const AdminTierPromotionPanel: React.FC<AdminTierPromotionPanelProps> = (
     accounts,
     currentAccount,
     googleUser,
+    loyaltyMap,
     adminDirectChangeAccountTier,
     adminAdjustAccountBalance,
     adminAdjustAccountSpinCoins,
@@ -413,6 +414,23 @@ export const AdminTierPromotionPanel: React.FC<AdminTierPromotionPanelProps> = (
               : acc.cardTier !== 'admin'
               ? acc.cardTier
               : 'regular';
+          const prevJobLevel =
+            prevGrant?.previousJobLevel ??
+            acc.preAdminSnapshot?.jobLevel ??
+            (isUnlimitedNumber(acc.jobLevel) ? 1 : Math.max(1, acc.jobLevel || 1));
+          const prevLevelVouchers =
+            prevGrant?.previousLevelVouchers ??
+            acc.preAdminSnapshot?.levelVouchers ??
+            (isUnlimitedNumber(acc.levelVouchers) ? 0 : Math.max(0, acc.levelVouchers || 0));
+          const prevRewardPoints =
+            prevGrant?.previousRewardPoints ??
+            acc.preAdminSnapshot?.rewardPoints ??
+            (isUnlimitedNumber(acc.rewardPoints) ? 0 : Math.max(0, acc.rewardPoints || 0));
+          const rawLoyaltyPts = loyaltyMap[acc.id]?.points ?? 0;
+          const prevLoyaltyPoints =
+            prevGrant?.previousLoyaltyPoints ??
+            acc.preAdminSnapshot?.loyaltyPoints ??
+            (isUnlimitedNumber(rawLoyaltyPts) ? 0 : Math.max(0, rawLoyaltyPts));
 
           return {
             accountId: acc.id,
@@ -420,6 +438,10 @@ export const AdminTierPromotionPanel: React.FC<AdminTierPromotionPanelProps> = (
             accountName: acc.fullName,
             accountEmail: acc.email || '-',
             previousCardTier: prevTier,
+            previousJobLevel: prevJobLevel,
+            previousLevelVouchers: prevLevelVouchers,
+            previousRewardPoints: prevRewardPoints,
+            previousLoyaltyPoints: prevLoyaltyPoints,
             allowedTabs: effectiveTabs,
             accessLevel: draftAccessLevel,
             canManageAdminTiers: Boolean(isSuperOwner && draftCanManageTiers),
@@ -1052,32 +1074,44 @@ export const AdminTierPromotionPanel: React.FC<AdminTierPromotionPanelProps> = (
                       </div>
                     </div>
 
-                    {/* Assets Compact Strip (Uang, Koin, Diamond, Voucher, Emas) */}
-                    <div className="grid grid-cols-4 gap-1.5 text-[10px] bg-slate-950/70 border border-slate-800 rounded-xl p-2 font-mono tabular-nums">
+                    {/* Assets Compact Strip (Uang, Koin, Diamond, Level/Voucher, Emas) */}
+                    <div className="grid grid-cols-5 gap-1.5 text-[10px] bg-slate-950/70 border border-slate-800 rounded-xl p-2 font-mono tabular-nums">
+                      <div>
+                        <span className="text-slate-500 block font-sans">Level</span>
+                        <span
+                          className={`font-semibold ${
+                            isAdminCardAccount(acc) || isUnlimitedNumber(acc.jobLevel)
+                              ? 'text-amber-300'
+                              : 'text-indigo-300'
+                          }`}
+                        >
+                          {isAdminCardAccount(acc) || isUnlimitedNumber(acc.jobLevel)
+                            ? 'Lv.∞'
+                            : `Lv.${acc.jobLevel || 1}`}
+                        </span>
+                      </div>
                       <div>
                         <span className="text-slate-500 block font-sans">Koin</span>
                         <span className="text-amber-300 font-semibold">
-                          {formatAssetCount(acc.spinCoins || 0)}
+                          {formatAssetCount(acc.spinCoins || 0, { isAdmin: isAdminCardAccount(acc) })}
                         </span>
                       </div>
                       <div>
                         <span className="text-slate-500 block font-sans">Diamond</span>
                         <span className="text-cyan-300 font-semibold">
-                          {formatAssetCount(acc.diamonds || 0)}
+                          {formatAssetCount(acc.diamonds || 0, { isAdmin: isAdminCardAccount(acc) })}
                         </span>
                       </div>
                       <div>
                         <span className="text-slate-500 block font-sans">Voucher</span>
                         <span className="text-violet-300 font-semibold">
-                          {formatAssetCount(acc.levelVouchers || 0)}
+                          {formatAssetCount(acc.levelVouchers || 0, { isAdmin: isAdminCardAccount(acc) })}
                         </span>
                       </div>
                       <div>
-                        <span className="text-slate-500 block font-sans">Emas</span>
-                        <span className="text-yellow-300 font-semibold">
-                          {isUnlimitedNumber(acc.goldGrams || 0)
-                            ? '∞'
-                            : `${Number(acc.goldGrams || 0).toFixed(1)}g`}
+                        <span className="text-slate-500 block font-sans">Poin</span>
+                        <span className="text-emerald-300 font-semibold">
+                          {formatAssetCount(acc.rewardPoints || 0, { isAdmin: isAdminCardAccount(acc) })}
                         </span>
                       </div>
                     </div>
@@ -1676,6 +1710,12 @@ export const AdminTierPromotionPanel: React.FC<AdminTierPromotionPanelProps> = (
                 <label className="font-bold text-white block">
                   Pengaturan Aset Kartu (Uang, Koin, Diamond, Voucher Level, Emas)
                 </label>
+                <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span>
+                    <strong>Otomatis Infinity (∞):</strong> Semua Kartu Tier Admin otomatis menerima <strong>Level ∞</strong> (Karier, Profil, Reputasi), <strong>Voucher Level ∞</strong>, dan <strong>Poin Rewards &amp; Loyalty ∞</strong> — nilai asli sebelum pengangkatan dicadangkan otomatis untuk pemulihan saat diturunkan.
+                  </span>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                   {(
                     [

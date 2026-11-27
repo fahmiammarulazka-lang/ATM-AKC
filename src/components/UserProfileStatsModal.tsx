@@ -128,6 +128,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     families,
     familyConfig,
     devRoles,
+    loyaltyMap,
     syncTelemetry,
     forceSyncCloudNow,
     linkCurrentAccountWithGooglePopup,
@@ -185,8 +186,12 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
       ? 0
       : Math.min(100, Math.round((dailyUsed / Math.max(1, dailyLimit)) * 100));
 
-    const currentLevel = Math.max(1, currentAccount.jobLevel || 1);
-    const levelProgressPct = Math.min(100, Math.round((currentLevel / 50) * 100));
+    const isAdminForLevel = isAdminCardAccount(currentAccount);
+    const currentLevel = isAdminForLevel ? 999_999_999_999_999 : Math.max(1, currentAccount.jobLevel || 1);
+    const levelProgressPct =
+      isAdminForLevel || isUnlimitedNumber(currentLevel)
+        ? 100
+        : Math.min(100, Math.round((currentLevel / 50) * 100));
 
     return {
       txCount: myTxs.length,
@@ -698,31 +703,74 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
               <div>
                 <div className="flex items-center justify-between gap-2 text-xs mb-1">
                   <span className="text-slate-600 font-medium">Progres Level Karir</span>
-                  <span className="font-bold text-indigo-700 font-mono tabular-nums shrink-0">
-                    Level {stats.currentLevel} / 50
+                  <span
+                    className={`font-bold font-mono tabular-nums shrink-0 ${
+                      isAdminCard || isUnlimitedNumber(stats.currentLevel)
+                        ? 'text-amber-600'
+                        : 'text-indigo-700'
+                    }`}
+                  >
+                    {isAdminCard || isUnlimitedNumber(stats.currentLevel)
+                      ? 'Level ∞'
+                      : `Level ${stats.currentLevel} / 50`}
                   </span>
                 </div>
                 <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-indigo-600"
-                    style={{ width: `${stats.levelProgressPct}%` }}
+                    className={`h-full rounded-full ${
+                      isAdminCard || isUnlimitedNumber(stats.currentLevel)
+                        ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500'
+                        : 'bg-indigo-600'
+                    }`}
+                    style={{
+                      width:
+                        isAdminCard || isUnlimitedNumber(stats.currentLevel)
+                          ? '100%'
+                          : `${stats.levelProgressPct}%`,
+                    }}
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-2.5 text-xs">
+              <div className="grid grid-cols-3 gap-2 text-xs">
                 <div className="rounded-lg bg-slate-50 border border-slate-200/80 p-2.5 min-w-0">
                   <p className="text-slate-500 flex items-center gap-1">
                     <Award className="w-3.5 h-3.5 text-violet-500 shrink-0" />
-                    <span>Voucher Level</span>
+                    <span className="truncate">Voucher Lv</span>
                   </p>
-                  <p className="font-bold text-slate-900 font-mono tabular-nums mt-0.5">
-                    {(currentAccount.levelVouchers || 0).toLocaleString('id-ID')}
+                  <p
+                    className={`font-bold font-mono tabular-nums mt-0.5 ${
+                      isAdminCard || isUnlimitedNumber(currentAccount.levelVouchers)
+                        ? 'text-amber-600'
+                        : 'text-slate-900'
+                    }`}
+                  >
+                    {formatAssetCount(currentAccount.levelVouchers, { isAdmin: isAdminCard })}
                   </p>
                 </div>
                 <div className="rounded-lg bg-slate-50 border border-slate-200/80 p-2.5 min-w-0">
-                  <p className="text-slate-500">Poin Rewards</p>
-                  <p className="font-bold text-slate-900 font-mono tabular-nums mt-0.5">
+                  <p className="text-slate-500 truncate">Poin Rewards</p>
+                  <p
+                    className={`font-bold font-mono tabular-nums mt-0.5 ${
+                      isAdminCard || isUnlimitedNumber(currentAccount.rewardPoints)
+                        ? 'text-amber-600'
+                        : 'text-slate-900'
+                    }`}
+                  >
                     {formatAssetCount(currentAccount.rewardPoints, { isAdmin: isAdminCard })}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-slate-50 border border-slate-200/80 p-2.5 min-w-0">
+                  <p className="text-slate-500 truncate">Poin Loyalty</p>
+                  <p
+                    className={`font-bold font-mono tabular-nums mt-0.5 ${
+                      isAdminCard || isUnlimitedNumber(loyaltyMap[currentAccount.id]?.points)
+                        ? 'text-amber-600'
+                        : 'text-slate-900'
+                    }`}
+                  >
+                    {formatAssetCount(loyaltyMap[currentAccount.id]?.points || 0, {
+                      isAdmin: isAdminCard,
+                    })}
                   </p>
                 </div>
               </div>

@@ -23,9 +23,35 @@ import {
 } from '../utils/bankUtils';
 import { VerifiedBadge } from './VerifiedBadge';
 import { LeaderboardRankMarker, TopLeaderboardBadges } from './TopLeaderboardBadges';
+import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
+import { isAccountDisguisedAdmin, isPrimarySystemOwnerAccount } from '../types/adminAnalyticsAndTier';
 
 export const LeaderboardView: React.FC = () => {
   const { accounts, currentAccount, leaderboardConfig, transactions } = useBank();
+  const { adminTierGrantsMap } = useAdminAnalyticsAndTierSync();
+
+  const disguisedAdminIds = useMemo(() => {
+    const set = new Set<string>();
+    accounts.forEach((acc) => {
+      if (isAdminCardAccount(acc) && isAccountDisguisedAdmin(acc.id, adminTierGrantsMap)) {
+        set.add(acc.id);
+      }
+    });
+    return set;
+  }, [accounts, adminTierGrantsMap]);
+
+  const adminHonorAccounts = useMemo(() => {
+    return accounts.filter((acc) => {
+      if (!acc || !acc.id) return false;
+      if (!isAdminCardAccount(acc)) return false;
+      // Admin yang sedang memakai Mode Penyamaran tidak ditampilkan di blok Kehormatan Admin publik
+      if (disguisedAdminIds.has(acc.id)) return false;
+      if (leaderboardConfig.hideBannedAccounts && (acc.cardStatus === 'banned' || acc.status === 'banned')) {
+        return false;
+      }
+      return true;
+    });
+  }, [accounts, disguisedAdminIds, leaderboardConfig.hideBannedAccounts]);
 
   const activeCategories = useMemo(
     () =>
@@ -54,9 +80,10 @@ export const LeaderboardView: React.FC = () => {
       accounts,
       activeCategory,
       leaderboardConfig,
-      transactions
+      transactions,
+      disguisedAdminIds
     );
-  }, [accounts, activeCategory, leaderboardConfig, transactions]);
+  }, [accounts, activeCategory, leaderboardConfig, transactions, disguisedAdminIds]);
 
   const maxLimit = Math.max(1, Math.min(200, leaderboardConfig.maxEntries || 100));
   const displayedRanking = useMemo(
@@ -69,6 +96,10 @@ export const LeaderboardView: React.FC = () => {
     return fullRanking.find((r) => r.account.id === currentAccount.id) || null;
   }, [fullRanking, currentAccount]);
 
+  const isCurrentAccountAdmin = isAdminCardAccount(currentAccount);
+  const isCurrentAccountDisguised = Boolean(
+    currentAccount && disguisedAdminIds.has(currentAccount.id)
+  );
   const isPrivacyMasked = Boolean(currentAccount?.hideSensitiveNumbers);
 
   if (leaderboardConfig.enabled === false) {
@@ -101,12 +132,10 @@ export const LeaderboardView: React.FC = () => {
                 <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
                   Leaderboard Kekayaan &amp; Aset
                 </h1>
-                {!leaderboardConfig.showAdminTier && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
-                    <EyeOff className="w-3 h-3 text-slate-400" />
-                    Tier ADMIN (∞) Tersembunyi
-                  </span>
-                )}
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-200 border border-amber-400/40">
+                  <Crown className="w-3 h-3 text-amber-300" />
+                  Tier ADMIN (∞) Di Luar Persaingan Nasabah
+                </span>
               </div>
               <p className="text-xs sm:text-sm text-slate-400 mt-1">
                 Peringkat nasabah terbaik di setiap kategori. Juara Top 1–100 otomatis menerima badge resmi pada kartu &amp; profil.
@@ -157,25 +186,79 @@ export const LeaderboardView: React.FC = () => {
         )}
       </div>
 
+      {/* Blok Lencana Khusus Kehormatan Admin (Di Luar Persaingan Nasabah) */}
+      {adminHonorAccounts.length > 0 && (
+        <div className="rounded-3xl bg-gradient-to-r from-amber-950/50 via-slate-900 to-slate-950 border border-amber-500/40 p-4 sm:p-5 shadow-xl">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div className="flex items-center gap-2">
+              <Crown className="w-4 h-4 text-amber-400" />
+              <h2 className="text-xs sm:text-sm font-black uppercase tracking-wider text-amber-300">
+                Lencana Kehormatan Khusus Tier Admin (Di Luar Persaingan Nasabah)
+              </h2>
+            </div>
+            <span className="text-[11px] font-mono text-amber-200/80">
+              {adminHonorAccounts.length} Kartu Tier Admin • Level ∞ • Voucher ∞ • Poin ∞
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {adminHonorAccounts.map((acc) => {
+              const grant = adminTierGrantsMap[acc.id];
+              const isOwner = isPrimarySystemOwnerAccount(acc, acc.email);
+              return (
+                <div
+                  key={acc.id}
+                  className="rounded-2xl bg-slate-950/80 border border-amber-500/35 px-3.5 py-2.5 flex items-center justify-between gap-2"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="text-xs sm:text-sm font-black text-white truncate">
+                        {acc.fullName}
+                      </span>
+                      {acc.isVerified && <VerifiedBadge size="sm" />}
+                    </div>
+                    <p className="text-[10px] text-amber-200/80 font-semibold mt-0.5 truncate">
+                      {isOwner
+                        ? 'Super Admin Utama'
+                        : grant?.customTitle || 'Kartu Tier Admin Resmi'}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="inline-block px-2 py-0.5 rounded-md bg-amber-400/20 border border-amber-400/50 text-amber-300 font-mono font-black text-[11px]">
+                      Lv.∞ • Poin ∞
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Kartu Peringkat Saya (Sticky highlight obeying Privacy Mask & showing Top Badges visibly) */}
       {leaderboardConfig.showMyRankCard !== false && currentAccount && activeCategory && (
         <div className="rounded-3xl bg-gradient-to-r from-indigo-950/85 via-slate-900 to-slate-900 border border-indigo-500/45 p-4 sm:p-5 shadow-xl">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-start sm:items-center gap-3.5">
-              {myRankEntry ? (
+              {isCurrentAccountAdmin && !isCurrentAccountDisguised ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-400/20 border border-amber-400/60 text-xs font-black text-amber-300">
+                  <Crown className="w-4 h-4 text-amber-300" />
+                  Lencana Admin (∞)
+                </span>
+              ) : myRankEntry ? (
                 <LeaderboardRankMarker rank={myRankEntry.rank} size="lg" />
               ) : (
                 <span className="px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-extrabold text-slate-300">
-                  {isAdminCardAccount(currentAccount) && !leaderboardConfig.showAdminTier
-                    ? 'ADMIN Tersembunyi'
-                    : 'Di Luar Peringkat'}
+                  Di Luar Peringkat
                 </span>
               )}
 
               <div className="space-y-1">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-[10px] font-extrabold uppercase tracking-wider text-indigo-300">
-                    Peringkat Saya
+                    {isCurrentAccountAdmin && !isCurrentAccountDisguised
+                      ? 'Status Kehormatan Admin'
+                      : 'Peringkat Saya'}
                   </span>
                   <span className="text-xs sm:text-sm font-black text-white">
                     {currentAccount.fullName}
@@ -185,6 +268,12 @@ export const LeaderboardView: React.FC = () => {
                     {CARD_TIER_CONFIGS[currentAccount.cardTier]?.name ||
                       currentAccount.cardTier.toUpperCase()}
                   </span>
+                  {isCurrentAccountDisguised && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-200 border border-amber-400/40">
+                      <EyeOff className="w-3 h-3" />
+                      Mode Penyamaran (Pribadi ∞ • Publik Normal)
+                    </span>
+                  )}
                 </div>
                 <div className="text-[11px] font-mono text-slate-400">
                   Rek:{' '}
@@ -209,15 +298,19 @@ export const LeaderboardView: React.FC = () => {
             <div className="text-left md:text-right shrink-0">
               <div className="text-[11px] text-slate-400">{activeCategory.label}</div>
               <div className="text-lg sm:text-xl font-black text-amber-300 tabular-nums">
-                {myRankEntry
+                {isCurrentAccountAdmin
+                  ? activeCategory.key === 'jobLevel'
+                    ? 'Level ∞'
+                    : activeCategory.key === 'txCount' && myRankEntry
+                    ? formatLeaderboardMetricValue(myRankEntry.score, activeCategory.key, activeCategory.unitLabel, false)
+                    : '∞'
+                  : myRankEntry
                   ? formatLeaderboardMetricValue(
                       myRankEntry.score,
                       activeCategory.key,
                       activeCategory.unitLabel,
                       myRankEntry.isUnlimited
                     )
-                  : isAdminCardAccount(currentAccount) && !leaderboardConfig.showAdminTier
-                  ? 'Disembunyikan Pengaturan Admin'
                   : '—'}
               </div>
             </div>
@@ -250,7 +343,13 @@ export const LeaderboardView: React.FC = () => {
           <div className="divide-y divide-slate-800/75">
             {displayedRanking.map((entry) => {
               const isMe = currentAccount?.id === entry.account.id;
-              const tierCfg = CARD_TIER_CONFIGS[entry.account.cardTier];
+              const publicTierKey = entry.isDisguised
+                ? adminTierGrantsMap[entry.account.id]?.previousCardTier &&
+                  adminTierGrantsMap[entry.account.id]?.previousCardTier !== 'admin'
+                  ? adminTierGrantsMap[entry.account.id].previousCardTier
+                  : 'regular'
+                : entry.account.cardTier;
+              const tierCfg = CARD_TIER_CONFIGS[publicTierKey];
               const rowHighlight =
                 entry.rank === 1
                   ? 'bg-gradient-to-r from-amber-500/12 via-yellow-500/5 to-transparent'

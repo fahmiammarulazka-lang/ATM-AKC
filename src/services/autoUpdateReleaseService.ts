@@ -194,6 +194,7 @@ export function bumpStructuredVersion(
 export function getLatestStructuredVersion(records: AppUpdateRecord[]): string {
   let best: StructuredVersion | null = null;
   for (const rec of records) {
+    if (rec?.visibilityMode === 'admin_only') continue;
     const parsed = parseStructuredVersion(rec?.version);
     if (!parsed) continue;
     if (!best || compareStructuredVersions(parsed, best) > 0) {
@@ -628,6 +629,139 @@ export function getPublicCurrentUpdate(records: AppUpdateRecord[]): AppUpdateRec
   return pub.find((u) => u.isCurrent) || pub[0] || null;
 }
 
+/**
+ * Katalog rilis khusus Admin (menggunakan penomoran terpisah vAdmin agar TIDAK pernah
+ * menaikkan nomor versi aplikasi publik v16.42.50).
+ */
+export const BUILT_IN_ADMIN_UPDATES_CATALOG: AppUpdateRecord[] = [
+  {
+    id: 'upd-admin-v1-0-0',
+    version: 'vAdmin 1.0.0',
+    releaseType: 'major',
+    visibilityMode: 'admin_only',
+    title:
+      'Peluncuran Panel Pengangkatan Kartu Tier Admin, Analitik Pengunjung Real-Time, Infinity Level/Voucher/Poin & Riwayat Update Admin',
+    description:
+      'Pembaruan eksklusif internal Admin tanpa mengubah nomor versi publik (tetap v16.42.50). Mencakup sistem pengangkatan kartu menjadi Tier Admin dengan kontrol izin per-tab granular, pelacakan pengunjung real-time 3 koleksi lengkap dengan Multi-Server GeoIP & GPS Presisi, status Infinity (∞) penuh untuk Level, Voucher, dan Poin bagi seluruh pemegang Kartu Tier Admin, serta halaman khusus Riwayat Update Admin di Navbar.',
+    highlights: [
+      'Tab Pengangkatan Kartu Tier Admin: Tampilan Kartu Visual ATM & Tabel Cepat, pilih izin 1 tab / beberapa tab / Semua Tab, mode Akses Penuh atau Hanya Lihat, 5 preset cepat, kontrak berbatas waktu, bekukan sementara, Mode Penyamaran, dan kunci mutlak Super Admin Utama AzkaAKC (No. Rek 1234567890).',
+      'Tab Analitik & Trafik Pengunjung Real-Time: Pencatatan instan bebas race-condition untuk Global Hits, Kunjungan Per Akun, dan Per Perangkat & Lokasi, status live ONLINE instan (heartbeat 20 detik / offline 45 detik), Multi-Server GeoIP + opsi GPS Presisi browser, deteksi Multi-Akun >3 mencurigakan, serta persistensi 3 lapis (WebSocket + Cloud Firestore + Local Backup).',
+      'Kartu Tier Admin Infinity (∞) Menyeluruh: Seluruh Level (Karier, Profil, Reputasi Chat), semua stok Voucher Naik Level & internal, Poin Rewards, serta Poin Loyalty otomatis bernilai ∞, tidak pernah berkurang saat dipakai/ditukar, otomatis membuka seluruh syarat lowongan kerja, tampil pada blok khusus Leaderboard, mendukung Mode Penyamaran bagi publik, dan memulihkan snapshot nilai asli saat turun tier.',
+      'Tab Navbar Riwayat Update Admin: Tampil khusus di samping Riwayat Update bagi pemegang Kartu Tier Admin & Super Admin Utama AzkaAKC (tersembunyi otomatis saat Mode Penyamaran), menampilkan seluruh update Admin & campuran tanpa filter, indikator titik merah BARU, penomoran versi terpisah vAdmin, dan tombol cepat Tambah Update Admin.',
+    ],
+    changes: [
+      'Tab Pengangkatan Kartu Tier Admin dengan kontrol izin per-tab granular dan kunci Super Admin Utama AzkaAKC (1234567890).',
+      'Perbaikan total Tab Analitik & Trafik Pengunjung Real-Time: kunjungan instan, status ONLINE real-time, Multi-Server GeoIP + GPS Presisi, dan persistensi 3 lapis.',
+      'Infinity (∞) penuh untuk semua jenis Level, Voucher, Poin Rewards, dan Poin Loyalty bagi seluruh Kartu Tier Admin beserta snapshot rollback saat turun tier.',
+      'Tab Navbar Riwayat Update Admin tanpa filter dengan penomoran versi vAdmin terpisah dan tombol Tambah Update Admin cepat.',
+    ],
+    dateText: '27 Nov 2026',
+    fullDate: 'Jumat, 27 November 2026 • Pukul 17:20 WIB',
+    categoryBadge: 'Rilis Internal Admin Terbaru',
+    isCurrent: false,
+    author: 'Super Admin Utama (AzkaAKC)',
+    createdAt: '2026-11-27T10:20:00.000Z',
+    isAutoDetected: true,
+  },
+];
+
+export interface AdminUpdateViewItem {
+  record: AppUpdateRecord;
+  kind: 'admin_only' | 'mixed';
+  hiddenPublicPointsCount: number;
+}
+
+export function isAdminStreamVersion(versionStr?: string): boolean {
+  return /^\s*v?admin\b/i.test(String(versionStr || ''));
+}
+
+function parseAdminStreamVersion(versionStr?: string): { major: number; minor: number; patch: number } | null {
+  const m = String(versionStr || '')
+    .trim()
+    .match(/^v?admin\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/i);
+  if (!m) return null;
+  return {
+    major: Number.parseInt(m[1], 10) || 1,
+    minor: Number.parseInt(m[2] ?? '0', 10) || 0,
+    patch: Number.parseInt(m[3] ?? '0', 10) || 0,
+  };
+}
+
+/**
+ * Menyarankan nomor versi Admin berikutnya (mis. vAdmin 1.1.0) tanpa menyentuh versi publik.
+ */
+export function getNextAdminVersion(records: AppUpdateRecord[]): string {
+  const all = [...BUILT_IN_ADMIN_UPDATES_CATALOG, ...records];
+  let best = { major: 1, minor: 0, patch: 0 };
+  let found = false;
+  for (const rec of all) {
+    const parsed = parseAdminStreamVersion(rec?.version);
+    if (!parsed) continue;
+    found = true;
+    if (
+      parsed.major > best.major ||
+      (parsed.major === best.major && parsed.minor > best.minor) ||
+      (parsed.major === best.major && parsed.minor === best.minor && parsed.patch > best.patch)
+    ) {
+      best = parsed;
+    }
+  }
+  if (!found) return 'vAdmin 1.0.0';
+  return `vAdmin ${best.major}.${best.minor + 1}.0`;
+}
+
+/**
+ * Mengembalikan seluruh catatan update khusus Admin dan update campuran TANPA penyaringan
+ * (judul, deskripsi, dan daftar perubahan tampil utuh apa adanya), digabungkan dengan
+ * katalog rilis Admin bawaan.
+ */
+export function getAdminAppUpdates(records: AppUpdateRecord[]): AdminUpdateViewItem[] {
+  const byId = new Map<string, AppUpdateRecord>();
+  for (const seed of BUILT_IN_ADMIN_UPDATES_CATALOG) {
+    byId.set(seed.id, seed);
+  }
+  for (const rec of records || []) {
+    if (!rec || !rec.id) continue;
+    byId.set(rec.id, rec);
+  }
+
+  const results: AdminUpdateViewItem[] = [];
+  for (const rec of byId.values()) {
+    const res = resolvePublicAppUpdate(rec);
+    const isAdminOnly =
+      rec.visibilityMode === 'admin_only' ||
+      isAdminStreamVersion(rec.version) ||
+      res.effectiveStatus === 'admin_hidden';
+    const isMixed = !isAdminOnly && res.hasAdminContent;
+
+    if (isAdminOnly || isMixed) {
+      results.push({
+        record: rec,
+        kind: isAdminOnly ? 'admin_only' : 'mixed',
+        hiddenPublicPointsCount: res.hiddenPointsCount,
+      });
+    }
+  }
+
+  results.sort((a, b) => {
+    const aAdminVer = parseAdminStreamVersion(a.record.version);
+    const bAdminVer = parseAdminStreamVersion(b.record.version);
+    if (aAdminVer && !bAdminVer) return -1;
+    if (!aAdminVer && bAdminVer) return 1;
+    if (aAdminVer && bAdminVer) {
+      if (bAdminVer.major !== aAdminVer.major) return bAdminVer.major - aAdminVer.major;
+      if (bAdminVer.minor !== aAdminVer.minor) return bAdminVer.minor - aAdminVer.minor;
+      if (bAdminVer.patch !== aAdminVer.patch) return bAdminVer.patch - aAdminVer.patch;
+    }
+    const ta = Date.parse(a.record.createdAt || '') || 0;
+    const tb = Date.parse(b.record.createdAt || '') || 0;
+    if (tb !== ta) return tb - ta;
+    return compareRecordsNewestFirst(a.record, b.record);
+  });
+
+  return results;
+}
+
 // =====================================================================================
 // PENGURUTAN & AUTO-MERGE KATALOG RILIS + DETEKSI BUILD BARU
 // =====================================================================================
@@ -775,26 +909,38 @@ export function mergeAutoDetectedAppUpdates(
   const mergedList = Array.from(byId.values()).sort(compareRecordsNewestFirst);
 
   if (mergedList.length > 0) {
+    const publicEligibleList = mergedList.filter(
+      (u) => u.visibilityMode !== 'admin_only' && !isAdminStreamVersion(u.version)
+    );
+    const currentPool = publicEligibleList.length > 0 ? publicEligibleList : mergedList;
+
     let targetCurrentId: string;
-    const hasExistingStructuredCurrent = mergedList.some(
+    const hasExistingStructuredCurrent = currentPool.some(
       (u) => u.isCurrent && isStructuredThreePartVersion(u.version)
     );
 
-    if (newlyAddedIds.length > 0) {
+    const newlyAddedPublic = newlyAddedIds.filter((id) =>
+      currentPool.some((u) => u.id === id)
+    );
+
+    if (newlyAddedPublic.length > 0) {
       const newestAdded =
-        mergedList.find((u) => newlyAddedIds.includes(u.id)) || mergedList[0];
+        currentPool.find((u) => newlyAddedPublic.includes(u.id)) || currentPool[0];
       targetCurrentId = newestAdded.id;
-    } else if (!hasExistingStructuredCurrent && isStructuredThreePartVersion(mergedList[0].version)) {
-      targetCurrentId = mergedList[0].id;
+    } else if (!hasExistingStructuredCurrent && isStructuredThreePartVersion(currentPool[0].version)) {
+      targetCurrentId = currentPool[0].id;
     } else {
-      const existingCurrent = mergedList.find((u) => u.isCurrent);
-      targetCurrentId = existingCurrent ? existingCurrent.id : mergedList[0].id;
+      const existingCurrent = currentPool.find((u) => u.isCurrent);
+      targetCurrentId = existingCurrent ? existingCurrent.id : currentPool[0].id;
     }
 
     const normalizedList = mergedList.map((u) => {
-      const shouldBeCurrent = u.id === targetCurrentId;
+      const isAdminOnlyRec = u.visibilityMode === 'admin_only' || isAdminStreamVersion(u.version);
+      const shouldBeCurrent = !isAdminOnlyRec && u.id === targetCurrentId;
       let nextBadge = u.categoryBadge;
-      if (shouldBeCurrent) {
+      if (isAdminOnlyRec) {
+        if (!nextBadge) nextBadge = 'Khusus Admin';
+      } else if (shouldBeCurrent) {
         if (!nextBadge || nextBadge === 'Update Sebelumnya') {
           nextBadge = 'Update Sekarang';
         }

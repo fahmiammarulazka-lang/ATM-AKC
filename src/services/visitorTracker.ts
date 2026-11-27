@@ -53,6 +53,10 @@ export interface DeviceFullSpecifications {
   country: string;
   countryCode: string;
   isp: string;
+  locationSource?: 'gps' | 'geoip' | 'timezone';
+  gpsLat?: number | null;
+  gpsLng?: number | null;
+  gpsAccuracyMeters?: number | null;
   timezone: string;
   systemLanguage: string;
   connectionType: string;
@@ -159,11 +163,16 @@ export interface DeviceSessionRecord {
   lastSeenIso: string;
   lastSeenMs: number;
   isOnline: boolean;
+  currentAccountId?: string | null;
+  currentAccountNumber?: string | null;
   currentAccountKey: string | null;
   currentAccountName: string;
   currentAccountEmail: string;
   currentAccountRole: 'admin' | 'customer' | 'guest';
   isAdminActive: boolean;
+  locationSource?: 'gps' | 'geoip' | 'timezone';
+  gpsLat?: number | null;
+  gpsLng?: number | null;
   accountsHistory: DeviceAccountLoginEntry[];
   reviewStatus: DeviceReviewStatus;
   reviewNote?: string;
@@ -770,160 +779,392 @@ async function syncVisitorRecordsToCloud(responsePayload: {
   }
 }
 
+const GPS_OVERRIDE_STORAGE_KEY = 'bn_visitor_gps_override_v1';
+export const VISITOR_LOCAL_BACKUP_STORAGE_KEY = 'bn_visitor_analytics_local_backup_v1';
+
+interface CachedGpsLocation {
+  lat: number;
+  lng: number;
+  accuracyMeters: number;
+  city?: string;
+  region?: string;
+  country?: string;
+  countryCode?: string;
+  updatedAtMs: number;
+}
+
+// Module-level singleton state (immune to React StrictMode double-mount cancellation!)
+let cachedSpecsPromise: Promise<DeviceFullSpecifications> | null = null;
+let cachedSpecsValue: DeviceFullSpecifications | null = null;
+let cachedGpsLocation: CachedGpsLocation | null = null;
+let activeModuleSessionKey: string | null = null;
+let hasCompletedInitialVisit = false;
+let lastTrackedAccountIdModule: string | null = null;
+let latestActiveAccountModule: ActiveTrackerAccountInfo | null = null;
+let visitAnalyticsDirectListener: ((va: VisitorAnalyticsStatePayload) => void) | null = null;
+
+export function registerVisitorTrackerDirectListener(
+  cb: ((va: VisitorAnalyticsStatePayload) => void) | null
+): void {
+  visitAnalyticsDirectListener = cb;
+}
+
+function loadSavedGpsLocation(): CachedGpsLocation | null {
+  if (cachedGpsLocation) return cachedGpsLocation;
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(GPS_OVERRIDE_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedGpsLocation;
+    if (
+      typeof parsed?.lat === 'number' &&
+      typeof parsed?.lng === 'number' &&
+      Number.isFinite(parsed.lat) &&
+      Number.isFinite(parsed.lng) &&
+      Date.now() - Number(parsed.updatedAtMs || 0) < 12 * 60 * 60 * 1000
+    ) {
+      cachedGpsLocation = parsed;
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function getOrCollectSpecsSingleton(): Promise<DeviceFullSpecifications> {
+  if (!cachedSpecsPromise) {
+    cachedSpecsPromise = collectFullDeviceSpecifications().then((specs) => {
+      cachedSpecsValue = specs;
+      return specs;
+    });
+  }
+  const base = cachedSpecsValue || (await cachedSpecsPromise);
+  const gps = loadSavedGpsLocation();
+  if (gps) {
+    return {
+      ...base,
+      gpsLat: gps.lat,
+      gpsLng: gps.lng,
+      gpsAccuracyMeters: gps.accuracyMeters,
+      locationSource: 'gps',
+      ...(gps.city ? { city: gps.city } : {}),
+      ...(gps.region ? { region: gps.region } : {}),
+      ...(gps.country ? { country: gps.country } : {}),
+      ...(gps.countryCode ? { countryCode: gps.countryCode } : {}),
+    };
+  }
+  return base;
+}
+
+export function saveLocalVisitorBackup(va: VisitorAnalyticsStatePayload | null | undefined): void {
+  if (typeof window === 'undefined' || !va) return;
+  try {
+    const existing = loadLocalVisitorBackup();
+    const incomingHits = Math.max(va.totalAllTimeHits || 0, va.globalVisits?.length || 0);
+    const existingHits = existing
+      ? Math.max(existing.totalAllTimeHits || 0, existing.globalVisits?.length || 0)
+      : 0;
+    if (incomingHits === 0 && existingHits > 0) return;
+
+    // Keep last 400 raw visits in browser localStorage backup so storage stays fast & compact
+    const compact: VisitorAnalyticsStatePayload = {
+      globalVisits: (va.globalVisits || []).slice(-400),
+      accountVisitsMap: va.accountVisitsMap || {},
+      deviceSessionsMap: va.deviceSessionsMap || {},
+      totalAllTimeHits: Math.max(incomingHits, existingHits),
+      updatedAtMs: va.updatedAtMs || Date.now(),
+    };
+    window.localStorage.setItem(VISITOR_LOCAL_BACKUP_STORAGE_KEY, JSON.stringify(compact));
+  } catch {
+    // quota safe
+  }
+}
+
+export function loadLocalVisitorBackup(): VisitorAnalyticsStatePayload | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(VISITOR_LOCAL_BACKUP_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as VisitorAnalyticsStatePayload;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {
+      globalVisits: Array.isArray(parsed.globalVisits) ? parsed.globalVisits : [],
+      accountVisitsMap: parsed.accountVisitsMap || {},
+      deviceSessionsMap: parsed.deviceSessionsMap || {},
+      totalAllTimeHits: Number(parsed.totalAllTimeHits || 0),
+      updatedAtMs: Number(parsed.updatedAtMs || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function dispatchHeartbeatSingleton(
+  acc: ActiveTrackerAccountInfo | null,
+  tabSessionId: string
+): Promise<DeviceSessionRecord | null> {
+  try {
+    const specs = await getOrCollectSpecsSingleton();
+    const res = await fetch('/api/visitor-analytics/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: tabSessionId,
+        sessionKey: activeModuleSessionKey,
+        specs,
+        account: acc,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      deviceSession?: DeviceSessionRecord;
+      accountSummary?: AccountVisitSummaryRecord | null;
+      visitorAnalytics?: VisitorAnalyticsStatePayload;
+    };
+    if (data.deviceSession?.sessionKey) {
+      activeModuleSessionKey = data.deviceSession.sessionKey;
+      void syncVisitorRecordsToCloud({
+        deviceSession: data.deviceSession,
+        accountSummary: data.accountSummary || null,
+      });
+    }
+    if (data.visitorAnalytics) {
+      saveLocalVisitorBackup(data.visitorAnalytics);
+      visitAnalyticsDirectListener?.(data.visitorAnalytics);
+    }
+    return data.deviceSession || null;
+  } catch {
+    return null;
+  }
+}
+
+async function dispatchRecordVisitSingleton(
+  acc: ActiveTrackerAccountInfo | null,
+  triggerType: 'app_open' | 'account_login' | 'reopen',
+  tabSessionId: string,
+  forceBypassDebounce = false
+): Promise<void> {
+  try {
+    const specs = await getOrCollectSpecsSingleton();
+    const accountKey = acc
+      ? (acc.accountId || acc.accountEmail || acc.accountNumber || '').trim().toLowerCase()
+      : null;
+
+    const isLoginTransition = triggerType === 'account_login';
+    const shouldRecord =
+      forceBypassDebounce || shouldRecordVisitAfterDebounce(accountKey, isLoginTransition);
+
+    if (!shouldRecord) {
+      await dispatchHeartbeatSingleton(acc, tabSessionId);
+      return;
+    }
+
+    const res = await fetch('/api/visitor-analytics/record-visit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: tabSessionId,
+        triggerType,
+        specs,
+        account: acc,
+      }),
+    });
+
+    if (res.ok) {
+      const data = (await res.json()) as {
+        globalVisit?: GlobalVisitLogEntry;
+        accountSummary?: AccountVisitSummaryRecord;
+        deviceSession?: DeviceSessionRecord;
+        visitorAnalytics?: VisitorAnalyticsStatePayload;
+      };
+      if (data.deviceSession?.sessionKey) {
+        activeModuleSessionKey = data.deviceSession.sessionKey;
+      }
+      if (data.visitorAnalytics) {
+        saveLocalVisitorBackup(data.visitorAnalytics);
+        visitAnalyticsDirectListener?.(data.visitorAnalytics);
+      }
+      void syncVisitorRecordsToCloud(data);
+    }
+  } catch {
+    // non-blocking background tracker
+  }
+}
+
+/**
+ * Opt-in browser GPS capture: asks the browser for high-accuracy coordinates,
+ * stores them locally, and immediately updates the live server & Firestore device session.
+ */
+export async function requestPreciseGpsLocation(
+  activeAccount?: ActiveTrackerAccountInfo | null
+): Promise<{
+  success: boolean;
+  message: string;
+  locationLabel?: string;
+  lat?: number;
+  lng?: number;
+}> {
+  if (typeof window === 'undefined' || !navigator.geolocation) {
+    return {
+      success: false,
+      message: 'Browser atau perangkat ini tidak mendukung GPS Geolocation.',
+    };
+  }
+
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        const accuracyMeters = Math.round(pos.coords.accuracy || 0);
+
+        let city: string | undefined;
+        let region: string | undefined;
+        let country: string | undefined;
+        let countryCode: string | undefined;
+
+        try {
+          const revRes = await fetch(
+            `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(
+              String(lat)
+            )}&longitude=${encodeURIComponent(String(lng))}&localityLanguage=id`
+          );
+          if (revRes.ok) {
+            const rev = (await revRes.json()) as {
+              city?: string;
+              locality?: string;
+              principalSubdivision?: string;
+              countryName?: string;
+              countryCode?: string;
+            };
+            city = rev.city || rev.locality || undefined;
+            region = rev.principalSubdivision || undefined;
+            country = rev.countryName || undefined;
+            countryCode = rev.countryCode || undefined;
+          }
+        } catch {
+          // server will also attempt reverse geocode cleanly
+        }
+
+        cachedGpsLocation = {
+          lat,
+          lng,
+          accuracyMeters,
+          city,
+          region,
+          country,
+          countryCode,
+          updatedAtMs: Date.now(),
+        };
+        try {
+          window.localStorage.setItem(GPS_OVERRIDE_STORAGE_KEY, JSON.stringify(cachedGpsLocation));
+        } catch {
+          // ignore
+        }
+
+        const acc = activeAccount ?? latestActiveAccountModule;
+        const updated = await dispatchHeartbeatSingleton(acc, getOrCreateTabSessionId());
+        const locLabel =
+          updated?.locationLabel ||
+          [city, region, country].filter(Boolean).join(', ') ||
+          `${lat}, ${lng}`;
+
+        resolve({
+          success: true,
+          message: `Lokasi GPS presisi aktif: ${locLabel} (akurasi ±${accuracyMeters}m).`,
+          locationLabel: locLabel,
+          lat,
+          lng,
+        });
+      },
+      (err) => {
+        const msg =
+          err.code === 1
+            ? 'Izin lokasi GPS ditolak oleh browser. Anda dapat mengizinkannya melalui pengaturan situs browser.'
+            : err.code === 2
+            ? 'Sinyal lokasi GPS tidak tersedia saat ini. Sistem tetap memakai deteksi Multi-Server GeoIP otomatis.'
+            : 'Permintaan lokasi GPS melebihi batas waktu. Silakan coba lagi.';
+        resolve({ success: false, message: msg });
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 }
+    );
+  });
+}
+
 /**
  * React Hook: Automatically runs in the background whenever the Web App or APK opens,
- * records initial visit (with 10s debounce), detects account login transitions (+1 visit),
- * and sends 20s real-time heartbeats + exit signal on close.
+ * records initial visit immediately (immune to StrictMode double-mount!), detects account
+ * login transitions (+1 visit), and sends immediate + 20s real-time heartbeats + exit signal on close.
  */
 export function useBackgroundVisitorTracker(activeAccount: ActiveTrackerAccountInfo | null): void {
-  const specsRef = useRef<DeviceFullSpecifications | null>(null);
-  const lastTrackedAccountKeyRef = useRef<string | null | undefined>(undefined);
-  const activeSessionKeyRef = useRef<string | null>(null);
   const tabSessionIdRef = useRef<string>(getOrCreateTabSessionId());
 
   useEffect(() => {
-    let cancelled = false;
-
-    const sendVisitOrLogin = async (
-      acc: ActiveTrackerAccountInfo | null,
-      triggerType: 'app_open' | 'account_login' | 'reopen'
-    ) => {
-      try {
-        if (!specsRef.current) {
-          specsRef.current = await collectFullDeviceSpecifications();
-        }
-        if (cancelled) return;
-
-        const accountKey = acc
-          ? (acc.accountEmail || acc.accountUid || acc.accountId || '').trim().toLowerCase()
-          : null;
-
-        const isLoginTransition = triggerType === 'account_login';
-        if (!shouldRecordVisitAfterDebounce(accountKey, isLoginTransition)) {
-          // Still send a heartbeat so device shows ONLINE immediately even on quick refresh
-          const hbRes = await fetch('/api/visitor-analytics/heartbeat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sessionId: tabSessionIdRef.current,
-              specs: specsRef.current,
-              account: acc,
-            }),
-          });
-          if (hbRes.ok) {
-            const hbData = (await hbRes.json()) as {
-              deviceSession?: DeviceSessionRecord;
-            };
-            if (hbData.deviceSession?.sessionKey) {
-              activeSessionKeyRef.current = hbData.deviceSession.sessionKey;
-              void syncVisitorRecordsToCloud({ deviceSession: hbData.deviceSession });
-            }
-          }
-          return;
-        }
-
-        const res = await fetch('/api/visitor-analytics/record-visit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: tabSessionIdRef.current,
-            triggerType,
-            specs: specsRef.current,
-            account: acc,
-          }),
-        });
-
-        if (res.ok) {
-          const data = (await res.json()) as {
-            globalVisit?: GlobalVisitLogEntry;
-            accountSummary?: AccountVisitSummaryRecord;
-            deviceSession?: DeviceSessionRecord;
-          };
-          if (data.deviceSession?.sessionKey) {
-            activeSessionKeyRef.current = data.deviceSession.sessionKey;
-          }
-          void syncVisitorRecordsToCloud(data);
-        }
-      } catch {
-        // non-blocking background tracker
-      }
-    };
-
-    const currentAccKey = activeAccount
-      ? (activeAccount.accountEmail || activeAccount.accountUid || activeAccount.accountId)
+    latestActiveAccountModule = activeAccount;
+    const currentAccId = activeAccount
+      ? (activeAccount.accountId || activeAccount.accountNumber || activeAccount.accountEmail)
           .trim()
           .toLowerCase()
       : null;
 
-    if (lastTrackedAccountKeyRef.current === undefined) {
-      // Initial app / APK open
-      lastTrackedAccountKeyRef.current = currentAccKey;
-      void sendVisitOrLogin(activeAccount, 'app_open');
-    } else if (currentAccKey && currentAccKey !== lastTrackedAccountKeyRef.current) {
-      // User just logged in or switched to another account -> count +1 visit
-      lastTrackedAccountKeyRef.current = currentAccKey;
-      void sendVisitOrLogin(activeAccount, 'account_login');
-    } else if (!currentAccKey && lastTrackedAccountKeyRef.current !== null) {
-      lastTrackedAccountKeyRef.current = null;
+    if (!hasCompletedInitialVisit) {
+      hasCompletedInitialVisit = true;
+      lastTrackedAccountIdModule = currentAccId;
+      // Record visit immediately upon opening app — never aborted by StrictMode cleanup!
+      void dispatchRecordVisitSingleton(activeAccount, 'app_open', tabSessionIdRef.current, true);
+    } else if (currentAccId && currentAccId !== lastTrackedAccountIdModule) {
+      // User logged in or switched account -> record +1 visit immediately
+      lastTrackedAccountIdModule = currentAccId;
+      void dispatchRecordVisitSingleton(
+        activeAccount,
+        'account_login',
+        tabSessionIdRef.current,
+        true
+      );
+    } else if (!currentAccId && lastTrackedAccountIdModule !== null) {
+      lastTrackedAccountIdModule = null;
+      void dispatchHeartbeatSingleton(null, tabSessionIdRef.current);
+    } else {
+      // Same account mounted/settled -> fire immediate heartbeat so status is ONLINE right away
+      void dispatchHeartbeatSingleton(activeAccount, tabSessionIdRef.current);
     }
-
-    return () => {
-      cancelled = true;
-    };
   }, [
     activeAccount?.accountId,
     activeAccount?.accountEmail,
+    activeAccount?.accountNumber,
     activeAccount?.accountUid,
     activeAccount?.role,
     activeAccount?.isAdmin,
   ]);
 
-  // 20-second Heartbeat Loop + Page Close Offline Signal
+  // 20-second Heartbeat Loop + Visibility/Online Recovery + Page Close Offline Signal
   useEffect(() => {
     let mounted = true;
+    const tabId = tabSessionIdRef.current;
 
-    const sendHeartbeat = async () => {
+    const sendBeat = () => {
       if (!mounted) return;
-      try {
-        if (!specsRef.current) {
-          specsRef.current = await collectFullDeviceSpecifications();
-        }
-        const res = await fetch('/api/visitor-analytics/heartbeat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId: tabSessionIdRef.current,
-            sessionKey: activeSessionKeyRef.current,
-            specs: specsRef.current,
-            account: activeAccount,
-          }),
-        });
-        if (res.ok) {
-          const data = (await res.json()) as { deviceSession?: DeviceSessionRecord };
-          if (data.deviceSession?.sessionKey) {
-            activeSessionKeyRef.current = data.deviceSession.sessionKey;
-          }
-        }
-      } catch {
-        // ignore network hiccup
-      }
+      void dispatchHeartbeatSingleton(latestActiveAccountModule, tabId);
     };
 
-    const intervalId = window.setInterval(() => {
-      void sendHeartbeat();
-    }, HEARTBEAT_INTERVAL_MS);
+    const intervalId = window.setInterval(sendBeat, HEARTBEAT_INTERVAL_MS);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        void sendHeartbeat();
+        sendBeat();
       }
+    };
+
+    const handleWindowOnline = () => {
+      sendBeat();
     };
 
     const handleBeforeUnload = () => {
       const payload = JSON.stringify({
-        sessionId: tabSessionIdRef.current,
-        sessionKey: activeSessionKeyRef.current,
-        deviceId: specsRef.current?.deviceId,
+        sessionId: tabId,
+        sessionKey: activeModuleSessionKey,
+        deviceId: cachedSpecsValue?.deviceId,
       });
       if (typeof navigator.sendBeacon === 'function') {
         const blob = new Blob([payload], { type: 'application/json' });
@@ -939,6 +1180,7 @@ export function useBackgroundVisitorTracker(activeAccount: ActiveTrackerAccountI
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('online', handleWindowOnline);
     window.addEventListener('beforeunload', handleBeforeUnload);
     window.addEventListener('pagehide', handleBeforeUnload);
 
@@ -946,14 +1188,9 @@ export function useBackgroundVisitorTracker(activeAccount: ActiveTrackerAccountI
       mounted = false;
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', handleWindowOnline);
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('pagehide', handleBeforeUnload);
     };
-  }, [
-    activeAccount?.accountId,
-    activeAccount?.accountEmail,
-    activeAccount?.accountName,
-    activeAccount?.role,
-    activeAccount?.isAdmin,
-  ]);
+  }, []);
 }

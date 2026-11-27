@@ -246,9 +246,18 @@ export interface BankAccount {
   verifiedLabel?: string;
   googleEmail?: string;
   // Lowongan Pekerjaan, Sistem Level & Voucher Level (Suit Komputer Medium)
-  jobLevel?: number; // Default 1
-  levelVouchers?: number; // Default 0 (didapat dari menang Suit lawan Komputer Medium atau Admin)
+  jobLevel?: number; // Default 1 (Kartu Tier Admin otomatis Infinity / UNLIMITED_BALANCE)
+  levelVouchers?: number; // Default 0 (Kartu Tier Admin otomatis Infinity / UNLIMITED_BALANCE)
   levelUpVouchers?: number; // Alias levelVouchers
+  preAdminSnapshot?: {
+    jobLevel?: number;
+    levelVouchers?: number;
+    rewardPoints?: number;
+    loyaltyPoints?: number;
+    balance?: number;
+    spinCoins?: number;
+    diamonds?: number;
+  };
   jobClickProgress?: Record<string, number>; // Progres klik masing-masing lowongan pekerjaan
   totalJobsCompleted?: number;
   totalJobEarnings?: number;

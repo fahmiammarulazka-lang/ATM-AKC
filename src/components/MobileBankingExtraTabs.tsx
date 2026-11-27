@@ -732,6 +732,11 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                 <Gift className="h-4 w-4 text-emerald-400" />
                 Tukar Poin ke Hadiah Instan
               </p>
+              {isAdminCard && (
+                <p className="text-[11px] font-semibold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-xl px-2.5 py-1.5">
+                  Kartu Tier Admin: Poin Loyalty &amp; Rewards bernilai ∞ selamanya dan tidak pernah berkurang saat ditukar.
+                </p>
+              )}
               <input
                 type="number"
                 min={50}

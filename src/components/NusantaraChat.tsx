@@ -98,7 +98,9 @@ import {
   MOTION_GIF_PRESETS,
   computeChatReputationRank,
 } from '../data/socialAndBankingExtrasCatalog';
-import { formatRupiah } from '../utils/bankUtils';
+import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
+import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
+import { isAccountDisguisedAdmin } from '../types/adminAnalyticsAndTier';
 import { PinPromptModal } from './PinPromptModal';
 import {
   AddContactModal,
@@ -291,6 +293,7 @@ export const NusantaraChat: React.FC = () => {
     loyaltyMap,
     transactions,
   } = useBank();
+  const { adminTierGrantsMap } = useAdminAnalyticsAndTierSync();
 
   const [mainTab, setMainTab] = useState<MainChatTab>('global');
   const [toastBanner, setToastBanner] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
@@ -3142,14 +3145,23 @@ export const NusantaraChat: React.FC = () => {
                             )}
                             {renderCustomCustomerBadge(msg.senderCustomBadge ?? senderAccountObj?.chatCustomBadge)}
                             {(() => {
+                              const isSenderDisguised =
+                                Boolean(senderAccountObj) &&
+                                isAccountDisguisedAdmin(senderAccountObj!.id, adminTierGrantsMap) &&
+                                currentAccount?.id !== senderAccountObj!.id;
+                              const rawPts = senderAccountObj ? loyaltyMap[senderAccountObj.id]?.points || 0 : 0;
+                              const publicPts = isSenderDisguised
+                                ? senderAccountObj?.preAdminSnapshot?.loyaltyPoints ??
+                                  (isUnlimitedNumber(rawPts) ? 0 : rawPts)
+                                : rawPts;
                               const rank = computeChatReputationRank({
-                                isAdmin: isMsgAdmin,
-                                loyaltyPoints: senderAccountObj ? loyaltyMap[senderAccountObj.id]?.points || 0 : 0,
+                                isAdmin: isMsgAdmin && !isSenderDisguised,
+                                loyaltyPoints: publicPts,
                                 txCount: senderAccountObj ? transactions.filter((t) => t.accountId === senderAccountObj.id).length : 0,
                               });
                               return (
                                 <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${rank.badgeClass}`}>
-                                  {msg.senderReputationLabel || rank.title}
+                                  {isSenderDisguised ? rank.title : msg.senderReputationLabel || rank.title}
                                 </span>
                               );
                             })()}
@@ -5096,14 +5108,23 @@ export const NusantaraChat: React.FC = () => {
                                   )}
                                   {renderCustomCustomerBadge(msg.senderCustomBadge ?? senderAccountObj?.chatCustomBadge)}
                                   {(() => {
+                                    const isSenderDisguised =
+                                      Boolean(senderAccountObj) &&
+                                      isAccountDisguisedAdmin(senderAccountObj!.id, adminTierGrantsMap) &&
+                                      currentAccount?.id !== senderAccountObj!.id;
+                                    const rawPts = senderAccountObj ? loyaltyMap[senderAccountObj.id]?.points || 0 : 0;
+                                    const publicPts = isSenderDisguised
+                                      ? senderAccountObj?.preAdminSnapshot?.loyaltyPoints ??
+                                        (isUnlimitedNumber(rawPts) ? 0 : rawPts)
+                                      : rawPts;
                                     const rank = computeChatReputationRank({
-                                      isAdmin: isMsgAdmin,
-                                      loyaltyPoints: senderAccountObj ? loyaltyMap[senderAccountObj.id]?.points || 0 : 0,
+                                      isAdmin: isMsgAdmin && !isSenderDisguised,
+                                      loyaltyPoints: publicPts,
                                       txCount: senderAccountObj ? transactions.filter((t) => t.accountId === senderAccountObj.id).length : 0,
                                     });
                                     return (
                                       <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${rank.badgeClass}`}>
-                                        {msg.senderReputationLabel || rank.title}
+                                        {isSenderDisguised ? rank.title : msg.senderReputationLabel || rank.title}
                                       </span>
                                     );
                                   })()}

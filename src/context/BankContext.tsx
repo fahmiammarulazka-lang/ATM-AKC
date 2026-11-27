@@ -23083,27 +23083,80 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!target) return { success: false, message: 'Rekening tidak ditemukan!' };
 
     const cfg = CARD_TIER_CONFIGS[newTier];
-    const nextAccounts = accounts.map((acc) =>
-      acc.id === accountId
-        ? applyTierTransitionAssets(
-            {
+    const prevLoyaltyState: LoyaltyAccountState = loyaltyMapRef.current[accountId] || {
+      points: 0,
+      streakDays: 0,
+      claimedAchievementIds: [],
+      totalCheckIns: 0,
+      redeemedCount: 0,
+    };
+    const safePreLoyaltyPoints = isUnlimitedNumber(prevLoyaltyState.points)
+      ? target.preAdminSnapshot?.loyaltyPoints ?? 0
+      : Math.max(0, Math.floor(prevLoyaltyState.points || 0));
+
+    const nextAccounts = accounts.map((acc) => {
+      if (acc.id !== accountId) return acc;
+      const withLoyaltySnap: BankAccount =
+        newTier === 'admin' && acc.cardTier !== 'admin'
+          ? {
               ...acc,
-              cardStatus: acc.cardStatus === 'pending' ? 'active' : acc.cardStatus,
-              accountUpdatedAtMs: Date.now(),
-            },
-            newTier
-          )
-        : acc
-    );
+              preAdminSnapshot: {
+                ...(acc.preAdminSnapshot || {}),
+                loyaltyPoints: acc.preAdminSnapshot?.loyaltyPoints ?? safePreLoyaltyPoints,
+              },
+            }
+          : acc;
+      return applyTierTransitionAssets(
+        {
+          ...withLoyaltySnap,
+          cardStatus: acc.cardStatus === 'pending' ? 'active' : acc.cardStatus,
+          accountUpdatedAtMs: Date.now(),
+        },
+        newTier
+      );
+    });
+
+    // Sinkronkan Poin Loyalty otomatis ∞ saat diangkat ke Admin, atau pulihkan snapshot asli saat diturunkan
+    let nextLoyaltyMap = loyaltyMapRef.current;
+    if (newTier === 'admin') {
+      nextLoyaltyMap = {
+        ...loyaltyMapRef.current,
+        [accountId]: {
+          ...prevLoyaltyState,
+          points: UNLIMITED_BALANCE,
+        },
+      };
+      loyaltyMapRef.current = nextLoyaltyMap;
+      setLoyaltyMap(nextLoyaltyMap);
+    } else if (target.cardTier === 'admin') {
+      const restoredLoyalty =
+        typeof target.preAdminSnapshot?.loyaltyPoints === 'number' &&
+        !isUnlimitedNumber(target.preAdminSnapshot.loyaltyPoints)
+          ? Math.max(0, Math.floor(target.preAdminSnapshot.loyaltyPoints))
+          : 0;
+      nextLoyaltyMap = {
+        ...loyaltyMapRef.current,
+        [accountId]: {
+          ...prevLoyaltyState,
+          points: restoredLoyalty,
+        },
+      };
+      loyaltyMapRef.current = nextLoyaltyMap;
+      setLoyaltyMap(nextLoyaltyMap);
+    }
+
     latestServerAccountsRef.current = nextAccounts;
     accountsRef.current = nextAccounts;
     setAccounts(nextAccounts);
-    void flushMasterStateToCloud({ accounts: nextAccounts });
+    void flushMasterStateToCloud({ accounts: nextAccounts, loyaltyMap: nextLoyaltyMap });
+    if (newTier === 'admin' || target.cardTier === 'admin') {
+      syncLoyaltyToServer(nextLoyaltyMap);
+    }
 
     addNotification(
       'Jenis Kartu Diubah oleh Admin 💳',
       newTier === 'admin'
-        ? `Kartu ${target.fullName} (${target.accountNumber}) telah diubah menjadi ${cfg.nameIndo} dengan Saldo Uang, Koin Spin, Diamond, Poin Rewards, dan Limit Harian ∞!`
+        ? `Kartu ${target.fullName} (${target.accountNumber}) telah diubah menjadi ${cfg.nameIndo} dengan Level ∞, Voucher Level ∞, Poin Rewards & Loyalty ∞, Saldo, Koin, Diamond, dan Limit Harian ∞!`
         : `Kartu ${target.fullName} (${target.accountNumber}) telah diubah menjadi ${cfg.nameIndo}.`,
       'success'
     );
@@ -23112,9 +23165,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       success: true,
       message:
         newTier === 'admin'
-          ? `Jenis kartu ${target.fullName} berhasil diubah ke ${cfg.nameIndo}! Semua aset (Uang, Koin, Diamond, Poin, Limit) otomatis ∞.`
+          ? `Jenis kartu ${target.fullName} berhasil diubah ke ${cfg.nameIndo}! Level, Voucher, Poin Rewards/Loyalty, dan seluruh aset otomatis ∞.`
           : target.cardTier === 'admin'
-          ? `Jenis kartu ${target.fullName} diturunkan ke ${cfg.nameIndo} dan saldo dikembalikan ke batas aman normal.`
+          ? `Jenis kartu ${target.fullName} diturunkan ke ${cfg.nameIndo} — Level, Voucher, Poin, dan saldo dikembalikan ke nilai asli sebelum diangkat jadi Admin.`
           : `Jenis kartu ${target.fullName} berhasil diubah ke ${cfg.nameIndo}!`,
     };
   };
@@ -23383,7 +23436,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return {
       success: true,
       message: isAdminTier
-        ? `Kartu ${target.fullName} bertier ADMIN sehingga Poin Rewards sudah ∞ dan berhasil disinkronkan ke Cloud!`
+        ? `Kartu Tier Admin (${target.fullName}) otomatis terkunci Infinity (∞) untuk Poin Rewards dan tidak perlu diubah manual.`
         : `Poin Reward Nusantara untuk ${target.fullName} berhasil diatur menjadi ${formatAssetCount(nextPts)} Poin!`,
     };
   };
@@ -23739,8 +23792,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ? 'Akun OA Resmi Terverifikasi Admin'
             : 'Nasabah Terverifikasi Resmi Admin')
         : undefined,
-      jobLevel: Math.min(50, Math.max(1, Number(input.jobLevel) || 1)),
-      levelVouchers: Math.max(0, Number(input.levelVouchers) || 0),
+      jobLevel:
+        input.cardTier === 'admin'
+          ? UNLIMITED_BALANCE
+          : Math.min(50, Math.max(1, Number(input.jobLevel) || 1)),
+      levelVouchers:
+        input.cardTier === 'admin'
+          ? UNLIMITED_BALANCE
+          : Math.max(0, Number(input.levelVouchers) || 0),
+      levelUpVouchers:
+        input.cardTier === 'admin'
+          ? UNLIMITED_BALANCE
+          : Math.max(0, Number(input.levelVouchers) || 0),
       clickPower: Math.max(1, Number(input.clickPower) || 1),
       salaryMultiplier: Math.max(1, Number(input.salaryMultiplier) || 1),
       cashbackPercent: Math.max(0, Number(input.cashbackPercent) || 0),
@@ -26278,33 +26341,42 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const filteredHighlights =
       rawHighlights.length > 0 ? rawHighlights.filter((h) => h.trim().length > 0) : undefined;
 
+    const isAdminOnlyRelease =
+      input.visibilityMode === 'admin_only' || /^\s*v?admin\b/i.test(String(input.version || ''));
     const latestStructured = getLatestStructuredVersion(appUpdates);
-    const normalizedVersion =
-      normalizeVersionInput(input.version) ||
-      bumpStructuredVersion(latestStructured || STRUCTURED_BASE_VERSION, input.releaseType || 'patch');
+    const normalizedVersion = isAdminOnlyRelease
+      ? String(input.version || '').trim() || 'vAdmin 1.1.0'
+      : normalizeVersionInput(input.version) ||
+        bumpStructuredVersion(latestStructured || STRUCTURED_BASE_VERSION, input.releaseType || 'patch');
+
+    const effectiveIsCurrent = isAdminOnlyRelease ? false : input.isCurrent;
 
     const newUpdate: AppUpdateRecord = {
       id: `upd-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       version: normalizedVersion,
       releaseType: input.releaseType || 'patch',
-      visibilityMode: input.visibilityMode || 'auto',
+      visibilityMode: isAdminOnlyRelease ? 'admin_only' : input.visibilityMode || 'auto',
       title: cleanTitle,
       fullDate: cleanDate,
       dateText: cleanDate,
       description: cleanDesc,
       highlights: filteredHighlights,
       changes: filteredHighlights,
-      isCurrent: input.isCurrent,
+      isCurrent: effectiveIsCurrent,
       categoryBadge:
         input.categoryBadge?.trim() ||
-        (input.isCurrent ? 'Update Sekarang' : 'Update Sebelumnya'),
+        (isAdminOnlyRelease
+          ? 'Rilis Internal Admin'
+          : effectiveIsCurrent
+          ? 'Update Sekarang'
+          : 'Update Sebelumnya'),
       author: input.author?.trim() || 'Tim Pengembangan Bank Nusantara',
       createdAt: new Date().toISOString(),
       editedByAdmin: true,
     };
 
     setAppUpdates((prev) => {
-      const updatedPrev = input.isCurrent
+      const updatedPrev = effectiveIsCurrent
         ? prev.map((u) => ({
             ...u,
             isCurrent: false,
@@ -26548,8 +26620,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
+    const isAdminTier = isAdminCardAccount(currentAccount);
     const userLevel = currentAccount.jobLevel || 1;
-    if (userLevel < requiredLevel) {
+    if (!isAdminTier && userLevel < requiredLevel) {
       playAtmSound('alert');
       return {
         success: false,
@@ -26580,8 +26653,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const totalCoinsCredited = multipliedCoins + adminExtraCoins;
       const bonusCoinsEarned = Math.max(0, totalCoinsCredited - baseWithSalaryMult);
 
-      const isUnlim =
-        currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance);
+      const isUnlim = isAdminTier || isUnlimitedNumber(currentAccount.balance);
       const newBalance = isUnlim ? UNLIMITED_BALANCE : currentAccount.balance + finalSalary;
 
       const stampMs = Date.now();
@@ -26589,16 +26661,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const updatedAccounts = latestPool.map((a) => {
         if (a.id !== currentAccount.id) return a;
         const nextMap = { ...(a.jobClickProgress || {}), [jobId]: 0 };
-        return {
+        return normalizeAdminAccountAssets({
           ...a,
           balance: newBalance,
-          spinCoins: (a.spinCoins || 0) + totalCoinsCredited,
+          spinCoins: isAdminTier || isUnlimitedNumber(a.spinCoins) ? UNLIMITED_BALANCE : (a.spinCoins || 0) + totalCoinsCredited,
           jobClickProgress: nextMap,
           totalJobsCompleted: (a.totalJobsCompleted || 0) + 1,
           totalJobEarnings: (a.totalJobEarnings || 0) + finalSalary,
-          rewardPoints: (a.rewardPoints || 0) + Math.max(10, Math.round(finalSalary / 10_000)),
+          rewardPoints:
+            isAdminTier || isUnlimitedNumber(a.rewardPoints)
+              ? UNLIMITED_BALANCE
+              : (a.rewardPoints || 0) + Math.max(10, Math.round(finalSalary / 10_000)),
           accountUpdatedAtMs: stampMs,
-        };
+        });
       });
       accountsRef.current = updatedAccounts;
       latestServerAccountsRef.current = updatedAccounts;
@@ -26739,9 +26814,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!liveAcc) {
       return { success: false, message: 'Silakan login terlebih dahulu.' };
     }
+    if (isAdminCardAccount(liveAcc)) {
+      playAtmSound('success');
+      return {
+        success: true,
+        newLevel: UNLIMITED_BALANCE,
+        message: 'Kartu Tier Admin otomatis memiliki Level Infinity (∞) selamanya dan seluruh lowongan pekerjaan sudah terbuka!',
+      };
+    }
     const UPGRADE_COST = 1_000_000;
-    const isUnlim =
-      liveAcc.cardTier === 'admin' || isUnlimitedNumber(liveAcc.balance);
+    const isUnlim = isUnlimitedNumber(liveAcc.balance);
 
     if (!isUnlim && liveAcc.balance < UPGRADE_COST) {
       playAtmSound('alert');
@@ -26803,6 +26885,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const liveAcc = latestPool.find((a) => a.id === currentAccountId) || currentAccount;
     if (!liveAcc) {
       return { success: false, message: 'Silakan login terlebih dahulu.' };
+    }
+    if (isAdminCardAccount(liveAcc)) {
+      playAtmSound('success');
+      return {
+        success: true,
+        newLevel: UNLIMITED_BALANCE,
+        message: '🎫 Kartu Tier Admin memiliki Level & Voucher Level Infinity (∞) — stok tetap ∞ selamanya dan tidak pernah berkurang!',
+      };
     }
     const available = liveAcc.levelVouchers || 0;
     const useCount = Math.max(1, Math.min(count, available));
@@ -28079,7 +28169,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     syncLoyaltyToServer(nextMap);
     playAtmSound('cash');
     const unitLabel = target === 'cash' ? formatRupiah(rewardAmount) : target === 'coin' ? `${rewardAmount} Coin` : `${rewardAmount} Diamond`;
-    return { success: true, message: `${cleanPts} Poin berhasil ditukar menjadi ${unitLabel}!` };
+    return {
+      success: true,
+      message: isAdminTier
+        ? `Penukaran ke ${unitLabel} berhasil! (Kartu Tier Admin: Poin Loyalty tetap ∞ selamanya dan tidak pernah berkurang.)`
+        : `${cleanPts} Poin berhasil ditukar menjadi ${unitLabel}!`,
+    };
   };
 
   const adminUpdateLoyaltyConfig = (partial: Partial<LoyaltyAdminConfig>): { success: boolean; message: string } => {
@@ -28105,7 +28200,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       totalCheckIns: 0,
       redeemedCount: 0,
     };
-    const nextPoints = isAdminCardAccount(acc)
+    const isAdminTier = isAdminCardAccount(acc);
+    const nextPoints = isAdminTier
       ? UNLIMITED_BALANCE
       : mode === 'set'
       ? Math.max(0, Math.round(points))
@@ -28116,7 +28212,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     syncLoyaltyToServer(nextMap);
     return {
       success: true,
-      message: `Poin Loyalty ${acc.fullName} diperbarui menjadi ${isUnlimitedNumber(nextPoints) ? '∞' : nextPoints.toLocaleString('id-ID')} poin.`,
+      message: isAdminTier
+        ? `Kartu Tier Admin (${acc.fullName}) otomatis terkunci Infinity (∞) untuk Poin Loyalty dan tidak perlu diubah manual.`
+        : `Poin Loyalty ${acc.fullName} diperbarui menjadi ${isUnlimitedNumber(nextPoints) ? '∞' : nextPoints.toLocaleString('id-ID')} poin.`,
     };
   };
 
@@ -28242,6 +28340,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const DIAMOND_PER_LEVEL = 25;
     const totalCost = lvlCount * DIAMOND_PER_LEVEL;
     const isAdminTier = isAdminCardAccount(liveAcc) || isUnlimitedNumber(liveAcc.diamonds);
+    if (isAdminCardAccount(liveAcc)) {
+      playAtmSound('success');
+      return {
+        success: true,
+        newLevel: UNLIMITED_BALANCE,
+        diamondsSpent: 0,
+        message: '💎 Kartu Tier Admin otomatis memiliki Level Infinity (∞) dan Diamond Infinity (∞) selamanya!',
+      };
+    }
     const currentDia = liveAcc.diamonds || 0;
     if (!isAdminTier && currentDia < totalCost) {
       playAtmSound('alert');
@@ -29696,6 +29803,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
     const target = latestPool.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan.' };
+    if (isAdminCardAccount(target)) {
+      commitAccountMutationPermanent(accountId, (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          jobLevel: UNLIMITED_BALANCE,
+        })
+      );
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `Kartu Tier Admin (${target.fullName}) otomatis terkunci Level Infinity (∞) dan tidak perlu diubah manual.`,
+      };
+    }
     const currentLvl = target.jobLevel || 1;
     const nextLvl =
       mode === 'max'
@@ -29723,11 +29843,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
     const target = latestPool.find((a) => a.id === accountId);
     if (!target) return { success: false, message: 'Rekening tidak ditemukan.' };
+    if (isAdminCardAccount(target)) {
+      commitAccountMutationPermanent(accountId, (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          levelVouchers: UNLIMITED_BALANCE,
+          levelUpVouchers: UNLIMITED_BALANCE,
+        })
+      );
+      playAtmSound('success');
+      return {
+        success: true,
+        message: `Kartu Tier Admin (${target.fullName}) otomatis terkunci Voucher Level Infinity (∞) dan tidak perlu diubah manual.`,
+      };
+    }
     const cur = target.levelVouchers || 0;
     const next = mode === 'add' ? Math.max(0, cur + count) : Math.max(0, count);
     commitAccountMutationPermanent(accountId, (a) => ({
       ...a,
       levelVouchers: next,
+      levelUpVouchers: next,
     }));
     playAtmSound('success');
     return {

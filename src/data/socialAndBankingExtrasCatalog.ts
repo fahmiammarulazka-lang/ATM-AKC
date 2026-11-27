@@ -140,7 +140,7 @@ export function computeChatReputationRank(params: {
 }): { title: string; badgeClass: string } {
   if (params.isAdmin) {
     return {
-      title: 'Komandan Admin',
+      title: 'Komandan Admin • Lv.∞',
       badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-400/50',
     };
   }

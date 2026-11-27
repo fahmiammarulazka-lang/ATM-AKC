@@ -285,8 +285,10 @@ service cloud.firestore {
       return data.keys().hasAll(['sessionKey', 'deviceId', 'locationKey', 'totalVisits', 'lastSeenMs', 'isOnline', 'specs'])
         && data.keys().hasOnly([
           'sessionKey', 'deviceId', 'fingerprintHash', 'locationKey', 'locationLabel',
+          'locationSource', 'gpsLat', 'gpsLng',
           'previousLocations', 'linkedSessionKeys', 'totalVisits', 'firstSeenIso', 'firstSeenMs',
-          'lastSeenIso', 'lastSeenMs', 'isOnline', 'currentAccountKey', 'currentAccountName',
+          'lastSeenIso', 'lastSeenMs', 'isOnline',
+          'currentAccountId', 'currentAccountNumber', 'currentAccountKey', 'currentAccountName',
           'currentAccountEmail', 'currentAccountRole', 'isAdminActive', 'accountsHistory',
           'reviewStatus', 'reviewNote', 'specs', 'updatedAt', 'updatedAtMs', 'updatedAtServer'
         ])
@@ -297,6 +299,9 @@ service cloud.firestore {
         && data.lastSeenMs is number
         && data.isOnline is bool
         && data.specs is map
+        && (!('locationSource' in data) || (data.locationSource is string && data.locationSource in ['gps', 'geoip', 'timezone']))
+        && (!('gpsLat' in data) || data.gpsLat == null || (data.gpsLat is number && data.gpsLat >= -90 && data.gpsLat <= 90))
+        && (!('gpsLng' in data) || data.gpsLng == null || (data.gpsLng is number && data.gpsLng >= -180 && data.gpsLng <= 180))
         && (!('currentAccountRole' in data) || (data.currentAccountRole is string && data.currentAccountRole in ['admin', 'customer', 'guest']))
         && (!('reviewStatus' in data) || (data.reviewStatus is string && data.reviewStatus in ['normal', 'watched', 'safe']))
         && (!('reviewNote' in data) || (data.reviewNote is string && data.reviewNote.size() <= 500))

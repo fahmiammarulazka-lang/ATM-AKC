@@ -14,6 +14,7 @@ import { AtmSimulator } from './components/AtmSimulator';
 import { AdminPortal } from './components/AdminPortal';
 import { InformationGuide } from './components/InformationGuide';
 import { UpdateHistoryView } from './components/UpdateHistoryView';
+import { AdminUpdateHistoryView } from './components/AdminUpdateHistoryView';
 import { JobVacancyView } from './components/JobVacancyView';
 import { SpinTheWheelView } from './components/SpinTheWheelView';
 import { FamilyWorkspaceView } from './components/FamilyWorkspaceView';
@@ -226,6 +227,32 @@ function BankAppContent() {
     }
   }, [activeView, markLatestAppUpdateSeen]);
 
+  // Lindungi rute Riwayat Update Admin agar hanya terbuka untuk Kartu Tier Admin / Super Admin Utama (dan tersembunyi saat Mode Penyamaran aktif)
+  useEffect(() => {
+    if (activeView !== 'admin_updates') return;
+    const isOwner = isPrimarySystemOwnerAccount(
+      currentAccount,
+      googleUser?.email || firebaseUser?.email
+    );
+    const isAdminCard = currentAccount?.cardTier === 'admin';
+    const isDisguised = Boolean(
+      !isOwner &&
+        currentAccountGrant &&
+        currentAccountGrant.status === 'active' &&
+        !currentAccountGrant.isFrozen &&
+        currentAccountGrant.hideAdminStatus
+    );
+    if ((!isOwner && !isAdminCard) || isDisguised) {
+      setActiveView('dashboard');
+    }
+  }, [
+    activeView,
+    currentAccount,
+    currentAccountGrant,
+    googleUser?.email,
+    firebaseUser?.email,
+  ]);
+
   // Laporkan halaman/tab yang sedang dibuka nasabah secara real-time untuk fitur Intip Live di Panel Admin
   useEffect(() => {
     if (!currentAccount?.id) return;
@@ -245,6 +272,7 @@ function BankAppContent() {
       guide: { screen: 'Panduan & Bantuan Nasabah', action: 'Membaca Panduan & FAQ Nasabah' },
       chat: { screen: 'Nusantara Chat', action: 'Membuka Ruang Pesan Nusantara Chat' },
       updates: { screen: 'Riwayat Update Website', action: 'Melihat Catatan Rilis & Update Terbaru' },
+      admin_updates: { screen: 'Riwayat Update Admin', action: 'Membaca Catatan Rilis Khusus Admin' },
       admin: { screen: 'Panel Admin Bank Nusantara', action: 'Mengelola Panel Admin Bank Nusantara' },
     };
     const meta = VIEW_LABELS[activeView] || {
@@ -292,6 +320,7 @@ function BankAppContent() {
         'guide',
         'chat',
         'updates',
+        'admin_updates',
         'admin',
       ];
       const safeView: AppNavView = validViews.includes(targetView as AppNavView)
@@ -734,6 +763,18 @@ function BankAppContent() {
         {activeView === 'updates' && (
           <UpdateHistoryView
             onNavigateToView={(view) => setActiveView(view)}
+          />
+        )}
+        {activeView === 'admin_updates' && (
+          <AdminUpdateHistoryView
+            onNavigateToView={(view) => setActiveView(view)}
+            onMarkAdminUpdatesRead={(latestId) => {
+              try {
+                window.localStorage.setItem('bn_last_seen_admin_update_id_v1', latestId);
+              } catch {
+                // ignore
+              }
+            }}
           />
         )}
       </main>

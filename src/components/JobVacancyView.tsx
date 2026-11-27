@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { JOB_VACANCIES_CATALOG } from '../data/featuresCatalog';
-import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
+import { formatRupiah, isAdminCardAccount, isUnlimitedNumber } from '../utils/bankUtils';
 import { JobVacancyItem } from '../types/bank';
 import { StopwatchDuelArena } from './StopwatchDuelArena';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
@@ -59,7 +59,7 @@ const JobVacancyCard: React.FC<JobVacancyCardProps> = React.memo(
     onUseVoucherUpgrade,
     onPayCashUpgrade,
   }) => {
-    const isUnlocked = userLevel >= job.requiredLevel;
+  const isUnlocked = isUnlimitedNumber(userLevel) || userLevel >= job.requiredLevel;
     const pct = Math.min(100, Math.round((currentClicks / effectiveTargetClicks) * 100));
     const remainingClicks = Math.max(0, effectiveTargetClicks - currentClicks);
 
@@ -349,8 +349,11 @@ export const JobVacancyView: React.FC = () => {
     };
   }, []);
 
-  const userLevel = currentAccount?.jobLevel || 1;
-  const userVouchers = currentAccount?.levelVouchers || 0;
+  const isAdminCard = isAdminCardAccount(currentAccount);
+  const userLevel = isAdminCard ? 999_999_999_999_999 : currentAccount?.jobLevel || 1;
+  const isLevelInfinity = isAdminCard || isUnlimitedNumber(userLevel);
+  const userVouchers = isAdminCard ? 999_999_999_999_999 : currentAccount?.levelVouchers || 0;
+  const isVoucherInfinity = isAdminCard || isUnlimitedNumber(userVouchers);
   const clickPower = Math.max(1, currentAccount?.clickPower || 1);
   const salaryMultiplier = Math.max(1, currentAccount?.salaryMultiplier || 1);
 
@@ -480,7 +483,11 @@ export const JobVacancyView: React.FC = () => {
     const res = upgradeJobLevelWithCash();
     setFeedback({
       type: res.success ? 'success' : 'error',
-      title: res.success ? `Naik ke Level ${res.newLevel}!` : 'Gagal Naik Level',
+      title: res.success
+        ? isUnlimitedNumber(res.newLevel)
+          ? 'Level Infinity (∞) Aktif!'
+          : `Naik ke Level ${res.newLevel}!`
+        : 'Gagal Naik Level',
       message: res.message,
     });
   }, [upgradeJobLevelWithCash]);
@@ -490,7 +497,11 @@ export const JobVacancyView: React.FC = () => {
       const res = useJobLevelVoucher(count);
       setFeedback({
         type: res.success ? 'success' : 'error',
-        title: res.success ? `Voucher Level Digunakan (Level ${res.newLevel})` : 'Voucher Kosong',
+        title: res.success
+          ? isUnlimitedNumber(res.newLevel)
+            ? 'Voucher & Level Infinity (∞)'
+            : `Voucher Level Digunakan (Level ${res.newLevel})`
+          : 'Voucher Kosong',
         message: res.message,
       });
     },
@@ -673,15 +684,27 @@ export const JobVacancyView: React.FC = () => {
               </span>
             </div>
 
-            <div className="p-3 rounded-2xl bg-slate-950/90 border-2 border-indigo-400/60 text-center">
-              <span className="text-[10px] font-mono uppercase text-indigo-300 block">
+            <div
+              className={`p-3 rounded-2xl bg-slate-950/90 border-2 text-center ${
+                isLevelInfinity ? 'border-amber-400/80 shadow-lg shadow-amber-500/10' : 'border-indigo-400/60'
+              }`}
+            >
+              <span
+                className={`text-[10px] font-mono uppercase block ${
+                  isLevelInfinity ? 'text-amber-300 font-bold' : 'text-indigo-300'
+                }`}
+              >
                 Level Karir
               </span>
-              <span className="text-xl font-black text-white font-mono block mt-0.5 tabular-nums">
-                LV.{userLevel}
+              <span
+                className={`text-xl font-black font-mono block mt-0.5 tabular-nums ${
+                  isLevelInfinity ? 'text-amber-300' : 'text-white'
+                }`}
+              >
+                {isLevelInfinity ? 'Level ∞' : `LV.${userLevel}`}
               </span>
               <span className="text-[9px] text-slate-400 block tabular-nums">
-                {unlockedCount}/25 Terbuka
+                {isLevelInfinity ? 'Semua 25/25 Terbuka' : `${unlockedCount}/25 Terbuka`}
               </span>
             </div>
 
@@ -690,7 +713,7 @@ export const JobVacancyView: React.FC = () => {
                 Voucher Level
               </span>
               <span className="text-xl font-black text-cyan-300 font-mono block mt-0.5 tabular-nums">
-                🎫 {userVouchers}
+                🎫 {isVoucherInfinity ? '∞' : userVouchers}
               </span>
             </div>
 
@@ -778,13 +801,23 @@ export const JobVacancyView: React.FC = () => {
                   PUSAT KENAIKAN LEVEL PEKERJAAN
                 </span>
                 <h3 className="font-black text-white text-base">
-                  Tingkatkan Level Karir (Level {userLevel} ➔ Level {userLevel + 1})
+                  {isLevelInfinity
+                    ? 'Level Infinity (∞) — Semua Lowongan Terbuka!'
+                    : `Tingkatkan Level Karir (Level ${userLevel} ➔ Level ${userLevel + 1})`}
                 </h3>
               </div>
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Semakin tinggi <strong>Level Pekerjaan</strong> Anda, semakin besar gaji &amp; Coin yang terbuka — hingga <strong>Rp 10.000.000 + Coin per target klik</strong> pada Level 60!
+              {isLevelInfinity ? (
+                <>
+                  Kartu Tier Admin Anda otomatis memiliki <strong>Level Infinity (∞)</strong> dan <strong>Voucher Level Infinity (∞)</strong>. Seluruh <strong>25 jenjang lowongan pekerjaan</strong> otomatis memenuhi syarat tanpa batas!
+                </>
+              ) : (
+                <>
+                  Semakin tinggi <strong>Level Pekerjaan</strong> Anda, semakin besar gaji &amp; Coin yang terbuka — hingga <strong>Rp 10.000.000 + Coin per target klik</strong> pada Level 60!
+                </>
+              )}
             </p>
 
             {/* Option A: Use Level Voucher (From Suit) */}
@@ -795,27 +828,33 @@ export const JobVacancyView: React.FC = () => {
                   <span>Cara 1: Pakai Voucher Level (Gratis!)</span>
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-200 font-mono font-bold text-[11px] tabular-nums">
-                  Milik Anda: {userVouchers} Voucher
+                  Milik Anda: {isVoucherInfinity ? '∞ Voucher' : `${userVouchers} Voucher`}
                 </span>
               </div>
               <p className="text-[11px] text-slate-300">
-                1 Voucher Level meningkatkan level Anda <strong>+1 Level</strong> tanpa memotong saldo!
+                {isVoucherInfinity
+                  ? 'Stok Voucher Level Anda bernilai ∞ selamanya dan tidak pernah berkurang saat dipakai.'
+                  : '1 Voucher Level meningkatkan level Anda +1 Level tanpa memotong saldo!'}
               </p>
               <div className="flex flex-wrap gap-2 pt-1">
                 <button
                   type="button"
                   onClick={() => handleUseVoucherUpgrade(1)}
-                  disabled={userVouchers < 1}
+                  disabled={!isVoucherInfinity && userVouchers < 1}
                   className={`flex-1 py-2.5 px-3 rounded-xl font-black text-xs cursor-pointer transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
-                    userVouchers >= 1
+                    isVoucherInfinity || userVouchers >= 1
                       ? 'bg-gradient-to-r from-cyan-400 to-teal-400 hover:from-cyan-300 hover:to-teal-300 text-slate-950 shadow-lg shadow-cyan-500/20'
                       : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                   }`}
                 >
                   <Ticket className="w-4 h-4 shrink-0" />
-                  <span>Pakai 1 Voucher (Lv.{userLevel + 1})</span>
+                  <span>
+                    {isLevelInfinity
+                      ? 'Voucher ∞ Aktif (Level ∞)'
+                      : `Pakai 1 Voucher (Lv.${userLevel + 1})`}
+                  </span>
                 </button>
-                {userVouchers > 1 && (
+                {!isVoucherInfinity && userVouchers > 1 && (
                   <button
                     type="button"
                     onClick={() => handleUseVoucherUpgrade(userVouchers)}
@@ -835,7 +874,7 @@ export const JobVacancyView: React.FC = () => {
                   <span>Cara 2: Bayar Langsung Rp 1.000.000</span>
                 </span>
                 <span className="font-mono font-bold text-amber-400 text-xs tabular-nums">
-                  Rp 1.000.000 / +1 Lv
+                  {isLevelInfinity ? 'Gratis • Level ∞' : 'Rp 1.000.000 / +1 Lv'}
                 </span>
               </div>
               <button
@@ -844,7 +883,11 @@ export const JobVacancyView: React.FC = () => {
                 className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-300 hover:to-yellow-400 text-slate-950 font-black text-xs cursor-pointer shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 whitespace-nowrap"
               >
                 <TrendingUp className="w-4 h-4 shrink-0" />
-                <span>Bayar Rp 1.000.000 ➔ Naik ke Level {userLevel + 1}</span>
+                <span>
+                  {isLevelInfinity
+                    ? 'Level Infinity (∞) Otomatis Terpenuhi'
+                    : `Bayar Rp 1.000.000 ➔ Naik ke Level ${userLevel + 1}`}
+                </span>
               </button>
             </div>
 
@@ -878,16 +921,20 @@ export const JobVacancyView: React.FC = () => {
                       const res = upgradeJobLevelWithDiamonds(1);
                       setFeedback({
                         type: res.success ? 'success' : 'error',
-                        title: res.success ? `Naik Permanen ke Level ${res.newLevel}!` : 'Saldo 💎 Kurang',
+                        title: res.success
+                          ? isUnlimitedNumber(res.newLevel)
+                            ? 'Level Infinity (∞) Aktif!'
+                            : `Naik Permanen ke Level ${res.newLevel}!`
+                          : 'Saldo 💎 Kurang',
                         message: res.message,
                         showTopUpShortcut: Boolean(res.insufficientDiamonds),
                       });
                     }}
                     className="flex-1 inline-flex items-center justify-center gap-1 py-2.5 px-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-xs cursor-pointer transition"
                   >
-                    <span>Pakai 25</span>
-                    <DiamondIcon tone="cyan" className="w-3.5 h-3.5" />
-                    <span>➔ Lv.{userLevel + 1}</span>
+                    <span>{isLevelInfinity ? 'Level ∞ & Diamond ∞ Aktif' : 'Pakai 25'}</span>
+                    {!isLevelInfinity && <DiamondIcon tone="cyan" className="w-3.5 h-3.5" />}
+                    {!isLevelInfinity && <span>➔ Lv.{userLevel + 1}</span>}
                   </button>
                   {currentAccount.cardTier !== 'admin' &&
                     (currentAccount.diamonds || 0) < 900_000_000_000_000 &&
@@ -906,22 +953,40 @@ export const JobVacancyView: React.FC = () => {
             )}
           </div>
 
-          {/* Summary Progress Bar for 25 Levels */}
-          <div className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2">
+          {/* Summary Progress Bar for 25 Levels (100% Gold Level ∞ for Admin Tier) */}
+          <div
+            className={`p-3.5 rounded-2xl border space-y-2 ${
+              isLevelInfinity
+                ? 'bg-amber-950/35 border-amber-400/50'
+                : 'bg-slate-950/80 border-slate-800'
+            }`}
+          >
             <div className="flex items-center justify-between text-[11px]">
-              <span className="font-bold text-slate-200">Progres 25 Lowongan Terbuka:</span>
-              <span className="font-mono font-black text-emerald-400 tabular-nums">
-                {unlockedCount} / 25 Pilihan
+              <span className="font-bold text-slate-200">
+                {isLevelInfinity ? 'Status Level Karir Admin:' : 'Progres 25 Lowongan Terbuka:'}
+              </span>
+              <span
+                className={`font-mono font-black tabular-nums ${
+                  isLevelInfinity ? 'text-amber-300' : 'text-emerald-400'
+                }`}
+              >
+                {isLevelInfinity ? 'Level ∞ (100% • 25/25 Terbuka)' : `${unlockedCount} / 25 Pilihan`}
               </span>
             </div>
             <div className="w-full h-2.5 rounded-full bg-slate-900 border border-slate-800 overflow-hidden p-0.5">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-amber-400"
-                style={{ width: `${Math.round((unlockedCount / 25) * 100)}%` }}
+                className={`h-full rounded-full ${
+                  isLevelInfinity
+                    ? 'bg-gradient-to-r from-amber-300 via-yellow-400 to-amber-500 shadow-[0_0_12px_rgba(251,191,36,0.65)]'
+                    : 'bg-gradient-to-r from-emerald-400 to-amber-400'
+                }`}
+                style={{ width: isLevelInfinity ? '100%' : `${Math.round((unlockedCount / 25) * 100)}%` }}
               />
             </div>
             <p className="text-[10px] text-slate-400">
-              Jenjang #1 (Rp 100rb • Lv.1) hingga #25 (Rp 10jt • Lv.60). Setiap pekerjaan memberi Uang Tunai &amp; Coin!
+              {isLevelInfinity
+                ? 'Semua syarat level pekerjaan otomatis terpenuhi oleh Kartu Tier Admin (Level ∞).'
+                : 'Jenjang #1 (Rp 100rb • Lv.1) hingga #25 (Rp 10jt • Lv.60). Setiap pekerjaan memberi Uang Tunai & Coin!'}
             </p>
           </div>
         </div>

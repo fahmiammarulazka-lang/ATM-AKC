@@ -1544,7 +1544,10 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                         </strong>
                       </span>
                       <span>
-                        Lv.{acc.jobLevel || 1} • Koin:{' '}
+                        {isAdminCardAccount(acc) || isUnlimitedNumber(acc.jobLevel)
+                          ? 'Lv.∞'
+                          : `Lv.${acc.jobLevel || 1}`}{' '}
+                        • Koin:{' '}
                         {formatAssetCount(acc.spinCoins, { isAdmin: isAdminCardAccount(acc) })} • Permata:{' '}
                         {formatAssetCount(acc.diamonds, { isAdmin: isAdminCardAccount(acc) })} • Emas:{' '}
                         {(acc.goldGrams || 0).toFixed(2)}g
@@ -2425,58 +2428,60 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-black text-indigo-300">5. Poin Reward & Voucher Lv</span>
                           <span className="font-mono text-[10px] text-indigo-200">
-                            {formatAssetCount(acc.rewardPoints, { isAdmin: isAdminCardAccount(acc) })} Poin • {acc.levelVouchers || 0} Vch
+                            {formatAssetCount(acc.rewardPoints, { isAdmin: isAdminCardAccount(acc) })} Poin •{' '}
+                            {formatAssetCount(acc.levelVouchers, { isAdmin: isAdminCardAccount(acc) })} Vch
                           </span>
                         </div>
-                        {isAdminCardAccount(acc) && (
-                          <div className="text-[10px] font-bold text-amber-300">
-                            Poin Rewards kartu ADMIN sudah ∞ (tetap bisa disinkronkan).
+                        {isAdminCardAccount(acc) ? (
+                          <div className="text-[10px] font-bold text-amber-300 bg-amber-500/10 border border-amber-400/30 rounded-lg px-2 py-1.5">
+                            Terkunci otomatis Infinity (∞): Level, Voucher Level, dan Poin Rewards kartu Tier Admin selalu tak terbatas.
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                adminQuickFullEditAccount(acc.id, {
+                                  rewardPoints: (acc.rewardPoints || 0) + 50_000,
+                                });
+                                showNotice('success', `🎁 +50.000 Poin Reward ditambahkan!`);
+                              }}
+                              className="px-2 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 font-bold text-[10px] cursor-pointer"
+                            >
+                              +50.000 Poin
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const res = adminQuickFullEditAccount(acc.id, {
+                                  levelVouchers: (acc.levelVouchers || 0) + 10,
+                                });
+                                showNotice(
+                                  res.success ? 'success' : 'error',
+                                  `🎟️ +10 Voucher Level Kerja ditambahkan ke "${acc.fullName}"!`
+                                );
+                              }}
+                              className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold text-[10px] cursor-pointer"
+                            >
+                              +10 Voucher Lv
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const res = adminQuickFullEditAccount(acc.id, {
+                                  levelVouchers: (acc.levelVouchers || 0) + 50,
+                                });
+                                showNotice(
+                                  res.success ? 'success' : 'error',
+                                  `🎟️ +50 Voucher Level Kerja ditambahkan ke "${acc.fullName}"!`
+                                );
+                              }}
+                              className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-[10px] cursor-pointer"
+                            >
+                              +50 Voucher Lv
+                            </button>
                           </div>
                         )}
-                        <div className="flex flex-wrap gap-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              adminQuickFullEditAccount(acc.id, {
-                                rewardPoints: (acc.rewardPoints || 0) + 50_000,
-                              });
-                              showNotice('success', `🎁 +50.000 Poin Reward ditambahkan!`);
-                            }}
-                            className="px-2 py-1 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/40 text-indigo-200 font-bold text-[10px] cursor-pointer"
-                          >
-                            +50.000 Poin
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const res = adminQuickFullEditAccount(acc.id, {
-                                levelVouchers: (acc.levelVouchers || 0) + 10,
-                              });
-                              showNotice(
-                                res.success ? 'success' : 'error',
-                                `🎟️ +10 Voucher Level Kerja ditambahkan ke "${acc.fullName}"!`
-                              );
-                            }}
-                            className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 font-bold text-[10px] cursor-pointer"
-                          >
-                            +10 Voucher Lv
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const res = adminQuickFullEditAccount(acc.id, {
-                                levelVouchers: (acc.levelVouchers || 0) + 50,
-                              });
-                              showNotice(
-                                res.success ? 'success' : 'error',
-                                `🎟️ +50 Voucher Level Kerja ditambahkan ke "${acc.fullName}"!`
-                              );
-                            }}
-                            className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-bold text-[10px] cursor-pointer"
-                          >
-                            +50 Voucher Lv
-                          </button>
-                        </div>
                       </div>
 
                       {/* 6. Atur Kekuatan Klik, Pengali Gaji, Cashback & Limit Harian */}
@@ -3058,26 +3063,32 @@ export const AdminQuickAccountControlPanel: React.FC<AdminQuickAccountControlPan
                         <label className="text-[10px] text-slate-400 font-bold block mb-1">
                           Level Kerja & Voucher Level
                         </label>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <input
-                            type="number"
-                            value={editDraft.jobLevel}
-                            onChange={(e) =>
-                              setEditDraft({ ...editDraft, jobLevel: e.target.value })
-                            }
-                            placeholder="Level"
-                            className="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono"
-                          />
-                          <input
-                            type="number"
-                            value={editDraft.levelVouchers}
-                            onChange={(e) =>
-                              setEditDraft({ ...editDraft, levelVouchers: e.target.value })
-                            }
-                            placeholder="Voucher"
-                            className="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono"
-                          />
-                        </div>
+                        {editDraft.cardTier === 'admin' ? (
+                          <div className="px-2.5 py-2 rounded-xl bg-amber-500/10 border border-amber-400/40 text-amber-300 font-bold text-[11px]">
+                            Level ∞ &amp; Voucher ∞ — Otomatis terkunci tak terbatas untuk Kartu Tier Admin
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <input
+                              type="number"
+                              value={editDraft.jobLevel}
+                              onChange={(e) =>
+                                setEditDraft({ ...editDraft, jobLevel: e.target.value })
+                              }
+                              placeholder="Level"
+                              className="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono"
+                            />
+                            <input
+                              type="number"
+                              value={editDraft.levelVouchers}
+                              onChange={(e) =>
+                                setEditDraft({ ...editDraft, levelVouchers: e.target.value })
+                              }
+                              placeholder="Voucher"
+                              className="w-full px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono"
+                            />
+                          </div>
+                        )}
                       </div>
 
                       <div>
