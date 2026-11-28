@@ -19,6 +19,7 @@ import {
   createEmptyStructuredAddress,
   validateStructuredAddress,
 } from '../data/indonesiaRegionsOffline';
+import { loadLobbySecurityPolicy } from '../utils/lobbySecurityPolicy';
 
 interface CardRegistrationModalProps {
   isOpen: boolean;
@@ -31,7 +32,7 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const { registerCard, accounts, enterLobbyCreatedAccountSession } = useBank();
+  const { registerCard, accounts } = useBank();
 
   // Step wizard: 1 (Data Diri), 2 (Buat PIN), 3 (Pilih Jenis Kartu), 4 (Konfirmasi & Kirim), 5 (Status Permohonan)
   const [step, setStep] = useState<number>(1);
@@ -53,24 +54,14 @@ export const CardRegistrationModal: React.FC<CardRegistrationModalProps> = ({
     ? accounts.find((a) => a.id === submittedAccountId) || null
     : null;
 
-  // Otomatis masuk ke Dashboard di HP nasabah begitu Admin klik "Setujui Kartu"
+  // Mode Privasi Lobi Ketat: matikan auto-masuk tanpa PIN; jika kartu disetujui saat modal terbuka, tutup modal agar pemilik login manual ber-PIN
   useEffect(() => {
     if (isOpen && step === 5 && trackedAccount && trackedAccount.cardStatus === 'active') {
-      enterLobbyCreatedAccountSession(trackedAccount.id);
-      const timer = window.setTimeout(() => {
-        onClose();
-      }, 650);
-      return () => window.clearTimeout(timer);
+      if (loadLobbySecurityPolicy().strictLobbyPrivacyMode) {
+        return;
+      }
     }
-  }, [
-    isOpen,
-    step,
-    trackedAccount,
-    trackedAccount?.id,
-    trackedAccount?.cardStatus,
-    enterLobbyCreatedAccountSession,
-    onClose,
-  ]);
+  }, [isOpen, step, trackedAccount]);
 
   if (!isOpen) return null;
 

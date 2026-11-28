@@ -19,6 +19,8 @@ import {
   mergeDismissedPopupIds,
   mergeDismissedWarningMaps,
 } from '../utils/dismissedReceiptStorage';
+import { loadLobbySecurityPolicy } from '../utils/lobbySecurityPolicy';
+import { loadJobFiveStageConfig } from '../utils/jobFiveStageUtils';
 import {
   auth,
   authPersistenceReady,
@@ -1626,6 +1628,25 @@ interface BankContextType {
     coinsEarned?: number;
     baseCoinsEarned?: number;
     bonusCoinsEarned?: number;
+    message: string;
+  };
+  completeFiveStageJob: (input: {
+    jobId: string;
+    jobTitle: string;
+    salary: number;
+    targetClicks: number;
+    requiredLevel: number;
+    coinReward?: number;
+    instantMode?: boolean;
+    useVoucher?: boolean;
+    completedStagesCount?: number;
+  }) => {
+    success: boolean;
+    paidAmount?: number;
+    extraSalaryBonus?: number;
+    coinsEarned?: number;
+    extraCoinBonus?: number;
+    extraXpEarned?: number;
     message: string;
   };
   upgradeJobLevelWithCash: () => { success: boolean; newLevel?: number; message: string };
@@ -3846,6 +3867,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 
   const [googleUser, setGoogleUser] = useState<GoogleUserSession | null>(null);
+  const googleUserRef = useRef<GoogleUserSession | null>(googleUser);
+  googleUserRef.current = googleUser;
   const [websitePopups, setWebsitePopups] = useState<WebsiteSystemPopupNotification[]>([]);
   const [dismissedReceiptsByAccount, setDismissedReceiptsByAccount] = useState<
     Record<string, AccountDismissedReceipts>
@@ -11436,6 +11459,16 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   ) => {
     if (!notificationsEnabledRef.current) return;
+
+    // Mode Privasi Lobi Ketat: blokir total push banner, suara notifikasi, dan notifikasi native saat layar masih di Lobi sebelum login PIN
+    const activeSession = googleUserRef.current;
+    const isInPreLoginLobby =
+      !activeSession ||
+      !activeSession.hasCompletedOnboarding ||
+      activeSession.isPinVerified === false;
+    if (isInPreLoginLobby && loadLobbySecurityPolicy().strictLobbyPrivacyMode) {
+      return;
+    }
 
     const resolvedMeta = inferNotificationMeta(title, message, meta);
     if (!isCategoryAlertEnabled(resolvedMeta.category)) return;
@@ -21439,39 +21472,18 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const nextTransactions = [depositTx, ...transactions];
     setTransactions(nextTransactions);
 
-    // Ensure onboarding state is also marked completed so user is never asked to activate/register again
-    if (!googleUser || !googleUser.hasCompletedOnboarding) {
-      const resolvedEmail = googleUser?.email || target.googleEmail || target.email || '';
-      const isRealGoogle = isRealGoogleLinkedEmail(resolvedEmail);
-      const nextAuthMode: FastBootSessionSnapshot['authMode'] =
-        googleUser?.authMode ||
-        (target.isOfficialAdminAccount
-          ? 'oa_account'
-          : target.isGuestAccount
-          ? 'guest'
-          : isRealGoogle
-          ? 'google'
-          : 'standard_account');
-      setGoogleUser({
-        email: resolvedEmail || 'nasabah@banknusantara.id',
-        name: googleUser?.name || target.fullName,
-        firebaseUid: googleUser?.firebaseUid || target.firebaseUid,
-        authMode: nextAuthMode,
-        loggedInAt: googleUser?.loggedInAt || new Date().toISOString(),
-        hasCompletedOnboarding: true,
-        isPinVerified: true,
-      });
-      persistActiveSessionToIdb({
-        authMode: nextAuthMode,
-        firebaseUid: googleUser?.firebaseUid || target.firebaseUid,
-        email: resolvedEmail,
-        name: googleUser?.name || target.fullName,
-        picture: googleUser?.picture,
-        activeAccountId: target.id,
-        isPinVerified: true,
-        hasCompletedOnboarding: true,
-        accountsPool: nextAccounts,
-      });
+    // Keamanan Lobi Anti-Curi: JANGAN pernah auto-masuk ke Dashboard dari layar Lobi tanpa verifikasi PIN 6 digit!
+    // Pemilik asli wajib login manual lewat No. Rekening + ID 16 Digit + PIN (atau Google + PIN).
+    const isStrictLobbyPrivacy = loadLobbySecurityPolicy().strictLobbyPrivacyMode;
+    const isAuthenticatedSession = Boolean(
+      googleUser &&
+        googleUser.hasCompletedOnboarding &&
+        googleUser.isPinVerified !== false
+    );
+
+    if (!isStrictLobbyPrivacy && !googleUser) {
+      // Tetap wajibkan verifikasi PIN meski mode ketat dimatikan
+      console.info('Kartu disetujui Admin; menunggu pemilik masuk manual dengan PIN.');
     }
 
     // Immediate 1-click permanent flush to Server & Cloud Firestore so background sync never reverts it
@@ -21480,6 +21492,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       transactions: nextTransactions,
     });
 
+    // Simpan notifikasi persetujuan secara privat khusus untuk pemilik kartu agar baru tampil aman DI DALAM Dashboard setelah login PIN
     addNotification(
       'Kartu Disetujui Admin & Siap Digunakan! 🎉',
       `Selamat! Pembuatan ${CARD_TIER_CONFIGS[target.cardTier].nameIndo} (${finalAccountNumber}) telah disetujui Admin dan kini aktif permanen.`,
@@ -21489,17 +21502,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         targetView: 'dashboard',
         targetDashboardTab: 'ringkasan',
         accountId,
+        privateAccountOnly: true,
       }
     );
 
-    try {
-      confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
-    } catch { /* empty */ }
+    if (isAuthenticatedSession) {
+      try {
+        confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+      } catch { /* empty */ }
+      playAtmSound('success');
+    }
 
-    playAtmSound('success');
     return {
       success: true,
-      message: `Kartu ${target.fullName} (${finalAccountNumber}) berhasil diaktifkan permanen!`,
+      message: `Kartu ${target.fullName} (${finalAccountNumber}) berhasil diaktifkan permanen! Pemilik dapat masuk secara aman melalui Login Ke Akun dengan PIN.`,
     };
   };
 
@@ -28023,6 +28039,210 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         message: `Progres kerja: ${nextClicks} / ${targetClicks} klik.`,
       };
     }
+  };
+
+  // Penyelesaian Lengkap Sistem 5 Tahap Kerja Interaktif (Bonus Ekstra Gaji %, Coin, & XP Level Akun + Selesai Instan 1-Klik)
+  const completeFiveStageJob = (input: {
+    jobId: string;
+    jobTitle: string;
+    salary: number;
+    targetClicks: number;
+    requiredLevel: number;
+    coinReward?: number;
+    instantMode?: boolean;
+    useVoucher?: boolean;
+    completedStagesCount?: number;
+  }): {
+    success: boolean;
+    paidAmount?: number;
+    extraSalaryBonus?: number;
+    coinsEarned?: number;
+    extraCoinBonus?: number;
+    extraXpEarned?: number;
+    message: string;
+  } => {
+    if (!currentAccount) {
+      return {
+        success: false,
+        message: 'Silakan login ke kartu rekening terlebih dahulu.',
+      };
+    }
+
+    const isAdminTier = isAdminCardAccount(currentAccount);
+    const userLevel = currentAccount.jobLevel || 1;
+    if (!isAdminTier && userLevel < input.requiredLevel) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Pekerjaan ini membutuhkan Level ${input.requiredLevel} (Level Anda saat ini: Level ${userLevel}).`,
+      };
+    }
+
+    const shouldConsumeVoucher = Boolean(input.instantMode && input.useVoucher && !isAdminTier);
+    const currentVouchers = currentAccount.levelVouchers || 0;
+    const isVoucherUnlim = isAdminTier || isUnlimitedNumber(currentVouchers);
+    if (shouldConsumeVoucher && !isVoucherUnlim && currentVouchers < 1) {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: 'Stok Voucher Level Anda habis. Selesaikan 5 tahap secara reguler atau kumpulkan Voucher terlebih dahulu.',
+      };
+    }
+
+    const stageCfg = loadJobFiveStageConfig();
+    const mult = Math.max(1, currentAccount.salaryMultiplier || 1);
+    const baseSalary = Math.round(input.salary * mult);
+    const extraSalaryBonus = Math.round(
+      (baseSalary * Math.max(0, stageCfg.extraSalaryBonusPercent)) / 100
+    );
+    const finalSalary = baseSalary + extraSalaryBonus;
+
+    const baseCoins =
+      (input.coinReward || 0) > 0
+        ? (input.coinReward as number)
+        : Math.max(2, Math.round(input.salary / 50_000));
+    const baseWithSalaryMult = Math.max(1, Math.round(baseCoins * mult));
+    const adminCoinMult = jobCoinBonusConfig.enabled
+      ? Math.max(0.1, jobCoinBonusConfig.coinMultiplier || 1)
+      : 1;
+    const adminExtraCoins = jobCoinBonusConfig.enabled
+      ? Math.max(0, Math.round(jobCoinBonusConfig.extraBonusCoins || 0))
+      : 0;
+    const stageExtraCoins = Math.max(0, Math.round(stageCfg.extraCoinBonus || 0));
+    const totalCoinsCredited =
+      Math.max(1, Math.round(baseWithSalaryMult * adminCoinMult)) +
+      adminExtraCoins +
+      stageExtraCoins;
+
+    const extraXpEarned = Math.max(0, Math.round(stageCfg.extraAccountXpBonus || 0));
+    const stampMs = Date.now();
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    let didAccountLevelUp = false;
+    let newAccountLevelAfter = currentAccount.accountLevel || 1;
+    let prevAccountLevelBefore = currentAccount.accountLevel || 1;
+
+    const updatedAccounts = latestPool.map((a) => {
+      if (a.id !== currentAccount.id) return a;
+      const isUnlimBal = isAdminTier || isUnlimitedNumber(a.balance);
+      const isUnlimCoin = isAdminTier || isUnlimitedNumber(a.spinCoins);
+      const isUnlimPts = isAdminTier || isUnlimitedNumber(a.rewardPoints);
+      const nextMap = { ...(a.jobClickProgress || {}), [input.jobId]: 0 };
+
+      let nextXp = a.accountXp || 0;
+      let nextAccLevel = a.accountLevel || 1;
+      if (!isAdminTier && extraXpEarned > 0) {
+        const beforeSnap = getAccountLevelSnapshot(a);
+        prevAccountLevelBefore = beforeSnap.level;
+        nextXp = Math.min(
+          MAX_REGULAR_CUMULATIVE_XP,
+          Math.max(beforeSnap.xp, 0) + extraXpEarned
+        );
+        const computed = computeLevelFromXp(nextXp);
+        nextAccLevel = Math.max(beforeSnap.level, computed.level);
+        didAccountLevelUp = nextAccLevel > beforeSnap.level;
+        newAccountLevelAfter = nextAccLevel;
+      }
+
+      const nextVouchers =
+        shouldConsumeVoucher && !isVoucherUnlim
+          ? Math.max(0, (a.levelVouchers || 0) - 1)
+          : a.levelVouchers || 0;
+
+      return normalizeAdminAccountAssets({
+        ...a,
+        balance: isUnlimBal ? UNLIMITED_BALANCE : a.balance + finalSalary,
+        spinCoins: isUnlimCoin ? UNLIMITED_BALANCE : (a.spinCoins || 0) + totalCoinsCredited,
+        jobClickProgress: nextMap,
+        totalJobsCompleted: (a.totalJobsCompleted || 0) + 1,
+        totalJobEarnings: (a.totalJobEarnings || 0) + finalSalary,
+        levelVouchers: nextVouchers,
+        accountXp: isAdminTier ? a.accountXp : nextXp,
+        accountLevel: isAdminTier ? a.accountLevel : nextAccLevel,
+        rewardPoints: isUnlimPts
+          ? UNLIMITED_BALANCE
+          : (a.rewardPoints || 0) + Math.max(15, Math.round(finalSalary / 10_000)),
+        accountUpdatedAtMs: stampMs,
+      });
+    });
+
+    accountsRef.current = updatedAccounts;
+    latestServerAccountsRef.current = updatedAccounts;
+    setAccounts(updatedAccounts);
+
+    const modeBadge = input.instantMode
+      ? isAdminTier
+        ? 'Selesai Instan 1-Klik Admin'
+        : 'Selesai Instan 1-Klik Voucher'
+      : `Lulus ${input.completedStagesCount || 5} Tahap Kerja`;
+
+    const salaryTx: Transaction = {
+      id: `tx-job5-${stampMs}-${Math.floor(Math.random() * 999)}`,
+      accountId: currentAccount.id,
+      type: 'setor',
+      title: `💼 Gaji 5 Tahap Cair: ${input.jobTitle} (${modeBadge})`,
+      amount: finalSalary,
+      coinAmount: totalCoinsCredited,
+      recipientAccount: currentAccount.accountNumber,
+      recipientName: currentAccount.fullName,
+      description: `Gaji Pokok ${formatRupiah(baseSalary)} + Bonus 5 Tahap ${formatRupiah(
+        extraSalaryBonus
+      )} • +${totalCoinsCredited.toLocaleString('id-ID')} Coin • +${extraXpEarned.toLocaleString(
+        'id-ID'
+      )} XP Level Akun`,
+      referenceNo: `JOB5-${String(stampMs).slice(-6)}`,
+      timestamp: new Date().toISOString(),
+      status: 'success',
+      category: 'setor_tunai',
+    };
+    const nextTxs = [salaryTx, ...transactions];
+    setTransactions(nextTxs);
+    flushMasterStateToCloud({ accounts: updatedAccounts, transactions: nextTxs });
+
+    if (currentAccount.firebaseUid || currentAccount.googleEmail || currentAccount.email) {
+      void syncCloudUserProfile(
+        {
+          uid: currentAccount.firebaseUid,
+          email: currentAccount.googleEmail || currentAccount.email,
+          fallbackEmail: currentAccount.email,
+        },
+        { lastJobSalaryAtMs: stampMs },
+        updatedAccounts
+      );
+    }
+
+    playAtmSound('cash');
+    try {
+      confetti({ particleCount: 55, spread: 60, origin: { y: 0.7 } });
+    } catch { /* empty */ }
+
+    recordMissionActivities(currentAccount.id, [
+      { metricKey: 'job_clicks', delta: Math.max(1, input.targetClicks) },
+      { metricKey: 'job_complete', delta: 1 },
+    ]);
+
+    if (didAccountLevelUp) {
+      pushAppToast({
+        type: 'success',
+        title: `Selamat! Level Akun Naik ke Lv.${newAccountLevelAfter}`,
+        message: `Bonus +${extraXpEarned.toLocaleString('id-ID')} XP dari 5 Tahap Kerja menaikkan level akun dari Lv.${prevAccountLevelBefore} ke Lv.${newAccountLevelAfter}!`,
+      });
+    }
+
+    return {
+      success: true,
+      paidAmount: finalSalary,
+      extraSalaryBonus,
+      coinsEarned: totalCoinsCredited,
+      extraCoinBonus: stageExtraCoins,
+      extraXpEarned,
+      message: `${modeBadge} selesai! Gaji ${formatRupiah(
+        finalSalary
+      )} (termasuk bonus +${formatRupiah(
+        extraSalaryBonus
+      )}), +${totalCoinsCredited.toLocaleString(
+        'id-ID'
+      )} Coin, dan +${extraXpEarned.toLocaleString('id-ID')} XP Level Akun langsung masuk ke rekening Anda.`,
+    };
   };
 
   // Helper sinkronisasi permanen untuk pembaruan akun (Level Pekerjaan, Voucher, Diamond, Slot Keluarga)
@@ -41861,6 +42081,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         adminCleanupAutoDdUpdates,
         adminAddCustomFeature,
         workJobClick,
+        completeFiveStageJob,
         upgradeJobLevelWithCash,
         useJobLevelVoucher,
         playSuitForLevelVoucher,

@@ -26,6 +26,18 @@ import { formatRupiah, isAdminCardAccount, isUnlimitedNumber } from '../utils/ba
 import { JobVacancyItem } from '../types/bank';
 import { StopwatchDuelArena } from './StopwatchDuelArena';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
+import { JobFiveStageModal } from './JobFiveStageModal';
+import {
+  JobFiveStageAdminConfig,
+  JobStageId,
+  JobStageProgressEntry,
+  clearJobStageProgress,
+  getEnabledStageList,
+  loadAccountJobStageProgressMap,
+  loadJobFiveStageConfig,
+  subscribeJobFiveStageConfig,
+  subscribeJobStageProgress,
+} from '../utils/jobFiveStageUtils';
 
 type JobFilterMode = 'all' | 'unlocked' | 'locked' | 'pemula' | 'menengah' | 'eksekutif';
 
@@ -37,6 +49,11 @@ interface JobVacancyCardProps {
   effectiveTargetClicks: number;
   effectiveSalary: number;
   effectiveCoins: number;
+  extraSalaryBonusPercent: number;
+  extraCoinBonus: number;
+  extraAccountXpBonus: number;
+  completedStagesCount: number;
+  totalActiveStagesCount: number;
   currentClicks: number;
   completionFlashNonce: number;
   onWorkClick: (job: JobVacancyItem) => void;
@@ -49,19 +66,27 @@ const JobVacancyCard: React.FC<JobVacancyCardProps> = React.memo(
     job,
     userLevel,
     userVouchers,
-    clickPower,
     effectiveTargetClicks,
     effectiveSalary,
     effectiveCoins,
-    currentClicks,
+    extraSalaryBonusPercent,
+    extraCoinBonus,
+    extraAccountXpBonus,
+    completedStagesCount,
+    totalActiveStagesCount,
     completionFlashNonce,
     onWorkClick,
     onUseVoucherUpgrade,
     onPayCashUpgrade,
   }) => {
-  const isUnlocked = isUnlimitedNumber(userLevel) || userLevel >= job.requiredLevel;
-    const pct = Math.min(100, Math.round((currentClicks / effectiveTargetClicks) * 100));
-    const remainingClicks = Math.max(0, effectiveTargetClicks - currentClicks);
+    const isUnlocked = isUnlimitedNumber(userLevel) || userLevel >= job.requiredLevel;
+    const stagePct = Math.min(
+      100,
+      Math.round((completedStagesCount / Math.max(1, totalActiveStagesCount)) * 100)
+    );
+    const totalSalaryWithBonus =
+      effectiveSalary + Math.round((effectiveSalary * Math.max(0, extraSalaryBonusPercent)) / 100);
+    const totalCoinsWithBonus = effectiveCoins + Math.max(0, extraCoinBonus);
 
     return (
       <div
@@ -107,19 +132,19 @@ const JobVacancyCard: React.FC<JobVacancyCardProps> = React.memo(
             </span>
           </div>
 
-          {/* Dual Money & Coin Reward Box */}
+          {/* Dual Money & Coin + 5-Stage Bonus Reward Box */}
           <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 space-y-2">
             <span className="text-[10px] font-mono uppercase text-slate-400 block">
-              HADIAH CAIR OTOMATIS (UANG + COIN):
+              TOTAL CAIR 5 TAHAP (+{extraSalaryBonusPercent}% GAJI, COIN &amp; +{extraAccountXpBonus} XP):
             </span>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="text-lg sm:text-xl font-black text-emerald-400 font-mono flex items-center gap-1.5 tabular-nums">
                 <Banknote className="w-4 h-4 text-emerald-300 shrink-0" />
-                <span>{formatRupiah(effectiveSalary)}</span>
+                <span>{formatRupiah(totalSalaryWithBonus)}</span>
               </span>
               <span className="px-2.5 py-1 rounded-xl bg-amber-400/15 border border-amber-400/40 text-amber-300 font-mono font-black text-xs flex items-center gap-1 tabular-nums">
                 <Coins className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span>+{effectiveCoins.toLocaleString('id-ID')} Coin</span>
+                <span>+{totalCoinsWithBonus.toLocaleString('id-ID')} Coin</span>
               </span>
             </div>
           </div>
@@ -138,19 +163,19 @@ const JobVacancyCard: React.FC<JobVacancyCardProps> = React.memo(
           </div>
         </div>
 
-        {/* Bottom Click Progress & Work Button */}
+        {/* Bottom 5-Stage Progress & Launch Interactive Modal Button */}
         <div className="space-y-3 pt-2 border-t border-slate-800/80">
           <div>
             <div className="flex items-center justify-between text-xs mb-1.5">
-              <span className="text-slate-300 font-bold">Progres Klik Kerja:</span>
+              <span className="text-slate-300 font-bold">Progres {totalActiveStagesCount} Tahap Kerja:</span>
               <span className="font-mono font-black text-amber-300 tabular-nums">
-                {currentClicks.toLocaleString('id-ID')} / {effectiveTargetClicks.toLocaleString('id-ID')} ({pct}%)
+                {completedStagesCount} / {totalActiveStagesCount} Tahap ({stagePct}%)
               </span>
             </div>
             <div className="w-full h-3 rounded-full bg-slate-900 border border-slate-800 overflow-hidden p-0.5">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-teal-400 to-amber-400"
-                style={{ width: `${pct}%` }}
+                style={{ width: `${stagePct}%` }}
               />
             </div>
           </div>
@@ -163,7 +188,9 @@ const JobVacancyCard: React.FC<JobVacancyCardProps> = React.memo(
             >
               <MousePointerClick className="w-4 h-4 shrink-0" />
               <span className="tabular-nums">
-                KLIK KERJA (+{clickPower}) • SISA {remainingClicks.toLocaleString('id-ID')}
+                {completedStagesCount > 0
+                  ? `LANJUT TAHAP ${Math.min(totalActiveStagesCount, completedStagesCount + 1)}/${totalActiveStagesCount}`
+                  : `MULAI ${totalActiveStagesCount} TAHAP KERJA`}
               </span>
             </button>
           ) : (
@@ -208,6 +235,7 @@ export const JobVacancyView: React.FC = () => {
   const {
     currentAccount,
     workJobClick,
+    completeFiveStageJob,
     upgradeJobLevelWithCash,
     useJobLevelVoucher,
     upgradeJobLevelWithDiamonds,
@@ -216,6 +244,28 @@ export const JobVacancyView: React.FC = () => {
     playSuitForLevelVoucher,
     jobCoinBonusConfig,
   } = useBank();
+
+  const [fiveStageConfig, setFiveStageConfig] = useState<JobFiveStageAdminConfig>(() =>
+    loadJobFiveStageConfig()
+  );
+  const [activeFiveStageJob, setActiveFiveStageJob] = useState<JobVacancyItem | null>(null);
+  const [stageProgressMap, setStageProgressMap] = useState<Record<string, JobStageProgressEntry>>(
+    () => (currentAccount?.id ? loadAccountJobStageProgressMap(currentAccount.id) : {})
+  );
+
+  useEffect(() => {
+    return subscribeJobFiveStageConfig(setFiveStageConfig);
+  }, []);
+
+  useEffect(() => {
+    if (!currentAccount?.id) {
+      setStageProgressMap({});
+      return;
+    }
+    const refresh = () => setStageProgressMap(loadAccountJobStageProgressMap(currentAccount.id));
+    refresh();
+    return subscribeJobStageProgress(refresh);
+  }, [currentAccount?.id]);
 
   const [feedback, setFeedback] = useState<{
     type: 'success' | 'error' | 'info' | 'salary';
@@ -397,86 +447,19 @@ export const JobVacancyView: React.FC = () => {
     }
   }, []);
 
-  const handleWorkClick = useCallback(
+  const handleOpenFiveStageJob = useCallback(
     (job: JobVacancyItem) => {
-      const effectiveTargetClicks = job.targetClicks * targetScaleRef.current;
-      const jobCoins = job.coinReward ?? Math.max(2, Math.round(job.salary / 50_000));
-
       if (userLevel < job.requiredLevel) {
-        const res = latestWorkJobClickRef.current(
-          job.id,
-          job.salary,
-          effectiveTargetClicks,
-          job.requiredLevel,
-          job.title,
-          jobCoins,
-          1
-        );
         setFeedback({
           type: 'error',
           title: 'Level Belum Mencukupi',
-          message: res.message,
+          message: `Pekerjaan "${job.title}" membutuhkan Level ${job.requiredLevel} (Level Anda saat ini: Level ${userLevel}).`,
         });
         return;
       }
-
-      const prevLocal = localClicksRef.current[job.id] ?? 0;
-      const nextLocal = prevLocal + clickPower;
-      pendingMetaRef.current[job.id] = { job, targetClicks: effectiveTargetClicks };
-
-      if (nextLocal >= effectiveTargetClicks) {
-        if (flushTimersRef.current[job.id]) {
-          window.clearTimeout(flushTimersRef.current[job.id]);
-          delete flushTimersRef.current[job.id];
-        }
-        const totalClicksToSend = (pendingDeltaRef.current[job.id] || 0) + 1;
-        pendingDeltaRef.current[job.id] = 0;
-        localClicksRef.current[job.id] = 0;
-        setLocalClicksMap((prev) => ({ ...prev, [job.id]: 0 }));
-
-        const res = latestWorkJobClickRef.current(
-          job.id,
-          job.salary,
-          effectiveTargetClicks,
-          job.requiredLevel,
-          job.title,
-          jobCoins,
-          totalClicksToSend
-        );
-
-        if (res.success && res.completed) {
-          const paid = res.paidAmount || job.salary;
-          const coins = res.coinsEarned || jobCoins;
-          setCompletionFlashMap((prev) => ({ ...prev, [job.id]: Date.now() }));
-          window.setTimeout(() => {
-            setCompletionFlashMap((prev) => {
-              if (!prev[job.id]) return prev;
-              const copy = { ...prev };
-              delete copy[job.id];
-              return copy;
-            });
-          }, 1400);
-
-          setFeedback({
-            type: 'salary',
-            title: `🎉 GAJIAN & COIN CAIR OTOMATIS: ${formatRupiah(paid)} + ${coins.toLocaleString('id-ID')} Coin!`,
-            message: res.message,
-          });
-        }
-      } else {
-        pendingDeltaRef.current[job.id] = (pendingDeltaRef.current[job.id] || 0) + 1;
-        localClicksRef.current[job.id] = nextLocal;
-        setLocalClicksMap((prev) => ({ ...prev, [job.id]: nextLocal }));
-
-        if (flushTimersRef.current[job.id]) {
-          window.clearTimeout(flushTimersRef.current[job.id]);
-        }
-        flushTimersRef.current[job.id] = window.setTimeout(() => {
-          flushJobDelta(job, effectiveTargetClicks);
-        }, 350);
-      }
+      setActiveFiveStageJob(job);
     },
-    [clickPower, flushJobDelta, userLevel]
+    [userLevel]
   );
 
   const handlePayCashUpgrade = useCallback(() => {
@@ -1301,7 +1284,14 @@ export const JobVacancyView: React.FC = () => {
           {filteredAndSortedJobs.map((job) => {
             const effectiveTargetClicks = job.targetClicks * targetScale;
             const currentClicks =
-              localClicksMap[job.id] ?? currentAccount.jobClickProgress?.[job.id] ?? 0;
+              stageProgressMap[job.id]?.stage2Clicks ??
+              localClicksMap[job.id] ??
+              currentAccount.jobClickProgress?.[job.id] ??
+              0;
+            const enabledStageIds = getEnabledStageList(fiveStageConfig);
+            const completedStagesForJob = (stageProgressMap[job.id]?.completedStages || []).filter(
+              (id) => enabledStageIds.includes(id)
+            );
             const effectiveSalary = job.salary * salaryMultiplier;
             const baseCoins = job.coinReward ?? Math.max(2, Math.round(job.salary / 50_000));
             const baseWithSalaryMult = Math.max(1, Math.round(baseCoins * salaryMultiplier));
@@ -1318,9 +1308,14 @@ export const JobVacancyView: React.FC = () => {
                 effectiveTargetClicks={effectiveTargetClicks}
                 effectiveSalary={effectiveSalary}
                 effectiveCoins={effectiveCoins}
+                extraSalaryBonusPercent={fiveStageConfig.extraSalaryBonusPercent}
+                extraCoinBonus={fiveStageConfig.extraCoinBonus}
+                extraAccountXpBonus={fiveStageConfig.extraAccountXpBonus}
+                completedStagesCount={completedStagesForJob.length}
+                totalActiveStagesCount={enabledStageIds.length}
                 currentClicks={currentClicks}
                 completionFlashNonce={completionFlashMap[job.id] || 0}
-                onWorkClick={handleWorkClick}
+                onWorkClick={handleOpenFiveStageJob}
                 onUseVoucherUpgrade={handleUseVoucherUpgrade}
                 onPayCashUpgrade={handlePayCashUpgrade}
               />
@@ -1328,6 +1323,84 @@ export const JobVacancyView: React.FC = () => {
           })}
         </div>
       </div>
+
+      {/* MODAL INTERAKTIF LAYAR PENUH 5 TAHAP KERJA */}
+      {activeFiveStageJob && (
+        <JobFiveStageModal
+          job={activeFiveStageJob}
+          accountId={currentAccount.id}
+          config={fiveStageConfig}
+          initialCompletedStages={stageProgressMap[activeFiveStageJob.id]?.completedStages || []}
+          initialStage2Clicks={
+            stageProgressMap[activeFiveStageJob.id]?.stage2Clicks ??
+            localClicksMap[activeFiveStageJob.id] ??
+            currentAccount.jobClickProgress?.[activeFiveStageJob.id] ??
+            0
+          }
+          effectiveTargetClicks={activeFiveStageJob.targetClicks * targetScale}
+          clickPower={clickPower}
+          baseSalary={activeFiveStageJob.salary * salaryMultiplier}
+          baseCoins={(() => {
+            const base =
+              activeFiveStageJob.coinReward ??
+              Math.max(2, Math.round(activeFiveStageJob.salary / 50_000));
+            const withMult = Math.max(1, Math.round(base * salaryMultiplier));
+            return Math.max(1, Math.round(withMult * adminCoinMult)) + adminExtraCoins;
+          })()}
+          isAdminCard={isAdminCard}
+          userVouchers={userVouchers}
+          isVoucherInfinity={isVoucherInfinity}
+          onClose={() => setActiveFiveStageJob(null)}
+          onStageProgressSaved={(completed: JobStageId[], s2Clicks?: number) => {
+            setStageProgressMap((prev) => ({
+              ...prev,
+              [activeFiveStageJob.id]: {
+                completedStages: completed,
+                stage2Clicks: s2Clicks,
+                updatedAt: new Date().toISOString(),
+              },
+            }));
+          }}
+          onCompleteJob={({ instantMode, useVoucher, completedStagesCount }) => {
+            const jobCoins =
+              activeFiveStageJob.coinReward ??
+              Math.max(2, Math.round(activeFiveStageJob.salary / 50_000));
+            const res = completeFiveStageJob({
+              jobId: activeFiveStageJob.id,
+              jobTitle: activeFiveStageJob.title,
+              salary: activeFiveStageJob.salary,
+              targetClicks: activeFiveStageJob.targetClicks * targetScale,
+              requiredLevel: activeFiveStageJob.requiredLevel,
+              coinReward: jobCoins,
+              instantMode,
+              useVoucher,
+              completedStagesCount,
+            });
+            if (res.success) {
+              clearJobStageProgress(currentAccount.id, activeFiveStageJob.id);
+              setStageProgressMap((prev) => {
+                const copy = { ...prev };
+                delete copy[activeFiveStageJob.id];
+                return copy;
+              });
+              setCompletionFlashMap((prev) => ({
+                ...prev,
+                [activeFiveStageJob.id]: Date.now(),
+              }));
+              setFeedback({
+                type: 'salary',
+                title: `🎉 GAJIAN 5 TAHAP CAIR: ${formatRupiah(
+                  res.paidAmount || activeFiveStageJob.salary
+                )} + ${(res.coinsEarned || jobCoins).toLocaleString('id-ID')} Coin + ${(
+                  res.extraXpEarned || 0
+                ).toLocaleString('id-ID')} XP!`,
+                message: res.message,
+              });
+            }
+            return res;
+          }}
+        />
+      )}
     </div>
   );
 };

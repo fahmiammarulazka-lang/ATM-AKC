@@ -150,6 +150,7 @@ import { AdminDashboardEffectsPanel } from './AdminDashboardEffectsPanel';
 import { AdminDevRolesPanel } from './AdminDevRolesPanel';
 import { AdminUniversalGachaPanel } from './AdminUniversalGachaPanel';
 import { AdminJobCoinBonusCard } from './AdminJobCoinBonusCard';
+import { AdminLobbyPrivacyCard } from './AdminLobbyPrivacyCard';
 import { AccountDeletion10StepModal } from './AccountDeletion10StepModal';
 import { AdminBanStudioView } from './AdminBanStudioView';
 import { AdminDebtManagementTab } from './AdminDebtManagementTab';
@@ -9370,7 +9371,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
 
       {/* ================= ADMIN TAB 1: VERIFIKASI KARTU ================= */}
       {activeAdminTab === 'cards' && (
-        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+        <div className="space-y-4">
+          <AdminLobbyPrivacyCard />
+          <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-bold text-white text-base flex items-center gap-2">
@@ -9441,6 +9444,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
               })}
             </div>
           )}
+          </div>
         </div>
       )}
 

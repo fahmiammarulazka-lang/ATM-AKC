@@ -72,10 +72,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     guestLocalAccounts,
     deviceLobbyGuestAccount,
     canCreateLobbyGuestOnThisDevice,
-    deviceLobbyCreatedAccount,
     canCreateLobbyRegularAccountOnThisDevice,
     registerLobbyStandaloneAccount,
-    enterLobbyCreatedAccountSession,
     linkCurrentAccountWithGooglePopup,
     registerGuestRegularCard,
     loginToGuestAccountWithPin,
@@ -168,6 +166,10 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   const [forgotPinReason, setForgotPinReason] = useState('');
   const [showForgotPinBox, setShowForgotPinBox] = useState(false);
   const [forgotPinStatusMsg, setForgotPinStatusMsg] = useState<string | null>(null);
+  const [forgotPinVerifyNik, setForgotPinVerifyNik] = useState('');
+  const [forgotPinVerifySecondary, setForgotPinVerifySecondary] = useState('');
+  const [forgotPinOwnerVerified, setForgotPinOwnerVerified] = useState(false);
+  const [forgotPinVerifyError, setForgotPinVerifyError] = useState<string | null>(null);
 
   // Stage 2B: New Google User -> Create Card (Otomatis Kartu Reguler, Saldo Awal Rp 0, Alamat Wilayah Indonesia Berjenjang)
   const [fullName, setFullName] = useState('');
@@ -234,33 +236,14 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
       const used = activeTargetAccount.failedPinAttempts || 0;
       setRemainingPinTries(Math.max(0, 5 - used));
     }
+    setForgotPinOwnerVerified(false);
+    setForgotPinVerifyNik('');
+    setForgotPinVerifySecondary('');
+    setForgotPinVerifyError(null);
   }, [activeTargetAccount]);
 
-  // Live reference untuk akun baru yang dibuat di perangkat ini (selalu ambil status terbaru dari array accounts Cloud/Local)
-  const liveSummaryTargetAccount =
-    (newlyCreatedAccountSummary &&
-      accounts.find((a) => a.id === newlyCreatedAccountSummary.id)) ||
-    deviceLobbyCreatedAccount ||
-    newlyCreatedAccountSummary ||
-    null;
-
-  // Otomatis masuk ke Dashboard secara real-time di HP nasabah begitu Admin klik "Setujui Kartu"
-  useEffect(() => {
-    if (
-      liveSummaryTargetAccount &&
-      liveSummaryTargetAccount.cardStatus === 'active' &&
-      (lobbyMode === 'create_account' || Boolean(newlyCreatedAccountSummary))
-    ) {
-      enterLobbyCreatedAccountSession(liveSummaryTargetAccount.id);
-    }
-  }, [
-    liveSummaryTargetAccount,
-    liveSummaryTargetAccount?.id,
-    liveSummaryTargetAccount?.cardStatus,
-    lobbyMode,
-    newlyCreatedAccountSummary,
-    enterLobbyCreatedAccountSession,
-  ]);
+  // Kredensial sekali tampil HANYA untuk sesi pendaftaran yang baru saja selesai dikirim (tidak pernah dimuat ulang dari perangkat)
+  const oneTimeCreatedAccountSummary = newlyCreatedAccountSummary;
 
   // Ticker 1 detik untuk hitung mundur Kunci Login 1 Hari (24 Jam) akibat salah PIN 5x
   const [loginLockNowMs, setLoginLockNowMs] = useState<number>(() => Date.now());
@@ -661,7 +644,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
           Pilih Metode Masuk (5 Jalur Resmi)
         </span>
         <span className="text-[10px] font-mono tabular-nums text-emerald-300">
-          Buat Akun: {deviceLobbyCreatedAccount ? '1/1' : '0/1'} · Guest: {guestLocalAccounts.length}
+          Privasi Lobi Ketat · Wajib PIN
         </span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 p-1.5 rounded-2xl bg-slate-950/95 border border-slate-700/90 shadow-inner">
@@ -762,7 +745,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   ) {
     const selectedGuestAccount =
       guestLocalAccounts.find((g) => g.id === selectedGuestId) || guestLocalAccounts[0] || null;
-    const summaryTargetAccount = liveSummaryTargetAccount;
+    const summaryTargetAccount = oneTimeCreatedAccountSummary;
     const cleanStdAccNum = stdAccountNumber.replace(/\D/g, '');
     const cleanStdUid16 = stdUserId16.replace(/\D/g, '');
     const matchedStdAccount =
@@ -829,20 +812,22 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
               )}
 
               {summaryTargetAccount ? (
-                /* TAMPILAN KARTU KREDENSIAL AKUN BARU + TOMBOL SALIN NO. REK & ID 16 DIGIT + OPSIONAL SAMBUNGKAN GOOGLE */
+                /* TAMPILAN KREDENSIAL SEKALI TAMPIL SAAT SELESAI DAFTAR (HILANG PERMANEN SAAT DITUTUP) */
                 <div className="space-y-4">
                   <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-slate-950 via-indigo-950/70 to-purple-950/60 border border-purple-400/50 shadow-xl space-y-3.5">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-black">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        Kredensial Akun Anda Tersimpan di Perangkat &amp; Cloud
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-400/50 text-amber-200 text-[11px] font-black">
+                        <Lock className="w-3.5 h-3.5 text-amber-300" />
+                        Kredensial Sekali Tampil — Catat Sekarang
                       </span>
-                      <span className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300">
-                        {summaryTargetAccount.cardStatus === 'active'
-                          ? 'Disetujui Admin'
-                          : 'Menunggu Persetujuan Admin'}
+                      <span className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-300">
+                        Pendaftaran Terkirim
                       </span>
                     </div>
+
+                    <p className="text-[11px] text-amber-100/90 leading-relaxed bg-amber-950/40 border border-amber-500/30 rounded-xl p-2.5">
+                      Demi keamanan dari orang asing di perangkat bersama, data ini <strong>hanya ditampilkan sekali</strong>. Setelah layar ini ditutup, Anda wajib login manual di tab <strong>Login Ke Akun</strong> menggunakan No. Rekening, User ID 16 Digit, dan PIN Kartu 6 Digit Anda. Status persetujuan kartu akan tampil aman di dalam Dashboard setelah login PIN.
+                    </p>
 
                     <div>
                       <div className="flex items-center justify-between gap-2 mb-1">
@@ -930,13 +915,13 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Tombol Salin Sekaligus No. Rek & ID 16 Digit */}
+                    {/* Tombol Salin No. Rek & ID 16 Digit (TANPA menyalin PIN ke clipboard) */}
                     <button
                       type="button"
                       onClick={() =>
                         handleCopyCredentialValue(
                           'all_creds',
-                          `Nama: ${summaryTargetAccount.fullName}\nNo. Rekening: ${summaryTargetAccount.accountNumber}\nUser ID 16 Digit: ${ensureAccountUserId16(summaryTargetAccount)}\nPIN Kartu: ${summaryTargetAccount.pin}`
+                          `Nama: ${summaryTargetAccount.fullName}\nNo. Rekening: ${summaryTargetAccount.accountNumber}\nUser ID 16 Digit: ${ensureAccountUserId16(summaryTargetAccount)}`
                         )
                       }
                       className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 border border-purple-400/40 text-purple-200 text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer transition"
@@ -944,8 +929,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                       <Copy className="w-4 h-4 text-purple-300" />
                       <span>
                         {copiedCredentialField === 'all_creds'
-                          ? 'Berhasil Disalin Lengkap (No. Rek, ID 16 Digit & PIN)!'
-                          : 'Salin Semua Kredensial (No. Rek & ID 16 Digit)'}
+                          ? 'No. Rekening & User ID 16 Digit Tersalin!'
+                          : 'Salin No. Rekening & User ID 16 Digit (PIN Tetap Rahasia)'}
                       </span>
                     </button>
 
@@ -988,22 +973,28 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Aksi Masuk ke Dashboard atau Buka Tab Login Ke Akun */}
+                  {/* Aksi Aman: Hapus Kredensial dari Layar Lobi & Arahkan Login Manual Ber-PIN */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <button
                       type="button"
-                      onClick={() => enterLobbyCreatedAccountSession(summaryTargetAccount.id)}
-                      className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-violet-500 via-purple-500 to-fuchsia-500 hover:from-violet-400 hover:to-fuchsia-400 text-white font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl shadow-purple-500/25 cursor-pointer transition"
+                      onClick={() => {
+                        setNewlyCreatedAccountSummary(null);
+                        setCreateAccountFeedbackMsg(null);
+                        setLobbyMode('google');
+                      }}
+                      className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/20 cursor-pointer transition"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      <span>Masuk ke Dashboard Sekarang</span>
+                      <span>Saya Sudah Catat &amp; Tutup Layar</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => {
-                        setStdAccountNumber(summaryTargetAccount.accountNumber);
-                        setStdUserId16(ensureAccountUserId16(summaryTargetAccount));
+                        setNewlyCreatedAccountSummary(null);
+                        setCreateAccountFeedbackMsg(null);
+                        setStdAccountNumber('');
+                        setStdUserId16('');
                         setStdCardPin('');
                         setLobbyMode('standard_login');
                         setAuthError(null);
@@ -1011,9 +1002,32 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                       className="w-full py-3.5 px-4 rounded-2xl bg-slate-950 hover:bg-slate-800 border border-sky-500/40 text-sky-300 font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition"
                     >
                       <LogIn className="w-4 h-4" />
-                      <span>Masuk Lewat Login Ke Akun</span>
+                      <span>Login Manual (Wajib PIN)</span>
                     </button>
                   </div>
+                </div>
+              ) : !canCreateLobbyRegularAccountOnThisDevice ? (
+                <div className="p-5 rounded-2xl bg-slate-950/90 border border-slate-700/80 space-y-3 text-center">
+                  <div className="w-11 h-11 rounded-2xl bg-slate-900 border border-slate-700 text-amber-300 flex items-center justify-center mx-auto">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <p className="text-xs font-extrabold text-white">
+                    Batas Pendaftaran Rekening di Perangkat Ini Tercapai
+                  </p>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Demi privasi dan keamanan pemilik akun, Lobi Daftar tidak menampilkan nama, nomor rekening, atau status kartu siapa pun. Silakan masuk secara aman melalui tab <strong>Login Ke Akun</strong> dengan No. Rekening, User ID 16 Digit, dan PIN Kartu 6 Digit Anda.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLobbyMode('standard_login');
+                      setAuthError(null);
+                    }}
+                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-500 via-sky-500 to-cyan-400 hover:from-indigo-400 hover:to-cyan-300 text-slate-950 font-black text-xs flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    <span>Buka Tab Login Ke Akun (Wajib PIN)</span>
+                  </button>
                 </div>
               ) : (
                 /* FORMULIR PENDAFTARAN TAB 2: BUAT AKUN BARU */
@@ -1237,27 +1251,6 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
                   <strong>PIN Kartu 6 Digit</strong> untuk masuk ke Akun hasil tab Buat Akun, Akun Guest, maupun Akun Google. Khusus Akun OA wajib lewat tab <strong>OA</strong>.
                 </p>
               </div>
-
-              {liveSummaryTargetAccount && liveSummaryTargetAccount.cardStatus === 'active' && (
-                <div className="p-3.5 rounded-2xl bg-emerald-950/90 border border-emerald-400/60 flex items-center justify-between gap-3 flex-wrap shadow-lg">
-                  <div className="min-w-0">
-                    <p className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Kartu Baru &ldquo;{liveSummaryTargetAccount.fullName}&rdquo; Sudah Disetujui Admin!</span>
-                    </p>
-                    <p className="text-[11px] text-emerald-100/90 mt-0.5">
-                      No. Rek: <strong className="font-mono">{liveSummaryTargetAccount.accountNumber}</strong> • Langsung masuk tanpa perlu menunggu lagi.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => enterLobbyCreatedAccountSession(liveSummaryTargetAccount.id)}
-                    className="px-3.5 py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs cursor-pointer transition shrink-0"
-                  >
-                    Langsung Masuk Dashboard
-                  </button>
-                </div>
-              )}
 
               {renderLoginLock1DayBox(matchedStdAccount)}
 
@@ -1837,27 +1830,6 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
 
           {renderPersistentThreeLoginTabs()}
 
-          {liveSummaryTargetAccount && liveSummaryTargetAccount.cardStatus === 'active' && (
-            <div className="mb-4 p-3.5 rounded-2xl bg-emerald-950/90 border border-emerald-400/60 flex items-center justify-between gap-3 flex-wrap shadow-lg">
-              <div className="min-w-0">
-                <p className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Kartu Baru &ldquo;{liveSummaryTargetAccount.fullName}&rdquo; Telah Disetujui Admin!</span>
-                </p>
-                <p className="text-[11px] text-emerald-100/90 mt-0.5">
-                  No. Rek: <strong className="font-mono">{liveSummaryTargetAccount.accountNumber}</strong> • Klik untuk langsung masuk ke Dashboard.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => enterLobbyCreatedAccountSession(liveSummaryTargetAccount.id)}
-                className="px-3.5 py-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-black text-xs cursor-pointer transition shrink-0"
-              >
-                Langsung Masuk Dashboard
-              </button>
-            </div>
-          )}
-
           <div className="space-y-3">
             {/* Tombol Utama 1: Sign in with Google */}
             <button
@@ -1907,11 +1879,7 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
             >
               <UserPlus className="w-5 h-5 text-white" />
               <span>
-                2. Buat Akun (
-                {deviceLobbyCreatedAccount
-                  ? 'Lihat Kredensial Akun Anda'
-                  : 'Tanpa Wajib Google · Opsional Google'}
-                )
+                2. Buat Akun (Tanpa Wajib Google · Opsional Google)
               </span>
             </button>
 
@@ -2286,12 +2254,92 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
             {showForgotPinBox && (
               <div className="mt-3 p-3.5 rounded-2xl bg-slate-950/90 border border-amber-500/30 space-y-2.5">
                 {latestResetReq?.status === 'approved' && latestResetReq.revealedPin ? (
-                  <div className="p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-xs text-emerald-200">
-                    ✅ Permohonan disetujui Admin! PIN Kartu Anda adalah:{' '}
-                    <span className="font-mono font-black text-sm text-emerald-300">
-                      {latestResetReq.revealedPin}
-                    </span>
-                  </div>
+                  forgotPinOwnerVerified ? (
+                    <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-xs text-emerald-200 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold">Identitas Pemilik Terverifikasi</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setForgotPinOwnerVerified(false);
+                            setForgotPinVerifyNik('');
+                            setForgotPinVerifySecondary('');
+                          }}
+                          className="text-[10px] font-bold text-amber-300 hover:text-white cursor-pointer"
+                        >
+                          Sembunyikan PIN
+                        </button>
+                      </div>
+                      <p>
+                        PIN Kartu Anda adalah:{' '}
+                        <span className="font-mono font-black text-sm text-emerald-300 tracking-widest">
+                          {latestResetReq.revealedPin}
+                        </span>
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      <div className="p-2.5 rounded-xl bg-amber-950/50 border border-amber-500/40 text-[11px] text-amber-200">
+                        <strong className="block text-amber-300 mb-0.5">
+                          Permohonan Lupa PIN Telah Disetujui Admin (Terkunci Privasi)
+                        </strong>
+                        Demi mencegah orang asing mengintip PIN Anda di Lobi, masukkan <strong>NIK 16 Digit</strong> dan <strong>Nomor HP atau User ID 16 Digit</strong> akun ini untuk membuka tampilan PIN.
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={16}
+                        value={forgotPinVerifyNik}
+                        onChange={(e) => {
+                          setForgotPinVerifyNik(e.target.value.replace(/\D/g, '').slice(0, 16));
+                          setForgotPinVerifyError(null);
+                        }}
+                        placeholder="Masukkan NIK 16 Digit pemilik akun..."
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-white"
+                      />
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={16}
+                        value={forgotPinVerifySecondary}
+                        onChange={(e) => {
+                          setForgotPinVerifySecondary(e.target.value.replace(/\D/g, '').slice(0, 16));
+                          setForgotPinVerifyError(null);
+                        }}
+                        placeholder="Masukkan Nomor HP atau User ID 16 Digit..."
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-white"
+                      />
+                      {forgotPinVerifyError && (
+                        <p className="text-[11px] text-rose-300 font-bold">{forgotPinVerifyError}</p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!activeTargetAccount) return;
+                          const cleanNik = forgotPinVerifyNik.replace(/\D/g, '');
+                          const cleanSec = forgotPinVerifySecondary.replace(/\D/g, '');
+                          const accNik = (activeTargetAccount.nik || '').replace(/\D/g, '');
+                          const accPhone = (activeTargetAccount.phone || '').replace(/\D/g, '');
+                          const accUid16 = ensureAccountUserId16(activeTargetAccount).replace(/\D/g, '');
+                          const nikMatches = cleanNik.length === 16 && cleanNik === accNik;
+                          const secMatches =
+                            (cleanSec.length >= 9 && cleanSec === accPhone) ||
+                            (cleanSec.length === 16 && cleanSec === accUid16);
+                          if (nikMatches && secMatches) {
+                            setForgotPinOwnerVerified(true);
+                            setForgotPinVerifyError(null);
+                          } else {
+                            setForgotPinVerifyError(
+                              'Data verifikasi NIK 16 Digit atau Nomor HP/User ID 16 Digit tidak cocok dengan pemilik akun.'
+                            );
+                          }
+                        }}
+                        className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black cursor-pointer"
+                      >
+                        Verifikasi Pemilik &amp; Tampilkan PIN Sementara
+                      </button>
+                    </div>
+                  )
                 ) : (
                   <>
                     <input

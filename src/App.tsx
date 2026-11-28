@@ -90,6 +90,10 @@ import {
   savePendingQrisTransfer,
   savePendingQrpProfile,
 } from './utils/qrisTransferUtils';
+import {
+  loadLobbySecurityPolicy,
+  subscribeLobbySecurityPolicy,
+} from './utils/lobbySecurityPolicy';
 
 function BankAppContent() {
   const {
@@ -126,6 +130,15 @@ function BankAppContent() {
       setActiveView('dashboard');
     }
   };
+  const [strictLobbyPrivacyMode, setStrictLobbyPrivacyMode] = useState<boolean>(
+    () => loadLobbySecurityPolicy().strictLobbyPrivacyMode
+  );
+  useEffect(() => {
+    return subscribeLobbySecurityPolicy((policy) => {
+      setStrictLobbyPrivacyMode(policy.strictLobbyPrivacyMode);
+    });
+  }, []);
+
   const [initialBootPendingQris] = useState<PendingQrisTransferPayload | null>(() => {
     const fromUrl = capturePendingQrisFromCurrentUrl();
     return fromUrl || readPendingQrisTransfer();
@@ -890,9 +903,13 @@ function BankAppContent() {
             </button>
           </div>
         )}
-        <WebsiteSystemNotificationModal />
-        <GlobalChatAndNotificationLayer />
-        <GlobalFloatingToastContainer onAction={handleFloatingToastAction} />
+        {!strictLobbyPrivacyMode && (
+          <>
+            <WebsiteSystemNotificationModal />
+            <GlobalChatAndNotificationLayer />
+            <GlobalFloatingToastContainer onAction={handleFloatingToastAction} />
+          </>
+        )}
         <GoogleAuthOnboardingGate />
         <AdminPinModal
           isOpen={showAdminPinModal}

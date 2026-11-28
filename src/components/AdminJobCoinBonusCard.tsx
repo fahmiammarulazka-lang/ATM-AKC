@@ -1,6 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Briefcase, CheckCircle2, Coins, Save, Sparkles } from 'lucide-react';
+import {
+  Briefcase,
+  CheckCircle2,
+  Coins,
+  Save,
+  Sparkles,
+  SlidersHorizontal,
+  Banknote,
+} from 'lucide-react';
 import { useBank } from '../context/BankContext';
+import {
+  JOB_FIVE_STAGE_CATALOG,
+  JobFiveStageAdminConfig,
+  JobStageId,
+  loadJobFiveStageConfig,
+  saveJobFiveStageConfig,
+  subscribeJobFiveStageConfig,
+} from '../utils/jobFiveStageUtils';
 
 interface AdminJobCoinBonusCardProps {
   compact?: boolean;
@@ -21,6 +37,22 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
   );
   const [feedback, setFeedback] = useState<string>('');
 
+  // Pengaturan Sistem 5 Tahap Kerja Interaktif
+  const [stageConfig, setStageConfig] = useState<JobFiveStageAdminConfig>(() =>
+    loadJobFiveStageConfig()
+  );
+  const [stageSalaryBonusPctText, setStageSalaryBonusPctText] = useState<string>(() =>
+    String(loadJobFiveStageConfig().extraSalaryBonusPercent)
+  );
+  const [stageExtraCoinText, setStageExtraCoinText] = useState<string>(() =>
+    String(loadJobFiveStageConfig().extraCoinBonus)
+  );
+  const [stageExtraXpText, setStageExtraXpText] = useState<string>(() =>
+    String(loadJobFiveStageConfig().extraAccountXpBonus)
+  );
+  const [stageFeedback, setStageFeedback] = useState<string>('');
+  const stageDirtyRef = useRef<boolean>(false);
+
   useEffect(() => {
     if (!isDirtyRef.current) {
       setEnabledDraft(jobCoinBonusConfig.enabled);
@@ -28,6 +60,17 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
       setExtraCoinsText(String(jobCoinBonusConfig.extraBonusCoins ?? 0));
     }
   }, [jobCoinBonusConfig]);
+
+  useEffect(() => {
+    return subscribeJobFiveStageConfig((latest) => {
+      setStageConfig(latest);
+      if (!stageDirtyRef.current) {
+        setStageSalaryBonusPctText(String(latest.extraSalaryBonusPercent));
+        setStageExtraCoinText(String(latest.extraCoinBonus));
+        setStageExtraXpText(String(latest.extraAccountXpBonus));
+      }
+    });
+  }, []);
 
   const parsedMultiplier = (() => {
     const n = Number(coinMultText.trim());
@@ -54,24 +97,65 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
     setFeedback(res.message);
   };
 
+  const handleToggleStage = (stageId: JobStageId) => {
+    const currentlyOn = stageConfig.enabledStages[stageId];
+    const activeCount = Object.values(stageConfig.enabledStages).filter(Boolean).length;
+    if (currentlyOn && activeCount <= 1) {
+      setStageFeedback('Minimal 1 tahap kerja harus tetap aktif agar lowongan dapat diselesaikan.');
+      return;
+    }
+    stageDirtyRef.current = true;
+    setStageConfig((prev) => ({
+      ...prev,
+      enabledStages: {
+        ...prev.enabledStages,
+        [stageId]: !currentlyOn,
+      },
+    }));
+  };
+
+  const handleSaveFiveStageConfig = () => {
+    const parsedSalaryPct = Math.max(0, Math.min(500, Math.round(Number(stageSalaryBonusPctText) || 0)));
+    const parsedStageCoins = Math.max(0, Math.min(100_000, Math.round(Number(stageExtraCoinText) || 0)));
+    const parsedStageXp = Math.max(0, Math.min(100_000, Math.round(Number(stageExtraXpText) || 0)));
+
+    const saved = saveJobFiveStageConfig({
+      enabledStages: stageConfig.enabledStages,
+      extraSalaryBonusPercent: parsedSalaryPct,
+      extraCoinBonus: parsedStageCoins,
+      extraAccountXpBonus: parsedStageXp,
+    });
+    stageDirtyRef.current = false;
+    setStageConfig(saved);
+    setStageSalaryBonusPctText(String(saved.extraSalaryBonusPercent));
+    setStageExtraCoinText(String(saved.extraCoinBonus));
+    setStageExtraXpText(String(saved.extraAccountXpBonus));
+    const activeCount = Object.values(saved.enabledStages).filter(Boolean).length;
+    setStageFeedback(
+      `Pengaturan 5 Tahap Kerja tersimpan! (${activeCount}/5 Tahap Aktif · Bonus +${saved.extraSalaryBonusPercent}% Gaji, +${saved.extraCoinBonus} Coin, +${saved.extraAccountXpBonus} XP Level Akun)`
+    );
+  };
+
+  const activeStageCount = Object.values(stageConfig.enabledStages).filter(Boolean).length;
+
   return (
     <div
       className={`bg-slate-900/95 border-2 border-amber-400/50 rounded-3xl ${
         compact ? 'p-4' : 'p-6'
-      } space-y-4 shadow-xl`}
+      } space-y-5 shadow-xl`}
     >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
         <div className="space-y-1">
           <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase inline-flex items-center gap-1">
             <Coins className="w-3 h-3 shrink-0" />
-            <span>PENGATURAN BONUS COIN LOWONGAN PEKERJAAN</span>
+            <span>PENGATURAN BONUS COIN &amp; 5 TAHAP KERJA LOWONGAN</span>
           </span>
           <h3 className="font-black text-white text-sm sm:text-base flex items-center gap-2">
             <Briefcase className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>Atur Pengali Coin &amp; Bonus Coin Ekstra Saat Nasabah Bekerja</span>
+            <span>Atur Pengali Coin, Tahap Kerja Aktif, &amp; Bonus Ekstra 25 Lowongan</span>
           </h3>
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            Berlaku otomatis untuk seluruh 25 Lowongan Kerja setiap kali target klik selesai. Perubahan aman dari reset saat mengetik.
+            Berlaku otomatis untuk seluruh 25 Lowongan Kerja setiap kali nasabah menuntaskan tahapan kerja. Perubahan aman dari reset saat mengetik.
           </p>
         </div>
 
@@ -220,6 +304,139 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
           </button>
         </div>
       )}
+
+      {/* =====================================================================
+          KONTROL SISTEM 5 TAHAP KERJA INTERAKTIF (AKTIF TAHAP & BONUS EKSTRA)
+         ===================================================================== */}
+      <div className="pt-4 border-t border-slate-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="space-y-0.5">
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-cyan-300">
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>KONTROL SISTEM 5 TAHAP KERJA INTERAKTIF ({activeStageCount}/5 TAHAP AKTIF)</span>
+            </span>
+            <p className="text-[11px] text-slate-400">
+              Aktifkan atau nonaktifkan masing-masing tahap kerja serta atur bonus ekstra Rupiah (%), Coin, dan XP Level Akun saat nasabah menuntaskan semua tahap.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSaveFiveStageConfig}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-lg shadow-cyan-500/20"
+          >
+            <Save className="w-4 h-4 shrink-0" />
+            <span>Simpan Aturan 5 Tahap</span>
+          </button>
+        </div>
+
+        {/* Toggle 5 Tahap */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+          {JOB_FIVE_STAGE_CATALOG.map((stage) => {
+            const isOn = stageConfig.enabledStages[stage.id];
+            return (
+              <button
+                key={stage.id}
+                type="button"
+                onClick={() => handleToggleStage(stage.id)}
+                className={`p-3 rounded-2xl border-2 text-left transition cursor-pointer ${
+                  isOn
+                    ? 'bg-emerald-950/50 border-emerald-400/70 text-white'
+                    : 'bg-slate-950/80 border-slate-800 text-slate-500'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <span className="text-[10px] font-mono font-black text-amber-300">
+                    TAHAP {stage.id}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[9px] font-black ${
+                      isOn ? 'bg-emerald-400 text-slate-950' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {isOn ? 'AKTIF' : 'OFF'}
+                  </span>
+                </div>
+                <span className="text-xs font-black block">{stage.shortLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Bonus Ekstra Gaji (%), Coin, & XP Level Akun */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
+            <label className="text-[11px] font-bold text-emerald-300 flex items-center gap-1.5">
+              <Banknote className="w-3.5 h-3.5" />
+              <span>Bonus Ekstra Gaji (%)</span>
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={500}
+              value={stageSalaryBonusPctText}
+              onChange={(e) => {
+                stageDirtyRef.current = true;
+                setStageSalaryBonusPctText(e.target.value);
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-emerald-300 font-mono font-bold text-xs"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
+            <label className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
+              <Coins className="w-3.5 h-3.5" />
+              <span>Bonus Ekstra Coin (5 Tahap)</span>
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={100000}
+              value={stageExtraCoinText}
+              onChange={(e) => {
+                stageDirtyRef.current = true;
+                setStageExtraCoinText(e.target.value);
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 font-mono font-bold text-xs"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
+            <label className="text-[11px] font-bold text-cyan-300 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Bonus Ekstra XP Level Akun</span>
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={100000}
+              value={stageExtraXpText}
+              onChange={(e) => {
+                stageDirtyRef.current = true;
+                setStageExtraXpText(e.target.value);
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono font-bold text-xs"
+            />
+          </div>
+        </div>
+
+        {stageFeedback && (
+          <div className="p-3 rounded-2xl bg-cyan-950/75 border border-cyan-400/50 text-cyan-200 font-bold text-xs flex items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>{stageFeedback}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setStageFeedback('')}
+              className="text-slate-400 hover:text-white cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
+
