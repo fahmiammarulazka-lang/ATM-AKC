@@ -403,7 +403,9 @@ export const QrisScannerModal: React.FC<QrisScannerModalProps> = ({
                     <p className="text-slate-200 leading-relaxed">
                       Anda sedang memakai <strong>Kamera Khusus QRP Profil</strong>, sedangkan kode yang Anda pindai adalah{' '}
                       <strong className="text-emerald-300">
-                        QRIS Pribadi (Khusus Transfer Multi-Aset)
+                        {wrongCameraState.classified.transferTarget?.qrisSubMode === 'minta'
+                          ? 'QRIS MINTA (Permintaan Nominal & Aset Terkunci)'
+                          : 'QRIS TF (Untuk Mentransfer Bebas Nominal & Aset)'}
                       </strong>{' '}
                       milik{' '}
                       <strong>
@@ -467,13 +469,20 @@ export const QrisScannerModal: React.FC<QrisScannerModalProps> = ({
                             recipientUserId: t.recipientUserId,
                             recipientBank: t.recipientBank,
                             recipientName: t.recipientName,
+                            qrisSubMode: t.qrisSubMode,
+                            lockAmountAndAsset: t.lockAmountAndAsset,
+                            expiresAtMs: t.expiresAtMs,
                             assetMode: t.assetMode,
                             amount: t.amount > 0 ? t.amount : undefined,
                             goldRupiahAmount: t.goldRupiahAmount > 0 ? t.goldRupiahAmount : undefined,
                             coinAmount: t.coinAmount > 0 ? t.coinAmount : undefined,
                             diamondAmount: t.diamondAmount > 0 ? t.diamondAmount : undefined,
                             tokenAmount: t.tokenAmount > 0 ? t.tokenAmount : undefined,
-                            note: t.note || 'Transfer via Scan QRIS Pribadi',
+                            note:
+                              t.note ||
+                              (t.qrisSubMode === 'minta'
+                                ? '[QRIS MINTA] Pembayaran Permintaan QRIS'
+                                : '[QRIS TF] Transfer via Scan QRIS Pribadi'),
                             source: wrongCameraState.source,
                           },
                         })
@@ -482,7 +491,9 @@ export const QrisScannerModal: React.FC<QrisScannerModalProps> = ({
                     className="flex-1 min-h-[42px] inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-400 hover:bg-emerald-300 px-4 py-2.5 text-xs font-black text-slate-950 cursor-pointer"
                   >
                     <Send className="h-4 w-4" />
-                    <span>Pindah ke Kamera Transfer Multi-Aset (1-Klik)</span>
+                    <span>
+                      Pindah ke Kamera Transfer ({wrongCameraState.classified.transferTarget.qrisSubMode === 'minta' ? 'QRIS MINTA' : 'QRIS TF'}) (1-Klik)
+                    </span>
                   </button>
                 )}
 

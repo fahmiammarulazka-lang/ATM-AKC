@@ -43,6 +43,9 @@ import {
   clearPendingQrisTransfer,
   isSelfQrisTransferTarget,
   parsePersonalQrisPayload,
+  PersonalQrisAdminPolicy,
+  PersonalQrisSubMode,
+  readPersonalQrisAdminPolicy,
   savePendingQrisTransfer,
 } from '../utils/qrisTransferUtils';
 
@@ -50,6 +53,9 @@ interface TransferWorkspaceProps {
   standalone?: boolean;
   initialMode?: 'reguler' | 'bebas';
   initialBebasAssetMode?: TransferBebasAssetMode;
+  prefillQrisSubMode?: PersonalQrisSubMode;
+  prefillLockAmountAndAsset?: boolean;
+  prefillQrisExpiresAtMs?: number;
   routeKey?: number;
   prefillAccount?: string;
   prefillBank?: string;
@@ -71,6 +77,9 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
   standalone = false,
   initialMode = 'reguler',
   initialBebasAssetMode,
+  prefillQrisSubMode,
+  prefillLockAmountAndAsset,
+  prefillQrisExpiresAtMs,
   routeKey = 0,
   prefillAccount = '',
   prefillBank = 'Bank Nusantara',
@@ -138,6 +147,25 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
   const [bebasAssetMode, setBebasAssetMode] = useState<TransferBebasAssetMode>(
     initialBebasAssetMode || 'uang'
   );
+  const [qrisSubMode, setQrisSubMode] = useState<PersonalQrisSubMode>(
+    prefillQrisSubMode || 'tf'
+  );
+  const [qrisLockAmountAndAsset, setQrisLockAmountAndAsset] = useState<boolean>(
+    Boolean(prefillLockAmountAndAsset || prefillQrisSubMode === 'minta')
+  );
+  const [qrisExpiresAtMs, setQrisExpiresAtMs] = useState<number | undefined>(
+    prefillQrisExpiresAtMs
+  );
+  const [qrisAdminPolicy, setQrisAdminPolicy] = useState<PersonalQrisAdminPolicy>(() =>
+    readPersonalQrisAdminPolicy()
+  );
+
+  useEffect(() => {
+    const syncPolicy = () => setQrisAdminPolicy(readPersonalQrisAdminPolicy());
+    window.addEventListener('bn:personal-qris-policy-updated', syncPolicy);
+    return () => window.removeEventListener('bn:personal-qris-policy-updated', syncPolicy);
+  }, []);
+
   const [bebasPrefillGoldRp, setBebasPrefillGoldRp] = useState<number | undefined>(
     prefillGoldRupiahAmount
   );
@@ -159,6 +187,11 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
         setTransferMode('bebas');
       }
     }
+    if (prefillQrisSubMode) {
+      setQrisSubMode(prefillQrisSubMode);
+    }
+    setQrisLockAmountAndAsset(Boolean(prefillLockAmountAndAsset || prefillQrisSubMode === 'minta'));
+    setQrisExpiresAtMs(prefillQrisExpiresAtMs);
     setBebasPrefillGoldRp(prefillGoldRupiahAmount);
     setBebasPrefillCoin(prefillCoinAmount);
     setBebasPrefillDiamond(prefillDiamondAmount);
@@ -166,6 +199,9 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
   }, [
     initialMode,
     initialBebasAssetMode,
+    prefillQrisSubMode,
+    prefillLockAmountAndAsset,
+    prefillQrisExpiresAtMs,
     prefillGoldRupiahAmount,
     prefillCoinAmount,
     prefillDiamondAmount,
@@ -244,10 +280,39 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
     setRecipientLookup(res);
   };
 
+  const isQrisMintaLocked =
+    isQrisPrefillBanner &&
+    qrisSubMode === 'minta' &&
+    qrisLockAmountAndAsset &&
+    qrisAdminPolicy.enforceQrisMintaLock;
+  const isQrisExpired = Boolean(
+    isQrisPrefillBanner &&
+      qrisSubMode === 'minta' &&
+      qrisExpiresAtMs &&
+      qrisExpiresAtMs > 0 &&
+      Date.now() > qrisExpiresAtMs
+  );
+
   const handleStartTransfer = (e: React.FormEvent) => {
     e.preventDefault();
     setTransferError('');
     setTransferSuccess('');
+    if (isQrisPrefillBanner) {
+      if (qrisSubMode === 'minta' && !qrisAdminPolicy.enableQrisMinta) {
+        setTransferError('Mode QRIS MINTA sedang dinonaktifkan sementara oleh kebijakan Admin.');
+        return;
+      }
+      if (qrisSubMode === 'tf' && !qrisAdminPolicy.enableQrisTf) {
+        setTransferError('Mode QRIS TF sedang dinonaktifkan sementara oleh kebijakan Admin.');
+        return;
+      }
+      if (isQrisExpired) {
+        setTransferError(
+          'Kode QRIS MINTA ini sudah melewati batas waktu aktif (kedaluwarsa). Minta penerima membuat kode QRIS MINTA baru.'
+        );
+        return;
+      }
+    }
     const amt = parseInt(transferAmount, 10);
     if (!amt || amt <= 0) {
       setTransferError('Jumlah transfer tidak valid');
@@ -267,11 +332,23 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
     }
 
     const amt = parseInt(transferAmount, 10);
+    const qrisLabelTag = isQrisPrefillBanner
+      ? qrisSubMode === 'minta'
+        ? '[QRIS MINTA]'
+        : '[QRIS TF]'
+      : '';
+    const rawNote = transferNote.trim();
+    const formattedNote = isQrisPrefillBanner
+      ? rawNote.startsWith('[QRIS')
+        ? rawNote
+        : `${qrisLabelTag} ${rawNote || (qrisSubMode === 'minta' ? 'Pembayaran Tagihan QRIS MINTA' : 'Transfer via Scan QRIS TF')}`
+      : rawNote;
+
     const res = transferMoney({
       recipientAccount: destAccount,
       recipientBank: destBank,
       amount: amt,
-      note: transferNote,
+      note: formattedNote,
       pin: transferPin,
     });
 
@@ -281,7 +358,7 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
       const finalRecipientName =
         recipientLookup?.name || qrisPrefillRecipientLabel || destAccount;
       if (saveAsFav && recipientLookup?.name) {
-        addFavorite(destAccount, recipientLookup.name, destBank, transferNote);
+        addFavorite(destAccount, recipientLookup.name, destBank, formattedNote);
       }
       clearPendingQrisTransfer();
       setTransferReceipt({
@@ -299,7 +376,7 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
         amount: amt,
         adminFee: feePaid,
         totalDeducted: amt + feePaid,
-        note: transferNote || (wasFromQris ? 'Transfer via Scan QRIS Pribadi' : '-'),
+        note: formattedNote || (wasFromQris ? `${qrisLabelTag} Transfer via Scan QRIS Pribadi` : '-'),
         fromQris: wasFromQris,
       });
       setIsQrisPrefillBanner(false);
@@ -344,6 +421,9 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
     setTransferReceipt(null);
     const detectedAssetMode = parsed.assetMode || 'uang';
     setBebasAssetMode(detectedAssetMode);
+    setQrisSubMode(parsed.qrisSubMode);
+    setQrisLockAmountAndAsset(parsed.lockAmountAndAsset);
+    setQrisExpiresAtMs(parsed.expiresAtMs);
     setBebasPrefillGoldRp(parsed.goldRupiahAmount > 0 ? parsed.goldRupiahAmount : undefined);
     setBebasPrefillCoin(parsed.coinAmount > 0 ? parsed.coinAmount : undefined);
     setBebasPrefillDiamond(parsed.diamondAmount > 0 ? parsed.diamondAmount : undefined);
@@ -355,13 +435,20 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
       recipientUserId: parsed.recipientUserId,
       recipientBank: parsed.recipientBank || 'Bank Nusantara',
       recipientName: parsed.recipientName,
+      qrisSubMode: parsed.qrisSubMode,
+      lockAmountAndAsset: parsed.lockAmountAndAsset,
+      expiresAtMs: parsed.expiresAtMs,
       assetMode: detectedAssetMode,
       amount: parsed.amount > 0 ? parsed.amount : undefined,
       goldRupiahAmount: parsed.goldRupiahAmount > 0 ? parsed.goldRupiahAmount : undefined,
       coinAmount: parsed.coinAmount > 0 ? parsed.coinAmount : undefined,
       diamondAmount: parsed.diamondAmount > 0 ? parsed.diamondAmount : undefined,
       tokenAmount: parsed.tokenAmount > 0 ? parsed.tokenAmount : undefined,
-      note: parsed.note || 'Transfer via Scan QRIS Pribadi',
+      note:
+        parsed.note ||
+        (parsed.qrisSubMode === 'minta'
+          ? '[QRIS MINTA] Pembayaran Permintaan QRIS'
+          : '[QRIS TF] Transfer via Scan QRIS Pribadi'),
       source: source === 'manual' ? 'url' : source,
     });
     setDestAccount(parsed.recipientAccount);
@@ -370,7 +457,12 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
     if (parsed.amount > 0) {
       setTransferAmount(String(parsed.amount));
     }
-    setTransferNote(parsed.note || 'Transfer via Scan QRIS Pribadi');
+    setTransferNote(
+      parsed.note ||
+        (parsed.qrisSubMode === 'minta'
+          ? '[QRIS MINTA] Pembayaran Permintaan QRIS'
+          : '[QRIS TF] Transfer via Scan QRIS Pribadi')
+    );
     setIsQrisPrefillBanner(true);
     const looked = lookupAccount(
       parsed.recipientAccount,
@@ -645,8 +737,12 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
         <div className="flex items-center gap-1.5 p-1 bg-slate-950 border border-slate-800 rounded-xl text-xs font-semibold overflow-x-auto">
           <button
             type="button"
-            onClick={() => setTransferMode('reguler')}
-            className={`px-4 py-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            disabled={isQrisMintaLocked && transferMode !== 'reguler'}
+            onClick={() => {
+              if (isQrisMintaLocked) return;
+              setTransferMode('reguler');
+            }}
+            className={`px-4 py-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${
               transferMode === 'reguler'
                 ? 'bg-blue-600 text-white'
                 : 'text-slate-300 hover:text-white'
@@ -656,8 +752,12 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => setTransferMode('bebas')}
-            className={`px-4 py-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+            disabled={isQrisMintaLocked && transferMode !== 'bebas'}
+            onClick={() => {
+              if (isQrisMintaLocked) return;
+              setTransferMode('bebas');
+            }}
+            className={`px-4 py-2 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${
               transferMode === 'bebas'
                 ? 'bg-amber-400 text-slate-950 font-bold'
                 : 'text-amber-300 hover:text-white'
@@ -693,16 +793,43 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
         const previewFee = calculateMandatoryTransferFee(previewAmt);
         const previewTotal = previewAmt + previewFee;
         return (
-          <div className="rounded-3xl border border-sky-500/45 bg-slate-900 p-4 sm:p-5 space-y-3.5">
+          <div
+            className={`rounded-3xl border p-4 sm:p-5 space-y-3.5 ${
+              qrisSubMode === 'minta'
+                ? 'border-amber-500/45 bg-slate-900'
+                : 'border-sky-500/45 bg-slate-900'
+            }`}
+          >
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 pb-3">
               <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-sky-500/40 bg-sky-500/15 text-sky-300">
+                <div
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border ${
+                    qrisSubMode === 'minta'
+                      ? 'border-amber-500/40 bg-amber-500/15 text-amber-300'
+                      : 'border-sky-500/40 bg-sky-500/15 text-sky-300'
+                  }`}
+                >
                   <QrCode className="w-5 h-5" />
                 </div>
                 <div>
-                  <p className="text-sm font-black text-white flex items-center gap-2">
-                    <span>Penerima QRIS Pribadi Terverifikasi</span>
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-black text-white">
+                      Penerima {qrisSubMode === 'minta' ? 'QRIS MINTA' : 'QRIS TF'} Terverifikasi
+                    </p>
+                    <span
+                      className={`rounded-md border px-2 py-0.5 text-[10px] font-black font-mono ${
+                        qrisSubMode === 'minta'
+                          ? 'border-amber-400/50 bg-amber-500/20 text-amber-200'
+                          : 'border-sky-400/50 bg-sky-500/20 text-sky-200'
+                      }`}
+                    >
+                      {qrisSubMode === 'minta'
+                        ? isQrisMintaLocked
+                          ? 'QRIS MINTA • NOMINAL & ASET TERKUNCI'
+                          : 'QRIS MINTA • PERMINTAAN DANA'
+                        : 'QRIS TF • BEBAS ISI NOMINAL & ASET'}
+                    </span>
+                  </div>
                   <p className="text-xs text-slate-300 mt-0.5">
                     <strong className="text-emerald-300">
                       {recipientLookup?.name || qrisPrefillRecipientLabel || 'Nasabah Bank Nusantara'}
@@ -724,6 +851,7 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
                   onClick={() => {
                     clearPendingQrisTransfer();
                     setIsQrisPrefillBanner(false);
+                    setQrisLockAmountAndAsset(false);
                   }}
                   className="min-h-[36px] rounded-xl border border-slate-700 bg-slate-950 hover:bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 whitespace-nowrap cursor-pointer"
                 >
@@ -732,9 +860,19 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
               </div>
             </div>
 
+            {isQrisExpired && (
+              <div className="rounded-xl border border-rose-500/50 bg-rose-950/90 px-3.5 py-2.5 text-xs text-rose-200">
+                <strong>Kode QRIS MINTA Kedaluwarsa:</strong> Batas waktu aktif kode permintaan ini telah berakhir. Silakan minta penerima menerbitkan kode QRIS MINTA baru.
+              </div>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
               <div className="rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5">
-                <span className="text-[11px] text-slate-400 block">Nominal Kirim (Dapat Diubah)</span>
+                <span className="text-[11px] text-slate-400 block">
+                  {isQrisMintaLocked
+                    ? 'Nominal Diminta (Terkunci Sesuai QRIS MINTA)'
+                    : 'Nominal Kirim (Bebas Diisi / Diubah)'}
+                </span>
                 <strong className="font-mono font-black text-white text-sm tabular-nums">
                   {previewAmt > 0 ? formatRupiah(previewAmt) : 'Isi nominal di bawah'}
                 </strong>
@@ -762,6 +900,9 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
         <TransferBebasPanel
           onNavigateToMutasi={onNavigateToMutasi}
           initialAssetMode={bebasAssetMode}
+          prefillQrisSubMode={qrisSubMode}
+          prefillLockAmountAndAsset={qrisLockAmountAndAsset}
+          prefillQrisExpiresAtMs={qrisExpiresAtMs}
           prefillRecipientAccount={destAccount}
           prefillRecipientName={recipientLookup?.name || qrisPrefillRecipientLabel}
           prefillUangAmount={parseInt(transferAmount, 10) || undefined}
@@ -889,33 +1030,50 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
 
               {/* Step 5: Transfer Amount */}
               <div>
-                <label className="text-slate-300 font-semibold block mb-1">
-                  Langkah 5 — Masukkan Jumlah Uang (Nominal):
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-300 font-semibold">
+                    Langkah 5 — Masukkan Jumlah Uang (Nominal):
+                  </label>
+                  {isQrisMintaLocked && (
+                    <span className="rounded bg-amber-500/20 border border-amber-400/40 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+                      Nominal Terkunci (QRIS MINTA)
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <span className="absolute left-3 top-3 text-slate-500 font-mono">Rp</span>
                   <input
                     type="number"
                     value={transferAmount}
-                    onChange={(e) => setTransferAmount(e.target.value)}
+                    readOnly={isQrisMintaLocked}
+                    onChange={(e) => {
+                      if (isQrisMintaLocked) return;
+                      setTransferAmount(e.target.value);
+                    }}
                     placeholder="100.000"
                     min="10000"
                     step="10000"
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl p-3 pl-10 font-mono text-sm focus:outline-none focus:border-blue-500"
+                    className={`w-full bg-slate-950 border text-white rounded-xl p-3 pl-10 font-mono text-sm focus:outline-none ${
+                      isQrisMintaLocked
+                        ? 'border-amber-500/50 text-amber-200 cursor-not-allowed'
+                        : 'border-slate-700 focus:border-blue-500'
+                    }`}
                   />
                 </div>
-                <div className="flex flex-wrap gap-2 mt-1.5">
-                  {[100_000, 250_000, 500_000, 1_000_000].map((amt) => (
-                    <button
-                      key={amt}
-                      type="button"
-                      onClick={() => setTransferAmount(amt.toString())}
-                      className="text-[11px] px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-mono cursor-pointer"
-                    >
-                      +{formatRupiah(amt)}
-                    </button>
-                  ))}
-                </div>
+                {!isQrisMintaLocked && (
+                  <div className="flex flex-wrap gap-2 mt-1.5">
+                    {[100_000, 250_000, 500_000, 1_000_000].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setTransferAmount(amt.toString())}
+                        className="text-[11px] px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 font-mono cursor-pointer"
+                      >
+                        +{formatRupiah(amt)}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Note / Description */}

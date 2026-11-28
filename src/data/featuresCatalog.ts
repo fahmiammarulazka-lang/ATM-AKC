@@ -3086,20 +3086,20 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
     releaseType: 'minor',
     visibilityMode: 'auto',
     title:
-      'Pembaruan v16.48.24: Kamera Scan Universal Bawah M-Banking, Perbaikan Streak 2 Hari Berturut-Turut, QRP Statistik Umum, QRIS Multi-Aset & Merchant Resmi buatqris.site',
+      'Pembaruan v16.48.24: Dual-Mode QRIS Pribadi (QRIS TF & QRIS MINTA 6 Aset), Scan Universal Bawah Ramping, Fix Streak 2 Hari, QRP Profil & Merchant buatqris.site',
     fullDate: 'Sabtu, 28 November 2026 • Pukul 18:10 WIB',
     dateText: 'Sabtu, 28 November 2026 • Pukul 18:10 WIB',
     description:
-      'Pembaruan minor v16.48.24 menggabungkan 5 inovasi besar sekaligus: (1) Panel Besar & Bar Mengambang Kamera Scan Universal di paling bawah M-Banking yang mendeteksi otomatis 3 jenis QR (QRP Profil, QRIS Multi-Aset, dan QRIS Top-Up Permata) melalui Kamera Live, Upload Galeri PNG, maupun Tempel Link; (2) Perbaikan total bug Streak tetap 1 saat login 2 hari berturut-turut dengan proteksi anti-timpa Cloud Sync, rekonsiliasi otomatis tanggal aktif WIB berturut-turut, sinkronisasi Misi 7-Hari, hadiah XP Level Akun, serta tombol Sinkron & Koreksi Streak; (3) QRP (QR Profil Statistik Umum Tanpa Saldo) di menu Profil lengkap dengan deteksi "Salah Kamera" 1-klik; (4) Transfer Multi-Aset 6 mode (Uang, Emas 24K, Coin, Permata, Token, & Gabungan) melalui QRIS Pribadi; serta (5) Integrasi resmi merchant buatqris.site khusus Top-Up Permata (ID Login azkafahmiammarulazka1550.azkaakc • Account ID user_6b01691c68be33.21495479 • Webhook https://atm-akc.vercel.app/).',
+      'Pembaruan minor v16.48.24 menggabungkan inovasi lengkap ekosistem QRIS dan Loyalty: (1) Dual-Mode QRIS Pribadi dengan 2 pilihan tab berdampingan yaitu QRIS TF (untuk mentransfer bebas nominal & pilih 6 aset) dan QRIS MINTA (untuk meminta dana/aset dengan nominal & jenis aset terkunci, chip nominal cepat, catatan alasan permintaan, pilihan masa berlaku, bagi instan ke Nusantara PayChat, unduh PNG warna berbeda, label [QRIS TF]/[QRIS MINTA] di mutasi & resi, serta statistik/kontrol di Panel Admin); (2) Kamera Scan Universal Bawah M-Banking dengan bar mengambang kiri-bawah yang ramping agar tombol Surat Hadiah, Donate, dan WA di kanan-bawah tetap terbuka bebas; (3) Perbaikan total bug Streak tetap 1 saat login 2 hari berturut-turut; (4) QRP (QR Profil Statistik Umum Tanpa Saldo) dengan peringatan Salah Kamera 1-klik; serta (5) Integrasi resmi merchant buatqris.site khusus Top-Up Permata.',
     highlights: [
-      'Kamera Scan Universal di Paling Bawah M-Banking (Bar Mengambang & Panel Besar): Langsung pindai QRP Profil, QRIS Pribadi Multi-Aset, maupun QRIS Top-Up Permata lewat Kamera Live, Upload Galeri PNG/JPG, atau Tempel Link.',
-      'Perbaikan Total Auto-Streak 2 Hari Berturut-Turut & Tombol Sinkron Streak: Mengunci nilai streak tertinggi dari penimpaan Cloud Sync, menghitung ulang hari aktif WIB berturut-turut secara otomatis, menyinkronkan Misi 7-Hari, memberi toast + XP Level Akun saat ganti hari WIB, serta menyediakan tombol Sinkron & Koreksi Streak di halaman Loyalty dan Admin.',
-      'QRP (QR Profil Statistik Umum Tanpa Saldo), QRIS Multi-Aset 6 Mode & Merchant Resmi buatqris.site: Kartu QR di Profil kini menjadi QRP Statistik Umum (Level XP, Tier, Gelar, Achievement, Streak tanpa membocorkan saldo) dengan peringatan Salah Kamera 1-klik, dukungan QRIS Multi-Aset (Uang/Emas/Coin/Permata/Token/Gabungan), dan pembayaran Top-Up Permata resmi buatqris.site.',
+      'Dual-Mode QRIS Pribadi (QRIS TF & QRIS MINTA) 6 Mode Aset: Switch 2 tab berdampingan untuk QRIS TF (pengirim bebas isi nominal & aset) dan QRIS MINTA (nominal & aset terkunci sesuai permintaan, tombol nominal cepat, batas waktu aktif, bagikan ke PayChat, serta kontrol Admin).',
+      'Kamera Scan Universal Bawah M-Banking Ramping (Anti-Tertutup): Panel bawah dan pill mengambang kiri-bawah yang otomatis mengenali QRP Profil, QRIS TF, QRIS MINTA, dan QRIS Top-Up Permata tanpa menutupi tombol Surat Hadiah, Donate, maupun WhatsApp di kanan-bawah.',
+      'Fix Auto-Streak 2 Hari Berturut-Turut, QRP Statistik Umum & Merchant Resmi buatqris.site: Proteksi anti-timpa Cloud Sync pada streak harian WIB, QRP Profil tanpa bocor saldo dengan deteksi Salah Kamera 1-klik, dan pembayaran QRIS Top-Up Permata resmi buatqris.site.',
     ],
     changes: [
-      'Menambahkan Panel Besar dan Bar Mengambang Kamera Scan Universal di bagian paling bawah CustomerDashboard.tsx serta memasang QrisScannerModal universal dan QrpPublicProfileModal di App.tsx.',
-      'Memperbaiki race condition sinkronisasi Cloud pada loyaltyMap di BankContext.tsx menggunakan mergeLoyaltyMapWithStreakProtection dan rekonsiliasi computeConsecutiveActiveDaysWib pada loyaltySystemUtils.ts.',
-      'Mengubah kartu QR di UserProfileStatsModal.tsx menjadi QRP (QR Profil) dengan tombol Scan QRP Nasabah, deteksi Salah Kamera 1-klik di QrisScannerModal.tsx, dukungan 6 mode aset di QRIS Pribadi & TransferBebasPanel.tsx, serta integrasi merchant resmi buatqris.site untuk Top-Up Permata.',
+      'Menambahkan mode QRIS TF dan QRIS MINTA pada qrisTransferUtils.ts, MobileBankingExtraTabs.tsx, QrisScannerModal.tsx, TransferWorkspace.tsx, TransferBebasPanel.tsx, dan AdminGoldTransferPanel.tsx.',
+      'Membuat bar mengambang Kamera Scan Universal di kiri-bawah CustomerDashboard.tsx agar tidak menghalangi tombol Surat Hadiah, Donate, dan WA di kanan-bawah.',
+      'Memperbaiki sinkronisasi Streak 2 hari berturut-turut di BankContext.tsx & loyaltySystemUtils.ts, menambahkan QRP Profil di UserProfileStatsModal.tsx, serta integrasi merchant buatqris.site untuk Top-Up Permata.',
     ],
     isCurrent: true,
     categoryBadge: 'Update Sekarang',

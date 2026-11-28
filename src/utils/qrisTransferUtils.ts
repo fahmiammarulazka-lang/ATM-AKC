@@ -7,11 +7,80 @@ export const PENDING_QRIS_TRANSFER_TTL_MS = 30 * 60 * 1000; // 30 menit
 export const PENDING_QRP_PROFILE_STORAGE_KEY = 'bn_pending_qrp_profile_v1';
 export const PENDING_QRP_PROFILE_TTL_MS = 30 * 60 * 1000; // 30 menit
 
+export type PersonalQrisSubMode = 'tf' | 'minta';
+
+export const PERSONAL_QRIS_POLICY_STORAGE_KEY = 'bn_personal_qris_policy_v1';
+
+export interface PersonalQrisAdminPolicy {
+  enableQrisTf: boolean;
+  enableQrisMinta: boolean;
+  enforceQrisMintaLock: boolean;
+}
+
+export function readPersonalQrisAdminPolicy(): PersonalQrisAdminPolicy {
+  if (typeof window === 'undefined') {
+    return {
+      enableQrisTf: true,
+      enableQrisMinta: true,
+      enforceQrisMintaLock: true,
+    };
+  }
+  try {
+    const raw = window.localStorage.getItem(PERSONAL_QRIS_POLICY_STORAGE_KEY);
+    if (!raw) {
+      return {
+        enableQrisTf: true,
+        enableQrisMinta: true,
+        enforceQrisMintaLock: true,
+      };
+    }
+    const parsed = JSON.parse(raw) as Partial<PersonalQrisAdminPolicy>;
+    return {
+      enableQrisTf: parsed.enableQrisTf !== false,
+      enableQrisMinta: parsed.enableQrisMinta !== false,
+      enforceQrisMintaLock: parsed.enforceQrisMintaLock !== false,
+    };
+  } catch {
+    return {
+      enableQrisTf: true,
+      enableQrisMinta: true,
+      enforceQrisMintaLock: true,
+    };
+  }
+}
+
+export function savePersonalQrisAdminPolicy(
+  policy: Partial<PersonalQrisAdminPolicy>
+): PersonalQrisAdminPolicy {
+  const current = readPersonalQrisAdminPolicy();
+  const next: PersonalQrisAdminPolicy = {
+    enableQrisTf: policy.enableQrisTf !== undefined ? Boolean(policy.enableQrisTf) : current.enableQrisTf,
+    enableQrisMinta:
+      policy.enableQrisMinta !== undefined ? Boolean(policy.enableQrisMinta) : current.enableQrisMinta,
+    enforceQrisMintaLock:
+      policy.enforceQrisMintaLock !== undefined
+        ? Boolean(policy.enforceQrisMintaLock)
+        : current.enforceQrisMintaLock,
+  };
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(PERSONAL_QRIS_POLICY_STORAGE_KEY, JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent('bn:personal-qris-policy-updated', { detail: next }));
+    } catch {
+      // ignore
+    }
+  }
+  return next;
+}
+
 export interface PendingQrisTransferPayload {
   recipientAccount: string;
   recipientUserId?: string;
   recipientBank: string;
   recipientName?: string;
+  qrisSubMode?: PersonalQrisSubMode;
+  lockAmountAndAsset?: boolean;
+  expiresAtMs?: number;
   assetMode?: TransferBebasAssetMode;
   amount?: number;
   goldRupiahAmount?: number;
@@ -28,6 +97,10 @@ export interface ParsedPersonalQrisTarget {
   recipientUserId?: string;
   recipientBank: string;
   recipientName?: string;
+  qrisSubMode: PersonalQrisSubMode;
+  lockAmountAndAsset: boolean;
+  expiresAtMs?: number;
+  isExpired?: boolean;
   assetMode: TransferBebasAssetMode;
   hasExplicitAssetRequest: boolean;
   amount: number;
@@ -95,6 +168,17 @@ export function parseAssetModeParam(raw?: string | null): TransferBebasAssetMode
   return 'uang';
 }
 
+export function parseQrisSubModeParam(
+  rawMode?: string | null,
+  rawLock?: string | null
+): PersonalQrisSubMode {
+  const clean = String(rawMode || '').trim().toLowerCase();
+  if (clean === 'minta' || clean === 'request' || clean === 'req') return 'minta';
+  if (clean === 'tf' || clean === 'transfer') return 'tf';
+  if (String(rawLock || '').trim() === '1') return 'minta';
+  return 'tf';
+}
+
 export function formatMultiAssetSummaryLabel(target: {
   assetMode?: TransferBebasAssetMode;
   amount?: number;
@@ -141,6 +225,8 @@ export function parsePersonalQrisPayload(rawInput: string): ParsedPersonalQrisTa
   const emptyResult: ParsedPersonalQrisTarget = {
     recipientAccount: '',
     recipientBank: 'Bank Nusantara',
+    qrisSubMode: 'tf',
+    lockAmountAndAsset: false,
     assetMode: 'uang',
     hasExplicitAssetRequest: false,
     amount: 0,
@@ -158,7 +244,7 @@ export function parsePersonalQrisPayload(rawInput: string): ParsedPersonalQrisTa
     return emptyResult;
   }
 
-  // 1. Parse URL deep-link (?qris_transfer=1&to=...&uid=...&asset=...&amt=...&gold_rp=...&coin=...&diamond=...&token=...&name=...&bank=...&note=...)
+  // 1. Parse URL deep-link (?qris_transfer=1&qris_mode=tf|minta&lock=0|1&exp=...&to=...&uid=...&asset=...&amt=...&gold_rp=...&coin=...&diamond=...&token=...&name=...&bank=...&note=...)
   if (
     trimmed.includes('qris_transfer=') ||
     /^https?:\/\//i.test(trimmed) ||
@@ -189,16 +275,31 @@ export function parsePersonalQrisPayload(rawInput: string): ParsedPersonalQrisTa
       const diamond = Math.max(0, Math.round(Number(sp.get('diamond') || '0') || 0));
       const token = Math.max(0, Math.round(Number(sp.get('token') || '0') || 0));
       const note = (sp.get('note') || '').trim();
+      const hasAnyAmount = amt > 0 || goldRp > 0 || coin > 0 || diamond > 0 || token > 0;
+      const rawMode = sp.get('qris_mode') || sp.get('mode');
+      const rawLock = sp.get('lock');
+      const qrisSubMode: PersonalQrisSubMode = rawMode
+        ? parseQrisSubModeParam(rawMode, rawLock)
+        : rawLock === '1'
+        ? 'minta'
+        : 'tf';
+      const lockAmountAndAsset =
+        qrisSubMode === 'minta' && (rawLock !== '0' || hasAnyAmount);
+      const expRaw = Number(sp.get('exp') || '0');
+      const expiresAtMs = Number.isFinite(expRaw) && expRaw > 0 ? Math.round(expRaw) : undefined;
+      const isExpired = Boolean(expiresAtMs && Date.now() > expiresAtMs);
       if (to) {
         return {
           recipientAccount: to,
           recipientUserId: uid,
           recipientBank: bank,
           recipientName: name,
+          qrisSubMode,
+          lockAmountAndAsset,
+          expiresAtMs,
+          isExpired,
           assetMode,
-          hasExplicitAssetRequest: Boolean(
-            rawAsset || amt > 0 || goldRp > 0 || coin > 0 || diamond > 0 || token > 0
-          ),
+          hasExplicitAssetRequest: Boolean(rawAsset || hasAnyAmount),
           amount: amt,
           goldRupiahAmount: goldRp,
           coinAmount: coin,
@@ -225,6 +326,8 @@ export function parsePersonalQrisPayload(rawInput: string): ParsedPersonalQrisTa
         recipientAccount: acc,
         recipientUserId: uid,
         recipientBank: 'Bank Nusantara',
+        qrisSubMode: amt > 0 ? 'minta' : 'tf',
+        lockAmountAndAsset: amt > 0,
         assetMode: 'uang',
         hasExplicitAssetRequest: amt > 0,
         amount: amt,
@@ -245,6 +348,8 @@ export function parsePersonalQrisPayload(rawInput: string): ParsedPersonalQrisTa
       recipientAccount: digits,
       recipientUserId: digits.length === 16 ? digits : undefined,
       recipientBank: 'Bank Nusantara',
+      qrisSubMode: 'tf',
+      lockAmountAndAsset: false,
       assetMode: 'uang',
       hasExplicitAssetRequest: false,
       amount: 0,
@@ -430,11 +535,21 @@ export function savePendingQrisTransfer(
 ): PendingQrisTransferPayload | null {
   const cleanAcc = String(payload.recipientAccount || '').trim();
   if (!cleanAcc) return null;
+  const subMode: PersonalQrisSubMode = payload.qrisSubMode === 'minta' ? 'minta' : 'tf';
   const full: PendingQrisTransferPayload = {
     recipientAccount: cleanAcc,
     recipientUserId: payload.recipientUserId?.trim() || undefined,
     recipientBank: String(payload.recipientBank || 'Bank Nusantara').trim() || 'Bank Nusantara',
     recipientName: payload.recipientName?.trim() || undefined,
+    qrisSubMode: subMode,
+    lockAmountAndAsset:
+      payload.lockAmountAndAsset !== undefined
+        ? Boolean(payload.lockAmountAndAsset)
+        : subMode === 'minta',
+    expiresAtMs:
+      payload.expiresAtMs && Number(payload.expiresAtMs) > 0
+        ? Math.round(Number(payload.expiresAtMs))
+        : undefined,
     assetMode: payload.assetMode || 'uang',
     amount:
       payload.amount && Number(payload.amount) > 0 ? Math.round(Number(payload.amount)) : undefined,
@@ -480,11 +595,21 @@ export function readPendingQrisTransfer(): PendingQrisTransferPayload | null {
       window.sessionStorage.removeItem(PENDING_QRIS_TRANSFER_STORAGE_KEY);
       return null;
     }
+    const subMode: PersonalQrisSubMode = parsed.qrisSubMode === 'minta' ? 'minta' : 'tf';
     return {
       recipientAccount: String(parsed.recipientAccount).trim(),
       recipientUserId: parsed.recipientUserId ? String(parsed.recipientUserId).trim() : undefined,
       recipientBank: String(parsed.recipientBank || 'Bank Nusantara').trim() || 'Bank Nusantara',
       recipientName: parsed.recipientName ? String(parsed.recipientName).trim() : undefined,
+      qrisSubMode: subMode,
+      lockAmountAndAsset:
+        parsed.lockAmountAndAsset !== undefined
+          ? Boolean(parsed.lockAmountAndAsset)
+          : subMode === 'minta',
+      expiresAtMs:
+        parsed.expiresAtMs && Number(parsed.expiresAtMs) > 0
+          ? Math.round(Number(parsed.expiresAtMs))
+          : undefined,
       assetMode: parsed.assetMode ? parseAssetModeParam(parsed.assetMode) : 'uang',
       amount:
         parsed.amount && Number(parsed.amount) > 0 ? Math.round(Number(parsed.amount)) : undefined,
@@ -633,19 +758,28 @@ export function capturePendingQrisFromCurrentUrl(): PendingQrisTransferPayload |
     const qName = (params.get('name') || '').trim() || undefined;
     const qBank = (params.get('bank') || 'Bank Nusantara').trim() || 'Bank Nusantara';
     const qNote = (params.get('note') || '').trim() || undefined;
+    const qSubMode = parseQrisSubModeParam(params.get('qris_mode') || params.get('mode'), params.get('lock'));
+    const hasAnyAmt = qAmt > 0 || qGoldRp > 0 || qCoin > 0 || qDiamond > 0 || qToken > 0;
+    const qLock = qSubMode === 'minta' && (params.get('lock') !== '0' || hasAnyAmt);
+    const qExpRaw = Number(params.get('exp') || '0');
+    const qExp = Number.isFinite(qExpRaw) && qExpRaw > 0 ? Math.round(qExpRaw) : undefined;
+    const defaultNotePrefix = qSubMode === 'minta' ? '[QRIS MINTA]' : '[QRIS TF]';
 
     const saved = savePendingQrisTransfer({
       recipientAccount: qTo,
       recipientUserId: qUid,
       recipientBank: qBank,
       recipientName: qName,
+      qrisSubMode: qSubMode,
+      lockAmountAndAsset: qLock,
+      expiresAtMs: qExp,
       assetMode: qAsset,
       amount: qAmt > 0 ? qAmt : undefined,
       goldRupiahAmount: qGoldRp > 0 ? qGoldRp : undefined,
       coinAmount: qCoin > 0 ? qCoin : undefined,
       diamondAmount: qDiamond > 0 ? qDiamond : undefined,
       tokenAmount: qToken > 0 ? qToken : undefined,
-      note: qNote || 'Transfer via Scan QRIS Pribadi',
+      note: qNote ? `${defaultNotePrefix} ${qNote}` : `${defaultNotePrefix} Transfer via Scan QRIS Pribadi`,
       source: 'url',
     });
 

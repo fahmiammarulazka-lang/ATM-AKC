@@ -84,6 +84,7 @@ import {
   isSelfQrisTransferTarget,
   PendingQrisTransferPayload,
   PendingQrpProfilePayload,
+  PersonalQrisSubMode,
   readPendingQrisTransfer,
   readPendingQrpProfile,
   savePendingQrisTransfer,
@@ -239,6 +240,9 @@ function BankAppContent() {
   const [transferRouteContext, setTransferRouteContext] = useState<{
     mode: 'reguler' | 'bebas';
     assetMode?: TransferBebasAssetMode;
+    qrisSubMode?: PersonalQrisSubMode;
+    lockAmountAndAsset?: boolean;
+    qrisExpiresAtMs?: number;
     prefillAccount?: string;
     prefillBank?: string;
     prefillRecipientName?: string;
@@ -258,6 +262,9 @@ function BankAppContent() {
               ? 'bebas'
               : 'reguler',
           assetMode: initialBootPendingQris.assetMode,
+          qrisSubMode: initialBootPendingQris.qrisSubMode,
+          lockAmountAndAsset: initialBootPendingQris.lockAmountAndAsset,
+          qrisExpiresAtMs: initialBootPendingQris.expiresAtMs,
           prefillAccount: initialBootPendingQris.recipientAccount,
           prefillBank: initialBootPendingQris.recipientBank || 'Bank Nusantara',
           prefillRecipientName: initialBootPendingQris.recipientName,
@@ -433,6 +440,9 @@ function BankAppContent() {
       recipientUserId?: string;
       recipientBank?: string;
       recipientName?: string;
+      qrisSubMode?: PersonalQrisSubMode;
+      lockAmountAndAsset?: boolean;
+      expiresAtMs?: number;
       assetMode?: TransferBebasAssetMode;
       amount?: number;
       goldRupiahAmount?: number;
@@ -460,6 +470,9 @@ function BankAppContent() {
         recipientUserId: payload.recipientUserId,
         recipientBank: String(payload.recipientBank || 'Bank Nusantara').trim() || 'Bank Nusantara',
         recipientName: String(payload.recipientName || '').trim() || undefined,
+        qrisSubMode: payload.qrisSubMode,
+        lockAmountAndAsset: payload.lockAmountAndAsset,
+        expiresAtMs: payload.expiresAtMs,
         assetMode: payload.assetMode,
         amount:
           payload.amount && Number(payload.amount) > 0
@@ -492,6 +505,9 @@ function BankAppContent() {
       setTransferRouteContext({
         mode: isMultiAsset ? 'bebas' : 'reguler',
         assetMode: resolvedAssetMode,
+        qrisSubMode: saved?.qrisSubMode,
+        lockAmountAndAsset: saved?.lockAmountAndAsset,
+        qrisExpiresAtMs: saved?.expiresAtMs,
         prefillAccount: cleanAcc,
         prefillBank: saved?.recipientBank || 'Bank Nusantara',
         prefillRecipientName: saved?.recipientName,
@@ -539,6 +555,9 @@ function BankAppContent() {
         recipientUserId?: string;
         recipientBank?: string;
         recipientName?: string;
+        qrisSubMode?: PersonalQrisSubMode;
+        lockAmountAndAsset?: boolean;
+        expiresAtMs?: number;
         assetMode?: TransferBebasAssetMode;
         amount?: number;
         goldRupiahAmount?: number;
@@ -632,13 +651,17 @@ function BankAppContent() {
         prev.prefillFromQris &&
         prev.prefillAccount === pending.recipientAccount &&
         prev.prefillAmount === pending.amount &&
-        prev.assetMode === pending.assetMode
+        prev.assetMode === pending.assetMode &&
+        prev.qrisSubMode === pending.qrisSubMode
       ) {
         return prev;
       }
       return {
         mode: isMultiAsset ? 'bebas' : 'reguler',
         assetMode: pending.assetMode,
+        qrisSubMode: pending.qrisSubMode,
+        lockAmountAndAsset: pending.lockAmountAndAsset,
+        qrisExpiresAtMs: pending.expiresAtMs,
         prefillAccount: pending.recipientAccount,
         prefillBank: pending.recipientBank || 'Bank Nusantara',
         prefillRecipientName: pending.recipientName,
@@ -969,6 +992,9 @@ function BankAppContent() {
                   recipientUserId: t.recipientUserId,
                   recipientBank: t.recipientBank || 'Bank Nusantara',
                   recipientName: t.recipientName,
+                  qrisSubMode: t.qrisSubMode,
+                  lockAmountAndAsset: t.lockAmountAndAsset,
+                  expiresAtMs: t.expiresAtMs,
                   assetMode: t.assetMode,
                   amount: t.amount,
                   goldRupiahAmount: t.goldRupiahAmount,
@@ -1089,6 +1115,9 @@ function BankAppContent() {
             standalone
             initialMode={transferRouteContext.mode}
             initialBebasAssetMode={transferRouteContext.assetMode}
+            prefillQrisSubMode={transferRouteContext.qrisSubMode}
+            prefillLockAmountAndAsset={transferRouteContext.lockAmountAndAsset}
+            prefillQrisExpiresAtMs={transferRouteContext.qrisExpiresAtMs}
             routeKey={transferRouteContext.key}
             prefillAccount={transferRouteContext.prefillAccount}
             prefillBank={transferRouteContext.prefillBank}

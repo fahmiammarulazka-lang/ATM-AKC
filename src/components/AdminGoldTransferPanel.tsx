@@ -12,6 +12,7 @@ import {
   Coins,
   Crown,
   FastForward,
+  QrCode,
   RotateCcw,
   Sliders,
   Sparkles,
@@ -19,10 +20,16 @@ import {
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { formatRupiah, formatAssetCount, isAdminCardAccount } from '../utils/bankUtils';
+import {
+  PersonalQrisAdminPolicy,
+  readPersonalQrisAdminPolicy,
+  savePersonalQrisAdminPolicy,
+} from '../utils/qrisTransferUtils';
 
 export const AdminGoldTransferPanel: React.FC = () => {
   const {
     accounts,
+    transactions,
     goldMarketConfig,
     adminUpdateGoldMarketConfig,
     adminSimulateGoldNextMonth,
@@ -30,6 +37,34 @@ export const AdminGoldTransferPanel: React.FC = () => {
     adminAdjustAccountGold,
     adminAdjustAccountSpinCoins,
   } = useBank();
+
+  const [qrisPolicy, setQrisPolicy] = useState<PersonalQrisAdminPolicy>(() =>
+    readPersonalQrisAdminPolicy()
+  );
+
+  useEffect(() => {
+    const syncQrisPolicy = () => setQrisPolicy(readPersonalQrisAdminPolicy());
+    window.addEventListener('bn:personal-qris-policy-updated', syncQrisPolicy);
+    return () => window.removeEventListener('bn:personal-qris-policy-updated', syncQrisPolicy);
+  }, []);
+
+  const handleToggleQrisPolicy = (patch: Partial<PersonalQrisAdminPolicy>, label: string) => {
+    const next = savePersonalQrisAdminPolicy(patch);
+    setQrisPolicy(next);
+    setFeedback(`Kebijakan QRIS Pribadi diperbarui: ${label}`);
+  };
+
+  const qrisTfTransactions = transactions.filter((tx) =>
+    String(tx.description || '').includes('[QRIS TF]')
+  );
+  const qrisMintaTransactions = transactions.filter((tx) =>
+    String(tx.description || '').includes('[QRIS MINTA]')
+  );
+  const qrisTfTotalVolume = qrisTfTransactions.reduce((sum, tx) => sum + Math.max(0, tx.amount || 0), 0);
+  const qrisMintaTotalVolume = qrisMintaTransactions.reduce(
+    (sum, tx) => sum + Math.max(0, tx.amount || 0),
+    0
+  );
 
   const [priceDraft, setPriceDraft] = useState<string>(
     String(goldMarketConfig.currentPricePerGram || 1_400_000)
@@ -474,6 +509,137 @@ export const AdminGoldTransferPanel: React.FC = () => {
               </div>
             );
           })()}
+        </div>
+      </div>
+
+      {/* Statistik & Kontrol Kebijakan QRIS Pribadi (QRIS TF & QRIS MINTA) */}
+      <div className="rounded-3xl bg-slate-900/90 border border-sky-500/35 p-6 space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div>
+            <div className="flex items-center gap-2 text-sky-300 font-bold text-xs">
+              <QrCode className="w-4 h-4" />
+              <span>STATISTIK &amp; KONTROL KEBIJAKAN QRIS PRIBADI (QRIS TF &amp; QRIS MINTA)</span>
+            </div>
+            <h3 className="text-base font-black text-white mt-0.5">
+              Pantau Transaksi QRIS TF (Transfer Bebas) vs QRIS MINTA (Tagihan Terkunci) &amp; Atur Kebijakan
+            </h3>
+            <p className="text-slate-400 mt-0.5">
+              Kendalikan status aktif QRIS TF, QRIS MINTA, serta kunci paksa nominal &amp; jenis aset pada kode QRIS MINTA di seluruh rekening nasabah.
+            </p>
+          </div>
+          <span className="rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 font-mono text-[11px] font-bold text-emerald-300">
+            6 Mode Aset Aktif (Uang, Emas, Coin, Permata, Token, Gabungan)
+          </span>
+        </div>
+
+        {/* Statistik Live QRIS TF vs QRIS MINTA */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="rounded-2xl bg-slate-950 border border-sky-500/30 p-4">
+            <span className="text-[11px] text-sky-300 font-bold block">Total Transaksi QRIS TF</span>
+            <strong className="font-mono text-lg font-black text-white mt-1 block">
+              {qrisTfTransactions.length.toLocaleString('id-ID')} Transaksi
+            </strong>
+            <span className="text-[10px] text-slate-400">Mode untuk mentransfer bebas nominal</span>
+          </div>
+          <div className="rounded-2xl bg-slate-950 border border-sky-500/30 p-4">
+            <span className="text-[11px] text-sky-300 font-bold block">Volume Nilai QRIS TF</span>
+            <strong className="font-mono text-lg font-black text-sky-200 mt-1 block">
+              {formatRupiah(qrisTfTotalVolume)}
+            </strong>
+            <span className="text-[10px] text-slate-400">Akumulasi mutasi berlabel [QRIS TF]</span>
+          </div>
+          <div className="rounded-2xl bg-slate-950 border border-amber-500/30 p-4">
+            <span className="text-[11px] text-amber-300 font-bold block">Total Transaksi QRIS MINTA</span>
+            <strong className="font-mono text-lg font-black text-white mt-1 block">
+              {qrisMintaTransactions.length.toLocaleString('id-ID')} Transaksi
+            </strong>
+            <span className="text-[10px] text-slate-400">Mode untuk minta dana &amp; aset terkunci</span>
+          </div>
+          <div className="rounded-2xl bg-slate-950 border border-amber-500/30 p-4">
+            <span className="text-[11px] text-amber-300 font-bold block">Volume Nilai QRIS MINTA</span>
+            <strong className="font-mono text-lg font-black text-amber-200 mt-1 block">
+              {formatRupiah(qrisMintaTotalVolume)}
+            </strong>
+            <span className="text-[10px] text-slate-400">Akumulasi mutasi berlabel [QRIS MINTA]</span>
+          </div>
+        </div>
+
+        {/* Kontrol Sakelar Kebijakan Admin */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="font-bold text-white">Izinkan Mode QRIS TF</div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Nasabah dapat membuat &amp; memindai QRIS TF untuk mentransfer bebas nominal.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                handleToggleQrisPolicy(
+                  { enableQrisTf: !qrisPolicy.enableQrisTf },
+                  `QRIS TF ${!qrisPolicy.enableQrisTf ? 'Diaktifkan' : 'Dinonaktifkan'}`
+                )
+              }
+              className={`px-3.5 py-2 rounded-xl font-black text-xs cursor-pointer shrink-0 ${
+                qrisPolicy.enableQrisTf
+                  ? 'bg-emerald-500 text-slate-950'
+                  : 'bg-rose-500/20 border border-rose-500/40 text-rose-200'
+              }`}
+            >
+              {qrisPolicy.enableQrisTf ? 'AKTIF' : 'NONAKTIF'}
+            </button>
+          </div>
+
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="font-bold text-white">Izinkan Mode QRIS MINTA</div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Nasabah dapat membuat &amp; memindai QRIS MINTA untuk meminta pembayaran aset.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                handleToggleQrisPolicy(
+                  { enableQrisMinta: !qrisPolicy.enableQrisMinta },
+                  `QRIS MINTA ${!qrisPolicy.enableQrisMinta ? 'Diaktifkan' : 'Dinonaktifkan'}`
+                )
+              }
+              className={`px-3.5 py-2 rounded-xl font-black text-xs cursor-pointer shrink-0 ${
+                qrisPolicy.enableQrisMinta
+                  ? 'bg-emerald-500 text-slate-950'
+                  : 'bg-rose-500/20 border border-rose-500/40 text-rose-200'
+              }`}
+            >
+              {qrisPolicy.enableQrisMinta ? 'AKTIF' : 'NONAKTIF'}
+            </button>
+          </div>
+
+          <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="font-bold text-white">Kunci Nominal &amp; Aset QRIS MINTA</div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Wajibkan nominal dan jenis aset terkunci otomatis saat pengirim memindai QRIS MINTA.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                handleToggleQrisPolicy(
+                  { enforceQrisMintaLock: !qrisPolicy.enforceQrisMintaLock },
+                  `Kunci Nominal QRIS MINTA ${!qrisPolicy.enforceQrisMintaLock ? 'Wajib Terkunci' : 'Dilonggarkan'}`
+                )
+              }
+              className={`px-3.5 py-2 rounded-xl font-black text-xs cursor-pointer shrink-0 ${
+                qrisPolicy.enforceQrisMintaLock
+                  ? 'bg-amber-400 text-slate-950'
+                  : 'bg-slate-800 text-slate-300'
+              }`}
+            >
+              {qrisPolicy.enforceQrisMintaLock ? 'TERKUNCI' : 'BEBAS'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

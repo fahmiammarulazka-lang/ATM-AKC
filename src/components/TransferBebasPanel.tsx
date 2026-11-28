@@ -28,10 +28,18 @@ import {
   isUnlimitedNumber,
 } from '../utils/bankUtils';
 import { DiamondIcon } from './DiamondIcon';
+import {
+  PersonalQrisAdminPolicy,
+  PersonalQrisSubMode,
+  readPersonalQrisAdminPolicy,
+} from '../utils/qrisTransferUtils';
 
 interface TransferBebasPanelProps {
   onNavigateToMutasi?: () => void;
   initialAssetMode?: TransferBebasAssetMode;
+  prefillQrisSubMode?: PersonalQrisSubMode;
+  prefillLockAmountAndAsset?: boolean;
+  prefillQrisExpiresAtMs?: number;
   prefillRecipientAccount?: string;
   prefillRecipientName?: string;
   prefillUangAmount?: number;
@@ -46,6 +54,9 @@ interface TransferBebasPanelProps {
 export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   onNavigateToMutasi,
   initialAssetMode,
+  prefillQrisSubMode,
+  prefillLockAmountAndAsset,
+  prefillQrisExpiresAtMs,
   prefillRecipientAccount,
   prefillRecipientName,
   prefillUangAmount,
@@ -59,6 +70,23 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   const { accounts, currentAccount, goldMarketConfig, transferBebas } = useBank();
 
   const [assetMode, setAssetMode] = useState<TransferBebasAssetMode>(initialAssetMode || 'uang');
+  const [qrisSubMode, setQrisSubMode] = useState<PersonalQrisSubMode>(prefillQrisSubMode || 'tf');
+  const [qrisLockAmountAndAsset, setQrisLockAmountAndAsset] = useState<boolean>(
+    Boolean(prefillLockAmountAndAsset || prefillQrisSubMode === 'minta')
+  );
+  const [qrisExpiresAtMs, setQrisExpiresAtMs] = useState<number | undefined>(
+    prefillQrisExpiresAtMs
+  );
+  const [qrisAdminPolicy, setQrisAdminPolicy] = useState<PersonalQrisAdminPolicy>(() =>
+    readPersonalQrisAdminPolicy()
+  );
+
+  useEffect(() => {
+    const syncPolicy = () => setQrisAdminPolicy(readPersonalQrisAdminPolicy());
+    window.addEventListener('bn:personal-qris-policy-updated', syncPolicy);
+    return () => window.removeEventListener('bn:personal-qris-policy-updated', syncPolicy);
+  }, []);
+
   useEffect(() => {
     if (initialAssetMode) {
       setAssetMode(initialAssetMode);
@@ -123,6 +151,11 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
     if (typeof prefillFromQris === 'boolean') {
       setIsFromQris(prefillFromQris);
     }
+    if (prefillQrisSubMode) {
+      setQrisSubMode(prefillQrisSubMode);
+    }
+    setQrisLockAmountAndAsset(Boolean(prefillLockAmountAndAsset || prefillQrisSubMode === 'minta'));
+    setQrisExpiresAtMs(prefillQrisExpiresAtMs);
   }, [
     prefillRecipientAccount,
     prefillRecipientName,
@@ -133,6 +166,9 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
     prefillTokenAmount,
     prefillNote,
     prefillFromQris,
+    prefillQrisSubMode,
+    prefillLockAmountAndAsset,
+    prefillQrisExpiresAtMs,
     otherAccounts,
   ]);
 
@@ -207,9 +243,38 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   const resolvedRecBank =
     recipientSource === 'registered' ? 'Bank Nusantara' : manualRecBank.trim() || 'Tujuan Bebas';
 
+  const isQrisMintaLocked =
+    isFromQris &&
+    qrisSubMode === 'minta' &&
+    qrisLockAmountAndAsset &&
+    qrisAdminPolicy.enforceQrisMintaLock;
+  const isQrisExpired = Boolean(
+    isFromQris &&
+      qrisSubMode === 'minta' &&
+      qrisExpiresAtMs &&
+      qrisExpiresAtMs > 0 &&
+      Date.now() > qrisExpiresAtMs
+  );
+
   const handleOpenConfirm = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    if (isFromQris) {
+      if (qrisSubMode === 'minta' && !qrisAdminPolicy.enableQrisMinta) {
+        setErrorMsg('Mode QRIS MINTA sedang dinonaktifkan sementara oleh kebijakan Admin.');
+        return;
+      }
+      if (qrisSubMode === 'tf' && !qrisAdminPolicy.enableQrisTf) {
+        setErrorMsg('Mode QRIS TF sedang dinonaktifkan sementara oleh kebijakan Admin.');
+        return;
+      }
+      if (isQrisExpired) {
+        setErrorMsg(
+          'Kode QRIS MINTA ini sudah melewati batas waktu aktif (kedaluwarsa). Minta penerima membuat kode QRIS MINTA baru.'
+        );
+        return;
+      }
+    }
     if (!resolvedRecAccount) {
       setErrorMsg('Silakan pilih rekening terdaftar atau ketik nomor rekening/ID tujuan.');
       return;
@@ -255,6 +320,18 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
       setErrorMsg('Masukkan 6 digit PIN Kartu Anda.');
       return;
     }
+    const qrisLabelTag = isFromQris
+      ? qrisSubMode === 'minta'
+        ? '[QRIS MINTA]'
+        : '[QRIS TF]'
+      : '';
+    const rawNote = note.trim();
+    const formattedNote = isFromQris
+      ? rawNote.startsWith('[QRIS')
+        ? rawNote
+        : `${qrisLabelTag} ${rawNote || (qrisSubMode === 'minta' ? 'Pembayaran Permintaan QRIS MINTA Multi-Aset' : 'Transfer Multi-Aset via Scan QRIS TF')}`
+      : rawNote;
+
     const res = transferBebas({
       assetMode,
       recipientAccount: resolvedRecAccount,
@@ -266,7 +343,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
       diamondAmount: diamondSent,
       tokenAmount: tokenSent,
       fromQris: isFromQris,
-      note,
+      note: formattedNote,
       pin: pinInput,
     });
     if (res.success && res.receipt) {
@@ -414,9 +491,24 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
         <form onSubmit={handleOpenConfirm} className="space-y-4 text-xs">
           {/* Asset Mode Selector (6 Mode Lengkap) */}
           <div>
-            <label className="text-slate-300 font-semibold block mb-1.5">
-              1. Pilih Jenis Aset yang Dikirim:
-            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+              <label className="text-slate-300 font-semibold">
+                1. Pilih Jenis Aset yang Dikirim:
+              </label>
+              {isFromQris && (
+                <span
+                  className={`rounded-md border px-2 py-0.5 text-[10px] font-black font-mono ${
+                    isQrisMintaLocked
+                      ? 'border-amber-400/50 bg-amber-500/20 text-amber-200'
+                      : 'border-sky-400/50 bg-sky-500/20 text-sky-200'
+                  }`}
+                >
+                  {isQrisMintaLocked
+                    ? 'QRIS MINTA • JENIS ASET & NOMINAL TERKUNCI'
+                    : 'QRIS TF • BEBAS PILIH ASET & NOMINAL'}
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {(
                 [
@@ -431,8 +523,12 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setAssetMode(item.id)}
-                  className={`py-2.5 px-3 rounded-xl font-bold border transition-colors cursor-pointer ${
+                  disabled={isQrisMintaLocked && assetMode !== item.id}
+                  onClick={() => {
+                    if (isQrisMintaLocked) return;
+                    setAssetMode(item.id);
+                  }}
+                  className={`py-2.5 px-3 rounded-xl font-bold border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
                     assetMode === item.id
                       ? 'bg-amber-400 text-slate-950 border-amber-300'
                       : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
@@ -524,7 +620,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
               <div className="flex justify-between">
                 <label className="text-emerald-300 font-bold">
-                  Nominal Uang Rupiah {assetMode === 'gabungan' ? '(Isi 0 jika tidak disertakan)' : `(Minimal ${formatRupiah(minNom)})`}:
+                  Nominal Uang Rupiah {isQrisMintaLocked ? '(Terkunci QRIS MINTA)' : assetMode === 'gabungan' ? '(Isi 0 jika tidak disertakan)' : `(Minimal ${formatRupiah(minNom)})`}:
                 </label>
                 <span className="font-mono text-slate-400">
                   Diterima: {formatRupiah(uangReceived)}
@@ -534,21 +630,29 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 type="number"
                 min={0}
                 value={uangInput}
-                onChange={(e) => setUangInput(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-emerald-400"
+                readOnly={isQrisMintaLocked}
+                onChange={(e) => {
+                  if (isQrisMintaLocked) return;
+                  setUangInput(e.target.value);
+                }}
+                className={`w-full bg-slate-900 border text-white rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none ${
+                  isQrisMintaLocked ? 'border-amber-500/50 cursor-not-allowed' : 'border-slate-700 focus:border-emerald-400'
+                }`}
               />
-              <div className="flex flex-wrap gap-1.5">
-                {[0, 100_000, 1_000_000, 10_000_000, 50_000_000].map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setUangInput(String(v))}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono text-[11px] cursor-pointer"
-                  >
-                    {v === 0 ? '0 (Lewati)' : formatRupiah(v)}
-                  </button>
-                ))}
-              </div>
+              {!isQrisMintaLocked && (
+                <div className="flex flex-wrap gap-1.5">
+                  {[0, 100_000, 1_000_000, 10_000_000, 50_000_000].map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setUangInput(String(v))}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono text-[11px] cursor-pointer"
+                    >
+                      {v === 0 ? '0 (Lewati)' : formatRupiah(v)}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -556,7 +660,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
               <div className="flex justify-between">
                 <label className="text-yellow-300 font-bold">
-                  Nominal Emas 24K dalam Rupiah (≈ {goldGramsSent.toFixed(4)} g):
+                  Nominal Emas 24K dalam Rupiah (≈ {goldGramsSent.toFixed(4)} g){isQrisMintaLocked ? ' [Terkunci]' : ''}:
                 </label>
                 <span className="font-mono text-slate-400">
                   Diterima: {goldReceivedGrams.toFixed(4)} g ({formatRupiah(goldReceivedRp)})
@@ -566,21 +670,29 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 type="number"
                 min={0}
                 value={goldRupiahInput}
-                onChange={(e) => setGoldRupiahInput(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-yellow-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-yellow-400"
+                readOnly={isQrisMintaLocked}
+                onChange={(e) => {
+                  if (isQrisMintaLocked) return;
+                  setGoldRupiahInput(e.target.value);
+                }}
+                className={`w-full bg-slate-900 border text-yellow-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none ${
+                  isQrisMintaLocked ? 'border-amber-500/50 cursor-not-allowed' : 'border-slate-700 focus:border-yellow-400'
+                }`}
               />
-              <div className="flex flex-wrap gap-1.5">
-                {[0, 100_000, 1_000_000, 5_000_000, 20_000_000].map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setGoldRupiahInput(String(v))}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-yellow-200 font-mono text-[11px] cursor-pointer"
-                  >
-                    {v === 0 ? '0 (Lewati)' : formatRupiah(v)}
-                  </button>
-                ))}
-              </div>
+              {!isQrisMintaLocked && (
+                <div className="flex flex-wrap gap-1.5">
+                  {[0, 100_000, 1_000_000, 5_000_000, 20_000_000].map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setGoldRupiahInput(String(v))}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-yellow-200 font-mono text-[11px] cursor-pointer"
+                    >
+                      {v === 0 ? '0 (Lewati)' : formatRupiah(v)}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -588,7 +700,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
               <div className="flex justify-between">
                 <label className="text-amber-300 font-bold">
-                  Jumlah Coin Spin:
+                  Jumlah Coin Spin{isQrisMintaLocked ? ' (Terkunci)' : ''}:
                 </label>
                 <span className="font-mono text-slate-400">
                   Diterima: {coinReceived.toLocaleString('id-ID')} Koin
@@ -598,21 +710,29 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 type="number"
                 min={0}
                 value={coinInput}
-                onChange={(e) => setCoinInput(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-amber-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-amber-400"
+                readOnly={isQrisMintaLocked}
+                onChange={(e) => {
+                  if (isQrisMintaLocked) return;
+                  setCoinInput(e.target.value);
+                }}
+                className={`w-full bg-slate-900 border text-amber-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none ${
+                  isQrisMintaLocked ? 'border-amber-500/50 cursor-not-allowed' : 'border-slate-700 focus:border-amber-400'
+                }`}
               />
-              <div className="flex flex-wrap gap-1.5">
-                {[0, 20, 100, 500, 1000].map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setCoinInput(String(c))}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-200 font-mono text-[11px] cursor-pointer"
-                  >
-                    {c === 0 ? '0 (Lewati)' : `${c.toLocaleString('id-ID')} Koin`}
-                  </button>
-                ))}
-              </div>
+              {!isQrisMintaLocked && (
+                <div className="flex flex-wrap gap-1.5">
+                  {[0, 20, 100, 500, 1000].map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setCoinInput(String(c))}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-200 font-mono text-[11px] cursor-pointer"
+                    >
+                      {c === 0 ? '0 (Lewati)' : `${c.toLocaleString('id-ID')} Koin`}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -620,7 +740,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
               <div className="flex justify-between">
                 <label className="text-cyan-300 font-bold">
-                  Jumlah Permata (Diamond):
+                  Jumlah Permata (Diamond){isQrisMintaLocked ? ' (Terkunci)' : ''}:
                 </label>
                 <span className="font-mono text-slate-400">
                   Diterima: {diamondReceived.toLocaleString('id-ID')} Permata
@@ -630,21 +750,29 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 type="number"
                 min={0}
                 value={diamondInput}
-                onChange={(e) => setDiamondInput(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-cyan-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-cyan-400"
+                readOnly={isQrisMintaLocked}
+                onChange={(e) => {
+                  if (isQrisMintaLocked) return;
+                  setDiamondInput(e.target.value);
+                }}
+                className={`w-full bg-slate-900 border text-cyan-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none ${
+                  isQrisMintaLocked ? 'border-amber-500/50 cursor-not-allowed' : 'border-slate-700 focus:border-cyan-400'
+                }`}
               />
-              <div className="flex flex-wrap gap-1.5">
-                {[0, 10, 25, 100, 500].map((d) => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDiamondInput(String(d))}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-200 font-mono text-[11px] cursor-pointer"
-                  >
-                    {d === 0 ? '0 (Lewati)' : `${d.toLocaleString('id-ID')} Permata`}
-                  </button>
-                ))}
-              </div>
+              {!isQrisMintaLocked && (
+                <div className="flex flex-wrap gap-1.5">
+                  {[0, 10, 25, 100, 500].map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setDiamondInput(String(d))}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-200 font-mono text-[11px] cursor-pointer"
+                    >
+                      {d === 0 ? '0 (Lewati)' : `${d.toLocaleString('id-ID')} Permata`}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -652,7 +780,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
               <div className="flex justify-between">
                 <label className="text-fuchsia-300 font-bold">
-                  Jumlah Token Spin Bingkai:
+                  Jumlah Token Spin Bingkai{isQrisMintaLocked ? ' (Terkunci)' : ''}:
                 </label>
                 <span className="font-mono text-slate-400">
                   Diterima: {tokenReceived.toLocaleString('id-ID')} Token
@@ -662,21 +790,29 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 type="number"
                 min={0}
                 value={tokenInput}
-                onChange={(e) => setTokenInput(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-fuchsia-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-fuchsia-400"
+                readOnly={isQrisMintaLocked}
+                onChange={(e) => {
+                  if (isQrisMintaLocked) return;
+                  setTokenInput(e.target.value);
+                }}
+                className={`w-full bg-slate-900 border text-fuchsia-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none ${
+                  isQrisMintaLocked ? 'border-amber-500/50 cursor-not-allowed' : 'border-slate-700 focus:border-fuchsia-400'
+                }`}
               />
-              <div className="flex flex-wrap gap-1.5">
-                {[0, 1, 3, 10, 25].map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    onClick={() => setTokenInput(String(t))}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-fuchsia-200 font-mono text-[11px] cursor-pointer"
-                  >
-                    {t === 0 ? '0 (Lewati)' : `${t.toLocaleString('id-ID')} Token`}
-                  </button>
-                ))}
-              </div>
+              {!isQrisMintaLocked && (
+                <div className="flex flex-wrap gap-1.5">
+                  {[0, 1, 3, 10, 25].map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setTokenInput(String(t))}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-fuchsia-200 font-mono text-[11px] cursor-pointer"
+                    >
+                      {t === 0 ? '0 (Lewati)' : `${t.toLocaleString('id-ID')} Token`}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
