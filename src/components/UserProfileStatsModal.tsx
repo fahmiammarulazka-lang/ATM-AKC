@@ -633,9 +633,8 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     logoutGoogle();
   };
 
-  const otherSavedSwitchAccounts = useMemo(
-    () => recentQuickSwitchAccounts.filter((item) => item.accountId !== currentAccount.id),
-    [recentQuickSwitchAccounts, currentAccount.id]
+  const otherSavedSwitchAccounts = (recentQuickSwitchAccounts || []).filter(
+    (item) => item.accountId !== currentAccount.id
   );
 
   const handleOpenQuickAccountSwitch = () => {
