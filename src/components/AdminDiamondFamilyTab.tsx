@@ -38,6 +38,9 @@ interface QrisGatewayStatusInfo {
   hasWebhookSecret: boolean;
   hasStaticQris: boolean;
   activeMode: 'api' | 'emvco';
+  accountId?: string;
+  loginId?: string;
+  webhookUrl?: string;
 }
 
 export const AdminDiamondFamilyTab: React.FC = () => {
@@ -711,46 +714,42 @@ export const AdminDiamondFamilyTab: React.FC = () => {
         )}
 
         {qrisConfigStatus && (
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">Mode Aktif</span>
-              <span className="font-black text-sky-300 uppercase">
-                {qrModeDraft === 'manual_override'
-                  ? 'QR MANUAL ADMIN'
-                  : qrisConfigStatus.activeMode === 'api'
-                    ? 'BOT BUATQRIS API'
-                    : 'BUATQRIS DINAMIS'}
-              </span>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">Akun Gateway</span>
-              <span className={qrisConfigStatus.hasAccountId ? 'font-bold text-emerald-400' : 'font-bold text-amber-400'}>
-                {qrisConfigStatus.hasAccountId ? 'Aktif' : 'Standby'}
-              </span>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">Otentikasi</span>
-              <span className={qrisConfigStatus.hasLoginId ? 'font-bold text-emerald-400' : 'font-bold text-slate-400'}>
-                {qrisConfigStatus.hasLoginId ? 'Terhubung' : 'Opsional'}
-              </span>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">Kunci Server</span>
-              <span className={qrisConfigStatus.hasSecretKey ? 'font-bold text-emerald-400' : 'font-bold text-amber-400'}>
-                {qrisConfigStatus.hasSecretKey ? 'Aktif' : 'Fallback EMVCo'}
-              </span>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">Sinkronisasi</span>
-              <span className={qrisConfigStatus.hasWebhookUrl ? 'font-bold text-emerald-400' : 'font-bold text-sky-300'}>
-                {qrisConfigStatus.hasWebhookUrl ? 'Otomatis Aktif' : 'Siap Terima'}
-              </span>
-            </div>
-            <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
-              <span className="text-[10px] text-slate-400 block">QRIS Dinamis</span>
-              <span className={qrisConfigStatus.hasStaticQris ? 'font-bold text-emerald-400' : 'font-bold text-slate-400'}>
-                {qrisConfigStatus.hasStaticQris ? 'Siap' : 'Default'}
-              </span>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+                <span className="text-[10px] text-slate-400 block">Alur Top-Up Diamond</span>
+                <span className="font-black text-emerald-300 uppercase">
+                  REDIRECT BUATQRIS.SITE
+                </span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+                <span className="text-[10px] text-slate-400 block">API Account ID</span>
+                <span className={qrisConfigStatus.hasAccountId ? 'font-bold text-emerald-400 font-mono text-[10px] break-all' : 'font-bold text-amber-400'}>
+                  {qrisConfigStatus.accountId || 'Aktif'}
+                </span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+                <span className="text-[10px] text-slate-400 block">ID Login Merchant</span>
+                <span className="font-bold text-sky-300 font-mono text-[10px] break-all">
+                  {qrisConfigStatus.loginId || 'Terhubung'}
+                </span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+                <span className="text-[10px] text-slate-400 block">Secret Key (Server)</span>
+                <span className={qrisConfigStatus.hasSecretKey ? 'font-bold text-emerald-400' : 'font-bold text-amber-400'}>
+                  {qrisConfigStatus.hasSecretKey ? 'Tersimpan Aman' : 'Isi di Secrets Server'}
+                </span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+                <span className="text-[10px] text-slate-400 block">Webhook Otomatis</span>
+                <span className="font-bold text-emerald-400 font-mono text-[10px] break-all">
+                  {qrisConfigStatus.webhookUrl || 'Siap Terima'}
+                </span>
+              </div>
+              <div className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+                <span className="text-[10px] text-slate-400 block">QRIS di Dashboard</span>
+                <span className="font-bold text-cyan-300">Dinonaktifkan (Tab Baru)</span>
+              </div>
             </div>
           </div>
         )}
@@ -983,71 +982,81 @@ export const AdminDiamondFamilyTab: React.FC = () => {
           )}
         </div>
 
-        {/* DAFTAR ORDER QRIS + TOMBOL TES SIMULASI QRIS LUNAS */}
-        <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-          {qrisOrders.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-slate-800 py-6 text-center text-slate-500">
-              Belum ada transaksi QRIS yang dibuat nasabah.
-            </p>
-          ) : (
-            qrisOrders.slice(0, 30).map((ord) => (
-              <div
-                key={ord.orderId}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white">{ord.accountName}</span>
-                    <span className="inline-flex items-center gap-1 text-cyan-300 font-black">
-                      <span>+{(ord.diamondAmount || 0).toLocaleString('id-ID')}</span>
-                      <DiamondIcon tone="bright" className="h-3.5 w-3.5" />
-                    </span>
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-black ${
-                        ord.status === 'LUNAS'
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : ord.status === 'EXPIRED' || ord.status === 'DITOLAK'
-                            ? 'bg-rose-500/20 text-rose-300'
-                            : ord.status === 'MENUNGGU_ADMIN'
-                              ? 'bg-sky-500/20 text-sky-300'
-                              : 'bg-amber-500/20 text-amber-300'
-                      }`}
-                    >
-                      {ord.status}
+        {/* LOG PESANAN REDIRECT BUATQRIS.SITE + SETUJUI MANUAL ADMIN */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h4 className="font-black text-sky-300 text-xs">
+              Log Pesanan Redirect buatqris.site ({qrisOrders.length} Transaksi)
+            </h4>
+            <span className="text-[10px] text-slate-400">
+              Otomatis lunas via Webhook atau klik Setujui Manual
+            </span>
+          </div>
+          <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+            {qrisOrders.length === 0 ? (
+              <p className="rounded-xl border border-dashed border-slate-800 py-6 text-center text-slate-500">
+                Belum ada transaksi redirect buatqris.site yang dibuat nasabah.
+              </p>
+            ) : (
+              qrisOrders.slice(0, 30).map((ord) => (
+                <div
+                  key={ord.orderId}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-white">{ord.accountName}</span>
+                      <span className="inline-flex items-center gap-1 text-cyan-300 font-black">
+                        <span>+{(ord.diamondAmount || 0).toLocaleString('id-ID')}</span>
+                        <DiamondIcon tone="bright" className="h-3.5 w-3.5" />
+                      </span>
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-black ${
+                          ord.status === 'LUNAS'
+                            ? 'bg-emerald-500/20 text-emerald-300'
+                            : ord.status === 'EXPIRED' || ord.status === 'DITOLAK'
+                              ? 'bg-rose-500/20 text-rose-300'
+                              : ord.status === 'MENUNGGU_ADMIN'
+                                ? 'bg-sky-500/20 text-sky-300'
+                                : 'bg-amber-500/20 text-amber-300'
+                        }`}
+                      >
+                        {ord.status}
+                      </span>
+                    </div>
+                    <p className="font-mono text-[10px] text-slate-400">
+                      {ord.orderId} · Redirect buatqris.site ({ord.paymentUrlSource === 'api' ? 'API Link' : 'Merchant Link'}) · {new Date(ord.createdAt).toLocaleString('id-ID')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    {(ord.status === 'PENDING' || ord.status === 'MENUNGGU_ADMIN') && (
+                      <button
+                        type="button"
+                        disabled={simulatingOrderId === ord.orderId}
+                        onClick={async () => {
+                          setSimulatingOrderId(ord.orderId);
+                          try {
+                            const res = await adminSimulateQrisOrder(ord.orderId);
+                            showMsg(res.message);
+                          } finally {
+                            setSimulatingOrderId(null);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 px-2.5 py-1 text-[10px] font-black text-emerald-200 cursor-pointer whitespace-nowrap"
+                        title="Setujui Manual & Cairkan Diamond Instan ke Nasabah"
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        <span>{simulatingOrderId === ord.orderId ? 'Memproses...' : 'Setujui Manual'}</span>
+                      </button>
+                    )}
+                    <span className="font-mono font-black text-sky-300 tabular-nums">
+                      {formatRupiah(ord.totalAmount)}
                     </span>
                   </div>
-                  <p className="font-mono text-[10px] text-slate-400">
-                    {ord.orderId} • Mode {ord.modeUsed.toUpperCase()} • {new Date(ord.createdAt).toLocaleString('id-ID')}
-                  </p>
                 </div>
-                <div className="flex items-center gap-2.5">
-                  {(ord.status === 'PENDING' || ord.status === 'MENUNGGU_ADMIN') && (
-                    <button
-                      type="button"
-                      disabled={simulatingOrderId === ord.orderId}
-                      onClick={async () => {
-                        setSimulatingOrderId(ord.orderId);
-                        try {
-                          const res = await adminSimulateQrisOrder(ord.orderId);
-                          showMsg(res.message);
-                        } finally {
-                          setSimulatingOrderId(null);
-                        }
-                      }}
-                      className="inline-flex items-center gap-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/50 px-2.5 py-1 text-[10px] font-black text-cyan-200 cursor-pointer"
-                      title="Tes Simulasi QRIS Lunas & Masuk Diamond Instan"
-                    >
-                      <Zap className="h-3 w-3" />
-                      <span>{simulatingOrderId === ord.orderId ? 'Proses...' : 'Tes Simulasi QRIS'}</span>
-                    </button>
-                  )}
-                  <span className="font-mono font-black text-sky-300 tabular-nums">
-                    {formatRupiah(ord.totalAmount)}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
         </div>
 
         {proofLightboxUrl && (

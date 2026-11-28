@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   RefreshCw,
   Download,
+  ExternalLink,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -31,10 +32,30 @@ import {
   getEffectiveDiamondPurchaseLimits,
 } from '../data/diamondCatalog';
 import { formatRupiah } from '../utils/bankUtils';
-import { QrisValidationError, requestCreateQrisPayment } from '../../buatQrisService';
+import {
+  QrisValidationError,
+  buildBuatQrisMerchantRedirectUrl,
+  requestCreateQrisPayment,
+} from '../../buatQrisService';
 import { downloadPureQrisPng } from '../utils/qrisDownload';
 import { QrisPaymentOrder } from '../types/bank';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
+
+const openExternalPaymentTab = (url: string): void => {
+  if (!url || typeof document === 'undefined') return;
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener noreferrer';
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } catch {
+    // Fallback link tetap selalu tersedia di modal Menunggu Pembayaran buatqris.site
+  }
+};
 
 const ITEMS_PER_PAGE = 25;
 
@@ -333,6 +354,17 @@ export const DiamondStoreModal: React.FC = () => {
         return;
       }
 
+      const resolvedPaymentUrl =
+        res.paymentUrl ||
+        buildBuatQrisMerchantRedirectUrl({
+          orderId: res.orderId,
+          totalAmount: res.totalAmount,
+          baseAmount: res.baseAmount,
+          uniqueCode: res.uniqueCode,
+          customerName: currentAccount.fullName,
+          description: label,
+        });
+
       const newOrder: QrisPaymentOrder = {
         orderId: res.orderId,
         externalInvoiceId: res.externalInvoiceId,
@@ -350,28 +382,29 @@ export const DiamondStoreModal: React.FC = () => {
         status: 'PENDING',
         qrisString: res.qrisString,
         qrisImageUrl: res.qrisImageUrl,
+        paymentUrl: resolvedPaymentUrl,
+        paymentUrlSource: res.paymentUrlSource || 'merchant_fallback',
         manualQrImageDataUrl: res.manualQrImageDataUrl,
         manualPaymentNote: res.manualPaymentNote,
         createdAt: res.createdAt || new Date().toISOString(),
         expiresAt: res.expiresAt,
       };
 
-      if (res.configNotice) {
-        recordLiveActivity({
-          actorRole: 'nasabah',
-          category: 'transaction',
-          accountId: currentAccount.id,
-          accountName: currentAccount.fullName,
-          accountNumber: currentAccount.accountNumber,
-          cardTier: currentAccount.cardTier,
-          actionTitle: 'Top-Up QRIS (Fallback EMVCo Lokal)',
-          description: `Tagihan ${label} (${formatRupiah(res.totalAmount)}) dibuat otomatis dengan mode QRIS EMVCo lokal.`,
-          amountRupiah: res.totalAmount,
-        });
-      }
+      recordLiveActivity({
+        actorRole: 'nasabah',
+        category: 'transaction',
+        accountId: currentAccount.id,
+        accountName: currentAccount.fullName,
+        accountNumber: currentAccount.accountNumber,
+        cardTier: currentAccount.cardTier,
+        actionTitle: 'Redirect Top-Up Diamond ke buatqris.site',
+        description: `Tagihan ${label} (${formatRupiah(res.totalAmount)} · ${res.orderId}) dialihkan ke halaman pembayaran buatqris.site.`,
+        amountRupiah: res.totalAmount,
+      });
 
       registerQrisOrder(newOrder);
       setActiveQrisModalOrder(newOrder);
+      openExternalPaymentTab(resolvedPaymentUrl);
     } catch (err) {
       const specificReason =
         err instanceof QrisValidationError
@@ -475,7 +508,7 @@ export const DiamondStoreModal: React.FC = () => {
                 <DiamondIcon tone="bright" className="h-3.5 w-3.5" />
                 <span>
                   ) • Mulai {formatRupiah(MIN_DIAMOND_PURCHASE_RUPIAH)} • Maks{' '}
-                  {formatRupiah(limits.maxBaseRupiah)} via QRIS Nusantara
+                  {formatRupiah(limits.maxBaseRupiah)} via buatqris.site
                 </span>
               </p>
             </div>
@@ -563,7 +596,7 @@ export const DiamondStoreModal: React.FC = () => {
               }`}
             >
               <Clock className="h-3.5 w-3.5" />
-              Riwayat QRIS ({accountOrders.length})
+              Riwayat Top-Up ({accountOrders.length})
             </button>
           )}
         </div>
@@ -703,12 +736,11 @@ export const DiamondStoreModal: React.FC = () => {
                       {isCreatingQris ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
-                        <QrCode className="h-4 w-4" />
+                        <ExternalLink className="h-4 w-4" />
                       )}
                       <span>
-                        Bayar{' '}
                         {parsedCustomDiamonds >= limits.minDiamonds
-                          ? formatRupiah(customPrice.finalPrice)
+                          ? `Bayar ${formatRupiah(customPrice.finalPrice)} di buatqris.site`
                           : `Min ${limits.minDiamonds} 💎`}
                       </span>
                     </button>
@@ -754,7 +786,7 @@ export const DiamondStoreModal: React.FC = () => {
                     )}
                   </div>
                   <span className="text-[10px] font-medium text-slate-500">
-                    Total QRIS + kode unik 3 digit tetap di bawah Rp 1.000.000
+                    Pembayaran dibuka langsung di buatqris.site • Total + kode unik 3 digit &lt; Rp 1.000.000
                   </span>
                 </div>
 
@@ -1096,44 +1128,76 @@ export const DiamondStoreModal: React.FC = () => {
                       <span className="text-sm font-black text-slate-900 tabular-nums mr-1">
                         {formatRupiah(ord.totalAmount)}
                       </span>
-                      {ord.status === 'PENDING' && (
-                        <>
-                          <button
-                            type="button"
-                            disabled={!ord.qrisString || downloadingHistoryOrderId === ord.orderId}
-                            onClick={() => void handleDownloadPendingHistoryQris(ord)}
-                            className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[11px] font-black text-white shadow-sm transition whitespace-nowrap disabled:opacity-50 ${
-                              downloadedHistoryOrderId === ord.orderId
-                                ? 'bg-emerald-600'
-                                : 'bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500'
-                            }`}
-                          >
-                            {downloadingHistoryOrderId === ord.orderId ? (
-                              <>
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                <span>Menyiapkan...</span>
-                              </>
-                            ) : downloadedHistoryOrderId === ord.orderId ? (
-                              <>
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                <span>Tersimpan</span>
-                              </>
-                            ) : (
-                              <>
-                                <Download className="h-3.5 w-3.5" />
-                                <span>Unduh Qris</span>
-                              </>
-                            )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setActiveQrisModalOrder(ord)}
-                            className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 transition hover:bg-slate-100 whitespace-nowrap"
-                          >
-                            Buka QRIS
-                          </button>
-                        </>
-                      )}
+                      {ord.status === 'PENDING' &&
+                        (ord.purpose === 'diamond_topup' ? (
+                          <>
+                            <a
+                              href={
+                                ord.paymentUrl ||
+                                buildBuatQrisMerchantRedirectUrl({
+                                  orderId: ord.orderId,
+                                  totalAmount: ord.totalAmount,
+                                  baseAmount: ord.baseAmount,
+                                  uniqueCode: ord.uniqueCode,
+                                  customerName: ord.accountName,
+                                  description: ord.diamondAmount
+                                    ? `Top-Up ${ord.diamondAmount.toLocaleString('id-ID')} Diamond`
+                                    : 'Top-Up Diamond',
+                                })
+                              }
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-3 py-1.5 text-[11px] font-black text-white shadow-sm transition hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500 whitespace-nowrap"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              <span>Bayar di buatqris.site</span>
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => setActiveQrisModalOrder(ord)}
+                              className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 transition hover:bg-slate-100 whitespace-nowrap"
+                            >
+                              Pantau Status
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              disabled={!ord.qrisString || downloadingHistoryOrderId === ord.orderId}
+                              onClick={() => void handleDownloadPendingHistoryQris(ord)}
+                              className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[11px] font-black text-white shadow-sm transition whitespace-nowrap disabled:opacity-50 ${
+                                downloadedHistoryOrderId === ord.orderId
+                                  ? 'bg-emerald-600'
+                                  : 'bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500'
+                              }`}
+                            >
+                              {downloadingHistoryOrderId === ord.orderId ? (
+                                <>
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  <span>Menyiapkan...</span>
+                                </>
+                              ) : downloadedHistoryOrderId === ord.orderId ? (
+                                <>
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                  <span>Tersimpan</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="h-3.5 w-3.5" />
+                                  <span>Unduh Qris</span>
+                                </>
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setActiveQrisModalOrder(ord)}
+                              className="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 transition hover:bg-slate-100 whitespace-nowrap"
+                            >
+                              Buka QRIS
+                            </button>
+                          </>
+                        ))}
                     </div>
                   </div>
                 ))

@@ -32,6 +32,7 @@ import {
   JobStageId,
   JobStageProgressEntry,
   clearJobStageProgress,
+  computeJobStageScaling,
   getEnabledStageList,
   loadAccountJobStageProgressMap,
   loadJobFiveStageConfig,
@@ -50,8 +51,10 @@ interface JobVacancyCardProps {
   effectiveSalary: number;
   effectiveCoins: number;
   extraSalaryBonusPercent: number;
+  tierBonusPercent: number;
   extraCoinBonus: number;
   extraAccountXpBonus: number;
+  cableCount: number;
   completedStagesCount: number;
   totalActiveStagesCount: number;
   currentClicks: number;
@@ -70,8 +73,10 @@ const JobVacancyCard: React.FC<JobVacancyCardProps> = React.memo(
     effectiveSalary,
     effectiveCoins,
     extraSalaryBonusPercent,
+    tierBonusPercent,
     extraCoinBonus,
     extraAccountXpBonus,
+    cableCount,
     completedStagesCount,
     totalActiveStagesCount,
     completionFlashNonce,
@@ -84,9 +89,13 @@ const JobVacancyCard: React.FC<JobVacancyCardProps> = React.memo(
       100,
       Math.round((completedStagesCount / Math.max(1, totalActiveStagesCount)) * 100)
     );
+    const totalSalaryBonusPct = Math.max(0, extraSalaryBonusPercent) + Math.max(0, tierBonusPercent);
     const totalSalaryWithBonus =
-      effectiveSalary + Math.round((effectiveSalary * Math.max(0, extraSalaryBonusPercent)) / 100);
-    const totalCoinsWithBonus = effectiveCoins + Math.max(0, extraCoinBonus);
+      effectiveSalary + Math.round((effectiveSalary * totalSalaryBonusPct) / 100);
+    const totalCoinsWithBonus =
+      effectiveCoins + Math.max(0, extraCoinBonus) + Math.max(0, (job.requiredLevel - 1) * 2);
+    const totalXpWithBonus =
+      Math.max(0, extraAccountXpBonus) + Math.max(0, (job.requiredLevel - 1) * 5);
 
     return (
       <div
@@ -128,14 +137,14 @@ const JobVacancyCard: React.FC<JobVacancyCardProps> = React.memo(
             </span>
 
             <span className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 font-mono text-[11px] text-cyan-300 font-bold tabular-nums whitespace-nowrap">
-              {effectiveTargetClicks.toLocaleString('id-ID')} Klik
+              {cableCount} Kabel · {effectiveTargetClicks.toLocaleString('id-ID')} Klik
             </span>
           </div>
 
-          {/* Dual Money & Coin + 5-Stage Bonus Reward Box */}
+          {/* Dual Money & Coin + 10-Stage Bonus Reward Box */}
           <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800/90 space-y-2">
             <span className="text-[10px] font-mono uppercase text-slate-400 block">
-              TOTAL CAIR 5 TAHAP (+{extraSalaryBonusPercent}% GAJI, COIN &amp; +{extraAccountXpBonus} XP):
+              TOTAL CAIR {totalActiveStagesCount} TAHAP (+{totalSalaryBonusPct}% GAJI, COIN &amp; +{totalXpWithBonus} XP):
             </span>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="text-lg sm:text-xl font-black text-emerald-400 font-mono flex items-center gap-1.5 tabular-nums">
@@ -1298,6 +1307,12 @@ export const JobVacancyView: React.FC = () => {
             const effectiveCoins =
               Math.max(1, Math.round(baseWithSalaryMult * adminCoinMult)) + adminExtraCoins;
 
+            const jobScaling = computeJobStageScaling(
+              job.requiredLevel,
+              fiveStageConfig.progressiveDifficultyEnabled,
+              fiveStageConfig.tierBonusPerLevelPercent
+            );
+
             return (
               <JobVacancyCard
                 key={job.id}
@@ -1309,8 +1324,10 @@ export const JobVacancyView: React.FC = () => {
                 effectiveSalary={effectiveSalary}
                 effectiveCoins={effectiveCoins}
                 extraSalaryBonusPercent={fiveStageConfig.extraSalaryBonusPercent}
+                tierBonusPercent={jobScaling.tierBonusPercent}
                 extraCoinBonus={fiveStageConfig.extraCoinBonus}
                 extraAccountXpBonus={fiveStageConfig.extraAccountXpBonus}
+                cableCount={jobScaling.cableCount}
                 completedStagesCount={completedStagesForJob.length}
                 totalActiveStagesCount={enabledStageIds.length}
                 currentClicks={currentClicks}
@@ -1324,7 +1341,7 @@ export const JobVacancyView: React.FC = () => {
         </div>
       </div>
 
-      {/* MODAL INTERAKTIF LAYAR PENUH 5 TAHAP KERJA */}
+      {/* MODAL INTERAKTIF LAYAR PENUH 10 TAHAP KERJA */}
       {activeFiveStageJob && (
         <JobFiveStageModal
           job={activeFiveStageJob}

@@ -63,12 +63,53 @@ function normalizeBuatQrisUrl(raw: string): string {
 export const OFFICIAL_BUATQRIS_MERCHANT_INFO = {
   gatewaySiteLabel: 'buatqris.site',
   gatewayUrl: 'https://app.buatqris.site',
+  merchantCheckoutUrl: 'https://app.buatqris.site/donation/azkaakc',
   merchantName: 'Bank Nusantara Diamond Official (buatqris.site)',
   loginId: 'azkafahmiammarulazka1550.azkaakc',
   accountId: 'user_6b01691c68be33.21495479',
   webhookUrl: 'https://atm-akc.vercel.app/',
   scopeDescription: 'Khusus Top-Up Permata (Diamond) di Toko Permata',
 } as const;
+
+/**
+ * Menyusun tautan tujuan pembayaran resmi merchant di buatqris.site
+ * lengkap dengan parameter nominal (termasuk kode unik 3 digit), Order ID, dan ID merchant.
+ */
+export function buildBuatQrisMerchantRedirectUrl(params: {
+  orderId: string;
+  totalAmount: number;
+  baseAmount?: number;
+  uniqueCode?: number;
+  customerName?: string;
+  description?: string;
+  accountId?: string;
+  loginId?: string;
+  gatewayUrl?: string;
+}): string {
+  const safeBase =
+    params.gatewayUrl && isAllowedBuatQrisHost(params.gatewayUrl)
+      ? params.gatewayUrl.replace(/\/+$/, '')
+      : OFFICIAL_BUATQRIS_MERCHANT_INFO.gatewayUrl;
+  const target = new URL(`${safeBase}/donation/azkaakc`);
+  target.searchParams.set('amount', String(Math.max(1, Math.round(params.totalAmount))));
+  target.searchParams.set('order_id', params.orderId);
+  target.searchParams.set('ref', params.orderId);
+  target.searchParams.set(
+    'account_id',
+    (params.accountId || OFFICIAL_BUATQRIS_MERCHANT_INFO.accountId).trim()
+  );
+  target.searchParams.set(
+    'login_id',
+    (params.loginId || OFFICIAL_BUATQRIS_MERCHANT_INFO.loginId).trim()
+  );
+  if (params.customerName) {
+    target.searchParams.set('name', params.customerName.slice(0, 60));
+  }
+  if (params.description) {
+    target.searchParams.set('note', `${params.description.slice(0, 80)} [${params.orderId}]`);
+  }
+  return target.toString();
+}
 
 export function getBuatQrisConfig(): BuatQrisConfig {
   const secretKey =
@@ -276,6 +317,8 @@ export interface CreateBuatQrisResult {
   totalAmount: number;
   qrisString: string;
   qrisImageUrl?: string;
+  paymentUrl?: string;
+  paymentUrlSource?: 'api' | 'merchant_fallback';
   manualQrImageDataUrl?: string;
   manualPaymentNote?: string;
   createdAt: string;
@@ -449,6 +492,17 @@ export async function createBuatQrisInvoiceServer(
           const qrisImageUrl = String(
             dataObj.qris_url || dataObj.qr_image_url || dataObj.image_url || dataObj.qr_url || ''
           ).trim();
+          const rawPaymentUrl = String(
+            dataObj.payment_url ||
+              dataObj.checkout_url ||
+              dataObj.pay_url ||
+              dataObj.redirect_url ||
+              dataObj.invoice_url ||
+              dataObj.url ||
+              ''
+          ).trim();
+          const validApiPaymentUrl =
+            rawPaymentUrl && isAllowedBuatQrisHost(rawPaymentUrl) ? rawPaymentUrl : '';
           const externalInvoiceId = String(
             dataObj.qris_invoiceid ||
               dataObj.invoice_id ||
@@ -457,7 +511,18 @@ export async function createBuatQrisInvoiceServer(
               input.orderId
           ).trim();
 
-          if (qrisString || qrisImageUrl) {
+          if (validApiPaymentUrl || qrisString || qrisImageUrl) {
+            const fallbackMerchantUrl = buildBuatQrisMerchantRedirectUrl({
+              orderId: input.orderId,
+              totalAmount,
+              baseAmount,
+              uniqueCode,
+              customerName: input.customerName,
+              description: input.description,
+              accountId: effectiveAccountId,
+              loginId: effectiveLoginId,
+              gatewayUrl: effectiveGatewayUrl,
+            });
             return {
               success: true,
               orderId: input.orderId,
@@ -470,6 +535,8 @@ export async function createBuatQrisInvoiceServer(
               qrisString:
                 qrisString || generateDynamicEmvcoQris(effectiveStaticQris, totalAmount),
               qrisImageUrl: qrisImageUrl || undefined,
+              paymentUrl: validApiPaymentUrl || fallbackMerchantUrl,
+              paymentUrlSource: validApiPaymentUrl ? 'api' : 'merchant_fallback',
               createdAt: now.toISOString(),
               expiresAt,
             };
@@ -485,9 +552,20 @@ export async function createBuatQrisInvoiceServer(
     }
   }
 
-  // 3. Fallback EMVCo Dinamis Otomatis (Tag 54 + Kode Unik 3 Digit + CRC16-CCITT valid)
+  // 3. Fallback Redirect Halaman Merchant buatqris.site (+ string EMVCo tersimpan untuk referensi server)
   const hasStaticQris = Boolean(effectiveStaticQris);
   const dynamicQrisString = generateDynamicEmvcoQris(effectiveStaticQris, totalAmount);
+  const fallbackMerchantUrl = buildBuatQrisMerchantRedirectUrl({
+    orderId: input.orderId,
+    totalAmount,
+    baseAmount,
+    uniqueCode,
+    customerName: input.customerName,
+    description: input.description,
+    accountId: effectiveAccountId,
+    loginId: effectiveLoginId,
+    gatewayUrl: effectiveGatewayUrl,
+  });
 
   return {
     success: true,
@@ -495,15 +573,17 @@ export async function createBuatQrisInvoiceServer(
     externalInvoiceId: input.orderId,
     modeUsed: 'emvco',
     configReady: hasStaticQris || hasApiCreds,
-    configNotice: !hasApiCreds && !hasStaticQris
-      ? 'Bot QRIS berjalan dalam mode pratinjau EMVCo lokal (isi kredensial BuatQRIS di Secrets atau pasang QR Manual di Panel Admin untuk scan pembayaran nyata).'
+    configNotice: !hasApiCreds
+      ? 'Dialihkan ke halaman merchant resmi buatqris.site — pastikan membayar sesuai nominal total (+ kode unik) dan Order ID.'
       : lastApiFailureNote
-      ? `Gateway BuatQRIS sementara sibuk (${lastApiFailureNote}) — dialihkan mulus ke QRIS Dinamis EMVCo.`
+      ? `API buatqris.site sementara sibuk (${lastApiFailureNote}) — tetap dialihkan ke halaman merchant buatqris.site sesuai nominal & Order ID.`
       : undefined,
     baseAmount,
     uniqueCode,
     totalAmount,
     qrisString: dynamicQrisString,
+    paymentUrl: fallbackMerchantUrl,
+    paymentUrlSource: 'merchant_fallback',
     createdAt: now.toISOString(),
     expiresAt,
   };
@@ -687,7 +767,7 @@ export class QrisValidationError extends Error {
  */
 export function createLocalEmvcoFallbackQris(
   payload: ClientCreateQrisRequest,
-  notice = 'Server QRIS sedang padat — QRIS Dinamis EMVCo diterbitkan otomatis secara lokal.'
+  notice = 'Server sementara sibuk — dialihkan langsung ke halaman merchant buatqris.site dengan nominal tepat & Order ID.'
 ): CreateBuatQrisResult {
   const baseAmount = Math.max(1, Math.round(Number(payload.amount) || 0));
   const useUnique = typeof payload.useUniqueCode === 'boolean' ? payload.useUniqueCode : true;
@@ -697,6 +777,14 @@ export function createLocalEmvcoFallbackQris(
   const now = new Date();
   const expiresAt = new Date(now.getTime() + expiryMinutes * 60 * 1000).toISOString();
   const qrisString = generateDynamicEmvcoQris(PLACEHOLDER_EMVCO_STATIC_QRIS, totalAmount);
+  const paymentUrl = buildBuatQrisMerchantRedirectUrl({
+    orderId: payload.orderId,
+    totalAmount,
+    baseAmount,
+    uniqueCode,
+    customerName: payload.customerName,
+    description: payload.description,
+  });
 
   return {
     success: true,
@@ -708,6 +796,8 @@ export function createLocalEmvcoFallbackQris(
     uniqueCode,
     totalAmount,
     qrisString,
+    paymentUrl,
+    paymentUrlSource: 'merchant_fallback',
     createdAt: now.toISOString(),
     expiresAt,
   };

@@ -2567,6 +2567,8 @@ export interface QrisPaymentOrder {
   configNotice?: string;
   qrisString: string;
   qrisImageUrl?: string;
+  paymentUrl?: string;
+  paymentUrlSource?: 'api' | 'merchant_fallback';
   manualQrImageDataUrl?: string;
   manualPaymentNote?: string;
   manualSubmissionId?: string;

@@ -37,12 +37,15 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
   );
   const [feedback, setFeedback] = useState<string>('');
 
-  // Pengaturan Sistem 5 Tahap Kerja Interaktif
+  // Pengaturan Sistem 10 Tahap Kerja Interaktif & Skala Kesulitan Progresif
   const [stageConfig, setStageConfig] = useState<JobFiveStageAdminConfig>(() =>
     loadJobFiveStageConfig()
   );
   const [stageSalaryBonusPctText, setStageSalaryBonusPctText] = useState<string>(() =>
     String(loadJobFiveStageConfig().extraSalaryBonusPercent)
+  );
+  const [tierBonusPctText, setTierBonusPctText] = useState<string>(() =>
+    String(loadJobFiveStageConfig().tierBonusPerLevelPercent)
   );
   const [stageExtraCoinText, setStageExtraCoinText] = useState<string>(() =>
     String(loadJobFiveStageConfig().extraCoinBonus)
@@ -66,6 +69,7 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
       setStageConfig(latest);
       if (!stageDirtyRef.current) {
         setStageSalaryBonusPctText(String(latest.extraSalaryBonusPercent));
+        setTierBonusPctText(String(latest.tierBonusPerLevelPercent));
         setStageExtraCoinText(String(latest.extraCoinBonus));
         setStageExtraXpText(String(latest.extraAccountXpBonus));
       }
@@ -116,23 +120,29 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
 
   const handleSaveFiveStageConfig = () => {
     const parsedSalaryPct = Math.max(0, Math.min(500, Math.round(Number(stageSalaryBonusPctText) || 0)));
+    const parsedTierPct = Math.max(0, Math.min(50, Math.round(Number(tierBonusPctText) || 0)));
     const parsedStageCoins = Math.max(0, Math.min(100_000, Math.round(Number(stageExtraCoinText) || 0)));
     const parsedStageXp = Math.max(0, Math.min(100_000, Math.round(Number(stageExtraXpText) || 0)));
 
     const saved = saveJobFiveStageConfig({
       enabledStages: stageConfig.enabledStages,
+      progressiveDifficultyEnabled: stageConfig.progressiveDifficultyEnabled,
       extraSalaryBonusPercent: parsedSalaryPct,
+      tierBonusPerLevelPercent: parsedTierPct,
       extraCoinBonus: parsedStageCoins,
       extraAccountXpBonus: parsedStageXp,
     });
     stageDirtyRef.current = false;
     setStageConfig(saved);
     setStageSalaryBonusPctText(String(saved.extraSalaryBonusPercent));
+    setTierBonusPctText(String(saved.tierBonusPerLevelPercent));
     setStageExtraCoinText(String(saved.extraCoinBonus));
     setStageExtraXpText(String(saved.extraAccountXpBonus));
     const activeCount = Object.values(saved.enabledStages).filter(Boolean).length;
     setStageFeedback(
-      `Pengaturan 5 Tahap Kerja tersimpan! (${activeCount}/5 Tahap Aktif · Bonus +${saved.extraSalaryBonusPercent}% Gaji, +${saved.extraCoinBonus} Coin, +${saved.extraAccountXpBonus} XP Level Akun)`
+      `Pengaturan 10 Tahap Kerja tersimpan (${activeCount}/10 Tahap Aktif · Skala Progresif ${
+        saved.progressiveDifficultyEnabled ? 'Aktif' : 'Seragam'
+      } · Bonus +${saved.extraSalaryBonusPercent}% Gaji, +${saved.tierBonusPerLevelPercent}%/Lv Tier, +${saved.extraCoinBonus} Coin, +${saved.extraAccountXpBonus} XP Akun)`
     );
   };
 
@@ -148,14 +158,14 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
         <div className="space-y-1">
           <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase inline-flex items-center gap-1">
             <Coins className="w-3 h-3 shrink-0" />
-            <span>PENGATURAN BONUS COIN &amp; 5 TAHAP KERJA LOWONGAN</span>
+            <span>PENGATURAN BONUS COIN &amp; 10 TAHAP KERJA LOWONGAN</span>
           </span>
           <h3 className="font-black text-white text-sm sm:text-base flex items-center gap-2">
             <Briefcase className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>Atur Pengali Coin, Tahap Kerja Aktif, &amp; Bonus Ekstra 25 Lowongan</span>
+            <span>Atur Pengali Coin, 10 Tahap Kerja Aktif, Skala Progresif, &amp; Bonus Ekstra</span>
           </h3>
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            Berlaku otomatis untuk seluruh 25 Lowongan Kerja setiap kali nasabah menuntaskan tahapan kerja. Perubahan aman dari reset saat mengetik.
+            Berlaku otomatis untuk seluruh 25 Lowongan Kerja setiap kali nasabah menuntaskan Workstation 10 Tahap. Perubahan aman dari reset saat mengetik.
           </p>
         </div>
 
@@ -306,32 +316,51 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
       )}
 
       {/* =====================================================================
-          KONTROL SISTEM 5 TAHAP KERJA INTERAKTIF (AKTIF TAHAP & BONUS EKSTRA)
+          KONTROL SISTEM 10 TAHAP KERJA INTERAKTIF (AKTIF TAHAP, SKALA & BONUS)
          ===================================================================== */}
       <div className="pt-4 border-t border-slate-800 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="space-y-0.5">
             <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-cyan-300">
               <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>KONTROL SISTEM 5 TAHAP KERJA INTERAKTIF ({activeStageCount}/5 TAHAP AKTIF)</span>
+              <span>KONTROL SISTEM 10 TAHAP KERJA INTERAKTIF ({activeStageCount}/10 TAHAP AKTIF)</span>
             </span>
             <p className="text-[11px] text-slate-400">
-              Aktifkan atau nonaktifkan masing-masing tahap kerja serta atur bonus ekstra Rupiah (%), Coin, dan XP Level Akun saat nasabah menuntaskan semua tahap.
+              Aktifkan/nonaktifkan Tahap 1 sampai 10, atur Skala Kesulitan Progresif (Pemula 4 kabel → Menengah 5 kabel → Tinggi 6 kabel → Elit 7 kabel + Tahap 2–10), serta pengali bonus hadiah.
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={handleSaveFiveStageConfig}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-lg shadow-cyan-500/20"
-          >
-            <Save className="w-4 h-4 shrink-0" />
-            <span>Simpan Aturan 5 Tahap</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-950 border border-cyan-500/40 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={stageConfig.progressiveDifficultyEnabled}
+                onChange={(e) => {
+                  stageDirtyRef.current = true;
+                  setStageConfig((prev) => ({
+                    ...prev,
+                    progressiveDifficultyEnabled: e.target.checked,
+                  }));
+                }}
+              />
+              <span className="text-[11px] font-bold text-cyan-200 whitespace-nowrap">
+                Skala Progresif: {stageConfig.progressiveDifficultyEnabled ? 'Aktif (4–7 Kabel)' : 'Seragam (4 Kabel)'}
+              </span>
+            </label>
+
+            <button
+              type="button"
+              onClick={handleSaveFiveStageConfig}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-emerald-400 hover:from-cyan-300 hover:to-emerald-300 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-lg shadow-cyan-500/20 whitespace-nowrap"
+            >
+              <Save className="w-4 h-4 shrink-0" />
+              <span>Simpan Aturan 10 Tahap</span>
+            </button>
+          </div>
         </div>
 
-        {/* Toggle 5 Tahap */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+        {/* Toggle 10 Tahap */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
           {JOB_FIVE_STAGE_CATALOG.map((stage) => {
             const isOn = stageConfig.enabledStages[stage.id];
             return (
@@ -357,14 +386,14 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
                     {isOn ? 'AKTIF' : 'OFF'}
                   </span>
                 </div>
-                <span className="text-xs font-black block">{stage.shortLabel}</span>
+                <span className="text-xs font-black block truncate">{stage.shortLabel}</span>
               </button>
             );
           })}
         </div>
 
-        {/* Bonus Ekstra Gaji (%), Coin, & XP Level Akun */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Bonus Ekstra Gaji (%), Bonus Tier/Level (%), Coin, & XP Level Akun */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
             <label className="text-[11px] font-bold text-emerald-300 flex items-center gap-1.5">
               <Banknote className="w-3.5 h-3.5" />
@@ -379,14 +408,32 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
                 stageDirtyRef.current = true;
                 setStageSalaryBonusPctText(e.target.value);
               }}
-              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-emerald-300 font-mono font-bold text-xs"
+              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-emerald-300 font-mono font-bold tabular-nums text-xs"
+            />
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
+            <label className="text-[11px] font-bold text-violet-300 flex items-center gap-1.5">
+              <Briefcase className="w-3.5 h-3.5" />
+              <span>Bonus Tier / Level (%)</span>
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={50}
+              value={tierBonusPctText}
+              onChange={(e) => {
+                stageDirtyRef.current = true;
+                setTierBonusPctText(e.target.value);
+              }}
+              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-violet-300 font-mono font-bold tabular-nums text-xs"
             />
           </div>
 
           <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2">
             <label className="text-[11px] font-bold text-amber-300 flex items-center gap-1.5">
               <Coins className="w-3.5 h-3.5" />
-              <span>Bonus Ekstra Coin (5 Tahap)</span>
+              <span>Bonus Ekstra Coin (10 Tahap)</span>
             </label>
             <input
               type="number"
@@ -397,7 +444,7 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
                 stageDirtyRef.current = true;
                 setStageExtraCoinText(e.target.value);
               }}
-              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 font-mono font-bold text-xs"
+              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-amber-300 font-mono font-bold tabular-nums text-xs"
             />
           </div>
 
@@ -415,7 +462,7 @@ export const AdminJobCoinBonusCard: React.FC<AdminJobCoinBonusCardProps> = ({
                 stageDirtyRef.current = true;
                 setStageExtraXpText(e.target.value);
               }}
-              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono font-bold text-xs"
+              className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-cyan-300 font-mono font-bold tabular-nums text-xs"
             />
           </div>
         </div>

@@ -257,6 +257,8 @@ export interface ServerQrisOrder {
   configNotice?: string;
   qrisString: string;
   qrisImageUrl?: string;
+  paymentUrl?: string;
+  paymentUrlSource?: 'api' | 'merchant_fallback';
   manualQrImageDataUrl?: string;
   manualPaymentNote?: string;
   manualSubmissionId?: string;
@@ -3843,6 +3845,14 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
     }
 
     try {
+      const rawAdminQrisCfg =
+        (serverState.qrisAdminConfig as Record<string, unknown> | null) || null;
+      // Khusus Top-Up Diamond: selalu arahkan ke halaman pembayaran resmi buatqris.site (tanpa QR manual di Dashboard)
+      const effectiveAdminQrisCfg =
+        purpose === 'diamond_topup'
+          ? { ...(rawAdminQrisCfg || {}), mode: 'auto_buatqris' as const }
+          : rawAdminQrisCfg;
+
       const created = await createBuatQrisInvoiceServer({
         orderId: rawOrderId,
         amount,
@@ -3850,7 +3860,7 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         description: typeof body.description === 'string' ? body.description.slice(0, 140) : undefined,
         useUniqueCode: typeof body.useUniqueCode === 'boolean' ? body.useUniqueCode : true,
         expiryMinutes: typeof body.expiryMinutes === 'number' ? body.expiryMinutes : 10,
-        adminConfig: (serverState.qrisAdminConfig as Record<string, unknown> | null) || null,
+        adminConfig: effectiveAdminQrisCfg,
       });
 
       const orderRecord: ServerQrisOrder = {
@@ -3867,6 +3877,8 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
         configNotice: created.configNotice,
         qrisString: created.qrisString,
         qrisImageUrl: created.qrisImageUrl,
+        paymentUrl: created.paymentUrl,
+        paymentUrlSource: created.paymentUrlSource,
         manualQrImageDataUrl: created.manualQrImageDataUrl,
         manualPaymentNote: created.manualPaymentNote,
         status: 'PENDING',

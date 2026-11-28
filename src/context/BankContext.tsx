@@ -20,7 +20,20 @@ import {
   mergeDismissedWarningMaps,
 } from '../utils/dismissedReceiptStorage';
 import { loadLobbySecurityPolicy } from '../utils/lobbySecurityPolicy';
-import { loadJobFiveStageConfig } from '../utils/jobFiveStageUtils';
+import { loadJobFiveStageConfig, computeJobStageScaling } from '../utils/jobFiveStageUtils';
+import {
+  type SavedQuickSwitchAccount,
+  type QuickSwitchReturnSnapshot,
+  loadQuickSwitchAccounts,
+  recordVerifiedQuickSwitchAccount,
+  removeQuickSwitchAccount,
+  subscribeQuickSwitchAccounts,
+  saveQuickSwitchReturnSnapshot,
+  loadQuickSwitchReturnSnapshot,
+  clearQuickSwitchReturnSnapshot,
+  subscribeQuickSwitchReturnSnapshot,
+  extractAccountLast4,
+} from '../utils/quickAccountSwitchUtils';
 import {
   auth,
   authPersistenceReady,
@@ -671,6 +684,12 @@ interface BankContextType {
   completeGoogleOnboarding: () => void;
   reopenGoogleOnboarding: () => void;
   logoutGoogle: () => void;
+  recentQuickSwitchAccounts: SavedQuickSwitchAccount[];
+  quickSwitchReturnSnapshot: QuickSwitchReturnSnapshot | null;
+  startQuickAccountSwitchToLobby: () => void;
+  returnToPreviousAccountFromSwitch: () => { success: boolean; message: string };
+  quickSwitchToSavedAccount: (accountId: string) => { success: boolean; message: string };
+  removeSavedQuickSwitchAccount: (accountId: string) => void;
 
   // Website System Popup Notifications (Notifikasi Sistem Website saat Kartu Terbuka dari Banned / Broadcast Admin / Pesan dari Admin, Bisa Ditutup)
   websitePopups: WebsiteSystemPopupNotification[];
@@ -1644,6 +1663,7 @@ interface BankContextType {
     success: boolean;
     paidAmount?: number;
     extraSalaryBonus?: number;
+    tierBonusSalary?: number;
     coinsEarned?: number;
     extraCoinBonus?: number;
     extraXpEarned?: number;
@@ -9169,8 +9189,208 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
   };
 
+  // Riwayat Akun Terverifikasi untuk Ganti Akun Cepat (Maks. 5 Akun) & Snapshot Tombol Kembali Lobi
+  const [recentQuickSwitchAccounts, setRecentQuickSwitchAccounts] = useState<
+    SavedQuickSwitchAccount[]
+  >(() => loadQuickSwitchAccounts());
+  const [quickSwitchReturnSnapshot, setQuickSwitchReturnSnapshot] =
+    useState<QuickSwitchReturnSnapshot | null>(() => loadQuickSwitchReturnSnapshot());
+
+  useEffect(() => {
+    const unsubSaved = subscribeQuickSwitchAccounts(() => {
+      setRecentQuickSwitchAccounts(loadQuickSwitchAccounts());
+    });
+    const unsubReturn = subscribeQuickSwitchReturnSnapshot(() => {
+      setQuickSwitchReturnSnapshot(loadQuickSwitchReturnSnapshot());
+    });
+    return () => {
+      unsubSaved();
+      unsubReturn();
+    };
+  }, []);
+
+  // Otomatis simpan akun ke daftar Ganti Akun Cepat setiap kali pengguna berhasil masuk Dashboard terverifikasi PIN
+  useEffect(() => {
+    const activeAcc = accounts.find((a) => a.id === currentAccountId) || null;
+    if (
+      activeAcc &&
+      googleUser?.hasCompletedOnboarding &&
+      googleUser?.isPinVerified !== false
+    ) {
+      const updated = recordVerifiedQuickSwitchAccount(activeAcc, googleUser);
+      setRecentQuickSwitchAccounts(updated);
+      // Hapus snapshot kembali setelah pengguna sudah berada di Dashboard
+      if (loadQuickSwitchReturnSnapshot()) {
+        clearQuickSwitchReturnSnapshot();
+        setQuickSwitchReturnSnapshot(null);
+      }
+    }
+  }, [
+    currentAccountId,
+    accounts,
+    googleUser?.hasCompletedOnboarding,
+    googleUser?.isPinVerified,
+    googleUser?.authMode,
+    googleUser?.email,
+    googleUser?.picture,
+  ]);
+
+  const startQuickAccountSwitchToLobby = () => {
+    const activeAcc =
+      accountsRef.current.find((a) => a.id === currentAccountId) ||
+      accounts.find((a) => a.id === currentAccountId) ||
+      null;
+    if (activeAcc && googleUser) {
+      const recorded = recordVerifiedQuickSwitchAccount(activeAcc, googleUser);
+      setRecentQuickSwitchAccounts(recorded);
+      const snapshot: QuickSwitchReturnSnapshot = {
+        accountId: activeAcc.id,
+        fullName: activeAcc.fullName || googleUser.name || 'Nasabah',
+        cardTier: activeAcc.cardTier || 'regular',
+        accountLast4: extractAccountLast4(activeAcc.accountNumber),
+        googleSession: {
+          ...googleUser,
+          name: activeAcc.fullName || googleUser.name,
+          hasCompletedOnboarding: true,
+          isPinVerified: true,
+        },
+        activeCloudEmail: activeCloudEmail || googleUser.email || null,
+        createdAt: new Date().toISOString(),
+      };
+      saveQuickSwitchReturnSnapshot(snapshot);
+      setQuickSwitchReturnSnapshot(snapshot);
+    }
+    void clearActiveBootSession();
+    setGoogleUser(null);
+    playAtmSound('beep');
+  };
+
+  const returnToPreviousAccountFromSwitch = (): { success: boolean; message: string } => {
+    const snapshot = loadQuickSwitchReturnSnapshot() || quickSwitchReturnSnapshot;
+    if (!snapshot) {
+      return { success: false, message: 'Tidak ada sesi akun sebelumnya untuk dikembalikan.' };
+    }
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const targetAcc = pool.find((a) => a.id === snapshot.accountId);
+    if (!targetAcc) {
+      clearQuickSwitchReturnSnapshot();
+      setQuickSwitchReturnSnapshot(null);
+      return { success: false, message: 'Akun sebelumnya sudah tidak ditemukan.' };
+    }
+
+    const restoredSession: GoogleUserSession = {
+      ...snapshot.googleSession,
+      name: targetAcc.fullName || snapshot.googleSession.name,
+      hasCompletedOnboarding: true,
+      isPinVerified: true,
+    };
+
+    setCurrentAccountIdState(targetAcc.id);
+    setActiveCloudEmail(snapshot.activeCloudEmail || restoredSession.email || null);
+    setCloudAccountVerificationState('confirmed_has_accounts');
+    setGoogleUser(restoredSession);
+
+    persistActiveSessionToIdb({
+      authMode: restoredSession.authMode || 'standard_account',
+      firebaseUid: restoredSession.firebaseUid || targetAcc.firebaseUid,
+      email: restoredSession.email,
+      emailKey: restoredSession.emailKey,
+      name: restoredSession.name,
+      picture: restoredSession.picture,
+      activeAccountId: targetAcc.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: pool,
+    });
+
+    clearQuickSwitchReturnSnapshot();
+    setQuickSwitchReturnSnapshot(null);
+    playAtmSound('beep');
+    return {
+      success: true,
+      message: `Kembali ke akun ${targetAcc.fullName}.`,
+    };
+  };
+
+  const quickSwitchToSavedAccount = (
+    accountId: string
+  ): { success: boolean; message: string } => {
+    const savedList = loadQuickSwitchAccounts();
+    const savedEntry = savedList.find((item) => item.accountId === accountId);
+    if (!savedEntry) {
+      return {
+        success: false,
+        message: 'Akun tidak ditemukan pada daftar Ganti Akun cepat.',
+      };
+    }
+
+    const pool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const targetAcc = pool.find((a) => a.id === accountId);
+    if (!targetAcc) {
+      removeQuickSwitchAccount(accountId);
+      setRecentQuickSwitchAccounts(loadQuickSwitchAccounts());
+      return {
+        success: false,
+        message: 'Rekening ini sudah tidak tersedia di sistem dan dihapus dari daftar cepat.',
+      };
+    }
+
+    const resolvedEmail =
+      savedEntry.email ||
+      targetAcc.googleEmail ||
+      targetAcc.email ||
+      `${targetAcc.id}@nasabah.banknusantara.local`;
+
+    const nextSession: GoogleUserSession = {
+      email: resolvedEmail,
+      name: targetAcc.fullName || savedEntry.fullName,
+      picture: savedEntry.picture,
+      firebaseUid: savedEntry.firebaseUid || targetAcc.firebaseUid,
+      authMode: savedEntry.authMode,
+      emailKey: savedEntry.emailKey || emailToFirestoreDocId(resolvedEmail),
+      loggedInAt: new Date().toISOString(),
+      hasCompletedOnboarding: true,
+      isPinVerified: true,
+    };
+
+    setCurrentAccountIdState(targetAcc.id);
+    setActiveCloudEmail(resolvedEmail);
+    setCloudAccountVerificationState('confirmed_has_accounts');
+    setGoogleUser(nextSession);
+
+    persistActiveSessionToIdb({
+      authMode: nextSession.authMode || 'standard_account',
+      firebaseUid: nextSession.firebaseUid,
+      email: nextSession.email,
+      emailKey: nextSession.emailKey,
+      name: nextSession.name,
+      picture: nextSession.picture,
+      activeAccountId: targetAcc.id,
+      isPinVerified: true,
+      hasCompletedOnboarding: true,
+      accountsPool: pool,
+    });
+
+    const updatedSaved = recordVerifiedQuickSwitchAccount(targetAcc, nextSession);
+    setRecentQuickSwitchAccounts(updatedSaved);
+    clearQuickSwitchReturnSnapshot();
+    setQuickSwitchReturnSnapshot(null);
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Berhasil pindah cepat ke akun ${targetAcc.fullName}.`,
+    };
+  };
+
+  const removeSavedQuickSwitchAccount = (accountId: string) => {
+    const next = removeQuickSwitchAccount(accountId);
+    setRecentQuickSwitchAccounts(next);
+  };
+
   const logoutGoogle = () => {
-    // Bersihkan total 100% cache sesi & snapshot lokal perangkat saat Keluar Akun (data Cloud tetap 100% aman)
+    // Bersihkan total 100% cache sesi, snapshot kembali Ganti Akun, & snapshot lokal perangkat saat Keluar Akun (data Cloud tetap 100% aman)
+    clearQuickSwitchReturnSnapshot();
+    setQuickSwitchReturnSnapshot(null);
     void clearActiveBootSession();
     void clearFastBootSnapshot();
     setCurrentAccountIdState('');
@@ -20453,7 +20673,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (existingPending) {
       return {
         success: true,
-        message: 'Permohonan Lupa PIN Anda sedang dalam antrean tinjauan Admin. Silakan buka Panel Admin untuk menyetujui dan melihat PIN.',
+        message: 'Permohonan Lupa PIN sedang diproses. Mohon tunggu persetujuan Admin.',
         requestId: existingPending.id,
       };
     }
@@ -20473,8 +20693,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setPinResetRequests((prev) => [newReq, ...prev]);
     addNotification(
-      'Permohonan Lupa PIN Terkirim ke Admin 🔐',
-      `Permintaan bantuan Lupa PIN untuk rekening ${acc.accountNumber} telah masuk ke Panel Admin. Setelah disetujui Admin, PIN akan diberitahukan kepada Anda.`,
+      'Permohonan Lupa PIN Terkirim 🔐',
+      `Permintaan bantuan Lupa PIN untuk rekening ${acc.accountNumber} telah dikirim. Mohon tunggu persetujuan dari Admin.`,
       'info'
     );
     emitAdminTierNotification({
@@ -20494,7 +20714,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     return {
       success: true,
-      message: 'Permohonan Lupa PIN berhasil dikirim ke Admin! Silakan buka Panel Admin untuk meninjau & menampilkan PIN Anda.',
+      message: 'Permohonan Lupa PIN berhasil dikirim. Mohon tunggu persetujuan dari Admin.',
       requestId: newReq.id,
     };
   };
@@ -28056,6 +28276,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     success: boolean;
     paidAmount?: number;
     extraSalaryBonus?: number;
+    tierBonusSalary?: number;
     coinsEarned?: number;
     extraCoinBonus?: number;
     extraXpEarned?: number;
@@ -28085,16 +28306,23 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       playAtmSound('alert');
       return {
         success: false,
-        message: 'Stok Voucher Level Anda habis. Selesaikan 5 tahap secara reguler atau kumpulkan Voucher terlebih dahulu.',
+        message: 'Stok Voucher Level Anda habis. Selesaikan 10 tahap secara reguler atau kumpulkan Voucher terlebih dahulu.',
       };
     }
 
     const stageCfg = loadJobFiveStageConfig();
+    const scaling = computeJobStageScaling(
+      input.requiredLevel,
+      stageCfg.progressiveDifficultyEnabled,
+      stageCfg.tierBonusPerLevelPercent
+    );
     const mult = Math.max(1, currentAccount.salaryMultiplier || 1);
     const baseSalary = Math.round(input.salary * mult);
-    const extraSalaryBonus = Math.round(
+    const stageExtraSalary = Math.round(
       (baseSalary * Math.max(0, stageCfg.extraSalaryBonusPercent)) / 100
     );
+    const tierBonusSalary = Math.round((baseSalary * scaling.tierBonusPercent) / 100);
+    const extraSalaryBonus = stageExtraSalary + tierBonusSalary;
     const finalSalary = baseSalary + extraSalaryBonus;
 
     const baseCoins =
@@ -28108,13 +28336,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const adminExtraCoins = jobCoinBonusConfig.enabled
       ? Math.max(0, Math.round(jobCoinBonusConfig.extraBonusCoins || 0))
       : 0;
-    const stageExtraCoins = Math.max(0, Math.round(stageCfg.extraCoinBonus || 0));
+    const tierCoinBonus = Math.max(0, (Math.max(1, input.requiredLevel) - 1) * 2);
+    const stageExtraCoins = Math.max(0, Math.round(stageCfg.extraCoinBonus || 0)) + tierCoinBonus;
     const totalCoinsCredited =
       Math.max(1, Math.round(baseWithSalaryMult * adminCoinMult)) +
       adminExtraCoins +
       stageExtraCoins;
 
-    const extraXpEarned = Math.max(0, Math.round(stageCfg.extraAccountXpBonus || 0));
+    const tierXpBonus = Math.max(0, (Math.max(1, input.requiredLevel) - 1) * 5);
+    const extraXpEarned = Math.max(0, Math.round(stageCfg.extraAccountXpBonus || 0)) + tierXpBonus;
     const stampMs = Date.now();
     const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
     let didAccountLevelUp = false;
@@ -28160,7 +28390,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         accountLevel: isAdminTier ? a.accountLevel : nextAccLevel,
         rewardPoints: isUnlimPts
           ? UNLIMITED_BALANCE
-          : (a.rewardPoints || 0) + Math.max(15, Math.round(finalSalary / 10_000)),
+          : (a.rewardPoints || 0) + Math.max(25, Math.round(finalSalary / 10_000)),
         accountUpdatedAtMs: stampMs,
       });
     });
@@ -28169,27 +28399,26 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     latestServerAccountsRef.current = updatedAccounts;
     setAccounts(updatedAccounts);
 
+    const totalStageDone = input.completedStagesCount || 10;
     const modeBadge = input.instantMode
       ? isAdminTier
         ? 'Selesai Instan 1-Klik Admin'
         : 'Selesai Instan 1-Klik Voucher'
-      : `Lulus ${input.completedStagesCount || 5} Tahap Kerja`;
+      : `Lulus ${totalStageDone} Tahap Kerja (${scaling.tierLabel})`;
 
     const salaryTx: Transaction = {
-      id: `tx-job5-${stampMs}-${Math.floor(Math.random() * 999)}`,
+      id: `tx-job10-${stampMs}-${Math.floor(Math.random() * 999)}`,
       accountId: currentAccount.id,
       type: 'setor',
-      title: `💼 Gaji 5 Tahap Cair: ${input.jobTitle} (${modeBadge})`,
+      title: `💼 Gaji ${totalStageDone} Tahap Cair: ${input.jobTitle} (${modeBadge})`,
       amount: finalSalary,
       coinAmount: totalCoinsCredited,
       recipientAccount: currentAccount.accountNumber,
       recipientName: currentAccount.fullName,
-      description: `Gaji Pokok ${formatRupiah(baseSalary)} + Bonus 5 Tahap ${formatRupiah(
-        extraSalaryBonus
-      )} • +${totalCoinsCredited.toLocaleString('id-ID')} Coin • +${extraXpEarned.toLocaleString(
-        'id-ID'
-      )} XP Level Akun`,
-      referenceNo: `JOB5-${String(stampMs).slice(-6)}`,
+      description: `Gaji Pokok ${formatRupiah(baseSalary)} + Bonus 10 Tahap ${formatRupiah(
+        stageExtraSalary
+      )}${tierBonusSalary > 0 ? ` + Bonus Tier Lv.${input.requiredLevel} ${formatRupiah(tierBonusSalary)}` : ''} • +${totalCoinsCredited.toLocaleString('id-ID')} Coin • +${extraXpEarned.toLocaleString('id-ID')} XP Level Akun`,
+      referenceNo: `JOB10-${String(stampMs).slice(-6)}`,
       timestamp: new Date().toISOString(),
       status: 'success',
       category: 'setor_tunai',
@@ -28212,7 +28441,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     playAtmSound('cash');
     try {
-      confetti({ particleCount: 55, spread: 60, origin: { y: 0.7 } });
+      confetti({ particleCount: 65, spread: 65, origin: { y: 0.7 } });
     } catch { /* empty */ }
 
     recordMissionActivities(currentAccount.id, [
@@ -28224,7 +28453,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       pushAppToast({
         type: 'success',
         title: `Selamat! Level Akun Naik ke Lv.${newAccountLevelAfter}`,
-        message: `Bonus +${extraXpEarned.toLocaleString('id-ID')} XP dari 5 Tahap Kerja menaikkan level akun dari Lv.${prevAccountLevelBefore} ke Lv.${newAccountLevelAfter}!`,
+        message: `Bonus +${extraXpEarned.toLocaleString('id-ID')} XP dari 10 Tahap Kerja menaikkan level akun dari Lv.${prevAccountLevelBefore} ke Lv.${newAccountLevelAfter}!`,
       });
     }
 
@@ -28232,12 +28461,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       success: true,
       paidAmount: finalSalary,
       extraSalaryBonus,
+      tierBonusSalary,
       coinsEarned: totalCoinsCredited,
       extraCoinBonus: stageExtraCoins,
       extraXpEarned,
       message: `${modeBadge} selesai! Gaji ${formatRupiah(
         finalSalary
-      )} (termasuk bonus +${formatRupiah(
+      )} (termasuk bonus 10 tahap & tier +${formatRupiah(
         extraSalaryBonus
       )}), +${totalCoinsCredited.toLocaleString(
         'id-ID'
@@ -29606,11 +29836,50 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return Array.from(dateSet);
   };
 
+  // Penjaga permanen agar notifikasi toast Streak Online HANYA muncul 1x per akun per hari WIB
+  const streakToastShownRef = useRef<Set<string>>(new Set());
+  const hasShownStreakToastToday = (accountId: string, dateWib: string): boolean => {
+    const key = `${accountId}:${dateWib}`;
+    if (streakToastShownRef.current.has(key)) return true;
+    if (typeof window === 'undefined') return false;
+    try {
+      const raw = window.localStorage.getItem('bn_streak_toast_shown_day_v1');
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      if (parsed && parsed[accountId] === dateWib) {
+        streakToastShownRef.current.add(key);
+        return true;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return false;
+  };
+  const markStreakToastShownToday = (accountId: string, dateWib: string) => {
+    const key = `${accountId}:${dateWib}`;
+    streakToastShownRef.current.add(key);
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem('bn_streak_toast_shown_day_v1');
+      const parsed: Record<string, string> = raw ? JSON.parse(raw) : {};
+      parsed[accountId] = dateWib;
+      window.localStorage.setItem('bn_streak_toast_shown_day_v1', JSON.stringify(parsed));
+    } catch {
+      // ignore storage errors
+    }
+  };
+
   // Auto-Streak Online Instan: otomatis mengisi/mencairkan/mengoreksi streak saat nasabah online,
   // saat data Cloud selesai dimuat, saat tab aktif kembali, maupun saat pergantian hari 00:00 WIB
   useEffect(() => {
     const activeId = currentAccount?.id;
-    if (!activeId) return;
+    const isAuthedReady = Boolean(
+      isCloudBootReady &&
+        googleUser &&
+        googleUser.hasCompletedOnboarding &&
+        googleUser.isPinVerified !== false
+    );
+    if (!activeId || !isAuthedReady) return;
 
     const evaluateAndSyncOnlineStreak = () => {
       const acc = accountsRef.current.find((a) => a.id === activeId) || currentAccount;
@@ -29637,7 +29906,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (res.nextState.streakDays > prevStreak || res.pointsEarned > 0) {
         grantAccountXp(activeId, 'streak');
-        if (res.noticeText) {
+        if (res.noticeText && !hasShownStreakToastToday(activeId, todayWib)) {
+          markStreakToastShownToday(activeId, todayWib);
           pushAppToast({
             type: 'success',
             title: `Streak Online Hari ke-${res.nextState.streakDays} Aktif!`,
@@ -29664,6 +29934,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, [
     currentAccount?.id,
+    isCloudBootReady,
+    googleUser?.hasCompletedOnboarding,
+    googleUser?.isPinVerified,
     loyaltyMap[currentAccount?.id || '']?.lastOnlineDateWib,
     loyaltyMap[currentAccount?.id || '']?.recentActiveDatesWib?.length,
     transactions.length,
@@ -41852,6 +42125,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         completeGoogleOnboarding,
         reopenGoogleOnboarding,
         logoutGoogle,
+        recentQuickSwitchAccounts,
+        quickSwitchReturnSnapshot,
+        startQuickAccountSwitchToLobby,
+        returnToPreviousAccountFromSwitch,
+        quickSwitchToSavedAccount,
+        removeSavedQuickSwitchAccount,
         websitePopups,
         activeWebsitePopups,
         dismissWebsitePopup,

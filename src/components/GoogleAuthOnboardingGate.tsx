@@ -35,6 +35,7 @@ import {
   Copy,
   Link2,
   Clock,
+  ArrowLeft,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -83,6 +84,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     requestPinReset,
     pinResetRequests,
     accounts,
+    quickSwitchReturnSnapshot,
+    returnToPreviousAccountFromSwitch,
   } = useBank();
 
   // Mode Tab Utama yang SELALU tampil di semua layar masuk (5 Jalur Resmi):
@@ -736,6 +739,29 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     </div>
   );
 
+  // Tombol Kembali di Pojok Kiri Atas Lobi (hanya aktif saat masuk Lobi dari menu Ganti Akun)
+  const renderTopLeftQuickReturnButton = () => {
+    if (!quickSwitchReturnSnapshot) return null;
+    return (
+      <div className="fixed top-3 left-3 sm:top-4 sm:left-4 z-50">
+        <button
+          type="button"
+          onClick={() => {
+            const res = returnToPreviousAccountFromSwitch();
+            if (!res.success) {
+              setAuthError({ message: res.message });
+            }
+          }}
+          className="min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-900/95 hover:bg-slate-800 text-white border border-cyan-400/50 shadow-xl shadow-slate-950/60 backdrop-blur-md inline-flex items-center gap-2 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap max-w-[240px] sm:max-w-[300px]"
+          title={`Kembali ke Dashboard ${quickSwitchReturnSnapshot.fullName}`}
+        >
+          <ArrowLeft className="w-4 h-4 text-cyan-300 shrink-0" />
+          <span className="truncate">Kembali · {quickSwitchReturnSnapshot.fullName}</span>
+        </button>
+      </div>
+    );
+  };
+
   // JIKA PENGGUNA MEMILIH TAB "2. BUAT AKUN", "3. LOGIN KE AKUN", "4. OA", ATAU "5. GUEST"
   if (
     lobbyMode === 'create_account' ||
@@ -766,7 +792,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
       );
 
     return (
-      <div className="min-h-screen bg-[#040814] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="min-h-screen bg-[#040814] text-slate-100 flex items-center justify-center p-4 pt-16 sm:pt-4 relative overflow-hidden">
+        {renderTopLeftQuickReturnButton()}
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
 
@@ -1807,7 +1834,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   // STAGE 1: LOBI AWAL SAAT BELUM ADA SESI GOOGLE (!googleUser)
   if (!googleUser) {
     return (
-      <div className="min-h-screen bg-[#040814] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="min-h-screen bg-[#040814] text-slate-100 flex items-center justify-center p-4 pt-16 sm:pt-4 relative overflow-hidden">
+        {renderTopLeftQuickReturnButton()}
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none" />
 
@@ -2005,7 +2033,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     );
 
     return (
-      <div className="min-h-screen bg-[#040814] text-slate-100 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="min-h-screen bg-[#040814] text-slate-100 flex items-center justify-center p-4 pt-16 sm:pt-4 relative overflow-hidden">
+        {renderTopLeftQuickReturnButton()}
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
         <div className="w-full max-w-lg bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10">
           {/* Bar 3 Tab Login Selalu Terlihat di Paling Atas */}
@@ -2386,7 +2415,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
     };
 
     return (
-      <div className="min-h-screen bg-[#040814] text-slate-100 py-8 px-4 flex items-center justify-center relative overflow-hidden">
+      <div className="min-h-screen bg-[#040814] text-slate-100 py-8 pt-16 sm:pt-8 px-4 flex items-center justify-center relative overflow-hidden">
+        {renderTopLeftQuickReturnButton()}
         <div className="w-full max-w-lg bg-slate-900/95 backdrop-blur-2xl border border-slate-700/80 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10">
           {renderPersistentThreeLoginTabs()}
 
@@ -2486,7 +2516,8 @@ export const GoogleAuthOnboardingGate: React.FC = () => {
   const regularCfg = CARD_TIER_CONFIGS.regular;
 
   return (
-    <div className="min-h-screen bg-[#040814] text-slate-100 py-8 px-4 flex items-center justify-center relative overflow-hidden">
+    <div className="min-h-screen bg-[#040814] text-slate-100 py-8 pt-16 sm:pt-8 px-4 flex items-center justify-center relative overflow-hidden">
+      {renderTopLeftQuickReturnButton()}
       <div className="absolute -top-40 -left-40 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-indigo-600/15 rounded-full blur-3xl pointer-events-none" />
 

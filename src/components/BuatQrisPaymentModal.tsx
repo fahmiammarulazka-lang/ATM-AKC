@@ -20,12 +20,14 @@ import {
   Send,
   XCircle,
   MessageSquare,
+  ExternalLink,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { formatRupiah } from '../utils/bankUtils';
 import {
   OFFICIAL_BUATQRIS_MERCHANT_INFO,
   QrisValidationError,
+  buildBuatQrisMerchantRedirectUrl,
   requestCheckQrisPaymentStatus,
   requestCreateQrisPayment,
 } from '../../buatQrisService';
@@ -38,6 +40,22 @@ import {
 } from '../utils/qrisDownload';
 import { QrisPaymentOrder } from '../types/bank';
 import { DiamondIcon, DiamondText } from './DiamondIcon';
+
+const openExternalPaymentTab = (url: string): void => {
+  if (!url || typeof document === 'undefined') return;
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener noreferrer';
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } catch {
+    // Fallback tombol tautan langsung tersedia di modal
+  }
+};
 
 const getOrderItemLabel = (order: QrisPaymentOrder): string => {
   if (order.diamondAmount && order.diamondAmount > 0) {
@@ -124,6 +142,17 @@ export const BuatQrisPaymentModal: React.FC = () => {
       downloadResetTimerRef.current = null;
     }
 
+    // Khusus Top-Up Diamond, jangan pernah merender gambar QRIS di halaman Dashboard (redirect langsung ke buatqris.site)
+    if (order.purpose === 'diamond_topup') {
+      setQrDataUrl('');
+      setLastCheckNote(
+        order.status === 'LUNAS'
+          ? 'Pembayaran LUNAS terverifikasi oleh buatqris.site.'
+          : 'Menunggu pembayaran diselesaikan di halaman buatqris.site...'
+      );
+      return;
+    }
+
     if (order.manualQrImageDataUrl) {
       setQrDataUrl(order.manualQrImageDataUrl);
       return;
@@ -158,7 +187,7 @@ export const BuatQrisPaymentModal: React.FC = () => {
     } else {
       setQrDataUrl('');
     }
-  }, [order?.orderId, order?.qrisString, order?.qrisImageUrl, order?.manualQrImageDataUrl, order?.status]);
+  }, [order?.orderId, order?.purpose, order?.qrisString, order?.qrisImageUrl, order?.manualQrImageDataUrl, order?.status]);
 
   // Countdown timer (10 minutes)
   useEffect(() => {
@@ -206,10 +235,16 @@ export const BuatQrisPaymentModal: React.FC = () => {
         }, 2200);
       } else if (statusRes.status === 'EXPIRED') {
         updateQrisOrderStatus(order.orderId, 'EXPIRED');
-        setLastCheckNote('Tagihan QRIS kedaluwarsa. Silakan buat ulang QRIS.');
+        setLastCheckNote(
+          order.purpose === 'diamond_topup'
+            ? 'Tagihan kedaluwarsa. Tekan Buat Ulang Tagihan untuk membuka halaman buatqris.site yang baru.'
+            : 'Tagihan QRIS kedaluwarsa. Silakan buat ulang QRIS.'
+        );
       } else {
         setLastCheckNote(
-          `Menunggu konfirmasi pembayaran QRIS (${new Date().toLocaleTimeString('id-ID')})...`
+          order.purpose === 'diamond_topup'
+            ? `Menunggu pembayaran di buatqris.site (${new Date().toLocaleTimeString('id-ID')})...`
+            : `Menunggu konfirmasi pembayaran QRIS (${new Date().toLocaleTimeString('id-ID')})...`
         );
       }
     } catch {
@@ -446,6 +481,19 @@ export const BuatQrisPaymentModal: React.FC = () => {
       });
 
       if (res.success) {
+        const resolvedPaymentUrl =
+          res.paymentUrl ||
+          (order.purpose === 'diamond_topup'
+            ? buildBuatQrisMerchantRedirectUrl({
+                orderId: res.orderId,
+                totalAmount: res.totalAmount,
+                baseAmount: res.baseAmount,
+                uniqueCode: res.uniqueCode,
+                customerName: currentAccount.fullName,
+                description: getOrderItemLabel(order),
+              })
+            : undefined);
+
         const freshOrder: QrisPaymentOrder = {
           orderId: res.orderId,
           externalInvoiceId: res.externalInvoiceId,
@@ -463,6 +511,8 @@ export const BuatQrisPaymentModal: React.FC = () => {
           status: 'PENDING',
           qrisString: res.qrisString,
           qrisImageUrl: res.qrisImageUrl,
+          paymentUrl: resolvedPaymentUrl,
+          paymentUrlSource: res.paymentUrlSource || (resolvedPaymentUrl ? 'merchant_fallback' : undefined),
           manualQrImageDataUrl: res.manualQrImageDataUrl,
           manualPaymentNote: res.manualPaymentNote,
           createdAt: res.createdAt || new Date().toISOString(),
@@ -470,12 +520,19 @@ export const BuatQrisPaymentModal: React.FC = () => {
         };
         registerQrisOrder(freshOrder);
         setActiveQrisModalOrder(freshOrder);
-        setLastCheckNote(
-          res.configNotice ||
-            'QRIS baru berhasil dibuat. Silakan scan dan bayar sesuai nominal tepat.'
-        );
+        if (order.purpose === 'diamond_topup' && resolvedPaymentUrl) {
+          openExternalPaymentTab(resolvedPaymentUrl);
+          setLastCheckNote(
+            'Tagihan baru berhasil dibuat dan halaman buatqris.site dibuka di tab baru.'
+          );
+        } else {
+          setLastCheckNote(
+            res.configNotice ||
+              'QRIS baru berhasil dibuat. Silakan scan dan bayar sesuai nominal tepat.'
+          );
+        }
       } else {
-        setLastCheckNote(res.configNotice || 'Gagal membuat ulang tagihan QRIS. Silakan coba lagi.');
+        setLastCheckNote(res.configNotice || 'Gagal membuat ulang tagihan. Silakan coba lagi.');
       }
     } catch (err) {
       const errMsg =
@@ -483,7 +540,7 @@ export const BuatQrisPaymentModal: React.FC = () => {
           ? err.message
           : err instanceof Error && err.message.trim()
           ? err.message.trim()
-          : 'Gagal membuat ulang tagihan QRIS. Silakan tekan tombol Buat Ulang QRIS.';
+          : 'Gagal membuat ulang tagihan pembayaran. Silakan coba lagi.';
       setLastCheckNote(errMsg);
       recordLiveActivity({
         actorRole: 'nasabah',
@@ -492,14 +549,258 @@ export const BuatQrisPaymentModal: React.FC = () => {
         accountName: currentAccount.fullName,
         accountNumber: currentAccount.accountNumber,
         cardTier: currentAccount.cardTier,
-        actionTitle: 'Gagal Buat Ulang Tagihan QRIS',
-        description: `Gagal buat ulang QRIS (${order.orderId}): ${errMsg}`,
+        actionTitle: 'Gagal Buat Ulang Tagihan',
+        description: `Gagal buat ulang tagihan (${order.orderId}): ${errMsg}`,
         amountRupiah: order.baseAmount,
       });
     } finally {
       setIsRegenerating(false);
     }
   };
+
+  if (order.purpose === 'diamond_topup') {
+    const resolvedPaymentUrl =
+      order.paymentUrl ||
+      buildBuatQrisMerchantRedirectUrl({
+        orderId: order.orderId,
+        totalAmount: order.totalAmount,
+        baseAmount: order.baseAmount,
+        uniqueCode: order.uniqueCode,
+        customerName: order.accountName,
+        description: getOrderItemLabel(order),
+      });
+
+    return (
+      <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
+        <div className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+          {/* Header */}
+          <div className="flex items-center justify-between border-b border-slate-200 bg-gradient-to-r from-slate-950 via-sky-950 to-slate-900 px-5 py-4 text-white">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-cyan-500/20 text-cyan-300 ring-1 ring-cyan-400/30">
+                <ExternalLink className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-black tracking-tight">
+                  Pembayaran via buatqris.site
+                </h2>
+                <p className="text-xs text-sky-200/80">
+                  {order.paymentUrlSource === 'api'
+                    ? 'Checkout Otomatis buatqris.site Live'
+                    : 'Halaman Merchant Resmi azkaakc · buatqris.site'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveQrisModalOrder(null)}
+              className="rounded-xl p-2 text-slate-300 transition hover:bg-white/10 hover:text-white"
+              aria-label="Tutup modal pembayaran buatqris.site"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Body — Halaman Menunggu Pembayaran buatqris.site (TANPA QRIS di Dashboard) */}
+          <div className="overflow-y-auto p-5 space-y-4">
+            {paidSuccessBanner && (
+              <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
+                <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
+                <div>
+                  <p className="text-sm font-black">PEMBAYARAN LUNAS!</p>
+                  <p className="mt-0.5 text-xs font-medium text-emerald-800">
+                    <DiamondText text={paidSuccessBanner} />
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Order Summary & Countdown */}
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  Paket Top-Up Diamond
+                </p>
+                <p className="text-sm font-black text-slate-900">
+                  <DiamondText text={getOrderItemLabel(order)} iconClassName="h-4 w-4 mx-0.5" />
+                </p>
+              </div>
+              <div
+                className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-black tabular-nums ${
+                  isPaid
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : isExpired
+                    ? 'bg-rose-100 text-rose-800'
+                    : remainingSeconds <= 120
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-sky-100 text-sky-900'
+                }`}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                {isPaid
+                  ? 'LUNAS'
+                  : isExpired
+                  ? 'KEDALUWARSA'
+                  : `Berlaku ${formatCountdown(remainingSeconds)}`}
+              </div>
+            </div>
+
+            {/* Rincian Total Bayar Tepat + Kode Unik 3 Digit + Order ID */}
+            <div className="rounded-2xl border-2 border-sky-200 bg-gradient-to-br from-sky-50 via-white to-cyan-50 p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-sky-700">
+                    Total Bayar Tepat di buatqris.site
+                  </p>
+                  <p className="mt-0.5 text-2xl font-black tracking-tight text-slate-950 tabular-nums">
+                    {formatRupiah(order.totalAmount)}
+                  </p>
+                  <p className="mt-1 text-[11px] font-medium text-slate-600 tabular-nums">
+                    Harga Dasar {formatRupiah(order.baseAmount)} + Kode Unik{' '}
+                    <span className="font-black text-sky-700">+{order.uniqueCode}</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleCopy(String(order.totalAmount), 'amount')}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs font-bold text-sky-700 shadow-sm transition hover:bg-sky-50"
+                >
+                  {copiedField === 'amount' ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-emerald-600" />
+                      <span className="text-emerald-700">Disalin</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      <span>Salin Total</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Order ID Transaksi
+                  </p>
+                  <p className="truncate font-mono text-xs font-bold text-slate-800">
+                    {order.orderId}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleCopy(order.orderId, 'orderId')}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:bg-slate-100"
+                >
+                  {copiedField === 'orderId' ? (
+                    <>
+                      <Check className="h-3 w-3 text-emerald-600" />
+                      <span>Disalin</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3 w-3" />
+                      <span>Salin ID</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Tombol Utama Buka Lagi buatqris.site & Cek Status */}
+            {!isPaid && (
+              <div className="space-y-2.5">
+                {!isExpired ? (
+                  <a
+                    href={resolvedPaymentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-sky-600 via-cyan-600 to-blue-600 px-4 py-3.5 text-sm font-black text-white shadow-lg shadow-sky-600/20 transition hover:from-sky-500 hover:via-cyan-500 hover:to-blue-500 active:scale-[0.99]"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    <span>Buka Lagi buatqris.site</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isRegenerating}
+                    onClick={() => void handleRegenerateQris()}
+                    className="flex w-full items-center justify-center gap-2 rounded-2xl bg-sky-600 px-4 py-3.5 text-sm font-black text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isRegenerating ? 'animate-spin' : ''}`} />
+                    <span>{isRegenerating ? 'Membuat Tagihan Baru...' : 'Buat Ulang Tagihan buatqris.site'}</span>
+                  </button>
+                )}
+
+                {!isExpired && (
+                  <button
+                    type="button"
+                    disabled={isCheckingNow}
+                    onClick={() => void runStatusCheck(false)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-800 transition hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${isCheckingNow ? 'animate-spin' : ''}`} />
+                    <span>{isCheckingNow ? 'Memeriksa Status Pembayaran...' : 'Cek Status Bayar'}</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Info Status Otomatis & Fallback Notice */}
+            {order.configNotice && !isPaid && (
+              <div className="flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[11px] font-semibold text-amber-950">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                <span>
+                  {order.configNotice} Pastikan membayar tepat{' '}
+                  <strong>{formatRupiah(order.totalAmount)}</strong> pada halaman merchant{' '}
+                  <strong>buatqris.site</strong>.
+                </span>
+              </div>
+            )}
+
+            <div className="flex items-start gap-2.5 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-[11px] font-medium text-slate-600">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <div>
+                <p className="font-bold text-slate-800">{lastCheckNote}</p>
+                <p className="mt-0.5 text-[10px] text-slate-500">
+                  Pembayaran diproses langsung di situs buatqris.site (tidak menampilkan QRIS di
+                  Dashboard). Diamond otomatis masuk ke saldo setelah webhook terkonfirmasi.
+                </p>
+              </div>
+            </div>
+
+            {/* Info Merchant Resmi */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-3.5 text-[11px]">
+              <p className="mb-2 flex items-center gap-1.5 font-black uppercase tracking-wider text-slate-500">
+                <Lock className="h-3.5 w-3.5 text-sky-600" />
+                <span>Detail Merchant Resmi buatqris.site</span>
+              </p>
+              <div className="grid grid-cols-1 gap-1.5 text-slate-600">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">ID Login</span>
+                  <span className="font-mono font-bold text-slate-900">
+                    {OFFICIAL_BUATQRIS_MERCHANT_INFO.loginId}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">API Account ID</span>
+                  <span className="font-mono font-bold text-slate-900">
+                    {OFFICIAL_BUATQRIS_MERCHANT_INFO.accountId}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500">Webhook Auto-Credit</span>
+                  <span className="font-mono font-semibold text-sky-700">
+                    {OFFICIAL_BUATQRIS_MERCHANT_INFO.webhookUrl}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">

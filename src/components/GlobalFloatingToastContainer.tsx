@@ -66,6 +66,8 @@ const ToastCard: React.FC<{
   const [isPaused, setIsPaused] = useState(false);
   const remainingRef = useRef<number>(durationMs);
   const startedAtRef = useRef<number>(Date.now());
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
 
   useEffect(() => {
     if (isPaused) {
@@ -73,7 +75,7 @@ const ToastCard: React.FC<{
     }
     startedAtRef.current = Date.now();
     const timer = window.setTimeout(() => {
-      onDismiss(item.id);
+      onDismissRef.current(item.id);
     }, Math.max(50, remainingRef.current));
 
     return () => {
@@ -81,7 +83,7 @@ const ToastCard: React.FC<{
       const elapsed = Date.now() - startedAtRef.current;
       remainingRef.current = Math.max(0, remainingRef.current - elapsed);
     };
-  }, [isPaused, item.id, onDismiss]);
+  }, [isPaused, item.id]);
 
   const theme = TOAST_STYLE_MAP[item.type] || TOAST_STYLE_MAP.info;
 
