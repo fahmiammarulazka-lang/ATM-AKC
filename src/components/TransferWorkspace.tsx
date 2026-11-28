@@ -55,6 +55,10 @@ interface TransferWorkspaceProps {
   prefillBank?: string;
   prefillRecipientName?: string;
   prefillAmount?: number;
+  prefillGoldRupiahAmount?: number;
+  prefillCoinAmount?: number;
+  prefillDiamondAmount?: number;
+  prefillTokenAmount?: number;
   prefillNote?: string;
   prefillFromQris?: boolean;
   onNavigateToMutasi?: () => void;
@@ -72,6 +76,10 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
   prefillBank = 'Bank Nusantara',
   prefillRecipientName = '',
   prefillAmount,
+  prefillGoldRupiahAmount,
+  prefillCoinAmount,
+  prefillDiamondAmount,
+  prefillTokenAmount,
   prefillNote = '',
   prefillFromQris = false,
   onNavigateToMutasi,
@@ -127,11 +135,43 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
     fromQris: boolean;
   } | null>(null);
 
+  const [bebasAssetMode, setBebasAssetMode] = useState<TransferBebasAssetMode>(
+    initialBebasAssetMode || 'uang'
+  );
+  const [bebasPrefillGoldRp, setBebasPrefillGoldRp] = useState<number | undefined>(
+    prefillGoldRupiahAmount
+  );
+  const [bebasPrefillCoin, setBebasPrefillCoin] = useState<number | undefined>(prefillCoinAmount);
+  const [bebasPrefillDiamond, setBebasPrefillDiamond] = useState<number | undefined>(
+    prefillDiamondAmount
+  );
+  const [bebasPrefillToken, setBebasPrefillToken] = useState<number | undefined>(
+    prefillTokenAmount
+  );
+
   useEffect(() => {
     if (initialMode) {
       setTransferMode(initialMode);
     }
-  }, [initialMode, routeKey]);
+    if (initialBebasAssetMode) {
+      setBebasAssetMode(initialBebasAssetMode);
+      if (initialBebasAssetMode !== 'uang') {
+        setTransferMode('bebas');
+      }
+    }
+    setBebasPrefillGoldRp(prefillGoldRupiahAmount);
+    setBebasPrefillCoin(prefillCoinAmount);
+    setBebasPrefillDiamond(prefillDiamondAmount);
+    setBebasPrefillToken(prefillTokenAmount);
+  }, [
+    initialMode,
+    initialBebasAssetMode,
+    prefillGoldRupiahAmount,
+    prefillCoinAmount,
+    prefillDiamondAmount,
+    prefillTokenAmount,
+    routeKey,
+  ]);
 
   useEffect(() => {
     if (prefillAccount) {
@@ -278,7 +318,10 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
     }
   };
 
-  const handleQrisDetectedInWorkspace = (rawText: string, source: 'camera' | 'gallery') => {
+  const handleQrisDetectedInWorkspace = (
+    rawText: string,
+    source: 'camera' | 'gallery' | 'manual'
+  ) => {
     setQrisScannerModal((prev) => ({ ...prev, open: false }));
     const parsed = parsePersonalQrisPayload(rawText);
     if (!parsed.recipientAccount) {
@@ -299,15 +342,27 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
     setQrisSelfScanAlert('');
     setTransferError('');
     setTransferReceipt(null);
-    setTransferMode('reguler');
+    const detectedAssetMode = parsed.assetMode || 'uang';
+    setBebasAssetMode(detectedAssetMode);
+    setBebasPrefillGoldRp(parsed.goldRupiahAmount > 0 ? parsed.goldRupiahAmount : undefined);
+    setBebasPrefillCoin(parsed.coinAmount > 0 ? parsed.coinAmount : undefined);
+    setBebasPrefillDiamond(parsed.diamondAmount > 0 ? parsed.diamondAmount : undefined);
+    setBebasPrefillToken(parsed.tokenAmount > 0 ? parsed.tokenAmount : undefined);
+    setTransferMode(detectedAssetMode !== 'uang' ? 'bebas' : 'reguler');
+
     savePendingQrisTransfer({
       recipientAccount: parsed.recipientAccount,
       recipientUserId: parsed.recipientUserId,
       recipientBank: parsed.recipientBank || 'Bank Nusantara',
       recipientName: parsed.recipientName,
+      assetMode: detectedAssetMode,
       amount: parsed.amount > 0 ? parsed.amount : undefined,
+      goldRupiahAmount: parsed.goldRupiahAmount > 0 ? parsed.goldRupiahAmount : undefined,
+      coinAmount: parsed.coinAmount > 0 ? parsed.coinAmount : undefined,
+      diamondAmount: parsed.diamondAmount > 0 ? parsed.diamondAmount : undefined,
+      tokenAmount: parsed.tokenAmount > 0 ? parsed.tokenAmount : undefined,
       note: parsed.note || 'Transfer via Scan QRIS Pribadi',
-      source,
+      source: source === 'manual' ? 'url' : source,
     });
     setDestAccount(parsed.recipientAccount);
     setDestBank(parsed.recipientBank || 'Bank Nusantara');
@@ -608,7 +663,7 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
                 : 'text-amber-300 hover:text-white'
             }`}
           >
-            Transfer Bebas 5% (Uang, Coin &amp; Emas)
+            Transfer Multi-Aset 5% (Rupiah, Emas, Coin, Permata, Token &amp; Gabungan)
           </button>
         </div>
 
@@ -706,7 +761,16 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
       {transferMode === 'bebas' ? (
         <TransferBebasPanel
           onNavigateToMutasi={onNavigateToMutasi}
-          initialAssetMode={initialBebasAssetMode}
+          initialAssetMode={bebasAssetMode}
+          prefillRecipientAccount={destAccount}
+          prefillRecipientName={recipientLookup?.name || qrisPrefillRecipientLabel}
+          prefillUangAmount={parseInt(transferAmount, 10) || undefined}
+          prefillGoldRupiahAmount={bebasPrefillGoldRp}
+          prefillCoinAmount={bebasPrefillCoin}
+          prefillDiamondAmount={bebasPrefillDiamond}
+          prefillTokenAmount={bebasPrefillToken}
+          prefillNote={transferNote}
+          prefillFromQris={isQrisPrefillBanner}
         />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -1103,6 +1167,7 @@ export const TransferWorkspace: React.FC<TransferWorkspaceProps> = ({
       <QrisScannerModal
         isOpen={qrisScannerModal.open}
         initialMode={qrisScannerModal.mode}
+        scannerPurpose="transfer_only"
         onClose={() => setQrisScannerModal((prev) => ({ ...prev, open: false }))}
         onDetected={handleQrisDetectedInWorkspace}
       />

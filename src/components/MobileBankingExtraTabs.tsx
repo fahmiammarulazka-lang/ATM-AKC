@@ -68,10 +68,17 @@ import {
   resolveMissionResetCycleWindow,
 } from '../utils/loyaltySystemUtils';
 import {
+  formatMultiAssetSummaryLabel,
   isSelfQrisTransferTarget,
+  parsePersonalQrisPayload,
+  parseQrpProfilePayload,
   savePendingQrisTransfer,
 } from '../utils/qrisTransferUtils';
-import { LoyaltyDailyMissionCategory } from '../types/bank';
+import {
+  LoyaltyDailyMissionCategory,
+  TransferBebasAssetMode,
+  TransferBebasReceipt,
+} from '../types/bank';
 
 export type MobileBankingExtraTabKey =
   | 'kantong_impian'
@@ -88,9 +95,18 @@ interface ParsedQrisTransferTarget {
   recipientAccount: string;
   recipientBank: string;
   recipientName?: string;
+  assetMode?: TransferBebasAssetMode;
   amount: number;
+  goldRupiahAmount?: number;
+  coinAmount?: number;
+  diamondAmount?: number;
+  tokenAmount?: number;
   note: string;
   sourceKind: 'url' | 'legacy_qr' | 'uid' | 'account' | 'unknown';
+  isQrpProfileLink?: boolean;
+  qrpTargetAccount?: string;
+  qrpTargetUserId?: string;
+  qrpTargetName?: string;
 }
 
 function parseQrisTransferInput(
@@ -101,51 +117,59 @@ function parseQrisTransferInput(
   const fallback: ParsedQrisTransferTarget = {
     recipientAccount: '',
     recipientBank: 'Bank Nusantara',
+    assetMode: 'uang',
     amount: 0,
     note: '',
     sourceKind: 'unknown',
   };
   if (!trimmed) return fallback;
 
-  // 1. Parse URL deep-link (?qris_transfer=1&to=...&amt=...&name=...&bank=...&note=...)
-  if (trimmed.includes('qris_transfer=') || /^https?:\/\//i.test(trimmed) || trimmed.startsWith('/?')) {
-    try {
-      const normalizedUrl = trimmed.startsWith('/?')
-        ? `${window.location.origin}${trimmed}`
-        : trimmed;
-      const urlObj = new URL(normalizedUrl);
-      const toParam = (urlObj.searchParams.get('to') || '').trim();
-      const uidParam = (urlObj.searchParams.get('uid') || '').trim();
-      const nameParam = (urlObj.searchParams.get('name') || '').trim();
-      const bankParam = (urlObj.searchParams.get('bank') || 'Bank Nusantara').trim();
-      const amtParam = Math.max(0, Math.round(Number(urlObj.searchParams.get('amt') || '0') || 0));
-      const noteParam = (urlObj.searchParams.get('note') || '').trim();
+  // 0. Deteksi jika yang ditempel adalah Link QRP (QR Profil Statistik Umum) -> Salah Kamera / Salah Menu
+  const qrpCheck = parseQrpProfilePayload(trimmed);
+  if (qrpCheck.sourceKind === 'url' && (qrpCheck.targetAccount || qrpCheck.targetUserId)) {
+    const matchedQrp = accounts.find(
+      (a) =>
+        (qrpCheck.targetAccount && a.accountNumber === qrpCheck.targetAccount) ||
+        (qrpCheck.targetUserId && a.userId16 === qrpCheck.targetUserId)
+    );
+    return {
+      ...fallback,
+      isQrpProfileLink: true,
+      qrpTargetAccount: matchedQrp?.accountNumber || qrpCheck.targetAccount,
+      qrpTargetUserId: matchedQrp?.userId16 || qrpCheck.targetUserId,
+      qrpTargetName: qrpCheck.targetName || matchedQrp?.fullName,
+    };
+  }
 
-      let resolvedAcc = toParam;
-      let resolvedName = nameParam;
-      if (!resolvedAcc && uidParam) {
-        const byUid = accounts.find((a) => a.userId16 === uidParam);
-        if (byUid) {
-          resolvedAcc = byUid.accountNumber;
-          if (!resolvedName) resolvedName = byUid.fullName;
-        }
-      } else if (resolvedAcc && !resolvedName) {
-        const byAcc = accounts.find((a) => a.accountNumber === resolvedAcc);
-        if (byAcc) resolvedName = byAcc.fullName;
+  // 1. Parse URL deep-link (?qris_transfer=1&to=...&asset=...&amt=...&gold_rp=...&coin=...&diamond=...&token=...)
+  const personalParsed = parsePersonalQrisPayload(trimmed);
+  if (personalParsed.sourceKind === 'url' && (personalParsed.recipientAccount || personalParsed.recipientUserId)) {
+    let resolvedAcc = personalParsed.recipientAccount;
+    let resolvedName = personalParsed.recipientName;
+    if (!resolvedAcc && personalParsed.recipientUserId) {
+      const byUid = accounts.find((a) => a.userId16 === personalParsed.recipientUserId);
+      if (byUid) {
+        resolvedAcc = byUid.accountNumber;
+        if (!resolvedName) resolvedName = byUid.fullName;
       }
-
-      if (resolvedAcc) {
-        return {
-          recipientAccount: resolvedAcc,
-          recipientBank: bankParam || 'Bank Nusantara',
-          recipientName: resolvedName || undefined,
-          amount: amtParam,
-          note: noteParam,
-          sourceKind: 'url',
-        };
-      }
-    } catch {
-      // fallback to other formats
+    } else if (resolvedAcc && !resolvedName) {
+      const byAcc = accounts.find((a) => a.accountNumber === resolvedAcc);
+      if (byAcc) resolvedName = byAcc.fullName;
+    }
+    if (resolvedAcc) {
+      return {
+        recipientAccount: resolvedAcc,
+        recipientBank: personalParsed.recipientBank || 'Bank Nusantara',
+        recipientName: resolvedName || undefined,
+        assetMode: personalParsed.assetMode || 'uang',
+        amount: personalParsed.amount,
+        goldRupiahAmount: personalParsed.goldRupiahAmount,
+        coinAmount: personalParsed.coinAmount,
+        diamondAmount: personalParsed.diamondAmount,
+        tokenAmount: personalParsed.tokenAmount,
+        note: personalParsed.note,
+        sourceKind: 'url',
+      };
     }
   }
 
@@ -222,6 +246,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     loyaltyMap,
     loyaltyConfig,
     claimAchievementReward,
+    claimDailyCheckIn,
     claimDailyLoyaltyMission,
     claimAllReadyLoyaltyMissions,
     buyStreakRecoveryCard,
@@ -229,6 +254,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     forfeitFrozenStreak,
     redeemLoyaltyPoints,
     transferMoney,
+    transferBebas,
     chatStatuses,
   } = useBank();
 
@@ -241,15 +267,27 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
   const [pocketDeadline, setPocketDeadline] = useState('');
   const [pocketAmounts, setPocketAmounts] = useState<Record<string, string>>({});
 
-  // State: QRIS Rekening Pribadi
+  // State: QRIS Rekening Pribadi (Multi-Aset Creator & Instant Payment)
   const [personalQrUrl, setPersonalQrUrl] = useState('');
+  const [qrRequestAssetMode, setQrRequestAssetMode] = useState<TransferBebasAssetMode>('uang');
   const [qrRequestAmount, setQrRequestAmount] = useState('');
+  const [qrRequestGoldRp, setQrRequestGoldRp] = useState('');
+  const [qrRequestCoin, setQrRequestCoin] = useState('');
+  const [qrRequestDiamond, setQrRequestDiamond] = useState('');
+  const [qrRequestToken, setQrRequestToken] = useState('');
   const [qrRequestNote, setQrRequestNote] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [scanInputCode, setScanInputCode] = useState('');
+  const [scanAssetMode, setScanAssetMode] = useState<TransferBebasAssetMode>('uang');
   const [scanPayAmount, setScanPayAmount] = useState('');
+  const [scanPayGoldRp, setScanPayGoldRp] = useState('');
+  const [scanPayCoin, setScanPayCoin] = useState('');
+  const [scanPayDiamond, setScanPayDiamond] = useState('');
+  const [scanPayToken, setScanPayToken] = useState('');
   const [scanPayNote, setScanPayNote] = useState('');
   const [scanPayPin, setScanPayPin] = useState('');
+  const [instantMultiAssetReceipt, setInstantMultiAssetReceipt] =
+    useState<TransferBebasReceipt | null>(null);
   const [qrisScannerModal, setQrisScannerModal] = useState<{
     open: boolean;
     mode: 'camera' | 'gallery';
@@ -301,7 +339,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     [normalizedLoyaltyConfig, cycleBucket10s]
   );
 
-  // Personal QRIS sekarang menyimpan Link Transfer Resmi Bank Nusantara agar saat discan nasabah lain langsung mengarah ke halaman Transfer terisi otomatis!
+  // Personal QRIS menyimpan Link Transfer Multi-Aset Resmi Bank Nusantara
   const personalQrTransferLink = useMemo(() => {
     if (!currentAccount) return '';
     const origin =
@@ -314,12 +352,60 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     params.set('uid', currentAccount.userId16 || currentAccount.accountNumber);
     params.set('name', currentAccount.fullName);
     params.set('bank', 'Bank Nusantara');
+    params.set('asset', qrRequestAssetMode);
     const amt = Math.max(0, Math.round(Number(qrRequestAmount) || 0));
-    if (amt > 0) params.set('amt', String(amt));
+    const goldRp = Math.max(0, Math.round(Number(qrRequestGoldRp) || 0));
+    const coin = Math.max(0, Math.round(Number(qrRequestCoin) || 0));
+    const diamond = Math.max(0, Math.round(Number(qrRequestDiamond) || 0));
+    const token = Math.max(0, Math.round(Number(qrRequestToken) || 0));
+    if (amt > 0 && (qrRequestAssetMode === 'uang' || qrRequestAssetMode === 'gabungan')) {
+      params.set('amt', String(amt));
+    }
+    if (goldRp > 0 && (qrRequestAssetMode === 'emas' || qrRequestAssetMode === 'gabungan')) {
+      params.set('gold_rp', String(goldRp));
+    }
+    if (coin > 0 && (qrRequestAssetMode === 'coin' || qrRequestAssetMode === 'gabungan')) {
+      params.set('coin', String(coin));
+    }
+    if (diamond > 0 && (qrRequestAssetMode === 'permata' || qrRequestAssetMode === 'gabungan')) {
+      params.set('diamond', String(diamond));
+    }
+    if (token > 0 && (qrRequestAssetMode === 'token' || qrRequestAssetMode === 'gabungan')) {
+      params.set('token', String(token));
+    }
     const note = qrRequestNote.trim();
     if (note) params.set('note', note);
     return `${origin}/?${params.toString()}`;
-  }, [currentAccount, qrRequestAmount, qrRequestNote]);
+  }, [
+    currentAccount,
+    qrRequestAssetMode,
+    qrRequestAmount,
+    qrRequestGoldRp,
+    qrRequestCoin,
+    qrRequestDiamond,
+    qrRequestToken,
+    qrRequestNote,
+  ]);
+
+  const qrCreatorAssetSummaryLabel = useMemo(
+    () =>
+      formatMultiAssetSummaryLabel({
+        assetMode: qrRequestAssetMode,
+        amount: Math.max(0, Math.round(Number(qrRequestAmount) || 0)),
+        goldRupiahAmount: Math.max(0, Math.round(Number(qrRequestGoldRp) || 0)),
+        coinAmount: Math.max(0, Math.round(Number(qrRequestCoin) || 0)),
+        diamondAmount: Math.max(0, Math.round(Number(qrRequestDiamond) || 0)),
+        tokenAmount: Math.max(0, Math.round(Number(qrRequestToken) || 0)),
+      }),
+    [
+      qrRequestAssetMode,
+      qrRequestAmount,
+      qrRequestGoldRp,
+      qrRequestCoin,
+      qrRequestDiamond,
+      qrRequestToken,
+    ]
+  );
 
   useEffect(() => {
     if (activeTab !== 'qris_pribadi' || !personalQrTransferLink) return;
@@ -343,10 +429,65 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
     [scanInputCode, accounts]
   );
 
+  // Otomatis isi jenis aset & jumlah ketika hasil scan QRIS terdeteksi
+  useEffect(() => {
+    if (!parsedScanTarget.recipientAccount) return;
+    if (parsedScanTarget.assetMode) {
+      setScanAssetMode(parsedScanTarget.assetMode);
+    }
+    if (parsedScanTarget.amount > 0) {
+      setScanPayAmount(String(parsedScanTarget.amount));
+    }
+    if ((parsedScanTarget.goldRupiahAmount || 0) > 0) {
+      setScanPayGoldRp(String(parsedScanTarget.goldRupiahAmount));
+    }
+    if ((parsedScanTarget.coinAmount || 0) > 0) {
+      setScanPayCoin(String(parsedScanTarget.coinAmount));
+    }
+    if ((parsedScanTarget.diamondAmount || 0) > 0) {
+      setScanPayDiamond(String(parsedScanTarget.diamondAmount));
+    }
+    if ((parsedScanTarget.tokenAmount || 0) > 0) {
+      setScanPayToken(String(parsedScanTarget.tokenAmount));
+    }
+    if (parsedScanTarget.note) {
+      setScanPayNote(parsedScanTarget.note);
+    }
+  }, [
+    parsedScanTarget.recipientAccount,
+    parsedScanTarget.assetMode,
+    parsedScanTarget.amount,
+    parsedScanTarget.goldRupiahAmount,
+    parsedScanTarget.coinAmount,
+    parsedScanTarget.diamondAmount,
+    parsedScanTarget.tokenAmount,
+    parsedScanTarget.note,
+  ]);
+
   const effectiveScanAmount = useMemo(() => {
     const manual = Math.max(0, Math.round(Number(scanPayAmount) || 0));
     return manual > 0 ? manual : parsedScanTarget.amount;
   }, [scanPayAmount, parsedScanTarget.amount]);
+
+  const effectiveScanGoldRp = useMemo(() => {
+    const manual = Math.max(0, Math.round(Number(scanPayGoldRp) || 0));
+    return manual > 0 ? manual : parsedScanTarget.goldRupiahAmount || 0;
+  }, [scanPayGoldRp, parsedScanTarget.goldRupiahAmount]);
+
+  const effectiveScanCoin = useMemo(() => {
+    const manual = Math.max(0, Math.round(Number(scanPayCoin) || 0));
+    return manual > 0 ? manual : parsedScanTarget.coinAmount || 0;
+  }, [scanPayCoin, parsedScanTarget.coinAmount]);
+
+  const effectiveScanDiamond = useMemo(() => {
+    const manual = Math.max(0, Math.round(Number(scanPayDiamond) || 0));
+    return manual > 0 ? manual : parsedScanTarget.diamondAmount || 0;
+  }, [scanPayDiamond, parsedScanTarget.diamondAmount]);
+
+  const effectiveScanToken = useMemo(() => {
+    const manual = Math.max(0, Math.round(Number(scanPayToken) || 0));
+    return manual > 0 ? manual : parsedScanTarget.tokenAmount || 0;
+  }, [scanPayToken, parsedScanTarget.tokenAmount]);
 
   const effectiveScanFee = useMemo(
     () => calculateMandatoryTransferFee(effectiveScanAmount),
@@ -557,7 +698,10 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
       )
   );
 
-  const handleQrisModalDetected = (rawText: string, source: 'camera' | 'gallery') => {
+  const handleQrisModalDetected = (
+    rawText: string,
+    source: 'camera' | 'gallery' | 'manual'
+  ) => {
     setQrisScannerModal((prev) => ({ ...prev, open: false }));
     setScanInputCode(rawText);
     const detected = parseQrisTransferInput(rawText, accounts);
@@ -579,26 +723,18 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
       return;
     }
 
-    savePendingQrisTransfer({
-      recipientAccount: detected.recipientAccount,
-      recipientBank: detected.recipientBank || 'Bank Nusantara',
-      recipientName: detected.recipientName,
-      amount: detected.amount > 0 ? detected.amount : undefined,
-      note: detected.note || 'Transfer via Scan QRIS Pribadi',
-      source,
+    if (detected.assetMode) setScanAssetMode(detected.assetMode);
+    if (detected.amount > 0) setScanPayAmount(String(detected.amount));
+    if ((detected.goldRupiahAmount || 0) > 0) setScanPayGoldRp(String(detected.goldRupiahAmount));
+    if ((detected.coinAmount || 0) > 0) setScanPayCoin(String(detected.coinAmount));
+    if ((detected.diamondAmount || 0) > 0) setScanPayDiamond(String(detected.diamondAmount));
+    if ((detected.tokenAmount || 0) > 0) setScanPayToken(String(detected.tokenAmount));
+    if (detected.note) setScanPayNote(detected.note);
+
+    showNotice({
+      success: true,
+      message: `QRIS Pribadi ${detected.recipientName || detected.recipientAccount} berhasil dipindai! Pilih aset yang ingin dikirim lalu bayar instan atau lanjut ke Halaman Transfer.`,
     });
-    window.dispatchEvent(
-      new CustomEvent('bn:qris-transfer', {
-        detail: {
-          recipientAccount: detected.recipientAccount,
-          recipientBank: detected.recipientBank || 'Bank Nusantara',
-          recipientName: detected.recipientName || '',
-          amount: detected.amount > 0 ? detected.amount : undefined,
-          note: detected.note || 'Transfer via Scan QRIS Pribadi',
-          source,
-        },
-      })
-    );
   };
 
   const handleOpenScannedTransferPage = () => {
@@ -616,32 +752,31 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
       });
       return;
     }
-    savePendingQrisTransfer({
+    const payload = {
       recipientAccount: parsedScanTarget.recipientAccount,
       recipientBank: parsedScanTarget.recipientBank || 'Bank Nusantara',
       recipientName: parsedScanTarget.recipientName,
+      assetMode: scanAssetMode,
       amount: effectiveScanAmount > 0 ? effectiveScanAmount : undefined,
+      goldRupiahAmount: effectiveScanGoldRp > 0 ? effectiveScanGoldRp : undefined,
+      coinAmount: effectiveScanCoin > 0 ? effectiveScanCoin : undefined,
+      diamondAmount: effectiveScanDiamond > 0 ? effectiveScanDiamond : undefined,
+      tokenAmount: effectiveScanToken > 0 ? effectiveScanToken : undefined,
       note: scanPayNote.trim() || parsedScanTarget.note || 'Transfer via Scan QRIS Pribadi',
-      source: 'manual',
-    });
+      source: 'manual' as const,
+    };
+    savePendingQrisTransfer(payload);
     window.dispatchEvent(
       new CustomEvent('bn:qris-transfer', {
-        detail: {
-          recipientAccount: parsedScanTarget.recipientAccount,
-          recipientBank: parsedScanTarget.recipientBank || 'Bank Nusantara',
-          recipientName: parsedScanTarget.recipientName || '',
-          amount: effectiveScanAmount > 0 ? effectiveScanAmount : undefined,
-          note: scanPayNote.trim() || parsedScanTarget.note || 'Transfer via Scan QRIS Pribadi',
-          source: 'manual',
-        },
+        detail: payload,
       })
     );
   };
 
   const handleScanQrSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setInstantMultiAssetReceipt(null);
     const targetAccount = parsedScanTarget.recipientAccount;
-    const amountNum = effectiveScanAmount;
 
     if (isSelfScannedQris) {
       showNotice({
@@ -651,24 +786,70 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
       return;
     }
 
-    if (!targetAccount || amountNum < 1000) {
+    if (!targetAccount) {
       showNotice({
         success: false,
-        message: 'Masukkan Link Transfer QRIS / Rekening / User ID 16-digit penerima dan nominal minimal Rp 1.000.',
+        message: 'Masukkan atau scan Link Transfer QRIS / Rekening / User ID 16-digit penerima terlebih dahulu.',
       });
       return;
     }
-    const res = transferMoney({
+
+    if (scanPayPin.length !== 6) {
+      showNotice({
+        success: false,
+        message: 'Masukkan 6 digit PIN Kartu Anda untuk verifikasi keamanan transfer via QRIS.',
+      });
+      return;
+    }
+
+    // Jika mode 'uang' murni, bisa melalui transferMoney standar; jika aset non-uang / gabungan, gunakan transferBebas({ fromQris: true })
+    if (scanAssetMode === 'uang') {
+      const amountNum = effectiveScanAmount;
+      if (amountNum < 1000) {
+        showNotice({
+          success: false,
+          message: 'Nominal transfer Saldo Rupiah minimal Rp 1.000.',
+        });
+        return;
+      }
+      const res = transferMoney({
+        recipientAccount: targetAccount,
+        recipientBank: parsedScanTarget.recipientBank || 'Bank Nusantara',
+        amount: amountNum,
+        note: scanPayNote.trim() || parsedScanTarget.note || 'Pembayaran QRIS Rekening Pribadi',
+        pin: scanPayPin,
+      });
+      showNotice(res);
+      if (res.success) {
+        setScanPayAmount('');
+        setScanPayNote('');
+        setScanPayPin('');
+      }
+      return;
+    }
+
+    // Transfer Multi-Aset via QRIS (Emas 24K, Coin Spin, Permata, Token, atau Paket Gabungan)
+    const res = transferBebas({
+      assetMode: scanAssetMode,
       recipientAccount: targetAccount,
+      recipientName: parsedScanTarget.recipientName || 'Penerima QRIS',
       recipientBank: parsedScanTarget.recipientBank || 'Bank Nusantara',
-      amount: amountNum,
-      note: scanPayNote.trim() || parsedScanTarget.note || 'Pembayaran QRIS Rekening Pribadi',
+      uangAmount: scanAssetMode === 'gabungan' ? effectiveScanAmount : 0,
+      goldRupiahAmount:
+        scanAssetMode === 'emas' || scanAssetMode === 'gabungan' ? effectiveScanGoldRp : 0,
+      coinAmount:
+        scanAssetMode === 'coin' || scanAssetMode === 'gabungan' ? effectiveScanCoin : 0,
+      diamondAmount:
+        scanAssetMode === 'permata' || scanAssetMode === 'gabungan' ? effectiveScanDiamond : 0,
+      tokenAmount:
+        scanAssetMode === 'token' || scanAssetMode === 'gabungan' ? effectiveScanToken : 0,
+      fromQris: true,
+      note: scanPayNote.trim() || parsedScanTarget.note || 'Transfer Multi-Aset via QRIS Pribadi',
       pin: scanPayPin,
     });
     showNotice(res);
-    if (res.success) {
-      setScanPayAmount('');
-      setScanPayNote('');
+    if (res.success && res.receipt) {
+      setInstantMultiAssetReceipt(res.receipt);
       setScanPayPin('');
     }
   };
@@ -912,18 +1093,19 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
         </div>
       )}
 
-      {/* ==================== 2. KOTAK SCAN & TERIMA QRIS REKENING PRIBADI ==================== */}
+      {/* ==================== 2. KOTAK SCAN & TERIMA QRIS REKENING PRIBADI MULTI-ASET ==================== */}
       {activeTab === 'qris_pribadi' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* LEFT: PEMBUAT KARTU QRIS MULTI-ASET */}
           <div className="lg:col-span-6 rounded-3xl border border-slate-800 bg-slate-900/90 p-5 space-y-4">
             <div className="flex items-center gap-2.5">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-sky-500/15 text-sky-400 border border-sky-500/30">
                 <QrCode className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-sm font-black text-white">Kartu QRIS Link Transfer Pribadi</h3>
+                <h3 className="text-sm font-black text-white">Kartu QRIS Link Transfer Multi-Aset</h3>
                 <p className="text-[11px] text-slate-400">
-                  Saat di-scan nasabah lain, QRIS ini langsung mengarahkan ke link halaman Transfer Anda dengan rekening terisi otomatis
+                  Pilih jenis aset &amp; jumlah yang diminta (atau biarkan bebas). Saat di-scan via kamera M-Banking maupun Google Lens, otomatis membuka form transfer aset tersebut.
                 </p>
               </div>
             </div>
@@ -934,34 +1116,113 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                 <p className="text-[11px] font-mono text-slate-600">
                   Rek: {currentAccount.accountNumber} · ID: {currentAccount.userId16 || '-'}
                 </p>
+                <span className="mt-1 inline-block rounded-full bg-sky-100 border border-sky-300 px-3 py-0.5 text-[10px] font-black text-sky-900">
+                  PERMINTAAN: {qrCreatorAssetSummaryLabel.toUpperCase()}
+                </span>
               </div>
               {personalQrUrl && (
                 <img
                   src={personalQrUrl}
-                  alt="QRIS Link Transfer Pribadi"
+                  alt="QRIS Link Transfer Pribadi Multi-Aset"
                   className="h-52 w-52 rounded-xl border border-slate-200 p-2"
                 />
               )}
-              <div className="w-full max-w-xs space-y-2">
-                <input
-                  type="number"
-                  min={0}
-                  value={qrRequestAmount}
-                  onChange={(e) => setQrRequestAmount(e.target.value)}
-                  placeholder="Nominal tagihan opsional (Rp)..."
-                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 text-center tabular-nums"
-                />
+
+              {/* Pemilih Jenis Aset pada Pembuat QRIS */}
+              <div className="w-full space-y-2 text-left">
+                <label className="block text-[11px] font-black text-slate-700 text-center">
+                  Pilih Jenis Aset yang Diminta di QRIS Ini:
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { id: 'uang', label: 'Rupiah' },
+                      { id: 'emas', label: 'Emas 24K' },
+                      { id: 'coin', label: 'Coin Spin' },
+                      { id: 'permata', label: 'Permata' },
+                      { id: 'token', label: 'Token' },
+                      { id: 'gabungan', label: 'Gabungan' },
+                    ] as { id: TransferBebasAssetMode; label: string }[]
+                  ).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setQrRequestAssetMode(item.id)}
+                      className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer ${
+                        qrRequestAssetMode === item.id
+                          ? 'bg-slate-900 text-amber-300 border-slate-900'
+                          : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="w-full max-w-sm space-y-2">
+                {(qrRequestAssetMode === 'uang' || qrRequestAssetMode === 'gabungan') && (
+                  <input
+                    type="number"
+                    min={0}
+                    value={qrRequestAmount}
+                    onChange={(e) => setQrRequestAmount(e.target.value)}
+                    placeholder="Nominal Saldo Rupiah yang diminta (opsional)..."
+                    className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 text-center tabular-nums"
+                  />
+                )}
+                {(qrRequestAssetMode === 'emas' || qrRequestAssetMode === 'gabungan') && (
+                  <input
+                    type="number"
+                    min={0}
+                    value={qrRequestGoldRp}
+                    onChange={(e) => setQrRequestGoldRp(e.target.value)}
+                    placeholder="Nilai Emas 24K dalam Rupiah (mis. 1000000)..."
+                    className="w-full rounded-xl border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-slate-900 text-center tabular-nums"
+                  />
+                )}
+                {(qrRequestAssetMode === 'coin' || qrRequestAssetMode === 'gabungan') && (
+                  <input
+                    type="number"
+                    min={0}
+                    value={qrRequestCoin}
+                    onChange={(e) => setQrRequestCoin(e.target.value)}
+                    placeholder="Jumlah Coin Spin yang diminta (mis. 50)..."
+                    className="w-full rounded-xl border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs text-slate-900 text-center tabular-nums"
+                  />
+                )}
+                {(qrRequestAssetMode === 'permata' || qrRequestAssetMode === 'gabungan') && (
+                  <input
+                    type="number"
+                    min={0}
+                    value={qrRequestDiamond}
+                    onChange={(e) => setQrRequestDiamond(e.target.value)}
+                    placeholder="Jumlah Permata / Diamond yang diminta (mis. 25)..."
+                    className="w-full rounded-xl border border-cyan-300 bg-cyan-50/70 px-3 py-2 text-xs text-slate-900 text-center tabular-nums"
+                  />
+                )}
+                {(qrRequestAssetMode === 'token' || qrRequestAssetMode === 'gabungan') && (
+                  <input
+                    type="number"
+                    min={0}
+                    value={qrRequestToken}
+                    onChange={(e) => setQrRequestToken(e.target.value)}
+                    placeholder="Jumlah Token Spin Bingkai yang diminta (mis. 3)..."
+                    className="w-full rounded-xl border border-fuchsia-300 bg-fuchsia-50/70 px-3 py-2 text-xs text-slate-900 text-center tabular-nums"
+                  />
+                )}
                 <input
                   type="text"
                   value={qrRequestNote}
                   onChange={(e) => setQrRequestNote(e.target.value)}
-                  placeholder="Catatan tagihan opsional (mis. Patungan makan)..."
+                  placeholder="Catatan permintaan aset opsional..."
                   className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-900 text-center"
                 />
               </div>
+
               <div className="w-full rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-left">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-sky-700 flex items-center gap-1">
-                  <Link2 className="h-3 w-3" /> Link Tujuan Scan QRIS
+                  <Link2 className="h-3 w-3" /> Link Tujuan Scan QRIS Multi-Aset
                 </p>
                 <p className="mt-0.5 text-[10px] font-mono text-slate-700 break-all line-clamp-2">
                   {personalQrTransferLink}
@@ -979,29 +1240,30 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                 {personalQrUrl && (
                   <a
                     href={personalQrUrl}
-                    download={`QRIS-Transfer-${currentAccount.accountNumber}.png`}
+                    download={`QRIS-MultiAset-${currentAccount.accountNumber}.png`}
                     className="inline-flex items-center gap-1.5 rounded-xl bg-sky-600 px-3 py-2 text-xs font-bold text-white"
                   >
                     <Download className="h-3.5 w-3.5" />
-                    <span>Unduh QR</span>
+                    <span>Unduh QRIS (PNG)</span>
                   </a>
                 )}
               </div>
               <p className="text-[10px] text-slate-500">
-                Pengirim akan diarahkan ke halaman Transfer resmi (Biaya Admin Wajib {MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%).
+                Mendukung pengiriman Rupiah, Emas 24K, Coin Spin, Permata, Token, &amp; Paket Gabungan (Biaya Admin Wajib {MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}%).
               </p>
             </div>
           </div>
 
+          {/* RIGHT: PEMINDAI & PENGIRIMAN INSTAN MULTI-ASET VIA QRIS */}
           <form onSubmit={handleScanQrSubmit} className="lg:col-span-6 rounded-3xl border border-slate-800 bg-slate-900/90 p-5 space-y-4">
             <div className="flex items-center gap-2.5">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                 <ScanLine className="h-5 w-5" />
               </div>
               <div>
-                <h3 className="text-sm font-black text-white">Scan / Tempel Link QRIS Pribadi</h3>
+                <h3 className="text-sm font-black text-white">Scan / Kirim Multi-Aset via QRIS Pribadi</h3>
                 <p className="text-[11px] text-slate-400">
-                  Tempel Link Transfer QRIS hasil scan kamera, kode BNUS-QRPAY, No. Rekening 10-digit, atau User ID 16-digit
+                  Pindai QRIS Pribadi teman lalu pilih atau ubah aset yang ingin dikirim (Rupiah, Emas 24K, Coin Spin, Permata, Token, atau Paket Gabungan)
                 </p>
               </div>
             </div>
@@ -1034,10 +1296,47 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                   type="text"
                   value={scanInputCode}
                   onChange={(e) => setScanInputCode(e.target.value)}
-                  placeholder="https://.../?qris_transfer=1&to=... atau rekening/User ID"
+                  placeholder="https://.../?qris_transfer=1&to=...&asset=... atau rekening/User ID"
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-white font-mono"
                 />
               </div>
+
+              {/* Deteksi Salah Kamera / Salah Menu jika yang ditempel adalah QRP (QR Profil) */}
+              {parsedScanTarget.isQrpProfileLink && (
+                <div className="rounded-2xl border-2 border-amber-400/70 bg-amber-950/60 p-3.5 text-xs text-amber-100 space-y-2.5">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-black text-amber-300 uppercase">
+                        Salah Kamera / Salah Menu! Ini Adalah Kode QRP (QR Profil)
+                      </p>
+                      <p className="text-[11px] text-amber-100/90 mt-0.5">
+                        Link yang Anda masukkan adalah <strong>QRP (QR Profil Statistik Umum)</strong> milik{' '}
+                        <strong>{parsedScanTarget.qrpTargetName || parsedScanTarget.qrpTargetAccount}</strong>, bukan QRIS Transfer.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.dispatchEvent(
+                        new CustomEvent('bn:open-qrp-profile', {
+                          detail: {
+                            targetAccount: parsedScanTarget.qrpTargetAccount || '',
+                            targetUserId: parsedScanTarget.qrpTargetUserId,
+                            targetName: parsedScanTarget.qrpTargetName,
+                            source: 'manual',
+                          },
+                        })
+                      );
+                    }}
+                    className="w-full min-h-[40px] rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <QrCode className="h-4 w-4" />
+                    <span>Buka Statistik Umum QRP Ini (1-Klik)</span>
+                  </button>
+                </div>
+              )}
 
               {isSelfScannedQris && (
                 <div className="rounded-2xl border border-rose-500/50 bg-rose-950/60 p-3 text-xs text-rose-100 flex items-start gap-2">
@@ -1051,62 +1350,170 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
               {parsedScanTarget.recipientAccount && !isSelfScannedQris && (
                 <div className="rounded-2xl border border-sky-500/40 bg-sky-950/40 p-3 text-xs space-y-1">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sky-300 font-bold">Penerima Terdeteksi</span>
+                    <span className="text-sky-300 font-bold">Penerima QRIS Terdeteksi</span>
                     <span className="text-[10px] font-mono text-sky-200 uppercase">
-                      {parsedScanTarget.sourceKind === 'url' ? 'Link Transfer QRIS' : parsedScanTarget.sourceKind}
+                      {parsedScanTarget.sourceKind === 'url' ? 'Link QRIS Multi-Aset' : parsedScanTarget.sourceKind}
                     </span>
                   </div>
                   <p className="font-black text-white">
                     {parsedScanTarget.recipientName || 'Nasabah Bank Nusantara'}{' '}
                     <span className="font-mono text-amber-300">({parsedScanTarget.recipientAccount})</span>
                   </p>
-                  {parsedScanTarget.amount > 0 && (
-                    <p className="text-[11px] text-emerald-300">
-                      Nominal dari QRIS: <strong className="tabular-nums">{formatRupiah(parsedScanTarget.amount)}</strong>
-                    </p>
-                  )}
+                  <p className="text-[11px] text-emerald-300">
+                    Permintaan QRIS:{' '}
+                    <strong>
+                      {formatMultiAssetSummaryLabel({
+                        assetMode: parsedScanTarget.assetMode || 'uang',
+                        amount: parsedScanTarget.amount,
+                        goldRupiahAmount: parsedScanTarget.goldRupiahAmount,
+                        coinAmount: parsedScanTarget.coinAmount,
+                        diamondAmount: parsedScanTarget.diamondAmount,
+                        tokenAmount: parsedScanTarget.tokenAmount,
+                      })}
+                    </strong>
+                  </p>
                   {parsedScanTarget.note && (
                     <p className="text-[11px] text-slate-300">Catatan QRIS: {parsedScanTarget.note}</p>
                   )}
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1">Nominal Transfer (Rp)</label>
-                  <input
-                    type="number"
-                    min={1000}
-                    value={scanPayAmount}
-                    onChange={(e) => setScanPayAmount(e.target.value)}
-                    placeholder={parsedScanTarget.amount > 0 ? String(parsedScanTarget.amount) : '50000'}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-white tabular-nums"
-                  />
+              {/* Pemilih Jenis Aset yang Ingin Dikirim oleh Pemindai */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-300 mb-1.5">
+                  Pilih / Ubah Jenis Aset yang Ingin Anda Kirim via QRIS:
+                </label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { id: 'uang', label: 'Saldo Rupiah' },
+                      { id: 'emas', label: 'Emas 24K' },
+                      { id: 'coin', label: 'Coin Spin' },
+                      { id: 'permata', label: 'Permata' },
+                      { id: 'token', label: 'Token Bingkai' },
+                      { id: 'gabungan', label: 'Paket Gabungan' },
+                    ] as { id: TransferBebasAssetMode; label: string }[]
+                  ).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setScanAssetMode(item.id)}
+                      className={`py-2 px-2.5 rounded-xl text-[11px] font-extrabold border transition-colors cursor-pointer ${
+                        scanAssetMode === item.id
+                          ? 'bg-amber-400 text-slate-950 border-amber-300'
+                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
                 </div>
+              </div>
+
+              {/* Input Jumlah sesuai Aset yang Dipilih */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {(scanAssetMode === 'uang' || scanAssetMode === 'gabungan') && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-emerald-300 mb-1">
+                      Nominal Saldo Rupiah (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={scanPayAmount}
+                      onChange={(e) => setScanPayAmount(e.target.value)}
+                      placeholder={parsedScanTarget.amount > 0 ? String(parsedScanTarget.amount) : '50000'}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-white tabular-nums"
+                    />
+                  </div>
+                )}
+                {(scanAssetMode === 'emas' || scanAssetMode === 'gabungan') && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-yellow-300 mb-1">
+                      Nilai Emas 24K (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={scanPayGoldRp}
+                      onChange={(e) => setScanPayGoldRp(e.target.value)}
+                      placeholder="Contoh: 1000000"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-yellow-200 tabular-nums"
+                    />
+                  </div>
+                )}
+                {(scanAssetMode === 'coin' || scanAssetMode === 'gabungan') && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-amber-300 mb-1">
+                      Jumlah Coin Spin
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={scanPayCoin}
+                      onChange={(e) => setScanPayCoin(e.target.value)}
+                      placeholder="Contoh: 50"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-amber-200 tabular-nums"
+                    />
+                  </div>
+                )}
+                {(scanAssetMode === 'permata' || scanAssetMode === 'gabungan') && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-cyan-300 mb-1">
+                      Jumlah Permata (Diamond)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={scanPayDiamond}
+                      onChange={(e) => setScanPayDiamond(e.target.value)}
+                      placeholder="Contoh: 25"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-cyan-200 tabular-nums"
+                    />
+                  </div>
+                )}
+                {(scanAssetMode === 'token' || scanAssetMode === 'gabungan') && (
+                  <div>
+                    <label className="block text-[11px] font-bold text-fuchsia-300 mb-1">
+                      Jumlah Token Spin Bingkai
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={scanPayToken}
+                      onChange={(e) => setScanPayToken(e.target.value)}
+                      placeholder="Contoh: 3"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-fuchsia-200 tabular-nums"
+                    />
+                  </div>
+                )}
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1">PIN ATM (6 digit)</label>
+                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                    PIN ATM (6 Digit Wajib)
+                  </label>
                   <input
                     type="password"
                     maxLength={6}
                     value={scanPayPin}
                     onChange={(e) => setScanPayPin(e.target.value)}
                     placeholder="••••••"
-                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-white tabular-nums"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-amber-300 font-mono tabular-nums"
                   />
                 </div>
               </div>
+
               <div>
                 <label className="block text-[11px] font-bold text-slate-400 mb-1">Catatan (Opsional)</label>
                 <input
                   type="text"
                   value={scanPayNote}
                   onChange={(e) => setScanPayNote(e.target.value)}
-                  placeholder={parsedScanTarget.note || 'Bayar kopi / patungan makan'}
+                  placeholder={parsedScanTarget.note || 'Transfer Multi-Aset via QRIS Pribadi'}
                   className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-xs text-white"
                 />
               </div>
 
-              {effectiveScanAmount > 0 && !isSelfScannedQris && (
+              {scanAssetMode === 'uang' && effectiveScanAmount > 0 && !isSelfScannedQris && (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-950/30 px-3.5 py-2.5 text-[11px] space-y-1">
                   <div className="flex justify-between text-slate-300">
                     <span>Nominal Kirim</span>
@@ -1120,6 +1527,51 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                     <span>Total Dipotong</span>
                     <span className="font-mono tabular-nums">{formatRupiah(effectiveScanAmount + effectiveScanFee)}</span>
                   </div>
+                </div>
+              )}
+
+              {instantMultiAssetReceipt && (
+                <div className="rounded-2xl border border-emerald-500/50 bg-emerald-950/40 p-3.5 text-xs space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="font-black text-emerald-300">
+                      Struk Digital Multi-Aset QRIS ({instantMultiAssetReceipt.referenceNo})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setInstantMultiAssetReceipt(null)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <p className="text-slate-200">
+                    Penerima: <strong>{instantMultiAssetReceipt.recipientName}</strong> ({instantMultiAssetReceipt.recipientAccount})
+                  </p>
+                  {instantMultiAssetReceipt.uangSent > 0 && (
+                    <p className="font-mono text-emerald-300">
+                      • Rupiah: {formatRupiah(instantMultiAssetReceipt.uangSent)} → Diterima {formatRupiah(instantMultiAssetReceipt.uangReceived)}
+                    </p>
+                  )}
+                  {instantMultiAssetReceipt.goldRupiahSent > 0 && (
+                    <p className="font-mono text-yellow-300">
+                      • Emas 24K: {instantMultiAssetReceipt.goldGramsSent.toFixed(4)}g → Diterima {instantMultiAssetReceipt.goldReceivedGrams.toFixed(4)}g
+                    </p>
+                  )}
+                  {instantMultiAssetReceipt.coinSent > 0 && (
+                    <p className="font-mono text-amber-300">
+                      • Coin Spin: {instantMultiAssetReceipt.coinSent} → Diterima {instantMultiAssetReceipt.coinReceived} Koin
+                    </p>
+                  )}
+                  {(instantMultiAssetReceipt.diamondSent || 0) > 0 && (
+                    <p className="font-mono text-cyan-300">
+                      • Permata: {instantMultiAssetReceipt.diamondSent} → Diterima {instantMultiAssetReceipt.diamondReceived} Permata
+                    </p>
+                  )}
+                  {(instantMultiAssetReceipt.tokenSent || 0) > 0 && (
+                    <p className="font-mono text-fuchsia-300">
+                      • Token Bingkai: {instantMultiAssetReceipt.tokenSent} → Diterima {instantMultiAssetReceipt.tokenReceived} Token
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1139,7 +1591,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                   className="flex min-h-[42px] w-full items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-xs font-black text-white hover:bg-sky-500 disabled:opacity-45 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
                 >
                   <ScanLine className="h-4 w-4" />
-                  <span>Bayar Instan (+{MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}% Admin)</span>
+                  <span>Bayar Instan ({MANDATORY_TRANSFER_ADMIN_FEE_PERCENT}% Admin)</span>
                 </button>
               </div>
             </div>
@@ -1148,6 +1600,7 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
           <QrisScannerModal
             isOpen={qrisScannerModal.open}
             initialMode={qrisScannerModal.mode}
+            scannerPurpose="transfer_only"
             onClose={() => setQrisScannerModal((prev) => ({ ...prev, open: false }))}
             onDetected={handleQrisModalDetected}
           />
@@ -1390,6 +1843,26 @@ export const MobileBankingExtraTabs: React.FC<MobileBankingExtraTabsProps> = ({ 
                         {streakVisual.activeStreak} Hari
                       </p>
                     </div>
+                  </div>
+
+                  {/* Tombol Sinkron & Verifikasi Streak Harian (Anti-Stuck 2 Hari Berturut-Turut) */}
+                  <div className="rounded-2xl border border-orange-500/30 bg-slate-950/80 p-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-[11px] text-slate-300">
+                      <span className="font-bold text-orange-200 block">
+                        Sinkronisasi &amp; Verifikasi Riwayat Streak
+                      </span>
+                      <span className="text-slate-400">
+                        Riwayat aktif tercatat: {(myLoyalty.recentActiveDatesWib || []).length} hari · Terakhir: {myLoyalty.lastOnlineDateWib || todayWib}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => showNotice(claimDailyCheckIn())}
+                      className="min-h-[36px] px-3 py-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-400 hover:from-orange-400 hover:to-amber-300 text-slate-950 text-xs font-black inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span>Sinkron &amp; Koreksi Streak</span>
+                    </button>
                   </div>
 
                   {/* 4-Stage Freeze Rule Indicator */}

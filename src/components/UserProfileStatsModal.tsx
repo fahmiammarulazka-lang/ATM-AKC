@@ -96,6 +96,8 @@ import {
   normalizeAccountLevelSystemConfig,
 } from '../data/levelSystemCatalog';
 import { DevRoleConfig } from '../types/bank';
+import { QrisScannerModal } from './QrisScannerModal';
+import { parseQrpProfilePayload } from '../utils/qrisTransferUtils';
 
 type ProfileTabKey = 'ringkasan' | 'identitas' | 'aksi_favorit' | 'keamanan' | 'achievement';
 
@@ -246,6 +248,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     text: string;
   } | null>(null);
   const [personalQrUrl, setPersonalQrUrl] = useState<string>('');
+  const [isQrpScannerOpen, setIsQrpScannerOpen] = useState<boolean>(false);
 
   // State Tab Aksi & Favorit
   const [favAccNum, setFavAccNum] = useState('');
@@ -316,7 +319,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     setExportFeedback('');
   }, [isOpen, currentAccount?.id]);
 
-  // Link QRIS Pribadi untuk unduh langsung dari Profil
+  // Link QRP (QR Profil Statistik Umum Publik — Tanpa membocorkan Saldo)
   const personalQrLink = useMemo(() => {
     if (!currentAccount) return '';
     const origin =
@@ -324,8 +327,8 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
         ? window.location.origin
         : 'https://banknusantara.app';
     const params = new URLSearchParams();
-    params.set('qris_transfer', '1');
-    params.set('to', currentAccount.accountNumber);
+    params.set('qrp_profile', '1');
+    params.set('acc', currentAccount.accountNumber);
     params.set('uid', currentAccount.userId16 || currentAccount.accountNumber);
     params.set('name', currentAccount.fullName);
     params.set('bank', 'Bank Nusantara');
@@ -676,12 +679,85 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
 
   const handleDownloadQrisPng = () => {
     if (!personalQrUrl) return;
-    const link = document.createElement('a');
-    link.href = personalQrUrl;
-    link.download = `QRIS-Bank-Nusantara-${currentAccount.accountNumber}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const canvas = document.createElement('canvas');
+    canvas.width = 760;
+    canvas.height = 980;
+    const ctx = canvas.getContext('2d');
+    const qrImg = new Image();
+    qrImg.crossOrigin = 'anonymous';
+    qrImg.onload = () => {
+      if (ctx) {
+        const bgGrad = ctx.createLinearGradient(0, 0, 760, 980);
+        bgGrad.addColorStop(0, '#071426');
+        bgGrad.addColorStop(0.55, '#0b1e36');
+        bgGrad.addColorStop(1, '#091526');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, 760, 980);
+
+        ctx.strokeStyle = 'rgba(34, 211, 238, 0.45)';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(24, 24, 712, 932);
+
+        ctx.fillStyle = '#22d3ee';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('BANK NUSANTARA • QRP (QR PROFIL)', 380, 78);
+
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText('KARTU STATISTIK UMUM NASABAH (PRIVASI SALDO AMAN)', 380, 110);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(150, 145, 460, 460);
+        ctx.drawImage(qrImg, 170, 165, 420, 420);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 30px sans-serif';
+        ctx.fillText(currentAccount.fullName.toUpperCase(), 380, 665);
+
+        ctx.fillStyle = '#67e8f9';
+        ctx.font = 'bold 22px monospace';
+        ctx.fillText(`REK: ${currentAccount.accountNumber}`, 380, 708);
+
+        ctx.fillStyle = '#cbd5e1';
+        ctx.font = '18px monospace';
+        ctx.fillText(`ID 16 DIGIT: ${currentAccount.userId16 || currentAccount.accountNumber}`, 380, 742);
+
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(
+          `${activeFeaturedTitle ? activeFeaturedTitle.label : stats?.tierLabel || 'NASABAH'}${
+            currentAccount.city ? ` • ${currentAccount.city.toUpperCase()}` : ''
+          }`,
+          380,
+          782
+        );
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('Pindai lewat Kamera Scan Universal M-Banking, Scan QRP, atau Google Lens', 380, 860);
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = '12px monospace';
+        ctx.fillText(personalQrLink.slice(0, 82), 380, 895);
+
+        const pngUrl = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.href = pngUrl;
+        link.download = `QRP-Bank-Nusantara-${currentAccount.accountNumber}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    };
+    qrImg.onerror = () => {
+      const link = document.createElement('a');
+      link.href = personalQrUrl;
+      link.download = `QRP-Bank-Nusantara-${currentAccount.accountNumber}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+    qrImg.src = personalQrUrl;
   };
 
   const handleExportCsv = () => {
@@ -1957,8 +2033,8 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                 </div>
               </div>
 
-              {/* Kartu Nama Digital & Unduh QRIS Pribadi */}
-              <div className="rounded-xl border border-slate-200 bg-slate-900 text-white p-4 sm:p-5 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-center">
+              {/* Kartu Nama Digital & Unduh QRP (QR Profil Statistik Umum) */}
+              <div className="rounded-xl border border-cyan-500/30 bg-slate-900 text-white p-4 sm:p-5 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-4 items-center">
                 <div className="space-y-2.5 min-w-0">
                   <div className="flex items-center gap-3">
                     <ProfileAvatarBadge
@@ -1967,8 +2043,8 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                       size="md"
                     />
                     <div className="min-w-0">
-                      <p className="text-[11px] uppercase tracking-wider text-amber-300 font-bold">
-                        Kartu Nama Digital Bank Nusantara
+                      <p className="text-[11px] uppercase tracking-wider text-cyan-300 font-bold">
+                        Kartu Nama Digital &amp; QRP (QR Profil Statistik Umum)
                       </p>
                       <p className="text-base font-extrabold text-white truncate">
                         {currentAccount.fullName}
@@ -1984,6 +2060,9 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                       "{currentAccount.profileBio}"
                     </p>
                   )}
+                  <p className="text-[11px] text-cyan-200/90 bg-cyan-950/60 border border-cyan-500/30 rounded-lg px-3 py-1.5 leading-relaxed">
+                    <strong>QRP (QR Profil)</strong> adalah kode QR khusus untuk membagikan <strong>Statistik Umum Akun</strong> (Level Akun XP, Tier Kartu, Gelar, Achievement, &amp; Streak Online) kepada teman <strong>tanpa menampilkan Saldo Rekening</strong>. Untuk menerima uang/aset, gunakan menu <strong>QRIS Pribadi Multi-Aset</strong> di M-Banking.
+                  </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pt-1">
                     <div className="rounded-lg bg-slate-800/80 border border-slate-700 px-3 py-2">
                       <p className="text-[10px] text-slate-400">No. Rekening</p>
@@ -2005,10 +2084,10 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                       type="button"
                       onClick={handleDownloadQrisPng}
                       disabled={!personalQrUrl}
-                      className="min-h-[40px] px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      className="min-h-[40px] px-3.5 py-2 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-slate-950 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                     >
                       <Download className="w-4 h-4 shrink-0" />
-                      <span>Unduh QRIS Pribadi (PNG)</span>
+                      <span>Unduh QRP (PNG)</span>
                     </button>
                     <button
                       type="button"
@@ -2018,32 +2097,43 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                       {copiedField === 'qris' ? (
                         <>
                           <Check className="w-4 h-4 text-emerald-400" />
-                          <span>Link Tersalin</span>
+                          <span>Link QRP Tersalin</span>
                         </>
                       ) : (
                         <>
-                          <QrCode className="w-4 h-4" />
-                          <span>Salin Link QRIS</span>
+                          <QrCode className="w-4 h-4 text-cyan-300" />
+                          <span>Salin Link QRP</span>
                         </>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsQrpScannerOpen(true)}
+                      className="min-h-[40px] px-3.5 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <QrCode className="w-4 h-4 shrink-0" />
+                      <span>Scan QRP Nasabah</span>
                     </button>
                   </div>
                 </div>
 
-                <div className="flex flex-col items-center justify-center bg-white rounded-xl p-3 border border-slate-200 shrink-0 mx-auto md:mx-0">
+                <div className="flex flex-col items-center justify-center bg-white rounded-xl p-3 border-2 border-cyan-400 shrink-0 mx-auto md:mx-0">
                   {personalQrUrl ? (
                     <img
                       src={personalQrUrl}
-                      alt={`QRIS ${currentAccount.fullName}`}
+                      alt={`QRP ${currentAccount.fullName}`}
                       className="w-32 h-32 sm:w-36 sm:h-36 object-contain"
                     />
                   ) : (
                     <div className="w-32 h-32 flex items-center justify-center text-slate-400 text-xs">
-                      Memuat QR...
+                      Memuat QRP...
                     </div>
                   )}
-                  <span className="mt-1 text-[10px] font-bold text-slate-700 font-mono tabular-nums">
-                    QRIS PRIBADI
+                  <span className="mt-1 text-[10px] font-black text-cyan-900 font-mono tabular-nums tracking-wider">
+                    QRP • QR PROFIL
+                  </span>
+                  <span className="text-[9px] font-semibold text-slate-500">
+                    Statistik Umum (Tanpa Saldo)
                   </span>
                 </div>
               </div>
@@ -3202,6 +3292,29 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
             </div>
           </div>
         )}
+
+        {/* Modal Scanner Khusus QRP Nasabah (scannerPurpose="qrp_only") */}
+        <QrisScannerModal
+          isOpen={isQrpScannerOpen}
+          onClose={() => setIsQrpScannerOpen(false)}
+          scannerPurpose="qrp_only"
+          onDetected={(rawText, source) => {
+            setIsQrpScannerOpen(false);
+            const qrp = parseQrpProfilePayload(rawText);
+            if (qrp.targetAccount || qrp.targetUserId) {
+              window.dispatchEvent(
+                new CustomEvent('bn:open-qrp-profile', {
+                  detail: {
+                    targetAccount: qrp.targetAccount,
+                    targetUserId: qrp.targetUserId,
+                    targetName: qrp.targetName,
+                    source,
+                  },
+                })
+              );
+            }
+          }}
+        />
       </div>
     </div>
   );

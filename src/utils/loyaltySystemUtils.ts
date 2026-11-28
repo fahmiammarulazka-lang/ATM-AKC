@@ -1007,11 +1007,180 @@ export function computeStreakVisualSnapshot(
   };
 }
 
+/**
+ * Menghitung jumlah hari aktif berturut-turut (termasuk auto-thaw 1-2 hari sesuai aturan freeze)
+ * dari daftar tanggal YYYY-MM-DD (recentActiveDatesWib + tanggal tambahan) yang berakhir pada todayWib.
+ */
+export function computeConsecutiveActiveDaysWib(
+  dateStrings: string[],
+  todayWib: string = getWibDateString(),
+  rawConfig?: Partial<LoyaltyAdminConfig> | null
+): number {
+  const cfg = normalizeLoyaltyAdminConfig(rawConfig);
+  const validSet = new Set<string>();
+  for (const raw of dateStrings) {
+    if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+      const ymd = raw.trim();
+      if (diffWibCalendarDays(ymd, todayWib) >= 0) {
+        validSet.add(ymd);
+      }
+    }
+  }
+  validSet.add(todayWib);
+
+  const sortedDesc = Array.from(validSet).sort((a, b) => (a > b ? -1 : a < b ? 1 : 0));
+  if (sortedDesc.length === 0) return 1;
+
+  // Hitung hari aktif berturut-turut mundur dari todayWib.
+  // Mendukung toleransi auto-thaw (gap < freezeRecoveryRequiredDays, default < 3 hari offline)
+  const maxAutoThawGap = cfg.nationalHolidayMode
+    ? 365
+    : Math.max(0, (cfg.freezeRecoveryRequiredDays || 3) - 1);
+
+  let count = 1;
+  let currentAnchor = sortedDesc[0]; // todayWib
+  for (let i = 1; i < sortedDesc.length; i++) {
+    const prevDate = sortedDesc[i];
+    const diff = diffWibCalendarDays(prevDate, currentAnchor);
+    if (diff <= 0) continue;
+    const gap = diff - 1;
+    if (gap <= maxAutoThawGap) {
+      count += 1;
+      currentAnchor = prevDate;
+    } else {
+      break;
+    }
+  }
+  return Math.max(1, count);
+}
+
+/**
+ * Menggabungkan state Loyalty lokal dan state yang baru datang dari Cloud
+ * TANPA menimpa/mereset streakDays atau recentActiveDatesWib yang sudah bertambah di perangkat lokal.
+ */
+export function mergeLoyaltyAccountStatePreservingStreak(
+  localState: LoyaltyAccountState | undefined,
+  incomingState: LoyaltyAccountState | undefined,
+  rawConfig?: Partial<LoyaltyAdminConfig> | null,
+  todayWib: string = getWibDateString(),
+  extraActiveDatesWib: string[] = []
+): LoyaltyAccountState {
+  if (!localState && !incomingState) {
+    return ensureTodayLoyaltyAccountState(undefined, todayWib, rawConfig);
+  }
+  if (!localState) {
+    return ensureTodayLoyaltyAccountState(incomingState, todayWib, rawConfig);
+  }
+  if (!incomingState) {
+    return ensureTodayLoyaltyAccountState(localState, todayWib, rawConfig);
+  }
+
+  const combinedDates = Array.from(
+    new Set([
+      ...(localState.recentActiveDatesWib || []),
+      ...(incomingState.recentActiveDatesWib || []),
+      ...(localState.lastOnlineDateWib ? [localState.lastOnlineDateWib] : []),
+      ...(incomingState.lastOnlineDateWib ? [incomingState.lastOnlineDateWib] : []),
+      ...(localState.lastCheckInDate ? [localState.lastCheckInDate] : []),
+      ...(incomingState.lastCheckInDate ? [incomingState.lastCheckInDate] : []),
+      ...extraActiveDatesWib,
+    ])
+  )
+    .filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort()
+    .slice(-30);
+
+  const localLastDate = localState.lastOnlineDateWib || localState.lastCheckInDate || '';
+  const incLastDate = incomingState.lastOnlineDateWib || incomingState.lastCheckInDate || '';
+  const latestOnlineDate = localLastDate >= incLastDate ? localLastDate : incLastDate;
+
+  const historyConsecutive =
+    combinedDates.length > 1
+      ? computeConsecutiveActiveDaysWib(combinedDates, latestOnlineDate || todayWib, rawConfig)
+      : 0;
+
+  const bestStreak = Math.max(
+    localState.streakDays || 0,
+    incomingState.streakDays || 0,
+    historyConsecutive
+  );
+
+  const combinedClaimedAchievements = Array.from(
+    new Set([
+      ...(localState.claimedAchievementIds || []),
+      ...(incomingState.claimedAchievementIds || []),
+    ])
+  );
+
+  const combinedDailyClaimedMissions = Array.from(
+    new Set([
+      ...(localState.dailyClaimedMissionIds || []),
+      ...(incomingState.dailyClaimedMissionIds || []),
+    ])
+  );
+
+  const mergedCounters: Record<string, number> = {
+    ...(incomingState.dailyCounters || {}),
+  };
+  if (localState.dailyActivityDateWib === todayWib) {
+    for (const [k, v] of Object.entries(localState.dailyCounters || {})) {
+      mergedCounters[k] = Math.max(mergedCounters[k] || 0, Number(v) || 0);
+    }
+  }
+
+  const mergedBase: LoyaltyAccountState = {
+    ...incomingState,
+    ...localState,
+    points: Math.max(localState.points || 0, incomingState.points || 0),
+    streakDays: bestStreak,
+    lastCheckInDate: latestOnlineDate || incomingState.lastCheckInDate || localState.lastCheckInDate,
+    lastOnlineDateWib: latestOnlineDate || incomingState.lastOnlineDateWib || localState.lastOnlineDateWib,
+    totalCheckIns: Math.max(
+      localState.totalCheckIns || 0,
+      incomingState.totalCheckIns || 0,
+      combinedDates.length
+    ),
+    redeemedCount: Math.max(localState.redeemedCount || 0, incomingState.redeemedCount || 0),
+    recoveryCards: Math.max(localState.recoveryCards || 0, incomingState.recoveryCards || 0),
+    recentActiveDatesWib: combinedDates,
+    claimedAchievementIds: combinedClaimedAchievements,
+    dailyClaimedMissionIds: combinedDailyClaimedMissions,
+    dailyCounters: mergedCounters,
+  };
+
+  return ensureTodayLoyaltyAccountState(mergedBase, todayWib, rawConfig);
+}
+
+export function mergeLoyaltyMapWithStreakProtection(
+  localMap: Record<string, LoyaltyAccountState>,
+  incomingMap: Record<string, LoyaltyAccountState>,
+  rawConfig?: Partial<LoyaltyAdminConfig> | null,
+  todayWib: string = getWibDateString(),
+  extraDatesByAccount?: Record<string, string[]>
+): Record<string, LoyaltyAccountState> {
+  const allAccountIds = new Set([
+    ...Object.keys(localMap || {}),
+    ...Object.keys(incomingMap || {}),
+  ]);
+  const result: Record<string, LoyaltyAccountState> = {};
+  for (const accId of allAccountIds) {
+    result[accId] = mergeLoyaltyAccountStatePreservingStreak(
+      localMap?.[accId],
+      incomingMap?.[accId],
+      rawConfig,
+      todayWib,
+      extraDatesByAccount?.[accId] || []
+    );
+  }
+  return result;
+}
+
 export function applyAutoOnlineStreakTransition(
   rawState: LoyaltyAccountState | undefined,
   rawConfig: LoyaltyAdminConfig | undefined,
   isAdminCard: boolean,
-  todayWib: string = getWibDateString()
+  todayWib: string = getWibDateString(),
+  extraActiveDatesWib: string[] = []
 ): {
   changed: boolean;
   nextState: LoyaltyAccountState;
@@ -1024,6 +1193,26 @@ export function applyAutoOnlineStreakTransition(
   if (!cfg.enabled || !cfg.streakEnabled) {
     return { changed: false, nextState: base, pointsEarned: 0 };
   }
+
+  // Gabungkan semua bukti tanggal aktif (recentActiveDatesWib + lastOnlineDateWib + extraActiveDatesWib)
+  const mergedHistoryDates = Array.from(
+    new Set([
+      ...(base.recentActiveDatesWib || []),
+      ...(base.lastOnlineDateWib ? [base.lastOnlineDateWib] : []),
+      ...(base.lastCheckInDate ? [base.lastCheckInDate] : []),
+      ...extraActiveDatesWib,
+      todayWib,
+    ])
+  )
+    .filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort()
+    .slice(-30);
+
+  const historyConsecutiveStreak = computeConsecutiveActiveDaysWib(
+    mergedHistoryDates,
+    todayWib,
+    cfg
+  );
 
   // Jika sedang dikunci Beku Tahap 3 (wajib Kartu Pemulihan) atau dikunci simulasi Admin -> jangan ditimpa otomatis
   if (base.freezeStage === 3 || base.manualFreezeLock) {
@@ -1039,13 +1228,47 @@ export function applyAutoOnlineStreakTransition(
   }
 
   const lastDate = base.lastOnlineDateWib || base.lastCheckInDate;
+
+  // Auto-Heal / Koreksi jika lastDate sudah tercatat hari ini tetapi streakDays tertahan di 1
+  // padahal riwayat tanggal aktif menunjukkan sudah login >= 2 hari berturut-turut!
   if (lastDate === todayWib && base.streakDays >= 1) {
-    if (!base.dailyCounters?.online_visit) {
+    if (historyConsecutiveStreak > base.streakDays) {
+      const gainedDays = historyConsecutiveStreak - base.streakDays;
+      const basePts = cfg.dailyCheckInPoints || 25;
+      const bonus7 = historyConsecutiveStreak % 7 === 0 ? cfg.streakBonus7DaysPoints || 0 : 0;
+      const bonus14 = historyConsecutiveStreak % 14 === 0 ? cfg.streakBonus14DaysPoints || 0 : 0;
+      const bonus30 = historyConsecutiveStreak % 30 === 0 ? cfg.streakBonus30DaysPoints || 0 : 0;
+      const totalPts = basePts * gainedDays + bonus7 + bonus14 + bonus30;
+      return {
+        changed: true,
+        pointsEarned: totalPts,
+        noticeText: `Streak Online dikoreksi otomatis ke Hari ke-${historyConsecutiveStreak} berdasarkan riwayat login berturut-turut! (+${totalPts} Poin Loyalty)`,
+        nextState: {
+          ...base,
+          points: isAdminCard ? UNLIMITED_BALANCE : (base.points || 0) + totalPts,
+          streakDays: historyConsecutiveStreak,
+          totalCheckIns: Math.max((base.totalCheckIns || 0) + gainedDays, mergedHistoryDates.length),
+          recentActiveDatesWib: mergedHistoryDates,
+          dailyActivityDateWib: todayWib,
+          dailyCounters: {
+            ...(base.dailyCounters || {}),
+            online_visit: Math.max(1, base.dailyCounters?.online_visit || 1),
+            streak_online_today: 1,
+          },
+        },
+      };
+    }
+
+    if (
+      !base.dailyCounters?.online_visit ||
+      (base.recentActiveDatesWib || []).length !== mergedHistoryDates.length
+    ) {
       return {
         changed: true,
         nextState: {
           ...base,
-          dailyCounters: { ...(base.dailyCounters || {}), online_visit: 1 },
+          recentActiveDatesWib: mergedHistoryDates,
+          dailyCounters: { ...(base.dailyCounters || {}), online_visit: 1, streak_online_today: 1 },
         },
         pointsEarned: 0,
       };
@@ -1084,19 +1307,19 @@ export function applyAutoOnlineStreakTransition(
   let lastExpiredStreakDays: number | undefined = undefined;
 
   if (!lastDate || base.streakDays <= 0) {
-    nextStreak = 1;
+    nextStreak = Math.max(1, historyConsecutiveStreak);
   } else if (cfg.nationalHolidayMode) {
-    nextStreak = base.streakDays + 1;
+    nextStreak = Math.max(base.streakDays + 1, historyConsecutiveStreak);
   } else if (gapDays === 0) {
-    nextStreak = base.streakDays + 1;
+    nextStreak = Math.max(base.streakDays + 1, historyConsecutiveStreak);
   } else if (gapDays >= (cfg.freezeStage1Days || 1) && gapDays < (cfg.freezeRecoveryRequiredDays || 3)) {
-    nextStreak = base.streakDays + 1;
+    nextStreak = Math.max(base.streakDays + 1, historyConsecutiveStreak);
     lastThawedFromStage = gapDays >= (cfg.freezeStage2Days || 2) ? 2 : 1;
   } else if (gapDays > (cfg.streakExpireAfterDays || 3)) {
     lastExpiredStreakDays = base.streakDays;
     nextStreak = 1;
   } else {
-    nextStreak = base.streakDays + 1;
+    nextStreak = Math.max(base.streakDays + 1, historyConsecutiveStreak);
   }
 
   const basePts = cfg.dailyCheckInPoints || 25;
@@ -1105,7 +1328,6 @@ export function applyAutoOnlineStreakTransition(
   const bonus30 = nextStreak % 30 === 0 ? cfg.streakBonus30DaysPoints || 0 : 0;
   const totalBonusPts = bonus7 + bonus14 + bonus30;
   const totalPts = basePts + totalBonusPts;
-  const recentDates = Array.from(new Set([...(base.recentActiveDatesWib || []), todayWib])).slice(-14);
 
   const nextState: LoyaltyAccountState = {
     ...base,
@@ -1118,8 +1340,8 @@ export function applyAutoOnlineStreakTransition(
     lastThawedFromStage,
     lastExpiredStreakDays,
     manualFreezeLock: false,
-    totalCheckIns: (base.totalCheckIns || 0) + 1,
-    recentActiveDatesWib: recentDates,
+    totalCheckIns: Math.max((base.totalCheckIns || 0) + 1, mergedHistoryDates.length),
+    recentActiveDatesWib: mergedHistoryDates,
     dailyActivityDateWib: todayWib,
     dailyCounters: {
       ...(base.dailyCounters || {}),

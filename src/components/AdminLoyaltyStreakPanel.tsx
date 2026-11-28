@@ -83,6 +83,7 @@ export const AdminLoyaltyStreakPanel: React.FC<AdminLoyaltyStreakPanelProps> = (
     adminBulkGrantLoyaltyPoints,
     adminBulkGrantRecoveryCards,
     adminBulkResetDailyLoyaltyMissions,
+    claimDailyCheckIn,
   } = useBank();
 
   const cfg = useMemo(() => normalizeLoyaltyAdminConfig(loyaltyConfig), [loyaltyConfig]);
@@ -672,6 +673,17 @@ export const AdminLoyaltyStreakPanel: React.FC<AdminLoyaltyStreakPanelProps> = (
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const res = claimDailyCheckIn();
+                notify(res.message);
+              }}
+              className="min-h-[40px] inline-flex items-center gap-1.5 rounded-xl border border-emerald-400/50 bg-emerald-500/15 hover:bg-emerald-500/25 px-3.5 py-2 text-xs font-bold text-emerald-200 whitespace-nowrap cursor-pointer"
+            >
+              <RefreshCw className="h-4 w-4 text-emerald-400 shrink-0" />
+              <span>Sinkron &amp; Koreksi Streak Akun Aktif</span>
+            </button>
             {fleetData.criticalStage3Count > 0 && (
               <button
                 type="button"

@@ -43,6 +43,9 @@ import {
   BarChart3,
   Trophy,
   Shield,
+  Camera,
+  Upload,
+  ClipboardPaste,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { CardVisualizer } from './CardVisualizer';
@@ -150,6 +153,7 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
       ? requestedSubTab.tab
       : 'ringkasan'
   );
+  const [isFloatingScanCollapsed, setIsFloatingScanCollapsed] = useState<boolean>(false);
   useEffect(() => {
     if (requestedSubTab?.tab) {
       setActiveTab(
@@ -1870,6 +1874,171 @@ export const CustomerDashboard: React.FC<CustomerDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* PANEL BESAR KAMERA SCAN UNIVERSAL DI PALING BAWAH M-BANKING */}
+      <div className="mt-6 rounded-3xl border-2 border-cyan-500/40 bg-gradient-to-br from-slate-900 via-cyan-950/30 to-indigo-950/40 p-5 sm:p-6 shadow-2xl space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-400 to-amber-400 text-slate-950 flex items-center justify-center shadow-lg shrink-0">
+              <QrCode className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="px-2.5 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-400/40 text-[10px] font-black uppercase tracking-wider text-cyan-200">
+                  KAMERA SCAN UNIVERSAL M-BANKING
+                </span>
+                <span className="px-2.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-400/40 text-[10px] font-black uppercase tracking-wider text-amber-300">
+                  QRP • MULTI-ASET • TOP-UP PERMATA
+                </span>
+              </div>
+              <h3 className="text-base sm:text-lg font-black text-white mt-1">
+                Pemindai QR Universal Bank Nusantara (Deteksi Otomatis 3 Jenis QR)
+              </h3>
+              <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                Satu pemindai pintar di paling bawah M-Banking untuk memindai{' '}
+                <strong className="text-cyan-300">QRP (QR Profil Statistik Umum)</strong>,{' '}
+                <strong className="text-amber-300">
+                  QRIS Pribadi Multi-Aset (Uang, Emas 24K, Coin, Permata, Token, Gabungan)
+                </strong>
+                , maupun <strong className="text-emerald-300">QRIS Top-Up Permata (buatqris.site)</strong>.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab('qris_pribadi')}
+              className="px-3.5 py-2.5 rounded-xl border border-amber-400/40 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition"
+            >
+              <QrCode className="w-4 h-4 text-amber-300" />
+              <span>Buka QRIS Multi-Aset Saya</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 3 Tombol Metode Pemindaian Universal */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent('bn:open-universal-scanner', { detail: { mode: 'camera' } })
+              )
+            }
+            className="p-4 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-black text-xs flex items-center gap-3 shadow-lg cursor-pointer transition text-left"
+          >
+            <div className="w-10 h-10 rounded-xl bg-slate-950/20 flex items-center justify-center shrink-0">
+              <Camera className="w-5 h-5 text-slate-950" />
+            </div>
+            <div>
+              <span className="block text-sm font-black">1. Scan Kamera Live</span>
+              <span className="block text-[11px] font-semibold text-slate-900">
+                Arahkan kamera HP/Laptop ke kode QRP atau QRIS
+              </span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent('bn:open-universal-scanner', { detail: { mode: 'gallery' } })
+              )
+            }
+            className="p-4 rounded-2xl border border-emerald-400/50 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-100 font-black text-xs flex items-center gap-3 shadow-lg cursor-pointer transition text-left"
+          >
+            <div className="w-10 h-10 rounded-xl bg-emerald-400/20 border border-emerald-400/40 flex items-center justify-center shrink-0 text-emerald-300">
+              <Upload className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="block text-sm font-black text-white">2. Upload Galeri PNG/JPG</span>
+              <span className="block text-[11px] font-normal text-emerald-200/90">
+                Pilih tangkapan layar kartu QRP / QRIS dari galeri
+              </span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent('bn:open-universal-scanner', { detail: { mode: 'paste' } })
+              )
+            }
+            className="p-4 rounded-2xl border border-amber-400/50 bg-amber-500/15 hover:bg-amber-500/25 text-amber-100 font-black text-xs flex items-center gap-3 shadow-lg cursor-pointer transition text-left"
+          >
+            <div className="w-10 h-10 rounded-xl bg-amber-400/20 border border-amber-400/40 flex items-center justify-center shrink-0 text-amber-300">
+              <ClipboardPaste className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="block text-sm font-black text-white">3. Tempel Link / Google Lens</span>
+              <span className="block text-[11px] font-normal text-amber-200/90">
+                Tempel tautan QRP, QRIS Multi-Aset, atau nomor rekening
+              </span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* TOMBOL MELAYANG RINGKAS (SEBAGIAN DI KIRI BAWAH) — TIDAK MENUTUPI SURAT HADIAH, DONATE & WA DI KANAN BAWAH */}
+      <div className="sticky bottom-4 z-30 mt-4 flex justify-start pointer-events-none">
+        <div className="pointer-events-auto inline-flex items-center gap-1.5 rounded-2xl border border-cyan-400/50 bg-slate-950/95 backdrop-blur-md px-2.5 py-2 shadow-2xl max-w-[calc(100vw-15.5rem)] sm:max-w-fit">
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent('bn:open-universal-scanner', { detail: { mode: 'camera' } })
+              )
+            }
+            className="px-3 py-2 rounded-xl bg-gradient-to-r from-cyan-400 to-amber-400 hover:from-cyan-300 hover:to-amber-300 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer shadow shrink-0"
+            title="Scan QR Universal (QRP Profil • QRIS Multi-Aset • Top-Up Permata)"
+          >
+            <Camera className="w-3.5 h-3.5 shrink-0" />
+            <span>Scan QR</span>
+          </button>
+
+          {!isFloatingScanCollapsed && (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(
+                    new CustomEvent('bn:open-universal-scanner', { detail: { mode: 'gallery' } })
+                  )
+                }
+                className="p-2 rounded-xl border border-emerald-400/50 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 font-bold text-xs flex items-center gap-1 cursor-pointer shrink-0"
+                title="Upload Gambar QR dari Galeri (PNG/JPG)"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Galeri</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(
+                    new CustomEvent('bn:open-universal-scanner', { detail: { mode: 'paste' } })
+                  )
+                }
+                className="p-2 rounded-xl border border-amber-400/50 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold text-xs flex items-center gap-1 cursor-pointer shrink-0"
+                title="Tempel Link QRP / QRIS"
+              >
+                <ClipboardPaste className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">Tempel</span>
+              </button>
+            </>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setIsFloatingScanCollapsed((prev) => !prev)}
+            className="px-2 py-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-bold cursor-pointer shrink-0"
+            title={isFloatingScanCollapsed ? 'Tampilkan tombol Galeri & Tempel' : 'Kecilkan bar Scan'}
+          >
+            {isFloatingScanCollapsed ? '+' : '−'}
+          </button>
+        </div>
+      </div>
 
       {/* MODAL GANTI NOMOR HP (Section 8 with OTP simulation) */}
       {showPhoneModal && (

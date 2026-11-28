@@ -121,6 +121,7 @@ import {
   getResolvedLoyaltyRedeemPackages,
   getWibDateString,
   MANDATORY_TRANSFER_ADMIN_FEE_PERCENT,
+  mergeLoyaltyMapWithStreakProtection,
   normalizeLoyaltyAdminConfig,
   resolveMissionResetCycleWindow,
 } from '../utils/loyaltySystemUtils';
@@ -5591,7 +5592,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setSafeVaultMap(merged);
     }
     if (data.loyaltyMap && typeof data.loyaltyMap === 'object') {
-      const merged = { ...loyaltyMapRef.current, ...(data.loyaltyMap as Record<string, LoyaltyAccountState>) };
+      const merged = mergeLoyaltyMapWithStreakProtection(
+        loyaltyMapRef.current,
+        data.loyaltyMap as Record<string, LoyaltyAccountState>,
+        loyaltyConfigRef.current
+      );
       loyaltyMapRef.current = merged;
       setLoyaltyMap(merged);
     }
@@ -11976,7 +11981,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setSafeVaultMap(merged);
         }
         if (data.loyaltyMap && typeof data.loyaltyMap === 'object') {
-          const merged = { ...loyaltyMapRef.current, ...(data.loyaltyMap as Record<string, LoyaltyAccountState>) };
+          const merged = mergeLoyaltyMapWithStreakProtection(
+            loyaltyMapRef.current,
+            data.loyaltyMap as Record<string, LoyaltyAccountState>,
+            loyaltyConfigRef.current
+          );
           loyaltyMapRef.current = merged;
           setLoyaltyMap(merged);
         }
@@ -12484,7 +12493,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 setSafeVaultMap(merged);
               }
               if (msg.payload.loyaltyMap && typeof msg.payload.loyaltyMap === 'object') {
-                const merged = { ...loyaltyMapRef.current, ...(msg.payload.loyaltyMap as Record<string, LoyaltyAccountState>) };
+                const merged = mergeLoyaltyMapWithStreakProtection(
+                  loyaltyMapRef.current,
+                  msg.payload.loyaltyMap as Record<string, LoyaltyAccountState>,
+                  loyaltyConfigRef.current
+                );
                 loyaltyMapRef.current = merged;
                 setLoyaltyMap(merged);
               }
@@ -13158,7 +13171,11 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               setSafeVaultMap(merged);
             } else if (msg.type === 'loyalty:updated' && msg.payload) {
               if (msg.payload.loyaltyMap && typeof msg.payload.loyaltyMap === 'object') {
-                const merged = { ...loyaltyMapRef.current, ...(msg.payload.loyaltyMap as Record<string, LoyaltyAccountState>) };
+                const merged = mergeLoyaltyMapWithStreakProtection(
+                  loyaltyMapRef.current,
+                  msg.payload.loyaltyMap as Record<string, LoyaltyAccountState>,
+                  loyaltyConfigRef.current
+                );
                 loyaltyMapRef.current = merged;
                 setLoyaltyMap(merged);
               }
@@ -29127,10 +29144,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       commitAccountMutationPermanent(
         activeAcc.id,
         (a) => ({ ...a, balance: Math.max(0, a.balance - cleanAmt) }),
-        { transactions: nextTxs, dreamPockets: nextPockets }
+        { transactions: nextTxs }
       );
     } else {
-      flushMasterStateToCloud({ transactions: nextTxs, dreamPockets: nextPockets });
+      flushMasterStateToCloud({ transactions: nextTxs });
     }
     syncDreamPocketsToServer(nextPockets);
     recordLoyaltyDailyActivityForAccount(activeAcc.id, [
@@ -29182,7 +29199,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ...a,
           balance: isAdminCardAccount(a) ? UNLIMITED_BALANCE : a.balance + cleanAmt,
         }),
-      { transactions: nextTxs, dreamPockets: nextPockets }
+      { transactions: nextTxs }
     );
     syncDreamPocketsToServer(nextPockets);
     playAtmSound('success');
@@ -29337,26 +29354,100 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     recordLoyaltyDailyActivityForAccount(activeId, [{ key: metricKey, delta, uniqueDailyTag }]);
   };
 
-  // Auto-Streak Online Instan: otomatis mengisi/mencairkan streak begitu nasabah online di hari WIB baru
+  // Mengumpulkan tanggal aktif tambahan dari mutasi transaksi & progres misi nasabah
+  const collectAccountHistoricalActiveDatesWib = (accountId: string): string[] => {
+    const dateSet = new Set<string>();
+    for (const tx of transactionsRef.current) {
+      if (tx.accountId === accountId && tx.timestamp) {
+        const ms = new Date(tx.timestamp).getTime();
+        if (Number.isFinite(ms) && ms > 0) {
+          dateSet.add(getWibDateString(ms));
+        }
+      }
+    }
+    const accMissions = missionProgressByAccountRef.current[accountId];
+    if (accMissions && typeof accMissions === 'object') {
+      for (const rec of Object.values(accMissions)) {
+        if (rec?.lastProgressDateKey && /^\d{4}-\d{2}-\d{2}$/.test(rec.lastProgressDateKey)) {
+          dateSet.add(rec.lastProgressDateKey);
+        }
+        if (rec?.lastStreakClaimDateKey && /^\d{4}-\d{2}-\d{2}$/.test(rec.lastStreakClaimDateKey)) {
+          dateSet.add(rec.lastStreakClaimDateKey);
+        }
+        if (Array.isArray(rec?.claimedDates)) {
+          for (const d of rec.claimedDates) {
+            if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+              dateSet.add(d);
+            }
+          }
+        }
+      }
+    }
+    return Array.from(dateSet);
+  };
+
+  // Auto-Streak Online Instan: otomatis mengisi/mencairkan/mengoreksi streak saat nasabah online,
+  // saat data Cloud selesai dimuat, saat tab aktif kembali, maupun saat pergantian hari 00:00 WIB
   useEffect(() => {
     const activeId = currentAccount?.id;
     if (!activeId) return;
-    const acc = accountsRef.current.find((a) => a.id === activeId) || currentAccount;
-    if (!acc) return;
-    const todayWib = getWibDateString();
-    const res = applyAutoOnlineStreakTransition(
-      loyaltyMapRef.current[activeId],
-      loyaltyConfigRef.current,
-      isAdminCardAccount(acc),
-      todayWib
-    );
-    if (!res.changed) return;
-    const nextMap = { ...loyaltyMapRef.current, [activeId]: res.nextState };
-    loyaltyMapRef.current = nextMap;
-    setLoyaltyMap(nextMap);
-    syncLoyaltyToServer(nextMap);
-    grantAccountXp(activeId, 'streak');
-  }, [currentAccount?.id]);
+
+    const evaluateAndSyncOnlineStreak = () => {
+      const acc = accountsRef.current.find((a) => a.id === activeId) || currentAccount;
+      if (!acc) return;
+      const todayWib = getWibDateString();
+      const extraDates = collectAccountHistoricalActiveDatesWib(activeId);
+      const prevStreak = loyaltyMapRef.current[activeId]?.streakDays || 0;
+      const res = applyAutoOnlineStreakTransition(
+        loyaltyMapRef.current[activeId],
+        loyaltyConfigRef.current,
+        isAdminCardAccount(acc),
+        todayWib,
+        extraDates
+      );
+
+      // Pastikan misi daily_checkin tercatat otomatis setiap hari nasabah online
+      recordMissionActivities(activeId, [{ metricKey: 'daily_checkin', delta: 1 }]);
+
+      if (!res.changed) return;
+      const nextMap = { ...loyaltyMapRef.current, [activeId]: res.nextState };
+      loyaltyMapRef.current = nextMap;
+      setLoyaltyMap(nextMap);
+      syncLoyaltyToServer(nextMap);
+
+      if (res.nextState.streakDays > prevStreak || res.pointsEarned > 0) {
+        grantAccountXp(activeId, 'streak');
+        if (res.noticeText) {
+          pushAppToast({
+            type: 'success',
+            title: `Streak Online Hari ke-${res.nextState.streakDays} Aktif!`,
+            message: res.noticeText,
+          });
+        }
+      }
+    };
+
+    evaluateAndSyncOnlineStreak();
+
+    const intervalId = window.setInterval(evaluateAndSyncOnlineStreak, 45_000);
+    const onVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        evaluateAndSyncOnlineStreak();
+      }
+    };
+    window.addEventListener('focus', onVisibilityOrFocus);
+    document.addEventListener('visibilitychange', onVisibilityOrFocus);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', onVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', onVisibilityOrFocus);
+    };
+  }, [
+    currentAccount?.id,
+    loyaltyMap[currentAccount?.id || '']?.lastOnlineDateWib,
+    loyaltyMap[currentAccount?.id || '']?.recentActiveDatesWib?.length,
+    transactions.length,
+  ]);
 
   const claimDailyCheckIn = (): { success: boolean; message: string; pointsEarned?: number; streak?: number } => {
     const activeAcc = accountsRef.current.find((a) => a.id === currentAccountIdRef.current) || currentAccount;
@@ -29366,6 +29457,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: 'Sistem Auto-Streak sedang dinonaktifkan sementara oleh Admin.' };
     }
     const todayWib = getWibDateString();
+    const extraDates = collectAccountHistoricalActiveDatesWib(activeAcc.id);
     const prev = ensureTodayLoyaltyAccountState(loyaltyMapRef.current[activeAcc.id], todayWib, cfg);
     if (prev.freezeStage === 3) {
       return {
@@ -29378,13 +29470,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unlockedPrev,
       cfg,
       isAdminCardAccount(activeAcc),
-      todayWib
+      todayWib,
+      extraDates
     );
+    recordMissionActivities(activeAcc.id, [{ metricKey: 'daily_checkin', delta: 1 }]);
     if (!trans.changed) {
       return {
         success: true,
         streak: trans.nextState.streakDays,
-        message: `Streak Online Hari ke-${trans.nextState.streakDays} sudah otomatis terisi hari ini!`,
+        message: `Streak Online Hari ke-${trans.nextState.streakDays} sudah terverifikasi & sinkron hari ini (${(trans.nextState.recentActiveDatesWib || []).length} tanggal riwayat aktif tercatat)!`,
       };
     }
     const nextMap = { ...loyaltyMapRef.current, [activeAcc.id]: trans.nextState };
@@ -29397,7 +29491,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       success: true,
       pointsEarned: trans.pointsEarned,
       streak: trans.nextState.streakDays,
-      message: trans.noticeText || `Streak Hari ke-${trans.nextState.streakDays} aktif!`,
+      message: trans.noticeText || `Streak Hari ke-${trans.nextState.streakDays} berhasil disinkronkan!`,
     };
   };
 

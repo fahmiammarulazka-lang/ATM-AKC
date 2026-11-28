@@ -73,13 +73,21 @@ import {
   isPrimarySystemOwnerAccount,
 } from './types/adminAnalyticsAndTier';
 import { isAdminCardAccount } from './utils/bankUtils';
+import { QrpPublicProfileModal } from './components/QrpPublicProfileModal';
+import { QrisScannerModal } from './components/QrisScannerModal';
 import {
   capturePendingQrisFromCurrentUrl,
+  capturePendingQrpFromCurrentUrl,
+  classifyScannedQrPayload,
   clearPendingQrisTransfer,
+  clearPendingQrpProfile,
   isSelfQrisTransferTarget,
   PendingQrisTransferPayload,
+  PendingQrpProfilePayload,
   readPendingQrisTransfer,
+  readPendingQrpProfile,
   savePendingQrisTransfer,
+  savePendingQrpProfile,
 } from './utils/qrisTransferUtils';
 
 function BankAppContent() {
@@ -121,6 +129,15 @@ function BankAppContent() {
     const fromUrl = capturePendingQrisFromCurrentUrl();
     return fromUrl || readPendingQrisTransfer();
   });
+  const [activeQrpProfileTarget, setActiveQrpProfileTarget] =
+    useState<PendingQrpProfilePayload | null>(() => {
+      const fromUrl = capturePendingQrpFromCurrentUrl();
+      return fromUrl || readPendingQrpProfile();
+    });
+  const [universalScannerState, setUniversalScannerState] = useState<{
+    open: boolean;
+    mode: 'camera' | 'gallery' | 'paste';
+  }>({ open: false, mode: 'camera' });
   const [activeView, setActiveView] = useState<AppNavView>(() =>
     initialBootPendingQris ? 'transfer' : 'dashboard'
   );
@@ -226,17 +243,29 @@ function BankAppContent() {
     prefillBank?: string;
     prefillRecipientName?: string;
     prefillAmount?: number;
+    prefillGoldRupiahAmount?: number;
+    prefillCoinAmount?: number;
+    prefillDiamondAmount?: number;
+    prefillTokenAmount?: number;
     prefillNote?: string;
     prefillFromQris?: boolean;
     key: number;
   }>(() =>
     initialBootPendingQris
       ? {
-          mode: 'reguler',
+          mode:
+            initialBootPendingQris.assetMode && initialBootPendingQris.assetMode !== 'uang'
+              ? 'bebas'
+              : 'reguler',
+          assetMode: initialBootPendingQris.assetMode,
           prefillAccount: initialBootPendingQris.recipientAccount,
           prefillBank: initialBootPendingQris.recipientBank || 'Bank Nusantara',
           prefillRecipientName: initialBootPendingQris.recipientName,
           prefillAmount: initialBootPendingQris.amount,
+          prefillGoldRupiahAmount: initialBootPendingQris.goldRupiahAmount,
+          prefillCoinAmount: initialBootPendingQris.coinAmount,
+          prefillDiamondAmount: initialBootPendingQris.diamondAmount,
+          prefillTokenAmount: initialBootPendingQris.tokenAmount,
           prefillNote: initialBootPendingQris.note || 'Transfer via Scan QRIS Pribadi',
           prefillFromQris: true,
           key: initialBootPendingQris.createdAtMs || Date.now(),
@@ -404,7 +433,12 @@ function BankAppContent() {
       recipientUserId?: string;
       recipientBank?: string;
       recipientName?: string;
+      assetMode?: TransferBebasAssetMode;
       amount?: number;
+      goldRupiahAmount?: number;
+      coinAmount?: number;
+      diamondAmount?: number;
+      tokenAmount?: number;
       note?: string;
       source?: 'url' | 'camera' | 'gallery' | 'manual';
     }) => {
@@ -426,21 +460,46 @@ function BankAppContent() {
         recipientUserId: payload.recipientUserId,
         recipientBank: String(payload.recipientBank || 'Bank Nusantara').trim() || 'Bank Nusantara',
         recipientName: String(payload.recipientName || '').trim() || undefined,
+        assetMode: payload.assetMode,
         amount:
           payload.amount && Number(payload.amount) > 0
             ? Math.round(Number(payload.amount))
+            : undefined,
+        goldRupiahAmount:
+          payload.goldRupiahAmount && Number(payload.goldRupiahAmount) > 0
+            ? Math.round(Number(payload.goldRupiahAmount))
+            : undefined,
+        coinAmount:
+          payload.coinAmount && Number(payload.coinAmount) > 0
+            ? Math.round(Number(payload.coinAmount))
+            : undefined,
+        diamondAmount:
+          payload.diamondAmount && Number(payload.diamondAmount) > 0
+            ? Math.round(Number(payload.diamondAmount))
+            : undefined,
+        tokenAmount:
+          payload.tokenAmount && Number(payload.tokenAmount) > 0
+            ? Math.round(Number(payload.tokenAmount))
             : undefined,
         note: String(payload.note || '').trim() || 'Transfer via Scan QRIS Pribadi',
         source: payload.source || 'url',
       });
 
+      const resolvedAssetMode = saved?.assetMode;
+      const isMultiAsset = Boolean(resolvedAssetMode && resolvedAssetMode !== 'uang');
+
       setQrisSelfScanWarning('');
       setTransferRouteContext({
-        mode: 'reguler',
+        mode: isMultiAsset ? 'bebas' : 'reguler',
+        assetMode: resolvedAssetMode,
         prefillAccount: cleanAcc,
         prefillBank: saved?.recipientBank || 'Bank Nusantara',
         prefillRecipientName: saved?.recipientName,
         prefillAmount: saved?.amount,
+        prefillGoldRupiahAmount: saved?.goldRupiahAmount,
+        prefillCoinAmount: saved?.coinAmount,
+        prefillDiamondAmount: saved?.diamondAmount,
+        prefillTokenAmount: saved?.tokenAmount,
         prefillNote: saved?.note || 'Transfer via Scan QRIS Pribadi',
         prefillFromQris: true,
         key: Date.now(),
@@ -450,6 +509,10 @@ function BankAppContent() {
     };
 
     try {
+      const capturedQrp = capturePendingQrpFromCurrentUrl();
+      if (capturedQrp) {
+        setActiveQrpProfileTarget(capturedQrp);
+      }
       const capturedFromUrl = capturePendingQrisFromCurrentUrl();
       if (capturedFromUrl) {
         applyQrisTransferDeepLink(capturedFromUrl);
@@ -476,13 +539,45 @@ function BankAppContent() {
         recipientUserId?: string;
         recipientBank?: string;
         recipientName?: string;
+        assetMode?: TransferBebasAssetMode;
         amount?: number;
+        goldRupiahAmount?: number;
+        coinAmount?: number;
+        diamondAmount?: number;
+        tokenAmount?: number;
         note?: string;
         source?: 'url' | 'camera' | 'gallery' | 'manual';
       }>;
       if (custom.detail?.recipientAccount) {
         applyQrisTransferDeepLink(custom.detail);
       }
+    };
+
+    const handleOpenQrpProfileEvent = (e: Event) => {
+      const custom = e as CustomEvent<PendingQrpProfilePayload>;
+      if (custom.detail?.targetAccount || custom.detail?.targetUserId) {
+        const saved = savePendingQrpProfile({
+          targetAccount: custom.detail.targetAccount,
+          targetUserId: custom.detail.targetUserId,
+          targetName: custom.detail.targetName,
+          source: custom.detail.source || 'camera',
+        });
+        if (saved) {
+          setActiveQrpProfileTarget(saved);
+        }
+      }
+    };
+
+    const handleOpenUniversalScannerEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ mode?: 'camera' | 'gallery' | 'paste' }>;
+      setUniversalScannerState({
+        open: true,
+        mode: custom.detail?.mode || 'camera',
+      });
+    };
+
+    const handleOpenDiamondStoreEvent = () => {
+      setIsDiamondStoreOpen(true);
     };
 
     const handleSwMessage = (event: MessageEvent) => {
@@ -493,6 +588,9 @@ function BankAppContent() {
 
     window.addEventListener('bn:navigate', handleCustomNav);
     window.addEventListener('bn:qris-transfer', handleQrisTransferEvent);
+    window.addEventListener('bn:open-qrp-profile', handleOpenQrpProfileEvent);
+    window.addEventListener('bn:open-universal-scanner', handleOpenUniversalScannerEvent);
+    window.addEventListener('bn:open-diamond-store', handleOpenDiamondStoreEvent);
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.addEventListener('message', handleSwMessage);
     }
@@ -500,13 +598,16 @@ function BankAppContent() {
     return () => {
       window.removeEventListener('bn:navigate', handleCustomNav);
       window.removeEventListener('bn:qris-transfer', handleQrisTransferEvent);
+      window.removeEventListener('bn:open-qrp-profile', handleOpenQrpProfileEvent);
+      window.removeEventListener('bn:open-universal-scanner', handleOpenUniversalScannerEvent);
+      window.removeEventListener('bn:open-diamond-store', handleOpenDiamondStoreEvent);
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.removeEventListener('message', handleSwMessage);
       }
     };
-  }, []);
+  }, [setIsDiamondStoreOpen]);
 
-  // Setelah boot cloud, login, dan verifikasi PIN tuntas: otomatis arahkan ke Transfer Reguler jika ada QRIS Pribadi di sesi (atau tampilkan peringatan jika scan milik sendiri)
+  // Setelah boot cloud, login, dan verifikasi PIN tuntas: otomatis arahkan ke Transfer Reguler/Multi-Aset jika ada QRIS Pribadi di sesi
   useEffect(() => {
     const gateOpen =
       !googleUser || !googleUser.hasCompletedOnboarding || googleUser.isPinVerified === false;
@@ -524,20 +625,28 @@ function BankAppContent() {
       return;
     }
 
+    const isMultiAsset = Boolean(pending.assetMode && pending.assetMode !== 'uang');
+
     setTransferRouteContext((prev) => {
       if (
         prev.prefillFromQris &&
         prev.prefillAccount === pending.recipientAccount &&
-        prev.prefillAmount === pending.amount
+        prev.prefillAmount === pending.amount &&
+        prev.assetMode === pending.assetMode
       ) {
         return prev;
       }
       return {
-        mode: 'reguler',
+        mode: isMultiAsset ? 'bebas' : 'reguler',
+        assetMode: pending.assetMode,
         prefillAccount: pending.recipientAccount,
         prefillBank: pending.recipientBank || 'Bank Nusantara',
         prefillRecipientName: pending.recipientName,
         prefillAmount: pending.amount,
+        prefillGoldRupiahAmount: pending.goldRupiahAmount,
+        prefillCoinAmount: pending.coinAmount,
+        prefillDiamondAmount: pending.diamondAmount,
+        prefillTokenAmount: pending.tokenAmount,
         prefillNote: pending.note || 'Transfer via Scan QRIS Pribadi',
         prefillFromQris: true,
         key: Date.now(),
@@ -836,6 +945,57 @@ function BankAppContent() {
       <DebtIncurredPopupModal onOpenDebtTab={() => setActiveView('debt')} />
       <DiamondStoreModal />
       <BuatQrisPaymentModal />
+      <QrpPublicProfileModal
+        target={activeQrpProfileTarget}
+        onClose={() => {
+          clearPendingQrpProfile();
+          setActiveQrpProfileTarget(null);
+        }}
+      />
+      <QrisScannerModal
+        isOpen={universalScannerState.open}
+        initialMode={universalScannerState.mode}
+        scannerPurpose="universal"
+        onClose={() => setUniversalScannerState((prev) => ({ ...prev, open: false }))}
+        onDetected={(rawText, source) => {
+          setUniversalScannerState((prev) => ({ ...prev, open: false }));
+          const classified = classifyScannedQrPayload(rawText);
+          if (classified.kind === 'qris_transfer' && classified.transferTarget?.recipientAccount) {
+            const t = classified.transferTarget;
+            window.dispatchEvent(
+              new CustomEvent('bn:qris-transfer', {
+                detail: {
+                  recipientAccount: t.recipientAccount,
+                  recipientUserId: t.recipientUserId,
+                  recipientBank: t.recipientBank || 'Bank Nusantara',
+                  recipientName: t.recipientName,
+                  assetMode: t.assetMode,
+                  amount: t.amount,
+                  goldRupiahAmount: t.goldRupiahAmount,
+                  coinAmount: t.coinAmount,
+                  diamondAmount: t.diamondAmount,
+                  tokenAmount: t.tokenAmount,
+                  note: t.note,
+                  source,
+                },
+              })
+            );
+          } else if (classified.kind === 'qrp_profile' && classified.qrpTarget) {
+            window.dispatchEvent(
+              new CustomEvent('bn:open-qrp-profile', {
+                detail: {
+                  targetAccount: classified.qrpTarget.targetAccount,
+                  targetUserId: classified.qrpTarget.targetUserId,
+                  targetName: classified.qrpTarget.targetName,
+                  source,
+                },
+              })
+            );
+          } else if (classified.kind === 'qris_diamond_merchant') {
+            setIsDiamondStoreOpen(true);
+          }
+        }}
+      />
       <GlobalFloatingToastContainer onAction={handleFloatingToastAction} />
 
       {/* Bar Pemberitahuan Sistem Sticky & Pop-up Tengah (tidak pernah menghalangi layar Panel Admin) */}
@@ -934,6 +1094,10 @@ function BankAppContent() {
             prefillBank={transferRouteContext.prefillBank}
             prefillRecipientName={transferRouteContext.prefillRecipientName}
             prefillAmount={transferRouteContext.prefillAmount}
+            prefillGoldRupiahAmount={transferRouteContext.prefillGoldRupiahAmount}
+            prefillCoinAmount={transferRouteContext.prefillCoinAmount}
+            prefillDiamondAmount={transferRouteContext.prefillDiamondAmount}
+            prefillTokenAmount={transferRouteContext.prefillTokenAmount}
             prefillNote={transferRouteContext.prefillNote}
             prefillFromQris={transferRouteContext.prefillFromQris}
             onNavigateToDashboard={() => {

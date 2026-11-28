@@ -332,6 +332,7 @@ export interface BankAccount {
   dismissedWarningMap?: Record<string, number>;
   // Kontak nasabah tersimpan untuk Chat Privat (sinkron Cloud per akun)
   savedChatContacts?: PrivateChatContact[];
+  privateContacts?: PrivateChatContact[];
   // Pesan berbintang / bookmark, pesan dihapus untuk saya sendiri & grup yang dibisukan notifikasinya (sinkron Cloud per akun)
   bookmarkedChatIds?: string[];
   hiddenChatMessageIds?: string[];
@@ -348,6 +349,7 @@ export interface BankAccount {
   // Kustomisasi Profil & Riwayat Ganti Nama (v16.44.20)
   profileBio?: string;
   city?: string;
+  avatarUrl?: string;
   avatarPresetId?: string;
   avatarFrameId?: string;
   featuredTitle?: string;
@@ -3062,6 +3064,7 @@ export interface ChatStatusReplyRef {
 export interface ChatStatusEntry {
   id: string;
   authorAccountId: string;
+  authorAccountNumber?: string;
   authorName: string;
   authorUserId16: string;
   authorAvatarUrl?: string;
@@ -3091,6 +3094,7 @@ export interface ChatStatusReport {
   statusId: string;
   statusAuthorId: string;
   statusAuthorName: string;
+  authorName?: string;
   statusAuthorUserId16?: string;
   reporterAccountId: string;
   reporterName: string;
@@ -3105,7 +3109,9 @@ export interface SocialChatPreferences {
   statusPrivacyDefault: ChatStatusPrivacy;
   moodEmoji?: string;
   moodText?: string;
+  moodLabel?: string;
   musicTrack?: string;
+  musicTitle?: string;
   dndEnabled: boolean;
   dndStartHour?: number;
   dndEndHour?: number;
@@ -3119,6 +3125,8 @@ export interface ScheduledChatMessage {
   targetId?: string;
   targetLabel: string;
   senderAccountId: string;
+  accountId?: string;
+  sent?: boolean;
   text: string;
   textEffect?: ChatTextEffectStyle;
   scheduledAtMs: number;
@@ -3145,6 +3153,7 @@ export interface DreamPocket {
 export interface DreamPocketAdminConfig {
   enabled: boolean;
   annualInterestPercent: number;
+  annualInterestRatePercent?: number;
   maxPocketsPerAccount: number;
   allowEarlyWithdraw: boolean;
   updatedAtMs?: number;

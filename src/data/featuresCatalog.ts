@@ -3086,20 +3086,20 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
     releaseType: 'minor',
     visibilityMode: 'auto',
     title:
-      'Pembaruan v16.48.24: Gelar Berbasis Syarat, Tab Achievement (28 Koleksi) & Sistem Level Akun XP (Lv. 1–100 + Hadiah Dinamis)',
+      'Pembaruan v16.48.24: Kamera Scan Universal Bawah M-Banking, Perbaikan Streak 2 Hari Berturut-Turut, QRP Statistik Umum, QRIS Multi-Aset & Merchant Resmi buatqris.site',
     fullDate: 'Sabtu, 28 November 2026 • Pukul 18:10 WIB',
     dateText: 'Sabtu, 28 November 2026 • Pukul 18:10 WIB',
     description:
-      'Pembaruan minor v16.48.24 menghadirkan tiga pembaruan besar untuk progresi akun nasabah Bank Nusantara: seluruh 12 Gelar Unggulan kini terkunci otomatis hingga syarat Achievement terpenuhi dan diklaim manual (atau diraih melalui hadiah naik Level), hadir Tab ke-5 Achievement di menu Profil berisi 28 pencapaian lintas Saldo, Kantong, Emas 24K, Deposito, QRIS, Transaksi, Misi, Streak, Permata, Spin Bingkai, dan PayChat (12 berhadiah Gelar Eksklusif dan 16 berhadiah Piala + Poin Achievement tanpa saldo), serta peluncuran Sistem Level Akun berbasis XP (Lv. 1–100 untuk nasabah reguler dan Lv. ∞ otomatis untuk Kartu Tier Admin) lengkap dengan pencairan hadiah milestone otomatis ke mutasi rekening.',
+      'Pembaruan minor v16.48.24 menggabungkan 5 inovasi besar sekaligus: (1) Panel Besar & Bar Mengambang Kamera Scan Universal di paling bawah M-Banking yang mendeteksi otomatis 3 jenis QR (QRP Profil, QRIS Multi-Aset, dan QRIS Top-Up Permata) melalui Kamera Live, Upload Galeri PNG, maupun Tempel Link; (2) Perbaikan total bug Streak tetap 1 saat login 2 hari berturut-turut dengan proteksi anti-timpa Cloud Sync, rekonsiliasi otomatis tanggal aktif WIB berturut-turut, sinkronisasi Misi 7-Hari, hadiah XP Level Akun, serta tombol Sinkron & Koreksi Streak; (3) QRP (QR Profil Statistik Umum Tanpa Saldo) di menu Profil lengkap dengan deteksi "Salah Kamera" 1-klik; (4) Transfer Multi-Aset 6 mode (Uang, Emas 24K, Coin, Permata, Token, & Gabungan) melalui QRIS Pribadi; serta (5) Integrasi resmi merchant buatqris.site khusus Top-Up Permata (ID Login azkafahmiammarulazka1550.azkaakc • Account ID user_6b01691c68be33.21495479 • Webhook https://atm-akc.vercel.app/).',
     highlights: [
-      'Tab ke-5 Achievement di Profil (28 Koleksi + Klaim Manual): Pantau syarat, bilah progres angka nyata, tier Perunggu–Legendaris, status hadiah Gelar maupun Piala + Poin Achievement tanpa saldo, serta tombol Klaim & Klaim Semua.',
-      '12 Gelar Unggulan Berbasis Syarat (8 Lama + 4 Eksklusif Baru): Seluruh gelar otomatis terkunci sampai Achievement diklaim atau terbuka lewat hadiah milestone Level, lengkap dengan tampilan progres langsung di daftar Gelar Profil.',
-      'Sistem Level Akun XP (Lv. 1–100 & Tier Admin Lv. ∞): Kumpulkan XP dari Transaksi, QRIS, Emas, Misi, Streak, Spin Bingkai, dan Achievement dengan lencana Level tampil di Profil, Tab Achievement, Navbar, dan PayChat, serta pencairan hadiah naik level otomatis tersimpan ke Cloud & mutasi rekening.',
+      'Kamera Scan Universal di Paling Bawah M-Banking (Bar Mengambang & Panel Besar): Langsung pindai QRP Profil, QRIS Pribadi Multi-Aset, maupun QRIS Top-Up Permata lewat Kamera Live, Upload Galeri PNG/JPG, atau Tempel Link.',
+      'Perbaikan Total Auto-Streak 2 Hari Berturut-Turut & Tombol Sinkron Streak: Mengunci nilai streak tertinggi dari penimpaan Cloud Sync, menghitung ulang hari aktif WIB berturut-turut secara otomatis, menyinkronkan Misi 7-Hari, memberi toast + XP Level Akun saat ganti hari WIB, serta menyediakan tombol Sinkron & Koreksi Streak di halaman Loyalty dan Admin.',
+      'QRP (QR Profil Statistik Umum Tanpa Saldo), QRIS Multi-Aset 6 Mode & Merchant Resmi buatqris.site: Kartu QR di Profil kini menjadi QRP Statistik Umum (Level XP, Tier, Gelar, Achievement, Streak tanpa membocorkan saldo) dengan peringatan Salah Kamera 1-klik, dukungan QRIS Multi-Aset (Uang/Emas/Coin/Permata/Token/Gabungan), dan pembayaran Top-Up Permata resmi buatqris.site.',
     ],
     changes: [
-      'Menambahkan katalog profileAchievementsCatalog.ts berisi 28 definisi Achievement lintas fitur beserta evaluator metrik akun real-time dan sinkronisasi klaim manual.',
-      'Memperluas profileCustomizationCatalog.ts menjadi 12 Gelar Unggulan dengan pemetaan syarat Achievement dan penguncian otomatis gelar yang belum memenuhi syarat.',
-      'Membangun mesin Sistem Level Akun XP (levelSystemCatalog.ts) Lv. 1–100 dengan penyesuaian bobot XP, hadiah milestone dinamis di level target pilihan, serta sinkronisasi awal akun lama.',
+      'Menambahkan Panel Besar dan Bar Mengambang Kamera Scan Universal di bagian paling bawah CustomerDashboard.tsx serta memasang QrisScannerModal universal dan QrpPublicProfileModal di App.tsx.',
+      'Memperbaiki race condition sinkronisasi Cloud pada loyaltyMap di BankContext.tsx menggunakan mergeLoyaltyMapWithStreakProtection dan rekonsiliasi computeConsecutiveActiveDaysWib pada loyaltySystemUtils.ts.',
+      'Mengubah kartu QR di UserProfileStatsModal.tsx menjadi QRP (QR Profil) dengan tombol Scan QRP Nasabah, deteksi Salah Kamera 1-klik di QrisScannerModal.tsx, dukungan 6 mode aset di QRIS Pribadi & TransferBebasPanel.tsx, serta integrasi merchant resmi buatqris.site untuk Top-Up Permata.',
     ],
     isCurrent: true,
     categoryBadge: 'Update Sekarang',

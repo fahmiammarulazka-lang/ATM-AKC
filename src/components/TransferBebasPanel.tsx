@@ -1,5 +1,5 @@
 /**
- * Mode Transfer Bebas (Biaya Admin 5%) — Uang, Coin Spin, Emas 24K, & Paket Gabungan
+ * Mode Transfer Bebas (Biaya Admin 5%) — Uang, Coin Spin, Emas 24K, Permata, Token Bingkai & Paket Gabungan
  * Mendukung pemilihan rekening terdaftar ataupun tujuan bebas manual, nominal Rp1.000–tak terbatas,
  * pemotongan biaya admin 5% dari nominal yang dikirim (contoh kirim 10jt -> penerima terima 9,5jt),
  * otorisasi PIN Kartu 6 digit, struk digital rinci, dan pencatatan Mutasi Rekening otomatis.
@@ -7,7 +7,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
-  CheckCircle2,
   Coins,
   Copy,
   Crown,
@@ -15,8 +14,7 @@ import {
   Layers,
   Receipt,
   Send,
-  ShieldCheck,
-  UserCheck,
+  Sparkles,
   Wallet,
   Eye,
   EyeOff,
@@ -29,15 +27,34 @@ import {
   formatRupiah,
   isUnlimitedNumber,
 } from '../utils/bankUtils';
+import { DiamondIcon } from './DiamondIcon';
 
 interface TransferBebasPanelProps {
   onNavigateToMutasi?: () => void;
   initialAssetMode?: TransferBebasAssetMode;
+  prefillRecipientAccount?: string;
+  prefillRecipientName?: string;
+  prefillUangAmount?: number;
+  prefillGoldRupiahAmount?: number;
+  prefillCoinAmount?: number;
+  prefillDiamondAmount?: number;
+  prefillTokenAmount?: number;
+  prefillNote?: string;
+  prefillFromQris?: boolean;
 }
 
 export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   onNavigateToMutasi,
   initialAssetMode,
+  prefillRecipientAccount,
+  prefillRecipientName,
+  prefillUangAmount,
+  prefillGoldRupiahAmount,
+  prefillCoinAmount,
+  prefillDiamondAmount,
+  prefillTokenAmount,
+  prefillNote,
+  prefillFromQris,
 }) => {
   const { accounts, currentAccount, goldMarketConfig, transferBebas } = useBank();
 
@@ -64,7 +81,60 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   const [uangInput, setUangInput] = useState<string>('10000000');
   const [coinInput, setCoinInput] = useState<string>('100');
   const [goldRupiahInput, setGoldRupiahInput] = useState<string>('5000000');
+  const [diamondInput, setDiamondInput] = useState<string>('25');
+  const [tokenInput, setTokenInput] = useState<string>('3');
   const [note, setNote] = useState<string>('');
+  const [isFromQris, setIsFromQris] = useState<boolean>(Boolean(prefillFromQris));
+
+  useEffect(() => {
+    if (prefillRecipientAccount) {
+      const cleaned = prefillRecipientAccount.trim();
+      const matched = otherAccounts.find(
+        (a) => a.accountNumber === cleaned || a.userId16 === cleaned
+      );
+      if (matched) {
+        setRecipientSource('registered');
+        setSelectedAccountId(matched.id);
+      } else {
+        setRecipientSource('manual');
+        setManualRecAccount(cleaned);
+        if (prefillRecipientName) setManualRecName(prefillRecipientName);
+        setManualRecBank('Bank Nusantara (QRIS)');
+      }
+    }
+    if (typeof prefillUangAmount === 'number' && prefillUangAmount > 0) {
+      setUangInput(String(prefillUangAmount));
+    }
+    if (typeof prefillGoldRupiahAmount === 'number' && prefillGoldRupiahAmount > 0) {
+      setGoldRupiahInput(String(prefillGoldRupiahAmount));
+    }
+    if (typeof prefillCoinAmount === 'number' && prefillCoinAmount > 0) {
+      setCoinInput(String(prefillCoinAmount));
+    }
+    if (typeof prefillDiamondAmount === 'number' && prefillDiamondAmount > 0) {
+      setDiamondInput(String(prefillDiamondAmount));
+    }
+    if (typeof prefillTokenAmount === 'number' && prefillTokenAmount > 0) {
+      setTokenInput(String(prefillTokenAmount));
+    }
+    if (typeof prefillNote === 'string' && prefillNote.trim()) {
+      setNote(prefillNote.trim());
+    }
+    if (typeof prefillFromQris === 'boolean') {
+      setIsFromQris(prefillFromQris);
+    }
+  }, [
+    prefillRecipientAccount,
+    prefillRecipientName,
+    prefillUangAmount,
+    prefillGoldRupiahAmount,
+    prefillCoinAmount,
+    prefillDiamondAmount,
+    prefillTokenAmount,
+    prefillNote,
+    prefillFromQris,
+    otherAccounts,
+  ]);
 
   const [showPinModal, setShowPinModal] = useState<boolean>(false);
   const [pinInput, setPinInput] = useState<string>('');
@@ -92,10 +162,14 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   const includeUang = assetMode === 'uang' || assetMode === 'gabungan';
   const includeCoin = assetMode === 'coin' || assetMode === 'gabungan';
   const includeGold = assetMode === 'emas' || assetMode === 'gabungan';
+  const includeDiamond = assetMode === 'permata' || assetMode === 'gabungan';
+  const includeToken = assetMode === 'token' || assetMode === 'gabungan';
 
   const uangSent = includeUang ? Math.max(0, Math.round(Number(uangInput) || 0)) : 0;
   const coinSent = includeCoin ? Math.max(0, Math.round(Number(coinInput) || 0)) : 0;
   const goldRupiahSent = includeGold ? Math.max(0, Math.round(Number(goldRupiahInput) || 0)) : 0;
+  const diamondSent = includeDiamond ? Math.max(0, Math.round(Number(diamondInput) || 0)) : 0;
+  const tokenSent = includeToken ? Math.max(0, Math.round(Number(tokenInput) || 0)) : 0;
 
   const uangFee = Math.round(uangSent * feeRate);
   const uangReceived = Math.max(0, uangSent - uangFee);
@@ -107,6 +181,19 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   const goldReceivedRp = Math.max(0, goldRupiahSent - goldFeeRp);
   const goldGramsSent = goldRupiahSent > 0 ? goldRupiahSent / activeGoldPrice : 0;
   const goldReceivedGrams = goldReceivedRp > 0 ? goldReceivedRp / activeGoldPrice : 0;
+
+  const diamondFee = Math.round(diamondSent * feeRate);
+  const diamondReceived = Math.max(0, diamondSent - diamondFee);
+
+  const tokenFee = Math.round(tokenSent * feeRate);
+  const tokenReceived = Math.max(0, tokenSent - tokenFee);
+
+  const estimatedTotalValueRupiah =
+    uangSent +
+    goldRupiahSent +
+    coinSent * 10_000 +
+    diamondSent * 1_000 +
+    tokenSent * 50_000;
 
   const selectedInternalAcc = otherAccounts.find((a) => a.id === selectedAccountId) || null;
   const resolvedRecAccount =
@@ -127,16 +214,35 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
       setErrorMsg('Silakan pilih rekening terdaftar atau ketik nomor rekening/ID tujuan.');
       return;
     }
-    if (includeUang && uangSent < minNom) {
+    if (assetMode === 'uang' && uangSent < minNom) {
       setErrorMsg(`Nominal Transfer Uang minimal ${formatRupiah(minNom)}.`);
       return;
     }
-    if (includeCoin && coinSent < 1) {
+    if (assetMode === 'coin' && coinSent < 1) {
       setErrorMsg('Jumlah Transfer Coin minimal 1 Koin.');
       return;
     }
-    if (includeGold && goldRupiahSent < minNom) {
+    if (assetMode === 'emas' && goldRupiahSent < minNom) {
       setErrorMsg(`Nominal Transfer Emas minimal senilai ${formatRupiah(minNom)}.`);
+      return;
+    }
+    if (assetMode === 'permata' && diamondSent < 1) {
+      setErrorMsg('Jumlah Transfer Permata minimal 1 Permata.');
+      return;
+    }
+    if (assetMode === 'token' && tokenSent < 1) {
+      setErrorMsg('Jumlah Transfer Token Spin Bingkai minimal 1 Token.');
+      return;
+    }
+    if (
+      assetMode === 'gabungan' &&
+      uangSent <= 0 &&
+      coinSent <= 0 &&
+      goldRupiahSent <= 0 &&
+      diamondSent <= 0 &&
+      tokenSent <= 0
+    ) {
+      setErrorMsg('Pada mode Paket Gabungan, isi minimal satu jenis aset untuk dikirim.');
       return;
     }
     setPinInput('');
@@ -157,6 +263,9 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
       uangAmount: uangSent,
       coinAmount: coinSent,
       goldRupiahAmount: goldRupiahSent,
+      diamondAmount: diamondSent,
+      tokenAmount: tokenSent,
+      fromQris: isFromQris,
       note,
       pin: pinInput,
     });
@@ -173,7 +282,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
   const handleCopyReceipt = () => {
     if (!latestReceipt) return;
     const lines = [
-      `STRUK TRANSFER BEBAS (ADMIN ${latestReceipt.adminFeePercent}%) — BANK NUSANTARA`,
+      `STRUK TRANSFER MULTI-ASET ${latestReceipt.fromQris ? 'QRIS PRIBADI ' : ''}(ADMIN ${latestReceipt.adminFeePercent}%) — BANK NUSANTARA`,
       `No. Referensi: ${latestReceipt.referenceNo}`,
       `Waktu: ${formatIndoDate(latestReceipt.timestamp)}`,
       `Penerima: ${latestReceipt.recipientName} (${latestReceipt.recipientAccount} · ${latestReceipt.recipientBank})`,
@@ -185,14 +294,9 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
         )} | Diterima Bersih: ${formatRupiah(latestReceipt.uangReceived)}`
       );
     }
-    if (latestReceipt.coinSent > 0) {
-      lines.push(
-        `Coin Dikirim: ${latestReceipt.coinSent} Koin | Admin: -${latestReceipt.coinAdminFee} Koin | Diterima Bersih: ${latestReceipt.coinReceived} Koin`
-      );
-    }
     if (latestReceipt.goldRupiahSent > 0) {
       lines.push(
-        `Emas Dikirim: ${latestReceipt.goldGramsSent.toFixed(4)} g (${formatRupiah(
+        `Emas 24K Dikirim: ${latestReceipt.goldGramsSent.toFixed(4)} g (${formatRupiah(
           latestReceipt.goldRupiahSent
         )}) | Admin: -${formatRupiah(
           latestReceipt.goldAdminFeeRupiah
@@ -200,6 +304,24 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
           latestReceipt.goldReceivedRupiah
         )})`
       );
+    }
+    if (latestReceipt.coinSent > 0) {
+      lines.push(
+        `Coin Spin Dikirim: ${latestReceipt.coinSent} Koin | Admin: -${latestReceipt.coinAdminFee} Koin | Diterima Bersih: ${latestReceipt.coinReceived} Koin`
+      );
+    }
+    if ((latestReceipt.diamondSent || 0) > 0) {
+      lines.push(
+        `Permata Dikirim: ${latestReceipt.diamondSent} Permata | Admin: -${latestReceipt.diamondAdminFee || 0} Permata | Diterima Bersih: ${latestReceipt.diamondReceived || 0} Permata`
+      );
+    }
+    if ((latestReceipt.tokenSent || 0) > 0) {
+      lines.push(
+        `Token Bingkai Dikirim: ${latestReceipt.tokenSent} Token | Admin: -${latestReceipt.tokenAdminFee || 0} Token | Diterima Bersih: ${latestReceipt.tokenReceived || 0} Token`
+      );
+    }
+    if (latestReceipt.estimatedTotalValueRupiah) {
+      lines.push(`Estimasi Total Nilai Transaksi: ${formatRupiah(latestReceipt.estimatedTotalValueRupiah)}`);
     }
     navigator.clipboard?.writeText(lines.join('\n')).catch(() => {});
     setCopiedReceipt(true);
@@ -214,48 +336,70 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
           <div>
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <Send className="w-5 h-5 text-amber-400" />
-              <span>Transfer Bebas Lintas Aset (Admin {feePercent}%)</span>
+              <span>Transfer Multi-Aset &amp; QRIS (Admin {feePercent}%)</span>
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Kirim Uang, Coin Spin, Emas 24K, atau ketiganya sekaligus. Biaya admin {feePercent}% otomatis dipotong dari jumlah yang dikirim.
+              Kirim Uang Rupiah, Emas 24K, Coin Spin, Permata, Token Bingkai, atau Paket Gabungan sekaligus. Biaya admin {feePercent}% otomatis dipotong dari aset yang dikirim.
             </p>
           </div>
           <span className="font-mono text-xs text-amber-300 font-bold">
-            Admin {feePercent}% · Rp 1.000 – ∞
+            Admin {feePercent}% · Multi-Aset
           </span>
         </div>
 
-        {/* Saldo Asset Strip */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
-          <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-            <div className="text-slate-400 flex items-center gap-1">
+        {/* Saldo Asset Strip (5 Aset Lengkap) */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-2.5">
+            <div className="text-slate-400 flex items-center gap-1 text-[11px]">
               <Wallet className="w-3.5 h-3.5 text-emerald-400" />
               <span>Saldo Uang</span>
             </div>
-            <div className="font-mono tabular-nums font-bold text-white mt-0.5">
+            <div className="font-mono tabular-nums font-bold text-white mt-0.5 truncate">
               {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.balance)
                 ? '∞'
                 : formatRupiah(currentAccount.balance)}
             </div>
           </div>
-          <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-            <div className="text-slate-400 flex items-center gap-1">
-              <Coins className="w-3.5 h-3.5 text-amber-400" />
-              <span>Saldo Coin Spin</span>
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-2.5">
+            <div className="text-slate-400 flex items-center gap-1 text-[11px]">
+              <Crown className="w-3.5 h-3.5 text-yellow-400" />
+              <span>Emas 24K</span>
             </div>
-            <div className="font-mono tabular-nums font-bold text-amber-300 mt-0.5">
+            <div className="font-mono tabular-nums font-bold text-yellow-300 mt-0.5 truncate">
+              {ownedGoldGrams.toFixed(3)} g
+            </div>
+          </div>
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-2.5">
+            <div className="text-slate-400 flex items-center gap-1 text-[11px]">
+              <Coins className="w-3.5 h-3.5 text-amber-400" />
+              <span>Coin Spin</span>
+            </div>
+            <div className="font-mono tabular-nums font-bold text-amber-300 mt-0.5 truncate">
               {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.spinCoins)
                 ? '∞'
                 : `${(currentAccount.spinCoins || 0).toLocaleString('id-ID')} Koin`}
             </div>
           </div>
-          <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-            <div className="text-slate-400 flex items-center gap-1">
-              <Crown className="w-3.5 h-3.5 text-yellow-400" />
-              <span>Saldo Emas 24K</span>
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-2.5">
+            <div className="text-slate-400 flex items-center gap-1 text-[11px]">
+              <DiamondIcon className="w-3.5 h-3.5" />
+              <span>Permata</span>
             </div>
-            <div className="font-mono tabular-nums font-bold text-yellow-300 mt-0.5">
-              {ownedGoldGrams.toFixed(4)} g ({formatRupiah(ownedGoldRupiah)})
+            <div className="font-mono tabular-nums font-bold text-cyan-300 mt-0.5 truncate">
+              {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.diamonds)
+                ? '∞'
+                : `${(currentAccount.diamonds || 0).toLocaleString('id-ID')} Diamond`}
+            </div>
+          </div>
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-2.5 col-span-2 sm:col-span-1">
+            <div className="text-slate-400 flex items-center gap-1 text-[11px]">
+              <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
+              <span>Token Bingkai</span>
+            </div>
+            <div className="font-mono tabular-nums font-bold text-fuchsia-300 mt-0.5 truncate">
+              {currentAccount.cardTier === 'admin' || isUnlimitedNumber(currentAccount.spinTokens)
+                ? '∞'
+                : `${(currentAccount.spinTokens || 0).toLocaleString('id-ID')} Token`}
             </div>
           </div>
         </div>
@@ -268,18 +412,20 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
         )}
 
         <form onSubmit={handleOpenConfirm} className="space-y-4 text-xs">
-          {/* Asset Mode Selector */}
+          {/* Asset Mode Selector (6 Mode Lengkap) */}
           <div>
             <label className="text-slate-300 font-semibold block mb-1.5">
               1. Pilih Jenis Aset yang Dikirim:
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {(
                 [
-                  { id: 'uang', label: 'Uang (Rupiah)' },
-                  { id: 'coin', label: 'Coin Spin' },
+                  { id: 'uang', label: 'Saldo Rupiah' },
                   { id: 'emas', label: 'Emas 24K' },
-                  { id: 'gabungan', label: 'Gabungan Semua' },
+                  { id: 'coin', label: 'Coin Spin' },
+                  { id: 'permata', label: 'Permata (Diamond)' },
+                  { id: 'token', label: 'Token Bingkai' },
+                  { id: 'gabungan', label: 'Paket Gabungan' },
                 ] as { id: TransferBebasAssetMode; label: string }[]
               ).map((item) => (
                 <button
@@ -302,7 +448,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
           <div className="space-y-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label className="text-slate-300 font-semibold">
-                2. Tujuan Penerima Transfer Bebas:
+                2. Tujuan Penerima Transfer Multi-Aset:
               </label>
               <div className="flex items-center gap-1 p-1 bg-slate-950 border border-slate-800 rounded-lg">
                 <button
@@ -378,7 +524,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
               <div className="flex justify-between">
                 <label className="text-emerald-300 font-bold">
-                  Nominal Uang Rupiah (Minimal {formatRupiah(minNom)}):
+                  Nominal Uang Rupiah {assetMode === 'gabungan' ? '(Isi 0 jika tidak disertakan)' : `(Minimal ${formatRupiah(minNom)})`}:
                 </label>
                 <span className="font-mono text-slate-400">
                   Diterima: {formatRupiah(uangReceived)}
@@ -386,52 +532,20 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
               </div>
               <input
                 type="number"
-                min={minNom}
+                min={0}
                 value={uangInput}
                 onChange={(e) => setUangInput(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-emerald-400"
               />
               <div className="flex flex-wrap gap-1.5">
-                {[100_000, 1_000_000, 10_000_000, 50_000_000].map((v) => (
+                {[0, 100_000, 1_000_000, 10_000_000, 50_000_000].map((v) => (
                   <button
                     key={v}
                     type="button"
                     onClick={() => setUangInput(String(v))}
                     className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono text-[11px] cursor-pointer"
                   >
-                    {formatRupiah(v)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {includeCoin && (
-            <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
-              <div className="flex justify-between">
-                <label className="text-amber-300 font-bold">
-                  Jumlah Coin Spin (Minimal 1 Koin):
-                </label>
-                <span className="font-mono text-slate-400">
-                  Diterima: {coinReceived.toLocaleString('id-ID')} Koin
-                </span>
-              </div>
-              <input
-                type="number"
-                min={1}
-                value={coinInput}
-                onChange={(e) => setCoinInput(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 text-amber-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-amber-400"
-              />
-              <div className="flex flex-wrap gap-1.5">
-                {[20, 100, 500, 1000].map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => setCoinInput(String(c))}
-                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-200 font-mono text-[11px] cursor-pointer"
-                  >
-                    {c.toLocaleString('id-ID')} Koin
+                    {v === 0 ? '0 (Lewati)' : formatRupiah(v)}
                   </button>
                 ))}
               </div>
@@ -450,20 +564,116 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
               </div>
               <input
                 type="number"
-                min={minNom}
+                min={0}
                 value={goldRupiahInput}
                 onChange={(e) => setGoldRupiahInput(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-700 text-yellow-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-yellow-400"
               />
               <div className="flex flex-wrap gap-1.5">
-                {[100_000, 1_000_000, 10_000_000, 20_000_000].map((v) => (
+                {[0, 100_000, 1_000_000, 5_000_000, 20_000_000].map((v) => (
                   <button
                     key={v}
                     type="button"
                     onClick={() => setGoldRupiahInput(String(v))}
                     className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-yellow-200 font-mono text-[11px] cursor-pointer"
                   >
-                    {formatRupiah(v)}
+                    {v === 0 ? '0 (Lewati)' : formatRupiah(v)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {includeCoin && (
+            <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
+              <div className="flex justify-between">
+                <label className="text-amber-300 font-bold">
+                  Jumlah Coin Spin:
+                </label>
+                <span className="font-mono text-slate-400">
+                  Diterima: {coinReceived.toLocaleString('id-ID')} Koin
+                </span>
+              </div>
+              <input
+                type="number"
+                min={0}
+                value={coinInput}
+                onChange={(e) => setCoinInput(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-amber-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-amber-400"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {[0, 20, 100, 500, 1000].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setCoinInput(String(c))}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-200 font-mono text-[11px] cursor-pointer"
+                  >
+                    {c === 0 ? '0 (Lewati)' : `${c.toLocaleString('id-ID')} Koin`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {includeDiamond && (
+            <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
+              <div className="flex justify-between">
+                <label className="text-cyan-300 font-bold">
+                  Jumlah Permata (Diamond):
+                </label>
+                <span className="font-mono text-slate-400">
+                  Diterima: {diamondReceived.toLocaleString('id-ID')} Permata
+                </span>
+              </div>
+              <input
+                type="number"
+                min={0}
+                value={diamondInput}
+                onChange={(e) => setDiamondInput(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-cyan-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-cyan-400"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {[0, 10, 25, 100, 500].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDiamondInput(String(d))}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-200 font-mono text-[11px] cursor-pointer"
+                  >
+                    {d === 0 ? '0 (Lewati)' : `${d.toLocaleString('id-ID')} Permata`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {includeToken && (
+            <div className="rounded-2xl bg-slate-950 border border-slate-800 p-4 space-y-2">
+              <div className="flex justify-between">
+                <label className="text-fuchsia-300 font-bold">
+                  Jumlah Token Spin Bingkai:
+                </label>
+                <span className="font-mono text-slate-400">
+                  Diterima: {tokenReceived.toLocaleString('id-ID')} Token
+                </span>
+              </div>
+              <input
+                type="number"
+                min={0}
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-fuchsia-200 rounded-xl p-3 font-mono tabular-nums text-sm font-bold focus:outline-none focus:border-fuchsia-400"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {[0, 1, 3, 10, 25].map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTokenInput(String(t))}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-fuchsia-200 font-mono text-[11px] cursor-pointer"
+                  >
+                    {t === 0 ? '0 (Lewati)' : `${t.toLocaleString('id-ID')} Token`}
                   </button>
                 ))}
               </div>
@@ -472,13 +682,13 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
 
           <div>
             <label className="text-slate-300 font-semibold block mb-1">
-              Catatan Transfer Bebas (Opsional):
+              Catatan Transfer Multi-Aset (Opsional):
             </label>
             <input
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Contoh: Kirim modal usaha, koin spin, & emas 24K"
+              placeholder="Contoh: Kirim uang, emas 24K, coin, permata & token via QRIS"
               className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl p-3 focus:outline-none focus:border-amber-400"
             />
           </div>
@@ -501,7 +711,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             <span>Simulasi Rincian Biaya Admin {feePercent}%</span>
           </h3>
           <p className="text-slate-400 leading-relaxed">
-            Saat Anda mengirim nilai tertentu, saldo Anda berkurang tepat sesuai nominal kirim, lalu biaya admin{' '}
+            Saat Anda mengirim aset, saldo berkurang sesuai jumlah kirim, lalu biaya admin{' '}
             <strong className="text-amber-300">{feePercent}%</strong> dipotong otomatis sehingga penerima menerima bersih{' '}
             <strong className="text-emerald-300">{100 - feePercent}%</strong>.
           </p>
@@ -513,7 +723,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 {resolvedRecName || '-'} ({resolvedRecAccount || '-'})
               </span>
             </div>
-            {includeUang && (
+            {includeUang && uangSent > 0 && (
               <div className="border-t border-slate-800 pt-2 space-y-1">
                 <div className="flex justify-between">
                   <span className="text-slate-400">Uang Dikirim</span>
@@ -529,23 +739,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 </div>
               </div>
             )}
-            {includeCoin && (
-              <div className="border-t border-slate-800 pt-2 space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Coin Dikirim</span>
-                  <span className="text-white">{coinSent.toLocaleString('id-ID')} Koin</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Admin {feePercent}%</span>
-                  <span className="text-rose-300">-{coinFee.toLocaleString('id-ID')} Koin</span>
-                </div>
-                <div className="flex justify-between font-bold">
-                  <span className="text-amber-300">Diterima Bersih</span>
-                  <span className="text-amber-300">{coinReceived.toLocaleString('id-ID')} Koin</span>
-                </div>
-              </div>
-            )}
-            {includeGold && (
+            {includeGold && goldRupiahSent > 0 && (
               <div className="border-t border-slate-800 pt-2 space-y-1">
                 <div className="flex justify-between">
                   <span className="text-slate-400">Emas Dikirim</span>
@@ -565,6 +759,58 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 </div>
               </div>
             )}
+            {includeCoin && coinSent > 0 && (
+              <div className="border-t border-slate-800 pt-2 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Coin Dikirim</span>
+                  <span className="text-white">{coinSent.toLocaleString('id-ID')} Koin</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Admin {feePercent}%</span>
+                  <span className="text-rose-300">-{coinFee.toLocaleString('id-ID')} Koin</span>
+                </div>
+                <div className="flex justify-between font-bold">
+                  <span className="text-amber-300">Diterima Bersih</span>
+                  <span className="text-amber-300">{coinReceived.toLocaleString('id-ID')} Koin</span>
+                </div>
+              </div>
+            )}
+            {includeDiamond && diamondSent > 0 && (
+              <div className="border-t border-slate-800 pt-2 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Permata Dikirim</span>
+                  <span className="text-white">{diamondSent.toLocaleString('id-ID')} Permata</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Admin {feePercent}%</span>
+                  <span className="text-rose-300">-{diamondFee.toLocaleString('id-ID')} Permata</span>
+                </div>
+                <div className="flex justify-between font-bold">
+                  <span className="text-cyan-300">Diterima Bersih</span>
+                  <span className="text-cyan-300">{diamondReceived.toLocaleString('id-ID')} Permata</span>
+                </div>
+              </div>
+            )}
+            {includeToken && tokenSent > 0 && (
+              <div className="border-t border-slate-800 pt-2 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Token Bingkai Dikirim</span>
+                  <span className="text-white">{tokenSent.toLocaleString('id-ID')} Token</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Admin {feePercent}%</span>
+                  <span className="text-rose-300">-{tokenFee.toLocaleString('id-ID')} Token</span>
+                </div>
+                <div className="flex justify-between font-bold">
+                  <span className="text-fuchsia-300">Diterima Bersih</span>
+                  <span className="text-fuchsia-300">{tokenReceived.toLocaleString('id-ID')} Token</span>
+                </div>
+              </div>
+            )}
+            <div className="border-t border-slate-800 pt-2 flex justify-between font-bold">
+              <span className="text-slate-300">Estimasi Nilai Transaksi</span>
+              <span className="text-amber-300">{formatRupiah(estimatedTotalValueRupiah)}</span>
+            </div>
           </div>
         </div>
 
@@ -574,7 +820,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
                 <Receipt className="w-4 h-4" />
-                <span>Struk Transfer Bebas Berhasil</span>
+                <span>Struk Transfer Multi-Aset Berhasil</span>
               </div>
               <span className="font-mono text-[11px] text-emerald-400">
                 {latestReceipt.referenceNo}
@@ -632,20 +878,6 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                   </div>
                 </div>
               )}
-              {latestReceipt.coinSent > 0 && (
-                <div className="border-t border-slate-800 pt-2 font-mono tabular-nums space-y-0.5">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Coin Dikirim / Admin {latestReceipt.adminFeePercent}%</span>
-                    <span className="text-white">
-                      {latestReceipt.coinSent} (-{latestReceipt.coinAdminFee})
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-amber-300 font-bold">
-                    <span>Coin Bersih Diterima</span>
-                    <span>{latestReceipt.coinReceived.toLocaleString('id-ID')} Koin</span>
-                  </div>
-                </div>
-              )}
               {latestReceipt.goldRupiahSent > 0 && (
                 <div className="border-t border-slate-800 pt-2 font-mono tabular-nums space-y-0.5">
                   <div className="flex justify-between">
@@ -662,6 +894,54 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                       {formatRupiah(latestReceipt.goldReceivedRupiah)})
                     </span>
                   </div>
+                </div>
+              )}
+              {latestReceipt.coinSent > 0 && (
+                <div className="border-t border-slate-800 pt-2 font-mono tabular-nums space-y-0.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Coin Dikirim / Admin {latestReceipt.adminFeePercent}%</span>
+                    <span className="text-white">
+                      {latestReceipt.coinSent} (-{latestReceipt.coinAdminFee})
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-amber-300 font-bold">
+                    <span>Coin Bersih Diterima</span>
+                    <span>{latestReceipt.coinReceived.toLocaleString('id-ID')} Koin</span>
+                  </div>
+                </div>
+              )}
+              {(latestReceipt.diamondSent || 0) > 0 && (
+                <div className="border-t border-slate-800 pt-2 font-mono tabular-nums space-y-0.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Permata Dikirim / Admin {latestReceipt.adminFeePercent}%</span>
+                    <span className="text-white">
+                      {latestReceipt.diamondSent} (-{latestReceipt.diamondAdminFee || 0})
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-cyan-300 font-bold">
+                    <span>Permata Bersih Diterima</span>
+                    <span>{(latestReceipt.diamondReceived || 0).toLocaleString('id-ID')} Permata</span>
+                  </div>
+                </div>
+              )}
+              {(latestReceipt.tokenSent || 0) > 0 && (
+                <div className="border-t border-slate-800 pt-2 font-mono tabular-nums space-y-0.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Token Bingkai Dikirim / Admin {latestReceipt.adminFeePercent}%</span>
+                    <span className="text-white">
+                      {latestReceipt.tokenSent} (-{latestReceipt.tokenAdminFee || 0})
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-fuchsia-300 font-bold">
+                    <span>Token Bersih Diterima</span>
+                    <span>{(latestReceipt.tokenReceived || 0).toLocaleString('id-ID')} Token</span>
+                  </div>
+                </div>
+              )}
+              {latestReceipt.estimatedTotalValueRupiah && (
+                <div className="border-t border-slate-800 pt-2 flex justify-between font-mono font-bold text-amber-300">
+                  <span>Estimasi Total Nilai</span>
+                  <span>{formatRupiah(latestReceipt.estimatedTotalValueRupiah)}</span>
                 </div>
               )}
             </div>
@@ -698,7 +978,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 <KeyRound className="w-5 h-5 text-amber-400" />
               </div>
               <div>
-                <h3 className="font-bold text-base text-white">Otorisasi PIN Transfer Bebas</h3>
+                <h3 className="font-bold text-base text-white">Otorisasi PIN Transfer Multi-Aset</h3>
                 <p className="text-slate-400">
                   Kirim ke {resolvedRecName} ({resolvedRecAccount})
                 </p>
@@ -706,27 +986,43 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
             </div>
 
             <div className="rounded-xl bg-slate-950 border border-slate-800 p-3.5 space-y-1.5 font-mono tabular-nums">
-              {includeUang && (
+              {includeUang && uangSent > 0 && (
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Uang (Terima 95%)</span>
+                  <span className="text-slate-400">Uang (Terima {100 - feePercent}%)</span>
                   <span className="text-emerald-300">
                     {formatRupiah(uangSent)} → {formatRupiah(uangReceived)}
                   </span>
                 </div>
               )}
-              {includeCoin && (
+              {includeGold && goldRupiahSent > 0 && (
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Coin (Terima 95%)</span>
+                  <span className="text-slate-400">Emas (Terima {100 - feePercent}%)</span>
+                  <span className="text-yellow-300">
+                    {goldGramsSent.toFixed(4)}g → {goldReceivedGrams.toFixed(4)}g
+                  </span>
+                </div>
+              )}
+              {includeCoin && coinSent > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Coin (Terima {100 - feePercent}%)</span>
                   <span className="text-amber-300">
                     {coinSent} → {coinReceived} Koin
                   </span>
                 </div>
               )}
-              {includeGold && (
+              {includeDiamond && diamondSent > 0 && (
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Emas (Terima 95%)</span>
-                  <span className="text-yellow-300">
-                    {goldGramsSent.toFixed(4)}g → {goldReceivedGrams.toFixed(4)}g
+                  <span className="text-slate-400">Permata (Terima {100 - feePercent}%)</span>
+                  <span className="text-cyan-300">
+                    {diamondSent} → {diamondReceived} Permata
+                  </span>
+                </div>
+              )}
+              {includeToken && tokenSent > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Token (Terima {100 - feePercent}%)</span>
+                  <span className="text-fuchsia-300">
+                    {tokenSent} → {tokenReceived} Token
                   </span>
                 </div>
               )}
@@ -759,7 +1055,7 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
                 disabled={pinInput.length !== 6}
                 className="flex-1 py-3 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-slate-950 font-black rounded-xl cursor-pointer"
               >
-                Kirim Transfer Bebas
+                Kirim Transfer Multi-Aset
               </button>
               <button
                 type="button"
@@ -775,3 +1071,4 @@ export const TransferBebasPanel: React.FC<TransferBebasPanelProps> = ({
     </div>
   );
 };
+

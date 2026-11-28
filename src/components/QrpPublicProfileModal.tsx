@@ -29,7 +29,6 @@ import { TopLeaderboardBadges } from './TopLeaderboardBadges';
 import { getFeaturedTitleById } from '../data/profileCustomizationCatalog';
 import {
   PROFILE_ACHIEVEMENTS,
-  getClaimedAchievementPointsTotal,
   isTitleUnlockedForAccount,
 } from '../data/profileAchievementsCatalog';
 import {
@@ -37,7 +36,8 @@ import {
   getAccountLevelSnapshot,
 } from '../data/levelSystemCatalog';
 import { TransferBebasAssetMode } from '../types/bank';
-import { isAccountDisguisedAdmin, resolveDisguisedPublicCardTier } from '../types/adminAnalyticsAndTier';
+import { isAccountDisguisedAdmin } from '../types/adminAnalyticsAndTier';
+import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
 
 export interface QrpPublicProfileTarget {
   targetAccount: string;
@@ -76,6 +76,7 @@ export const QrpPublicProfileModal: React.FC<QrpPublicProfileModalProps> = ({
     addFavorite,
     addPrivateChatContact,
   } = useBank();
+  const { adminTierGrantsMap } = useAdminAnalyticsAndTierSync();
 
   const [copiedField, setCopiedField] = useState<'acc' | 'uid' | null>(null);
   const [selectedTransferAsset, setSelectedTransferAsset] =
@@ -108,9 +109,16 @@ export const QrpPublicProfileModal: React.FC<QrpPublicProfileModalProps> = ({
       currentAccount.id === matchedAccount.id
   );
 
-  const disguisedAdmin = matchedAccount ? isAccountDisguisedAdmin(matchedAccount.id) : false;
+  const disguisedAdmin = matchedAccount
+    ? isAccountDisguisedAdmin(matchedAccount.id, adminTierGrantsMap)
+    : false;
   const effectivePublicTier = matchedAccount
-    ? resolveDisguisedPublicCardTier(matchedAccount)
+    ? disguisedAdmin
+      ? adminTierGrantsMap[matchedAccount.id]?.previousCardTier &&
+        adminTierGrantsMap[matchedAccount.id]?.previousCardTier !== 'admin'
+        ? adminTierGrantsMap[matchedAccount.id]!.previousCardTier!
+        : 'regular'
+      : matchedAccount.cardTier
     : 'regular';
   const isPublicAdminTier = Boolean(
     matchedAccount && checkIsAdminCard(matchedAccount) && !disguisedAdmin
@@ -118,7 +126,9 @@ export const QrpPublicProfileModal: React.FC<QrpPublicProfileModalProps> = ({
   const tierMeta =
     BANK_CARD_TIERS[effectivePublicTier] || BANK_CARD_TIERS.regular;
 
-  const levelSnapshot = getAccountLevelSnapshot(matchedAccount, !disguisedAdmin);
+  const levelSnapshot = getAccountLevelSnapshot(matchedAccount, {
+    isDisguisedViewer: disguisedAdmin,
+  });
 
   const activeFeaturedTitle =
     matchedAccount?.featuredTitle &&
@@ -129,7 +139,13 @@ export const QrpPublicProfileModal: React.FC<QrpPublicProfileModalProps> = ({
   const claimedAchievementCount = matchedAccount
     ? Object.keys(matchedAccount.profileAchievementClaims || {}).length
     : 0;
-  const totalAchievementPoints = getClaimedAchievementPointsTotal(matchedAccount);
+  const totalAchievementPoints = matchedAccount
+    ? PROFILE_ACHIEVEMENTS.reduce(
+        (sum, def) =>
+          matchedAccount.profileAchievementClaims?.[def.id] ? sum + def.points : sum,
+        0
+      )
+    : 0;
   const streakDays = matchedAccount
     ? loyaltyMap[matchedAccount.id]?.streakDays || 0
     : 0;
@@ -422,7 +438,9 @@ export const QrpPublicProfileModal: React.FC<QrpPublicProfileModalProps> = ({
                   : `Lv. ${levelSnapshot.level} / ${MAX_REGULAR_ACCOUNT_LEVEL}`}
               </p>
               <p className="text-[10px] text-slate-400 truncate">
-                {levelSnapshot.rankTitle}
+                {levelSnapshot.isInfinity
+                  ? 'Level Tak Terbatas (Admin)'
+                  : `${levelSnapshot.xp.toLocaleString('id-ID')} XP Total`}
               </p>
             </div>
 

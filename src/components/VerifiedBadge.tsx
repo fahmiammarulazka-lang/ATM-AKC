@@ -8,6 +8,7 @@ import { Copy, CheckCircle2, Fingerprint, ShieldCheck } from 'lucide-react';
 import { ensureAccountUserId16, formatUserId16, maskUserId16Full } from '../utils/bankUtils';
 
 interface VerifiedBadgeProps {
+  isVerified?: boolean;
   size?: 'xs' | 'sm' | 'md' | 'lg';
   label?: string;
   showLabel?: boolean;

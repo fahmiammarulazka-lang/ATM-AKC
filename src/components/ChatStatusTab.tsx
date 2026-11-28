@@ -129,8 +129,9 @@ export const ChatStatusTab: React.FC<{
     const ids = new Set<string>();
     if (!currentAccount) return ids;
     ids.add(currentAccount.id);
-    (currentAccount.privateContacts || []).forEach((c) => {
-      if (c.accountId) ids.add(c.accountId);
+    [...(currentAccount.savedChatContacts || []), ...(currentAccount.privateContacts || [])].forEach((c) => {
+      const cid = (c as { contactAccountId?: string; accountId?: string }).contactAccountId || (c as { accountId?: string }).accountId;
+      if (cid) ids.add(cid);
     });
     chats.forEach((m) => {
       if (m.groupId) return;
@@ -248,12 +249,12 @@ export const ChatStatusTab: React.FC<{
       offset += c.length;
     }
     pcmChunksRef.current = [];
-    const wavBlob = encodePcmFloatToWavBlob(merged, sampleRate);
+    const wavResult = encodePcmFloatToWavBlob(merged, sampleRate);
     const peaks = extractPeaksFromPcm(merged, 36);
     const dur = Math.max(1, Math.round(totalLen / sampleRate));
     setIsUploadingMedia(true);
-    const uploaded = await uploadChatMediaToServer(wavBlob, `status-voice-${Date.now()}.wav`, 'audio');
-    const url = uploaded.url || (await blobToDataUrl(wavBlob));
+    const uploaded = await uploadChatMediaToServer(wavResult.blob, `status-voice-${Date.now()}.wav`, 'audio');
+    const url = uploaded.url || (await blobToDataUrl(wavResult.blob));
     setMediaUrl(url);
     setMediaMime('audio/wav');
     setMediaDurationSec(dur);
@@ -307,11 +308,12 @@ export const ChatStatusTab: React.FC<{
       } else if (createType === 'audio') {
         const meta = await extractAudioDurationAndPeaks(file);
         const conv = await tryConvertAudioBlobToUniversalWav(file);
-        const up = await uploadChatMediaToServer(conv.blob, `status-audio-${Date.now()}.wav`, 'audio');
-        setMediaUrl(up.url || (await blobToDataUrl(conv.blob)));
-        setMediaMime(conv.mimeType || 'audio/wav');
+        const audioBlob = conv?.blob || file;
+        const up = await uploadChatMediaToServer(audioBlob, `status-audio-${Date.now()}.wav`, 'audio');
+        setMediaUrl(up.url || (await blobToDataUrl(audioBlob)));
+        setMediaMime(conv?.mimeType || file.type || 'audio/wav');
         setMediaDurationSec(meta.durationSec);
-        setMediaPeaks(meta.peaks);
+        setMediaPeaks(meta.waveformPeaks);
       }
     } catch {
       setFeedback({ type: 'error', text: 'Gagal memproses file media Status.' });
