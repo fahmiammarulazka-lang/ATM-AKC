@@ -2251,6 +2251,9 @@ interface BankContextType {
     uangAmount: number;
     coinAmount: number;
     goldRupiahAmount: number;
+    diamondAmount?: number;
+    tokenAmount?: number;
+    fromQris?: boolean;
     note?: string;
     pin: string;
   }) => {
@@ -35480,6 +35483,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     uangAmount: number;
     coinAmount: number;
     goldRupiahAmount: number;
+    diamondAmount?: number;
+    tokenAmount?: number;
+    fromQris?: boolean;
     note?: string;
     pin: string;
   }) => {
@@ -35506,7 +35512,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { success: false, message: msg };
     }
     if (cleanRecAcc === currentAccount.accountNumber) {
-      const msg = 'Tidak dapat melakukan Transfer Bebas ke rekening sendiri.';
+      const msg = 'Tidak dapat melakukan Transfer ke rekening sendiri.';
       pushAppToast({ type: 'warning', title: 'Rekening Tujuan Invalid', message: msg });
       return { success: false, message: msg };
     }
@@ -35519,50 +35525,107 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const feeRate = feePercent / 100;
     const minNom = Math.max(1000, goldMarketConfig.minNominalRupiah || 1000);
     const activeGoldPrice = getEffectiveGoldPrice(currentAccount);
+    const unitDiamondPriceRp = Math.max(90, diamondConfigRef.current?.baseDiamondPriceRupiah || 90);
+    const unitCoinPriceRp = 1000;
+    const unitTokenPriceRp = 50000;
 
-    const includeUang = input.assetMode === 'uang' || input.assetMode === 'gabungan';
-    const includeCoin = input.assetMode === 'coin' || input.assetMode === 'gabungan';
-    const includeGold = input.assetMode === 'emas' || input.assetMode === 'gabungan';
+    const isGabungan = input.assetMode === 'gabungan';
+    const includeUang = input.assetMode === 'uang' || isGabungan;
+    const includeCoin = input.assetMode === 'coin' || isGabungan;
+    const includeGold = input.assetMode === 'emas' || isGabungan;
+    const includeDiamond = input.assetMode === 'permata' || isGabungan;
+    const includeToken = input.assetMode === 'token' || isGabungan;
 
-    const uangSent = includeUang ? Math.round(Number(input.uangAmount) || 0) : 0;
-    const coinSent = includeCoin ? Math.round(Number(input.coinAmount) || 0) : 0;
-    const goldRupiahSent = includeGold ? Math.round(Number(input.goldRupiahAmount) || 0) : 0;
+    const uangSent = includeUang ? Math.max(0, Math.round(Number(input.uangAmount) || 0)) : 0;
+    const coinSent = includeCoin ? Math.max(0, Math.round(Number(input.coinAmount) || 0)) : 0;
+    const goldRupiahSent = includeGold ? Math.max(0, Math.round(Number(input.goldRupiahAmount) || 0)) : 0;
+    const diamondSent = includeDiamond ? Math.max(0, Math.round(Number(input.diamondAmount) || 0)) : 0;
+    const tokenSent = includeToken ? Math.max(0, Math.round(Number(input.tokenAmount) || 0)) : 0;
 
-    if (includeUang && uangSent < minNom) {
+    if (input.assetMode === 'uang' && uangSent < minNom) {
       const msg = `Nominal Transfer Uang minimal ${formatRupiah(minNom)}.`;
       pushAppToast({ type: 'warning', title: 'Nominal Transfer Kurang', message: msg });
       return { success: false, message: msg };
     }
-    if (includeCoin && coinSent < 1) {
+    if (input.assetMode === 'coin' && coinSent < 1) {
       const msg = 'Jumlah Transfer Coin minimal 1 Koin.';
       pushAppToast({ type: 'warning', title: 'Coin Transfer Kurang', message: msg });
       return { success: false, message: msg };
     }
-    if (includeGold && goldRupiahSent < minNom) {
+    if (input.assetMode === 'emas' && goldRupiahSent < minNom) {
       const msg = `Nominal Transfer Emas minimal senilai ${formatRupiah(minNom)}.`;
       pushAppToast({ type: 'warning', title: 'Nominal Emas Kurang', message: msg });
-      return {
-        success: false,
-        message: msg,
-      };
+      return { success: false, message: msg };
+    }
+    if (input.assetMode === 'permata' && diamondSent < 1) {
+      const msg = 'Jumlah Transfer Permata (Diamond) minimal 1 Permata.';
+      pushAppToast({ type: 'warning', title: 'Permata Transfer Kurang', message: msg });
+      return { success: false, message: msg };
+    }
+    if (input.assetMode === 'token' && tokenSent < 1) {
+      const msg = 'Jumlah Transfer Token Spin Bingkai minimal 1 Token.';
+      pushAppToast({ type: 'warning', title: 'Token Transfer Kurang', message: msg });
+      return { success: false, message: msg };
+    }
+    if (isGabungan) {
+      if (uangSent <= 0 && coinSent <= 0 && goldRupiahSent <= 0 && diamondSent <= 0 && tokenSent <= 0) {
+        const msg = 'Untuk Paket Gabungan, isi minimal satu jenis aset yang ingin dikirim.';
+        pushAppToast({ type: 'warning', title: 'Aset Gabungan Kosong', message: msg });
+        return { success: false, message: msg };
+      }
+      if (uangSent > 0 && uangSent < minNom) {
+        const msg = `Jika menyertakan Uang Rupiah di Paket Gabungan, minimal ${formatRupiah(minNom)}.`;
+        pushAppToast({ type: 'warning', title: 'Nominal Uang Kurang', message: msg });
+        return { success: false, message: msg };
+      }
+      if (goldRupiahSent > 0 && goldRupiahSent < minNom) {
+        const msg = `Jika menyertakan Emas 24K di Paket Gabungan, minimal senilai ${formatRupiah(minNom)}.`;
+        pushAppToast({ type: 'warning', title: 'Nominal Emas Kurang', message: msg });
+        return { success: false, message: msg };
+      }
     }
 
     const isSenderAdmin = isAdminCardAccount(currentAccount);
     const isInf = isSenderAdmin || isUnlimitedNumber(currentAccount.balance);
     const isCoinInf = isSenderAdmin || isUnlimitedNumber(currentAccount.spinCoins);
+    const isDiamondInf = isSenderAdmin || isUnlimitedNumber(currentAccount.diamonds);
+    const isTokenInf = isSenderAdmin || isUnlimitedNumber(currentAccount.spinTokens);
+
     if (!isInf && uangSent > currentAccount.balance) {
-      const msg = 'Saldo Uang Rupiah tidak mencukupi untuk Transfer Bebas.';
+      const msg = 'Saldo Uang Rupiah tidak mencukupi untuk transfer ini.';
       pushAppToast({ type: 'error', title: 'Saldo Rupiah Kurang', message: msg });
       return { success: false, message: msg };
     }
     if (!isCoinInf && coinSent > (currentAccount.spinCoins || 0)) {
-      const msg = 'Saldo Coin Spin tidak mencukupi untuk Transfer Bebas.';
+      const msg = 'Saldo Coin Spin tidak mencukupi untuk transfer ini.';
       pushAppToast({
         type: 'error',
         title: 'Koin Spin Tidak Cukup',
         message: msg,
         actionLabel: 'Beli Koin',
         actionKind: 'open_coin_shop',
+      });
+      return { success: false, message: msg };
+    }
+    if (!isDiamondInf && diamondSent > (currentAccount.diamonds || 0)) {
+      const msg = 'Saldo Permata (Diamond) tidak mencukupi untuk transfer ini.';
+      pushAppToast({
+        type: 'error',
+        title: 'Permata Tidak Cukup',
+        message: msg,
+        actionLabel: 'Top-Up Permata',
+        actionKind: 'open_diamond_shop',
+      });
+      return { success: false, message: msg };
+    }
+    if (!isTokenInf && tokenSent > (currentAccount.spinTokens || 0)) {
+      const msg = 'Saldo Token Spin Bingkai tidak mencukupi untuk transfer ini.';
+      pushAppToast({
+        type: 'error',
+        title: 'Token Bingkai Tidak Cukup',
+        message: msg,
+        actionLabel: 'Buka Arena Spin',
+        actionKind: 'open_frame_spin',
       });
       return { success: false, message: msg };
     }
@@ -35580,7 +35643,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       };
     }
 
-    // Q2 Exact Admin Fee Rule: Sender sends X, recipient receives X * (1 - 5%)
+    // Aturan Biaya Admin 5%: Dipotong dari nominal/jumlah aset yang dikirim
     const uangAdminFee = Math.round(uangSent * feeRate);
     const uangReceived = Math.max(0, uangSent - uangAdminFee);
 
@@ -35590,6 +35653,19 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const goldAdminFeeRupiah = Math.round(goldRupiahSent * feeRate);
     const goldReceivedRupiah = Math.max(0, goldRupiahSent - goldAdminFeeRupiah);
     const goldReceivedGrams = goldReceivedRupiah > 0 ? goldReceivedRupiah / activeGoldPrice : 0;
+
+    const diamondAdminFee = Math.round(diamondSent * feeRate);
+    const diamondReceived = Math.max(0, diamondSent - diamondAdminFee);
+
+    const tokenAdminFee = Math.round(tokenSent * feeRate);
+    const tokenReceived = Math.max(0, tokenSent - tokenAdminFee);
+
+    const estimatedTotalValueRupiah =
+      uangSent +
+      goldRupiahSent +
+      coinSent * unitCoinPriceRp +
+      diamondSent * unitDiamondPriceRp +
+      tokenSent * unitTokenPriceRp;
 
     // Deduct sender gold FIFO batches
     let nextSenderBatches = [...(currentAccount.goldBatches || [])];
@@ -35631,10 +35707,14 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     const nextSenderGoldGrams = nextSenderBatches.reduce((s, b) => s + b.grams, 0);
 
-    const internalRecipient = accounts.find((a) => a.accountNumber === cleanRecAcc);
+    const internalRecipient = accounts.find(
+      (a) => a.accountNumber === cleanRecAcc || (a.userId16 && a.userId16 === cleanRecAcc)
+    );
     const nowIso = new Date().toISOString();
     const todayKey = getLocalDateKey();
-    const refNo = `TFB-${Date.now().toString().slice(-6)}`;
+    const refNo = input.fromQris
+      ? `QRM-${Date.now().toString().slice(-6)}`
+      : `TFB-${Date.now().toString().slice(-6)}`;
 
     setAccounts((prev) =>
       prev.map((acc) => {
@@ -35643,6 +35723,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ...acc,
             balance: isInf ? UNLIMITED_BALANCE : Math.max(0, acc.balance - uangSent),
             spinCoins: isCoinInf ? UNLIMITED_BALANCE : Math.max(0, (acc.spinCoins || 0) - coinSent),
+            diamonds: isDiamondInf ? UNLIMITED_BALANCE : Math.max(0, (acc.diamonds || 0) - diamondSent),
+            spinTokens: isTokenInf ? UNLIMITED_BALANCE : Math.max(0, (acc.spinTokens || 0) - tokenSent),
             goldGrams: goldGramsSent > 0 ? nextSenderGoldGrams : acc.goldGrams,
             goldBatches: goldGramsSent > 0 ? nextSenderBatches : acc.goldBatches,
           });
@@ -35651,6 +35733,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const recIsAdmin = isAdminCardAccount(acc);
           const recIsInf = recIsAdmin || isUnlimitedNumber(acc.balance);
           const recIsCoinInf = recIsAdmin || isUnlimitedNumber(acc.spinCoins);
+          const recIsDiamondInf = recIsAdmin || isUnlimitedNumber(acc.diamonds);
+          const recIsTokenInf = recIsAdmin || isUnlimitedNumber(acc.spinTokens);
           const recNewBatches = [...(acc.goldBatches || [])];
           if (goldReceivedGrams > 0) {
             recNewBatches.push({
@@ -35662,7 +35746,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               pricePerGramAtBuy: activeGoldPrice,
               goldForm: acc.goldPreferredForm || 'batangan',
               motif: acc.goldPreferredMotif || 'klasik',
-              note: `Kiriman Transfer Bebas dari ${currentAccount.fullName}`,
+              note: `Kiriman ${input.fromQris ? 'QRIS Multi-Aset' : 'Transfer Bebas'} dari ${currentAccount.fullName}`,
             });
           }
           const recGoldGrams =
@@ -35673,6 +35757,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             ...acc,
             balance: recIsInf ? UNLIMITED_BALANCE : acc.balance + uangReceived,
             spinCoins: recIsCoinInf ? UNLIMITED_BALANCE : (acc.spinCoins || 0) + coinReceived,
+            diamonds: recIsDiamondInf ? UNLIMITED_BALANCE : (acc.diamonds || 0) + diamondReceived,
+            spinTokens: recIsTokenInf ? UNLIMITED_BALANCE : (acc.spinTokens || 0) + tokenReceived,
             goldGrams: recGoldGrams,
             goldBatches: goldReceivedGrams > 0 ? recNewBatches : acc.goldBatches,
           });
@@ -35683,27 +35769,36 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const assetLabelParts: string[] = [];
     if (uangSent > 0) assetLabelParts.push(`Uang ${formatRupiah(uangSent)}`);
-    if (coinSent > 0) assetLabelParts.push(`${coinSent.toLocaleString('id-ID')} Coin`);
     if (goldRupiahSent > 0)
       assetLabelParts.push(`Emas ${goldGramsSent.toFixed(4)} g (${formatRupiah(goldRupiahSent)})`);
+    if (coinSent > 0) assetLabelParts.push(`${coinSent.toLocaleString('id-ID')} Coin Spin`);
+    if (diamondSent > 0) assetLabelParts.push(`${diamondSent.toLocaleString('id-ID')} Permata`);
+    if (tokenSent > 0) assetLabelParts.push(`${tokenSent.toLocaleString('id-ID')} Token Bingkai`);
+
+    const txPrefix = input.fromQris ? 'Transfer QRIS Multi-Aset' : 'Transfer Bebas Multi-Aset';
 
     const senderTx: Transaction = {
       id: `tx-tfb-out-${Date.now()}`,
       accountId: currentAccount.id,
       type: 'transfer_bebas_out',
-      title: `Transfer Bebas (${feePercent}% Admin) ke ${internalRecipient?.fullName || cleanRecName}`,
-      amount: uangSent + goldRupiahSent,
+      title: `${txPrefix} (${feePercent}% Admin) ke ${internalRecipient?.fullName || cleanRecName}`,
+      amount: estimatedTotalValueRupiah,
       goldGrams: goldGramsSent || undefined,
       coinAmount: coinSent || undefined,
-      adminFeeAmount: uangAdminFee + goldAdminFeeRupiah,
+      adminFeeAmount:
+        uangAdminFee +
+        goldAdminFeeRupiah +
+        coinAdminFee * unitCoinPriceRp +
+        diamondAdminFee * unitDiamondPriceRp +
+        tokenAdminFee * unitTokenPriceRp,
       senderAccount: currentAccount.accountNumber,
       senderName: currentAccount.fullName,
-      recipientAccount: cleanRecAcc,
+      recipientAccount: internalRecipient?.accountNumber || cleanRecAcc,
       recipientName: internalRecipient?.fullName || cleanRecName,
-      recipientBank: input.recipientBank || 'Transfer Bebas Lintas Aset',
-      description: `Dikirim: ${assetLabelParts.join(' + ')} · Potongan Admin ${feePercent}% ditanggung dari nominal kirim.${
-        input.note ? ` Catatan: ${input.note}` : ''
-      }`,
+      recipientBank: input.recipientBank || 'Bank Nusantara Multi-Aset',
+      description: `Dikirim: ${assetLabelParts.join(' + ')} (Estimasi nilai ${formatRupiah(
+        estimatedTotalValueRupiah
+      )}) · Potongan Admin ${feePercent}%.${input.note ? ` Catatan: ${input.note}` : ''}`,
       status: 'success',
       referenceNo: refNo,
       timestamp: nowIso,
@@ -35714,25 +35809,39 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (internalRecipient) {
       const receivedParts: string[] = [];
       if (uangReceived > 0) receivedParts.push(`Uang ${formatRupiah(uangReceived)}`);
-      if (coinReceived > 0) receivedParts.push(`${coinReceived.toLocaleString('id-ID')} Coin`);
       if (goldReceivedGrams > 0)
         receivedParts.push(
           `Emas ${goldReceivedGrams.toFixed(4)} g (${formatRupiah(goldReceivedRupiah)})`
         );
+      if (coinReceived > 0) receivedParts.push(`${coinReceived.toLocaleString('id-ID')} Coin Spin`);
+      if (diamondReceived > 0)
+        receivedParts.push(`${diamondReceived.toLocaleString('id-ID')} Permata`);
+      if (tokenReceived > 0)
+        receivedParts.push(`${tokenReceived.toLocaleString('id-ID')} Token Bingkai`);
+
+      const receivedEstValue =
+        uangReceived +
+        goldReceivedRupiah +
+        coinReceived * unitCoinPriceRp +
+        diamondReceived * unitDiamondPriceRp +
+        tokenReceived * unitTokenPriceRp;
+
       nextTxs.push({
         id: `tx-tfb-in-${Date.now() + 1}`,
         accountId: internalRecipient.id,
         type: 'transfer_bebas_in',
-        title: `Terima Transfer Bebas dari ${currentAccount.fullName}`,
-        amount: uangReceived + goldReceivedRupiah,
+        title: `Terima ${txPrefix} dari ${currentAccount.fullName}`,
+        amount: receivedEstValue,
         goldGrams: goldReceivedGrams || undefined,
         coinAmount: coinReceived || undefined,
         senderAccount: currentAccount.accountNumber,
         senderName: currentAccount.fullName,
         recipientAccount: internalRecipient.accountNumber,
         recipientName: internalRecipient.fullName,
-        recipientBank: 'Bank Nusantara Transfer Bebas',
-        description: `Bersih diterima (setelah admin ${feePercent}%): ${receivedParts.join(' + ')}`,
+        recipientBank: 'Bank Nusantara Multi-Aset',
+        description: `Bersih diterima (setelah admin ${feePercent}%): ${receivedParts.join(' + ')} (Estimasi nilai ${formatRupiah(
+          receivedEstValue
+        )})`,
         status: 'success',
         referenceNo: refNo,
         timestamp: nowIso,
@@ -35742,13 +35851,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     setTransactions((prev) => [...nextTxs, ...prev]);
     if (
-      uangSent + goldRupiahSent >=
+      estimatedTotalValueRupiah >=
       (adminTierNotificationConfigRef.current.highValueTxThreshold || 10_000_000)
     ) {
       emitAdminTierNotification({
         eventType: 'high_value_tx',
-        title: `💸 Transfer Bebas Bernilai Besar: ${formatRupiah(uangSent + goldRupiahSent)}`,
-        message: `${currentAccount.fullName} mengirim Transfer Bebas (${assetLabelParts.join(
+        title: `💸 ${txPrefix} Bernilai Besar: ${formatRupiah(estimatedTotalValueRupiah)}`,
+        message: `${currentAccount.fullName} mengirim ${txPrefix} (${assetLabelParts.join(
           ' + '
         )}) ke ${internalRecipient?.fullName || cleanRecName}.`,
         adminTargetTab: 'keuangan',
@@ -35759,18 +35868,21 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     playAtmSound('success');
     recordMissionActivities(currentAccount.id, [
       { metricKey: 'transfer_count', delta: 1 },
-      { metricKey: 'transfer_amount', delta: uangSent + goldRupiahSent },
+      { metricKey: 'transfer_amount', delta: estimatedTotalValueRupiah },
       { metricKey: 'any_tx', delta: 1 },
     ]);
     grantAccountXp(currentAccount.id, 'tx');
+    if (input.fromQris) {
+      grantAccountXp(currentAccount.id, 'qris');
+    }
 
     const receipt: TransferBebasReceipt = {
       referenceNo: refNo,
       timestamp: nowIso,
       assetMode: input.assetMode,
-      recipientAccount: cleanRecAcc,
+      recipientAccount: internalRecipient?.accountNumber || cleanRecAcc,
       recipientName: internalRecipient?.fullName || cleanRecName,
-      recipientBank: input.recipientBank || 'Tujuan Bebas',
+      recipientBank: input.recipientBank || 'Bank Nusantara',
       isInternalAccount: Boolean(internalRecipient),
       adminFeePercent: feePercent,
       uangSent,
@@ -35784,12 +35896,20 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       goldAdminFeeRupiah,
       goldReceivedRupiah,
       goldReceivedGrams,
+      diamondSent,
+      diamondAdminFee,
+      diamondReceived,
+      tokenSent,
+      tokenAdminFee,
+      tokenReceived,
+      estimatedTotalValueRupiah,
+      fromQris: Boolean(input.fromQris),
       note: input.note,
     };
 
     return {
       success: true,
-      message: `Transfer Bebas berhasil dikirim ke ${receipt.recipientName} (Biaya Admin ${feePercent}% dipotong dari nominal kirim)!`,
+      message: `${txPrefix} (${assetLabelParts.join(' + ')}) berhasil dikirim ke ${receipt.recipientName} (Biaya Admin ${feePercent}%)!`,
       receipt,
       transaction: senderTx,
     };

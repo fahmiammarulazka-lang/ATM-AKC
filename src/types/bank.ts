@@ -401,7 +401,7 @@ export interface DebtHistoryEntry {
 
 export type GoldFormType = 'batangan' | 'perhiasan';
 export type GoldMotifType = 'klasik' | 'nusantara' | 'royal_platinum';
-export type TransferBebasAssetMode = 'uang' | 'coin' | 'emas' | 'gabungan';
+export type TransferBebasAssetMode = 'uang' | 'coin' | 'emas' | 'permata' | 'token' | 'gabungan';
 
 export interface GoldBatchRecord {
   id: string;
@@ -466,6 +466,14 @@ export interface TransferBebasReceipt {
   goldAdminFeeRupiah: number;
   goldReceivedRupiah: number;
   goldReceivedGrams: number;
+  diamondSent?: number;
+  diamondAdminFee?: number;
+  diamondReceived?: number;
+  tokenSent?: number;
+  tokenAdminFee?: number;
+  tokenReceived?: number;
+  estimatedTotalValueRupiah?: number;
+  fromQris?: boolean;
   note?: string;
 }
 

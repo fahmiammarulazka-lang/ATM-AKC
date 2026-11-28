@@ -60,6 +60,16 @@ function normalizeBuatQrisUrl(raw: string): string {
   return `https://${trimmed}`;
 }
 
+export const OFFICIAL_BUATQRIS_MERCHANT_INFO = {
+  gatewaySiteLabel: 'buatqris.site',
+  gatewayUrl: 'https://app.buatqris.site',
+  merchantName: 'Bank Nusantara Diamond Official (buatqris.site)',
+  loginId: 'azkafahmiammarulazka1550.azkaakc',
+  accountId: 'user_6b01691c68be33.21495479',
+  webhookUrl: 'https://atm-akc.vercel.app/',
+  scopeDescription: 'Khusus Top-Up Permata (Diamond) di Toko Permata',
+} as const;
+
 export function getBuatQrisConfig(): BuatQrisConfig {
   const secretKey =
     readServerEnv('QRIS_SECRET_KEY') ||
@@ -70,7 +80,16 @@ export function getBuatQrisConfig(): BuatQrisConfig {
     readServerEnv('QRIS_ACCOUNT_ID') ||
     readServerEnv('QRIS_MERCHANT_ID') ||
     readServerEnv('BUATQRIS_ACCOUNT_ID') ||
-    readServerEnv('BUATQRIS_MERCHANT_ID');
+    readServerEnv('BUATQRIS_MERCHANT_ID') ||
+    OFFICIAL_BUATQRIS_MERCHANT_INFO.accountId;
+  const loginId =
+    readServerEnv('QRIS_LOGIN_ID') ||
+    readServerEnv('BUATQRIS_LOGIN_ID') ||
+    OFFICIAL_BUATQRIS_MERCHANT_INFO.loginId;
+  const webhookUrl =
+    readServerEnv('QRIS_WEBHOOK_URL') ||
+    readServerEnv('BUATQRIS_WEBHOOK_URL') ||
+    OFFICIAL_BUATQRIS_MERCHANT_INFO.webhookUrl;
   const webhookSecret =
     readServerEnv('QRIS_WEBHOOK_SECRET') ||
     readServerEnv('BUATQRIS_WEBHOOK_SECRET') ||
@@ -79,14 +98,12 @@ export function getBuatQrisConfig(): BuatQrisConfig {
   return {
     BUATQRIS_URL_SITE: normalizeBuatQrisUrl(
       readServerEnv('QRIS_GATEWAY_URL') ||
-        readServerEnv('BUATQRIS_URL_SITE', 'https://app.buatqris.site')
+        readServerEnv('BUATQRIS_URL_SITE', OFFICIAL_BUATQRIS_MERCHANT_INFO.gatewayUrl)
     ),
-    BUATQRIS_LOGIN_ID:
-      readServerEnv('QRIS_LOGIN_ID') || readServerEnv('BUATQRIS_LOGIN_ID', ''),
+    BUATQRIS_LOGIN_ID: loginId,
     ACCOUNT_ID: accountId,
     SECRET_KEY: secretKey,
-    WEBHOOK_URL:
-      readServerEnv('QRIS_WEBHOOK_URL') || readServerEnv('BUATQRIS_WEBHOOK_URL', ''),
+    WEBHOOK_URL: webhookUrl,
     BUATQRIS_API_KEY: secretKey,
     MERCHANT_ID: accountId,
     WEBHOOK_SECRET: webhookSecret,

@@ -13,6 +13,7 @@ import {
   checkBuatQrisStatusServer,
   getBuatQrisConfig,
   testBuatQrisGatewayServer,
+  OFFICIAL_BUATQRIS_MERCHANT_INFO,
 } from './buatQrisService';
 import {
   attachVisitorAnalyticsAndTierRoutes,
@@ -3738,6 +3739,15 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       : hasSecretKey && hasAccountId
       ? 'api'
       : 'emvco';
+    const activeLoginId = String(
+      adminQris.customLoginId || cfg.BUATQRIS_LOGIN_ID || OFFICIAL_BUATQRIS_MERCHANT_INFO.loginId
+    );
+    const activeAccountId = String(
+      adminQris.customAccountId || cfg.ACCOUNT_ID || OFFICIAL_BUATQRIS_MERCHANT_INFO.accountId
+    );
+    const activeWebhookUrl = String(
+      cfg.WEBHOOK_URL || OFFICIAL_BUATQRIS_MERCHANT_INFO.webhookUrl
+    );
     res.json({
       success: true,
       defaultMode: cfg.DEFAULT_MODE,
@@ -3752,7 +3762,12 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
       hasWebhookSecret,
       hasStaticQris,
       isManualActive,
-      manualMerchantName: adminQris.manualMerchantName || '',
+      manualMerchantName: adminQris.manualMerchantName || OFFICIAL_BUATQRIS_MERCHANT_INFO.merchantName,
+      merchantName: OFFICIAL_BUATQRIS_MERCHANT_INFO.merchantName,
+      loginId: activeLoginId,
+      accountId: activeAccountId,
+      webhookUrl: activeWebhookUrl,
+      scopeDescription: OFFICIAL_BUATQRIS_MERCHANT_INFO.scopeDescription,
       gatewayUrl: String(adminQris.customGatewayUrl || cfg.BUATQRIS_URL_SITE),
       activeMode,
       activeEngine: activeMode,
@@ -4158,10 +4173,33 @@ Berikan jawaban dalam Bahasa Indonesia yang sangat jelas, lengkap, ramah, dan mu
     });
   };
 
+  const setWebhookCorsHeaders = (_req: express.Request, res: express.Response) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Buatqris-Signature, X-Signature, X-Webhook-Secret, X-Secret-Key, X-Callback-Token, X-Account-Id, X-Merchant-Id'
+    );
+  };
+
+  app.options(['/api/qris/webhook', '/api/buatqris/webhook'], (req, res) => {
+    setWebhookCorsHeaders(req, res);
+    res.status(204).end();
+  });
+
   // Primary clean QRIS webhook endpoints + silent backward-compatible webhook alias
-  app.post('/api/qris/webhook', handleBuatQrisWebhook);
-  app.post('/api/buatqris/webhook', handleBuatQrisWebhook);
-  app.post('/', handleBuatQrisWebhook);
+  app.post('/api/qris/webhook', (req, res) => {
+    setWebhookCorsHeaders(req, res);
+    handleBuatQrisWebhook(req, res);
+  });
+  app.post('/api/buatqris/webhook', (req, res) => {
+    setWebhookCorsHeaders(req, res);
+    handleBuatQrisWebhook(req, res);
+  });
+  app.post('/', (req, res) => {
+    setWebhookCorsHeaders(req, res);
+    handleBuatQrisWebhook(req, res);
+  });
 
   // ==================== VISITOR ANALYTICS & ADMIN CARD TIER RBAC ====================
   attachVisitorAnalyticsAndTierRoutes({

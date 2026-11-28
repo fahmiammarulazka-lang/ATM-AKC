@@ -19,10 +19,12 @@ import {
   Image as ImageIcon,
   Send,
   XCircle,
+  MessageSquare,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import { formatRupiah } from '../utils/bankUtils';
 import {
+  OFFICIAL_BUATQRIS_MERCHANT_INFO,
   QrisValidationError,
   requestCheckQrisPaymentStatus,
   requestCreateQrisPayment,
@@ -828,6 +830,38 @@ export const BuatQrisPaymentModal: React.FC = () => {
                 )}
               </button>
             </div>
+
+            {/* Official Merchant Info Card (buatqris.site) */}
+            <div className="mt-2.5 w-full rounded-xl border border-sky-200 bg-sky-50/75 p-3 text-[11px] text-slate-700 space-y-1.5">
+              <div className="flex items-center justify-between gap-2 border-b border-sky-200/70 pb-1.5">
+                <span className="font-black text-sky-900 uppercase tracking-wider text-[10px]">
+                  Merchant Resmi Top-Up Permata ({OFFICIAL_BUATQRIS_MERCHANT_INFO.gatewaySiteLabel})
+                </span>
+                <span className="rounded-md bg-sky-600 px-1.5 py-0.5 text-[9px] font-black text-white uppercase">
+                  VERIFIED MERCHANT
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[10px]">
+                <div className="rounded-lg bg-white/90 border border-sky-100 px-2.5 py-1.5">
+                  <span className="text-slate-400 block">ID Login Merchant</span>
+                  <span className="font-mono font-bold text-slate-800 break-all">
+                    {OFFICIAL_BUATQRIS_MERCHANT_INFO.loginId}
+                  </span>
+                </div>
+                <div className="rounded-lg bg-white/90 border border-sky-100 px-2.5 py-1.5">
+                  <span className="text-slate-400 block">API Account ID</span>
+                  <span className="font-mono font-bold text-slate-800 break-all">
+                    {OFFICIAL_BUATQRIS_MERCHANT_INFO.accountId}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-1 pt-0.5 text-[10px] text-slate-500">
+                <span>
+                  Webhook: <strong className="font-mono text-slate-700">{OFFICIAL_BUATQRIS_MERCHANT_INFO.webhookUrl}</strong>
+                </span>
+                <span>+Kode Unik 3 Digit Otomatis</span>
+              </div>
+            </div>
           </div>
 
           {/* Panel Unggah Bukti Transfer untuk Mode QR Manual Admin */}
@@ -925,6 +959,30 @@ export const BuatQrisPaymentModal: React.FC = () => {
               )}
             </div>
             <p className="mt-1.5 text-[11px] text-slate-500">{lastCheckNote}</p>
+
+            {/* Bantuan Gangguan Server buatqris.site -> Arahkan ke Nusantara Chat */}
+            {!isPaid && (
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50/85 px-3 py-2 text-[11px] text-amber-950">
+                <span className="font-medium">
+                  Server <strong>buatqris.site</strong> sedang sibuk atau kendala konfirmasi?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveQrisModalOrder(null);
+                    window.dispatchEvent(
+                      new CustomEvent('bn:navigate', {
+                        detail: { targetView: 'chat' },
+                      })
+                    );
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 px-2.5 py-1 text-[11px] font-black text-slate-950 transition cursor-pointer whitespace-nowrap"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  <span>Hubungi Admin di Nusantara Chat</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
