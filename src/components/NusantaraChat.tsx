@@ -101,6 +101,7 @@ import {
 import { formatRupiah, isUnlimitedNumber } from '../utils/bankUtils';
 import { useAdminAnalyticsAndTierSync } from '../hooks/useAdminAnalyticsAndTierSync';
 import { isAccountDisguisedAdmin } from '../types/adminAnalyticsAndTier';
+import { getAccountLevelSnapshot } from '../data/levelSystemCatalog';
 import { PinPromptModal } from './PinPromptModal';
 import { ProfileAvatarBadge } from './ProfileAvatarBadge';
 import {
@@ -3169,10 +3170,28 @@ export const NusantaraChat: React.FC = () => {
                                 loyaltyPoints: publicPts,
                                 txCount: senderAccountObj ? transactions.filter((t) => t.accountId === senderAccountObj.id).length : 0,
                               });
+                              const lvlSnap = senderAccountObj
+                                ? getAccountLevelSnapshot(senderAccountObj, {
+                                    isDisguisedViewer: isSenderDisguised,
+                                  })
+                                : null;
                               return (
-                                <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${rank.badgeClass}`}>
-                                  {isSenderDisguised ? rank.title : msg.senderReputationLabel || rank.title}
-                                </span>
+                                <>
+                                  {lvlSnap && (
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded-md text-[9px] font-mono font-black tabular-nums border ${
+                                        lvlSnap.isInfinity
+                                          ? 'bg-gradient-to-r from-amber-400 to-yellow-300 text-slate-950 border-amber-300'
+                                          : 'bg-indigo-500/20 text-indigo-200 border-indigo-400/40'
+                                      }`}
+                                    >
+                                      {lvlSnap.shortLabel}
+                                    </span>
+                                  )}
+                                  <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${rank.badgeClass}`}>
+                                    {isSenderDisguised ? rank.title : msg.senderReputationLabel || rank.title}
+                                  </span>
+                                </>
                               );
                             })()}
                             {(msg.senderMoodText || (senderAccountObj && socialChatPreferencesMap[senderAccountObj.id]?.moodLabel)) && (
@@ -5156,10 +5175,28 @@ export const NusantaraChat: React.FC = () => {
                                       loyaltyPoints: publicPts,
                                       txCount: senderAccountObj ? transactions.filter((t) => t.accountId === senderAccountObj.id).length : 0,
                                     });
+                                    const lvlSnap = senderAccountObj
+                                      ? getAccountLevelSnapshot(senderAccountObj, {
+                                          isDisguisedViewer: isSenderDisguised,
+                                        })
+                                      : null;
                                     return (
-                                      <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${rank.badgeClass}`}>
-                                        {isSenderDisguised ? rank.title : msg.senderReputationLabel || rank.title}
-                                      </span>
+                                      <>
+                                        {lvlSnap && (
+                                          <span
+                                            className={`px-1.5 py-0.5 rounded-md text-[9px] font-mono font-black tabular-nums border ${
+                                              lvlSnap.isInfinity
+                                                ? 'bg-gradient-to-r from-amber-400 to-yellow-300 text-slate-950 border-amber-300'
+                                                : 'bg-indigo-500/20 text-indigo-200 border-indigo-400/40'
+                                            }`}
+                                          >
+                                            {lvlSnap.shortLabel}
+                                          </span>
+                                        )}
+                                        <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border ${rank.badgeClass}`}>
+                                          {isSenderDisguised ? rank.title : msg.senderReputationLabel || rank.title}
+                                        </span>
+                                      </>
                                     );
                                   })()}
                                   {msg.expiresAtMs && (

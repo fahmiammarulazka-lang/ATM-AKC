@@ -48,6 +48,12 @@ import {
   Sparkles,
   ArrowRight,
   Snowflake,
+  Crown,
+  Gift,
+  Infinity as InfinityIcon,
+  Layers,
+  Target,
+  Zap,
 } from 'lucide-react';
 import { useBank } from '../context/BankContext';
 import {
@@ -74,9 +80,24 @@ import {
   PROFILE_RENAME_DIAMOND_COST,
   getFeaturedTitleById,
 } from '../data/profileCustomizationCatalog';
+import {
+  PROFILE_ACHIEVEMENTS,
+  PROFILE_ACHIEVEMENT_CATEGORY_LABELS,
+  PROFILE_ACHIEVEMENT_TIER_META,
+  ProfileAchievementCategory,
+  computeProfileAchievementMetrics,
+  evaluateProfileAchievements,
+  isTitleUnlockedForAccount,
+} from '../data/profileAchievementsCatalog';
+import {
+  MAX_REGULAR_ACCOUNT_LEVEL,
+  formatMilestoneRewardSummary,
+  getAccountLevelSnapshot,
+  normalizeAccountLevelSystemConfig,
+} from '../data/levelSystemCatalog';
 import { DevRoleConfig } from '../types/bank';
 
-type ProfileTabKey = 'ringkasan' | 'identitas' | 'aksi_favorit' | 'keamanan';
+type ProfileTabKey = 'ringkasan' | 'identitas' | 'aksi_favorit' | 'keamanan' | 'achievement';
 
 interface UserProfileStatsModalProps {
   isOpen: boolean;
@@ -181,6 +202,16 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     changePin,
     toggleCardFreezeWithPin,
     setIsDiamondStoreOpen,
+    missionProgressByAccount,
+    qrisOrders,
+    frameSpinHistory,
+    globalChats,
+    chats,
+    claimProfileAchievement,
+    claimAllReadyProfileAchievements,
+    levelSystemConfig,
+    syncAccountInitialLevelFromHistory,
+    claimPendingSyncLevelRewards,
   } = useBank();
 
   const [frameMotionMode, setFrameMotionMode] = useFrameMotionMode();
@@ -241,6 +272,18 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     text: string;
   } | null>(null);
 
+  // State Tab Achievement & Level XP
+  const [achCategoryFilter, setAchCategoryFilter] = useState<'all' | ProfileAchievementCategory>('all');
+  const [achStatusFilter, setAchStatusFilter] = useState<'all' | 'ready' | 'claimed' | 'locked'>('all');
+  const [achievementFeedback, setAchievementFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+  const [levelSyncFeedback, setLevelSyncFeedback] = useState<{
+    type: 'success' | 'error';
+    text: string;
+  } | null>(null);
+
   // Sinkronisasi draft ketika modal dibuka atau akun berganti
   useEffect(() => {
     if (!isOpen || !currentAccount) return;
@@ -250,13 +293,26 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     setCityDraft(currentAccount.city || '');
     setAvatarPresetDraft(currentAccount.avatarPresetId || '');
     setAvatarFrameDraft(currentAccount.avatarFrameId || 'frame-clean');
-    setFeaturedTitleDraft(currentAccount.featuredTitle || '');
+    const validFeaturedTitle =
+      currentAccount.featuredTitle &&
+      isTitleUnlockedForAccount(currentAccount, currentAccount.featuredTitle)
+        ? currentAccount.featuredTitle
+        : '';
+    setFeaturedTitleDraft(validFeaturedTitle);
+    if (currentAccount.featuredTitle && !validFeaturedTitle) {
+      updateAccountProfileDetails({ featuredTitle: '' });
+    }
+    if (!currentAccount.levelSyncInitialized) {
+      syncAccountInitialLevelFromHistory(currentAccount.id);
+    }
     setRenameInput(currentAccount.fullName);
     setRenameFeedback(null);
     setIdentityFeedback(null);
     setFavFeedback(null);
     setPinFeedback(null);
     setFreezeFeedback(null);
+    setAchievementFeedback(null);
+    setLevelSyncFeedback(null);
     setExportFeedback('');
   }, [isOpen, currentAccount?.id]);
 
@@ -441,7 +497,55 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     leaderboardConfig,
   ]);
 
-  if (!isOpen || !currentAccount || !stats) return null;
+  const achievementBundle = useMemo(() => {
+    if (!currentAccount) return null;
+    const goldPrice =
+      currentAccount.customUserGoldPricePerGram && currentAccount.customUserGoldPricePerGram > 0
+        ? currentAccount.customUserGoldPricePerGram
+        : goldMarketConfig?.currentPricePerGram || 1_450_000;
+    const metrics = computeProfileAchievementMetrics({
+      account: currentAccount,
+      transactions,
+      pockets,
+      dreamPockets,
+      depositos,
+      families,
+      loyaltyState: loyaltyMap[currentAccount.id],
+      missionProgressByAccount: missionProgressByAccount?.[currentAccount.id],
+      qrisOrders,
+      frameSpinHistory,
+      globalChats,
+      privateChats: chats,
+      goldPricePerGram: goldPrice,
+    });
+    return evaluateProfileAchievements(metrics, currentAccount.profileAchievementClaims);
+  }, [
+    currentAccount,
+    transactions,
+    pockets,
+    dreamPockets,
+    depositos,
+    families,
+    loyaltyMap,
+    missionProgressByAccount,
+    qrisOrders,
+    frameSpinHistory,
+    globalChats,
+    chats,
+    goldMarketConfig,
+  ]);
+
+  const accountLevelSnapshot = useMemo(
+    () => getAccountLevelSnapshot(currentAccount),
+    [currentAccount]
+  );
+
+  const normalizedLevelCfg = useMemo(
+    () => normalizeAccountLevelSystemConfig(levelSystemConfig),
+    [levelSystemConfig]
+  );
+
+  if (!isOpen || !currentAccount || !stats || !achievementBundle) return null;
 
   const activeDevRole = currentAccount.devRoleId
     ? devRoles.find((r) => r.id === currentAccount.devRoleId) || null
@@ -456,8 +560,16 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
   const isUnlimitedBal = isAdminCard || isUnlimitedNumber(currentAccount.balance);
   const isPrivacyMasked = Boolean(currentAccount.hideSensitiveNumbers);
   const totalDiamondText = formatAssetCount(currentAccount.diamonds || 0, { isAdmin: isAdminCard });
-  const activeFeaturedTitle = getFeaturedTitleById(currentAccount.featuredTitle);
+  const activeFeaturedTitle =
+    currentAccount.featuredTitle &&
+    isTitleUnlockedForAccount(currentAccount, currentAccount.featuredTitle)
+      ? getFeaturedTitleById(currentAccount.featuredTitle)
+      : undefined;
   const renameHistory = currentAccount.nameChangeHistory || [];
+  const pendingLevelSyncCount = (currentAccount.pendingSyncLevelRewardLevels || []).length;
+  const unlockedTitlesCount = FEATURED_TITLES.filter((t) =>
+    isTitleUnlockedForAccount(currentAccount, t.id)
+  ).length;
 
   const handleQuickSyncCloud = async () => {
     if (isQuickSyncing) return;
@@ -708,11 +820,19 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
   const hasEnoughDiamondsForRename =
     isAdminCard || (currentAccount.diamonds || 0) >= PROFILE_RENAME_DIAMOND_COST;
 
-  const tabs: Array<{ key: ProfileTabKey; label: string; icon: React.ReactNode }> = [
+  const achievementTabAlertCount = achievementBundle.readyCount + pendingLevelSyncCount;
+
+  const tabs: Array<{ key: ProfileTabKey; label: string; icon: React.ReactNode; badge?: number }> = [
     { key: 'ringkasan', label: 'Ringkasan', icon: <BarChart3 className="w-4 h-4 shrink-0" /> },
     { key: 'identitas', label: 'Identitas & Kartu', icon: <UserCheck className="w-4 h-4 shrink-0" /> },
     { key: 'aksi_favorit', label: 'Aksi & Favorit', icon: <Sparkles className="w-4 h-4 shrink-0" /> },
     { key: 'keamanan', label: 'Keamanan & PIN', icon: <ShieldCheck className="w-4 h-4 shrink-0" /> },
+    {
+      key: 'achievement',
+      label: 'Achievement',
+      icon: <Trophy className="w-4 h-4 shrink-0" />,
+      badge: achievementTabAlertCount,
+    },
   ];
 
   const modalContent = (
@@ -791,6 +911,21 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
 
               <div className="mt-1.5 flex items-center gap-x-2.5 gap-y-1 flex-wrap text-[11px] sm:text-xs text-slate-600">
                 <span className="font-semibold text-slate-800">{stats.tierLabel}</span>
+                <span className="text-slate-300">|</span>
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-mono font-bold text-[11px] ${
+                    accountLevelSnapshot.isInfinity
+                      ? 'bg-amber-50 border-amber-300 text-amber-800'
+                      : 'bg-indigo-50 border-indigo-200 text-indigo-800'
+                  }`}
+                >
+                  {accountLevelSnapshot.isInfinity ? (
+                    <Crown className="w-3 h-3 text-amber-600 shrink-0" />
+                  ) : (
+                    <Layers className="w-3 h-3 text-indigo-600 shrink-0" />
+                  )}
+                  <span>{accountLevelSnapshot.displayLabel}</span>
+                </span>
                 {currentAccount.city && (
                   <>
                     <span className="text-slate-300">|</span>
@@ -850,6 +985,15 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                 >
                   {tab.icon}
                   <span>{tab.label}</span>
+                  {typeof tab.badge === 'number' && tab.badge > 0 && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono tabular-nums font-black ${
+                        isActive ? 'bg-amber-400 text-slate-950' : 'bg-emerald-600 text-white'
+                      }`}
+                    >
+                      {tab.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -1118,11 +1262,57 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3 min-w-0">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                    <Briefcase className="w-4 h-4 text-indigo-600 shrink-0" />
-                    Progres Level Karir & Celengan
-                  </h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                      <Briefcase className="w-4 h-4 text-indigo-600 shrink-0" />
+                      Progres Level Akun, Karir &amp; Celengan
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('achievement')}
+                      className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                    >
+                      Lihat Hadiah Level →
+                    </button>
+                  </div>
+
+                  {/* Level Akun XP (Lv. 1-100 / Admin Infinity) */}
                   <div>
+                    <div className="flex items-center justify-between gap-2 text-xs mb-1">
+                      <span className="text-slate-700 font-semibold flex items-center gap-1">
+                        <Layers className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+                        <span>Level Akun XP</span>
+                      </span>
+                      <span
+                        className={`font-bold font-mono tabular-nums shrink-0 ${
+                          accountLevelSnapshot.isInfinity ? 'text-amber-600' : 'text-cyan-700'
+                        }`}
+                      >
+                        {accountLevelSnapshot.isInfinity
+                          ? 'Lv. ∞ (Tier Admin)'
+                          : `Lv. ${accountLevelSnapshot.level} / ${MAX_REGULAR_ACCOUNT_LEVEL} (${accountLevelSnapshot.progressPct}%)`}
+                      </span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${
+                          accountLevelSnapshot.isInfinity
+                            ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500'
+                            : 'bg-gradient-to-r from-cyan-500 to-indigo-600'
+                        }`}
+                        style={{ width: `${accountLevelSnapshot.progressPct}%` }}
+                      />
+                    </div>
+                    {!accountLevelSnapshot.isInfinity && !accountLevelSnapshot.isMaxLevel && (
+                      <p className="text-[10px] text-slate-500 font-mono tabular-nums mt-1">
+                        {accountLevelSnapshot.xpInCurrentLevel.toLocaleString('id-ID')} /{' '}
+                        {accountLevelSnapshot.xpForNextLevel.toLocaleString('id-ID')} XP menuju Lv.{' '}
+                        {accountLevelSnapshot.level + 1}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="pt-1 border-t border-slate-100">
                     <div className="flex items-center justify-between gap-2 text-xs mb-1">
                       <span className="text-slate-600 font-medium">Level Pekerjaan</span>
                       <span
@@ -1137,7 +1327,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                           : `Level ${stats.currentLevel} / 50`}
                       </span>
                     </div>
-                    <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
                       <div
                         className={`h-full rounded-full ${
                           isAdminCard || isUnlimitedNumber(stats.currentLevel)
@@ -1601,19 +1791,24 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                   </div>
                 </div>
 
-                {/* Pilihan Gelar Unggulan */}
-                <div>
-                  <p className="text-xs font-semibold text-slate-700 mb-2">
-                    Pajang Gelar / Lencana Unggulan di Profil
-                  </p>
-                  <div className="flex flex-wrap gap-2">
+                {/* Pilihan Gelar Unggulan Berbasis Syarat Achievement & Hadiah Level */}
+                <div className="pt-2 border-t border-slate-200/80 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-800">
+                        Pajang Gelar / Lencana Unggulan di Profil ({unlockedTitlesCount}/{FEATURED_TITLES.length} Terbuka)
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Gelar terkunci otomatis terbuka setelah syarat Achievement diklaim atau diraih dari hadiah naik Level.
+                      </p>
+                    </div>
                     <button
                       type="button"
                       onClick={() => {
                         setFeaturedTitleDraft('');
                         handleQuickSaveAppearance(undefined, undefined, '');
                       }}
-                      className={`min-h-[38px] px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer ${
+                      className={`min-h-[34px] px-3 py-1 rounded-lg border text-xs font-semibold cursor-pointer shrink-0 ${
                         !featuredTitleDraft
                           ? 'border-slate-900 bg-slate-900 text-white'
                           : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
@@ -1621,24 +1816,141 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                     >
                       Tanpa Gelar
                     </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {FEATURED_TITLES.map((item) => {
-                      const active = featuredTitleDraft === item.id;
+                      const unlocked = isTitleUnlockedForAccount(currentAccount, item.id);
+                      const active = featuredTitleDraft === item.id && unlocked;
+                      const achEval = achievementBundle.byTitleId[item.id];
+                      const isReadyToClaim = !unlocked && achEval?.status === 'ready';
+                      const fmtCurrent = achEval
+                        ? achEval.definition.formatValue
+                          ? achEval.definition.formatValue(achEval.currentValue)
+                          : String(achEval.currentValue)
+                        : '0';
+                      const fmtTarget = achEval
+                        ? achEval.definition.formatValue
+                          ? achEval.definition.formatValue(achEval.targetValue)
+                          : String(achEval.targetValue)
+                        : '1';
+
                       return (
-                        <button
+                        <div
                           key={item.id}
-                          type="button"
-                          onClick={() => {
-                            setFeaturedTitleDraft(item.id);
-                            handleQuickSaveAppearance(undefined, undefined, item.id);
-                          }}
-                          className={`min-h-[38px] px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${
+                          className={`rounded-xl border p-3 flex flex-col justify-between gap-2 transition-colors ${
                             active
-                              ? 'border-blue-600 bg-blue-600 text-white'
-                              : `${item.toneClass} hover:opacity-90`
+                              ? 'border-blue-600 bg-blue-50/70'
+                              : unlocked
+                              ? 'border-emerald-200 bg-emerald-50/35'
+                              : isReadyToClaim
+                              ? 'border-amber-300 bg-amber-50/50'
+                              : 'border-slate-200 bg-slate-50/80'
                           }`}
                         >
-                          {item.label}
-                        </button>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span
+                                  className={`inline-flex items-center gap-1 text-[11px] font-bold border px-2 py-0.5 rounded-md ${item.toneClass}`}
+                                >
+                                  {unlocked ? (
+                                    <Award className="w-3 h-3 shrink-0" />
+                                  ) : (
+                                    <Lock className="w-3 h-3 shrink-0" />
+                                  )}
+                                  <span>{item.label}</span>
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-600 mt-1.5 leading-snug">
+                                Syarat: {item.requirementSummary}
+                              </p>
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                                active
+                                  ? 'bg-blue-600 text-white'
+                                  : unlocked
+                                  ? 'bg-emerald-600 text-white'
+                                  : isReadyToClaim
+                                  ? 'bg-amber-500 text-slate-950'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {active
+                                ? 'Dipakai'
+                                : unlocked
+                                ? 'Terbuka'
+                                : isReadyToClaim
+                                ? 'Siap Klaim'
+                                : 'Terkunci'}
+                            </span>
+                          </div>
+
+                          {!unlocked && achEval && (
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-slate-500">
+                                <span>
+                                  {fmtCurrent} / {fmtTarget}
+                                </span>
+                                <span>{achEval.progressPct}%</span>
+                              </div>
+                              <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full ${
+                                    isReadyToClaim ? 'bg-amber-500' : 'bg-slate-500'
+                                  }`}
+                                  style={{ width: `${achEval.progressPct}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-end gap-2 pt-0.5">
+                            {unlocked ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = active ? '' : item.id;
+                                  setFeaturedTitleDraft(next);
+                                  handleQuickSaveAppearance(undefined, undefined, next);
+                                }}
+                                className={`min-h-[32px] px-3 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
+                                  active
+                                    ? 'bg-slate-800 text-white hover:bg-slate-900'
+                                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                                }`}
+                              >
+                                {active ? 'Lepas Gelar' : 'Pasang Gelar'}
+                              </button>
+                            ) : isReadyToClaim && achEval ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const res = claimProfileAchievement(achEval.definition.id);
+                                  setIdentityFeedback({
+                                    type: res.success ? 'success' : 'error',
+                                    text: res.message,
+                                  });
+                                  if (res.success) {
+                                    setFeaturedTitleDraft(item.id);
+                                  }
+                                }}
+                                className="min-h-[32px] px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-extrabold cursor-pointer"
+                              >
+                                Klaim &amp; Buka Gelar
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setActiveTab('achievement')}
+                                className="min-h-[32px] px-2.5 py-1 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-semibold cursor-pointer"
+                              >
+                                Cek Achievement
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       );
                     })}
                   </div>
@@ -2317,6 +2629,387 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                     {currentAccount.allowInternational ? 'Internasional Aktif' : 'Domestik Aktif'}
                   </p>
                 </div>
+              </div>
+            </>
+          )}
+
+          {/* ======================= TAB 5: ACHIEVEMENT & LEVEL XP ======================= */}
+          {activeTab === 'achievement' && (
+            <>
+              {/* Kartu Level Akun XP & Hadiah Milestone Admin */}
+              <div className="rounded-2xl border border-slate-200 bg-slate-900 text-white p-4 sm:p-5 space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Level Akun Nasabah (XP Aktivitas Perbankan)</span>
+                    </div>
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                      <span
+                        className={`px-3 py-1 rounded-xl font-mono font-black text-base inline-flex items-center gap-1.5 ${
+                          accountLevelSnapshot.isInfinity
+                            ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-400 text-slate-950'
+                            : 'bg-indigo-600 text-white'
+                        }`}
+                      >
+                        {accountLevelSnapshot.isInfinity && <InfinityIcon className="w-4 h-4" />}
+                        <span>{accountLevelSnapshot.displayLabel}</span>
+                      </span>
+                      <span className="text-xs text-slate-300 font-mono tabular-nums">
+                        {accountLevelSnapshot.isInfinity
+                          ? 'Tier Admin: Level Maksimal Tak Terbatas (∞)'
+                          : accountLevelSnapshot.isMaxLevel
+                          ? `Level Maksimal ${MAX_REGULAR_ACCOUNT_LEVEL} · Total ${accountLevelSnapshot.xp.toLocaleString('id-ID')} XP`
+                          : `${accountLevelSnapshot.xp.toLocaleString('id-ID')} Total XP · Butuh ${(
+                              accountLevelSnapshot.xpForNextLevel - accountLevelSnapshot.xpInCurrentLevel
+                            ).toLocaleString('id-ID')} XP lagi ke Lv. ${accountLevelSnapshot.level + 1}`}
+                      </span>
+                    </div>
+                  </div>
+                  {pendingLevelSyncCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = claimPendingSyncLevelRewards();
+                        setLevelSyncFeedback({
+                          type: res.success ? 'success' : 'error',
+                          text: res.message,
+                        });
+                      }}
+                      className="min-h-[40px] px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 text-slate-950 text-xs font-black inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+                    >
+                      <Gift className="w-4 h-4" />
+                      <span>Klaim {pendingLevelSyncCount} Hadiah Sinkronisasi Level</span>
+                    </button>
+                  )}
+                </div>
+
+                {!accountLevelSnapshot.isInfinity && (
+                  <div className="space-y-1">
+                    <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-cyan-400 via-indigo-400 to-amber-300 transition-all"
+                        style={{ width: `${accountLevelSnapshot.progressPct}%` }}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+                      <span>
+                        XP didapat dari Transaksi, QRIS, Emas, Misi, Streak, Spin &amp; Klaim Achievement
+                      </span>
+                      {(() => {
+                        const nextMs = normalizedLevelCfg.milestones.find(
+                          (m) => m.enabled && m.levelTarget > accountLevelSnapshot.level
+                        );
+                        return nextMs ? (
+                          <span className="text-amber-300 font-semibold">
+                            Target Berikutnya Lv. {nextMs.levelTarget}: {formatMilestoneRewardSummary(nextMs)}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {levelSyncFeedback && (
+                  <div
+                    className={`rounded-xl px-3.5 py-2 text-xs font-semibold border ${
+                      levelSyncFeedback.type === 'success'
+                        ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200'
+                        : 'bg-rose-950/60 border-rose-500/40 text-rose-200'
+                    }`}
+                  >
+                    {levelSyncFeedback.text}
+                  </div>
+                )}
+              </div>
+
+              {/* Strip KPI Achievement + Tombol Klaim Semua */}
+              <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                      <Trophy className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span>Koleksi Achievement Bank Nusantara ({PROFILE_ACHIEVEMENTS.length})</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      12 Achievement unggulan membuka Gelar Eksklusif &amp; 16 Achievement lainnya menganugerahkan Piala + Poin Achievement (tanpa saldo).
+                    </p>
+                  </div>
+                  {achievementBundle.readyCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = claimAllReadyProfileAchievements();
+                        setAchievementFeedback({
+                          type: res.success ? 'success' : 'error',
+                          text: res.message,
+                        });
+                      }}
+                      className="min-h-[38px] px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold inline-flex items-center gap-1.5 cursor-pointer shrink-0"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Klaim Semua ({achievementBundle.readyCount})</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-slate-500">Terklaim</p>
+                    <p className="text-base font-black text-slate-900 font-mono tabular-nums mt-0.5">
+                      {achievementBundle.claimedCount} / {PROFILE_ACHIEVEMENTS.length}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                    <p className="text-emerald-700 font-medium">Siap Diklaim</p>
+                    <p className="text-base font-black text-emerald-900 font-mono tabular-nums mt-0.5">
+                      {achievementBundle.readyCount} Item
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                    <p className="text-amber-700 font-medium">Poin Achievement</p>
+                    <p className="text-base font-black text-amber-950 font-mono tabular-nums mt-0.5">
+                      {achievementBundle.totalPoints.toLocaleString('id-ID')} Poin
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3">
+                    <p className="text-indigo-700 font-medium">Gelar Terbuka</p>
+                    <p className="text-base font-black text-indigo-950 font-mono tabular-nums mt-0.5">
+                      {unlockedTitlesCount} / {FEATURED_TITLES.length}
+                    </p>
+                  </div>
+                </div>
+
+                {achievementFeedback && (
+                  <div
+                    className={`rounded-xl px-3.5 py-2.5 text-xs font-semibold border ${
+                      achievementFeedback.type === 'success'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-rose-50 border-rose-200 text-rose-800'
+                    }`}
+                  >
+                    {achievementFeedback.text}
+                  </div>
+                )}
+
+                {/* Filter Kategori & Status */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                    <button
+                      type="button"
+                      onClick={() => setAchCategoryFilter('all')}
+                      className={`min-h-[32px] px-3 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap cursor-pointer ${
+                        achCategoryFilter === 'all'
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      Semua Kategori ({PROFILE_ACHIEVEMENTS.length})
+                    </button>
+                    {(
+                      Object.keys(
+                        PROFILE_ACHIEVEMENT_CATEGORY_LABELS
+                      ) as ProfileAchievementCategory[]
+                    ).map((catKey) => (
+                      <button
+                        key={catKey}
+                        type="button"
+                        onClick={() => setAchCategoryFilter(catKey)}
+                        className={`min-h-[32px] px-3 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap cursor-pointer ${
+                          achCategoryFilter === catKey
+                            ? 'bg-slate-900 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {PROFILE_ACHIEVEMENT_CATEGORY_LABELS[catKey]}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(
+                      [
+                        { id: 'all', label: 'Semua Status' },
+                        { id: 'ready', label: `Siap Klaim (${achievementBundle.readyCount})` },
+                        { id: 'claimed', label: `Terklaim (${achievementBundle.claimedCount})` },
+                        {
+                          id: 'locked',
+                          label: `Terkunci (${
+                            PROFILE_ACHIEVEMENTS.length -
+                            achievementBundle.claimedCount -
+                            achievementBundle.readyCount
+                          })`,
+                        },
+                      ] as const
+                    ).map((st) => (
+                      <button
+                        key={st.id}
+                        type="button"
+                        onClick={() => setAchStatusFilter(st.id)}
+                        className={`min-h-[30px] px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer ${
+                          achStatusFilter === st.id
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {st.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid Kartu Achievement */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {achievementBundle.items
+                  .filter(
+                    (it) =>
+                      (achCategoryFilter === 'all' ||
+                        it.definition.category === achCategoryFilter) &&
+                      (achStatusFilter === 'all' || it.status === achStatusFilter)
+                  )
+                  .map((item) => {
+                    const tierMeta = PROFILE_ACHIEVEMENT_TIER_META[item.definition.tier];
+                    const fmtCurr = item.definition.formatValue
+                      ? item.definition.formatValue(item.currentValue)
+                      : String(item.currentValue);
+                    const fmtTarget = item.definition.formatValue
+                      ? item.definition.formatValue(item.targetValue)
+                      : String(item.targetValue);
+
+                    return (
+                      <div
+                        key={item.definition.id}
+                        className={`rounded-xl border p-4 flex flex-col justify-between gap-3 ${
+                          item.status === 'ready'
+                            ? 'border-emerald-300 bg-emerald-50/40'
+                            : item.status === 'claimed'
+                            ? 'border-slate-200 bg-white'
+                            : 'border-slate-200 bg-slate-50/75'
+                        }`}
+                      >
+                        <div className="space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div
+                                className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 ${
+                                  item.status === 'claimed'
+                                    ? 'bg-amber-50 border-amber-200 text-amber-600'
+                                    : item.status === 'ready'
+                                    ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
+                                    : 'bg-slate-100 border-slate-200 text-slate-400'
+                                }`}
+                              >
+                                <Trophy className="w-4 h-4" />
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className="text-xs font-extrabold text-slate-900 break-words">
+                                  {item.definition.title}
+                                </h4>
+                                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded border text-[10px] font-bold ${tierMeta.badgeClass}`}
+                                  >
+                                    {tierMeta.label}
+                                  </span>
+                                  <span className="text-[10px] font-mono font-bold text-slate-600">
+                                    +{item.definition.points} Poin
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                                item.status === 'claimed'
+                                  ? 'bg-emerald-600 text-white'
+                                  : item.status === 'ready'
+                                  ? 'bg-amber-400 text-slate-950'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {item.status === 'claimed'
+                                ? 'Terklaim'
+                                : item.status === 'ready'
+                                ? 'Siap Klaim'
+                                : 'Terkunci'}
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] text-slate-600 leading-relaxed">
+                            {item.definition.description}
+                          </p>
+
+                          <div className="rounded-lg bg-white border border-slate-200/80 px-2.5 py-2 space-y-1.5">
+                            <p className="text-[11px] font-semibold text-slate-800">
+                              Syarat: {item.definition.requirementLabel}
+                            </p>
+                            <div className="flex items-center justify-between text-[10px] font-mono tabular-nums text-slate-500">
+                              <span>
+                                {fmtCurr} / {fmtTarget} {item.definition.unitLabel}
+                              </span>
+                              <span className="font-bold text-slate-700">{item.progressPct}%</span>
+                            </div>
+                            <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  item.status === 'claimed'
+                                    ? 'bg-emerald-500'
+                                    : item.status === 'ready'
+                                    ? 'bg-amber-500'
+                                    : tierMeta.barClass
+                                }`}
+                                style={{ width: `${item.progressPct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-200/70">
+                          <div className="min-w-0">
+                            {item.rewardTitle ? (
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-bold ${item.rewardTitle.toneClass}`}
+                              >
+                                <Award className="w-3 h-3 shrink-0" />
+                                <span className="truncate">Gelar: {item.rewardTitle.label}</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-semibold text-slate-500">
+                                Hadiah: Piala &amp; +{item.definition.points} Poin (Tanpa Saldo)
+                              </span>
+                            )}
+                          </div>
+
+                          {item.status === 'ready' ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const res = claimProfileAchievement(item.definition.id);
+                                setAchievementFeedback({
+                                  type: res.success ? 'success' : 'error',
+                                  text: res.message,
+                                });
+                              }}
+                              className="min-h-[34px] px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold inline-flex items-center gap-1 cursor-pointer shrink-0"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Klaim</span>
+                            </button>
+                          ) : item.status === 'claimed' ? (
+                            <span className="text-[11px] font-bold text-emerald-700 inline-flex items-center gap-1 shrink-0">
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Selesai</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] font-semibold text-slate-400 inline-flex items-center gap-1 shrink-0">
+                              <Lock className="w-3.5 h-3.5" />
+                              <span>{item.progressPct}%</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
             </>
           )}

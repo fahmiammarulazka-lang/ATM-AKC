@@ -69,6 +69,7 @@ import {
   resolveEffectiveAdminPermissions,
 } from '../types/adminAnalyticsAndTier';
 import { getAdminAppUpdates } from '../services/autoUpdateReleaseService';
+import { getAccountLevelSnapshot } from '../data/levelSystemCatalog';
 
 export type AppNavView =
   | 'dashboard'
@@ -252,7 +253,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const currentUpdateVersion =
-    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v16.47.24';
+    publicCurrentUpdate?.version || activeBuildInfo.catalogVersion || 'v16.48.24';
 
   const budgetAlertReport = currentAccount
     ? computeMonthlyBudgetReport({
@@ -1214,6 +1215,25 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <VerifiedBadge size="xs" label={currentAccount.verifiedLabel} />
                   )}
                   {currentAccount?.isOfficialAdminAccount && <OaAccountBadge size="xs" />}
+                  {currentAccount && (() => {
+                    const navLvl = getAccountLevelSnapshot(currentAccount);
+                    return (
+                      <span
+                        title={
+                          navLvl.isInfinity
+                            ? 'Level Akun Tier Admin: Infinity (∞)'
+                            : `Level Akun ${navLvl.level} (${navLvl.xp.toLocaleString('id-ID')} XP)`
+                        }
+                        className={`hidden md:inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono font-black tabular-nums leading-none shrink-0 ${
+                          navLvl.isInfinity
+                            ? 'bg-gradient-to-r from-amber-400 to-yellow-300 text-slate-950'
+                            : 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/40'
+                        }`}
+                      >
+                        {navLvl.shortLabel}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <span className="hidden md:block text-[10px] font-mono text-amber-300 -mt-0.5">
                   {currentAccount

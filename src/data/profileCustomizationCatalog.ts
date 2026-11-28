@@ -87,6 +87,9 @@ export interface ProfileFeaturedTitle {
   id: string;
   label: string;
   toneClass: string;
+  unlockAchievementId: string;
+  requirementSummary: string;
+  isExclusiveNew?: boolean;
 }
 
 export const PROFILE_RENAME_DIAMOND_COST = 50;
@@ -230,41 +233,89 @@ export const FEATURED_TITLES: ProfileFeaturedTitle[] = [
     id: 'title-nasabah-prioritas',
     label: 'Nasabah Prioritas',
     toneClass: 'bg-blue-50 text-blue-800 border-blue-200',
+    unlockAchievementId: 'ach-nasabah-prioritas',
+    requirementSummary: 'Saldo rekening mencapai minimal Rp 10.000.000',
   },
   {
     id: 'title-kolektor-emas',
     label: 'Kolektor Emas 24K',
     toneClass: 'bg-amber-50 text-amber-800 border-amber-200',
+    unlockAchievementId: 'ach-kolektor-emas',
+    requirementSummary: 'Memiliki simpanan Emas Digital minimal 5 gram',
   },
   {
     id: 'title-penjaga-streak',
     label: 'Penjaga Api Streak',
     toneClass: 'bg-orange-50 text-orange-800 border-orange-200',
+    unlockAchievementId: 'ach-penjaga-streak',
+    requirementSummary: 'Mencapai Streak Harian Loyalty minimal 7 hari',
   },
   {
     id: 'title-pemburu-diamond',
     label: 'Pemburu Permata',
     toneClass: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+    unlockAchievementId: 'ach-pemburu-permata',
+    requirementSummary: 'Mengumpulkan saldo minimal 250 Permata (Diamond)',
   },
   {
     id: 'title-saudagar-nusantara',
     label: 'Saudagar Nusantara',
     toneClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    unlockAchievementId: 'ach-saudagar-nusantara',
+    requirementSummary: 'Menyelesaikan minimal 25 kali transaksi keuangan',
   },
   {
     id: 'title-investor-ulung',
     label: 'Investor Ulung',
     toneClass: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+    unlockAchievementId: 'ach-investor-ulung',
+    requirementSummary: 'Memiliki minimal 2 Deposito aktif atau total pokok Rp 5.000.000+',
   },
   {
     id: 'title-penjelajah-misi',
     label: 'Penjelajah 100 Misi',
     toneClass: 'bg-violet-50 text-violet-800 border-violet-200',
+    unlockAchievementId: 'ach-penjelajah-misi',
+    requirementSummary: 'Mengklaim minimal 15 misi harian atau Loyalty',
   },
   {
     id: 'title-pioner-digital',
     label: 'Pioner Digital QRIS',
     toneClass: 'bg-slate-100 text-slate-800 border-slate-300',
+    unlockAchievementId: 'ach-pioner-qris',
+    requirementSummary: 'Menyelesaikan minimal 5 transaksi atau pembayaran QRIS',
+  },
+  {
+    id: 'title-sultan-nusantara',
+    label: 'Sultan Nusantara',
+    toneClass: 'bg-yellow-50 text-yellow-900 border-yellow-300',
+    unlockAchievementId: 'ach-sultan-nusantara',
+    requirementSummary: 'Total aset bersih (Saldo + Emas + Deposito + Kantong) Rp 100.000.000+',
+    isExclusiveNew: true,
+  },
+  {
+    id: 'title-kolektor-aura',
+    label: 'Kolektor Aura Legendaris',
+    toneClass: 'bg-fuchsia-50 text-fuchsia-900 border-fuchsia-300',
+    unlockAchievementId: 'ach-kolektor-aura',
+    requirementSummary: 'Memiliki minimal 3 Bingkai Aura Eksklusif Spin Bingkai',
+    isExclusiveNew: true,
+  },
+  {
+    id: 'title-bintang-paychat',
+    label: 'Bintang PayChat',
+    toneClass: 'bg-sky-50 text-sky-900 border-sky-300',
+    unlockAchievementId: 'ach-bintang-paychat',
+    requirementSummary: 'Mengirim minimal 25 pesan PayChat & menyimpan minimal 1 kontak',
+    isExclusiveNew: true,
+  },
+  {
+    id: 'title-arsitek-impian',
+    label: 'Arsitek Impian',
+    toneClass: 'bg-teal-50 text-teal-900 border-teal-300',
+    unlockAchievementId: 'ach-arsitek-impian',
+    requirementSummary: 'Mengisi minimal 3 Kantong Nabung atau Kantong Impian',
+    isExclusiveNew: true,
   },
 ];
 

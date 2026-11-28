@@ -3081,6 +3081,33 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-48-24',
+    version: 'v16.48.24',
+    releaseType: 'minor',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v16.48.24: Gelar Berbasis Syarat, Tab Achievement (28 Koleksi) & Sistem Level Akun XP (Lv. 1–100 + Hadiah Dinamis)',
+    fullDate: 'Sabtu, 28 November 2026 • Pukul 18:10 WIB',
+    dateText: 'Sabtu, 28 November 2026 • Pukul 18:10 WIB',
+    description:
+      'Pembaruan minor v16.48.24 menghadirkan tiga pembaruan besar untuk progresi akun nasabah Bank Nusantara: seluruh 12 Gelar Unggulan kini terkunci otomatis hingga syarat Achievement terpenuhi dan diklaim manual (atau diraih melalui hadiah naik Level), hadir Tab ke-5 Achievement di menu Profil berisi 28 pencapaian lintas Saldo, Kantong, Emas 24K, Deposito, QRIS, Transaksi, Misi, Streak, Permata, Spin Bingkai, dan PayChat (12 berhadiah Gelar Eksklusif dan 16 berhadiah Piala + Poin Achievement tanpa saldo), serta peluncuran Sistem Level Akun berbasis XP (Lv. 1–100 untuk nasabah reguler dan Lv. ∞ otomatis untuk Kartu Tier Admin) lengkap dengan pencairan hadiah milestone otomatis ke mutasi rekening.',
+    highlights: [
+      'Tab ke-5 Achievement di Profil (28 Koleksi + Klaim Manual): Pantau syarat, bilah progres angka nyata, tier Perunggu–Legendaris, status hadiah Gelar maupun Piala + Poin Achievement tanpa saldo, serta tombol Klaim & Klaim Semua.',
+      '12 Gelar Unggulan Berbasis Syarat (8 Lama + 4 Eksklusif Baru): Seluruh gelar otomatis terkunci sampai Achievement diklaim atau terbuka lewat hadiah milestone Level, lengkap dengan tampilan progres langsung di daftar Gelar Profil.',
+      'Sistem Level Akun XP (Lv. 1–100 & Tier Admin Lv. ∞): Kumpulkan XP dari Transaksi, QRIS, Emas, Misi, Streak, Spin Bingkai, dan Achievement dengan lencana Level tampil di Profil, Tab Achievement, Navbar, dan PayChat, serta pencairan hadiah naik level otomatis tersimpan ke Cloud & mutasi rekening.',
+    ],
+    changes: [
+      'Menambahkan katalog profileAchievementsCatalog.ts berisi 28 definisi Achievement lintas fitur beserta evaluator metrik akun real-time dan sinkronisasi klaim manual.',
+      'Memperluas profileCustomizationCatalog.ts menjadi 12 Gelar Unggulan dengan pemetaan syarat Achievement dan penguncian otomatis gelar yang belum memenuhi syarat.',
+      'Membangun mesin Sistem Level Akun XP (levelSystemCatalog.ts) Lv. 1–100 dengan penyesuaian bobot XP, hadiah milestone dinamis di level target pilihan, serta sinkronisasi awal akun lama.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-28T11:10:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v16-47-24',
     version: 'v16.47.24',
     releaseType: 'patch',
@@ -3101,8 +3128,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Memperbarui LiveFrameCanvas.tsx dengan teknik rendering dual-layer source-over kontras tinggi, penguatan skala sm untuk Navbar, deteksi visibilitas hibrida, ResizeObserver, serta pemulihan delta visibilitychange.',
       'Menambahkan kontrol segmented Mode Animasi Bingkai di UserProfileStatsModal serta cakupan selektor reduced-motion khusus bingkai pada src/index.css.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Rilis Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-28T09:30:00.000Z',
     isAutoDetected: true,

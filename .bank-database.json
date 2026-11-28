@@ -14027,8 +14027,8 @@
         "isAdmin": false,
         "totalVisits": 7,
         "firstVisitIso": "2026-11-27T10:20:14.573Z",
-        "lastActiveIso": "2026-11-27T22:48:35.701Z",
-        "lastActiveMs": 1795819715701,
+        "lastActiveIso": "2026-11-28T02:07:39.303Z",
+        "lastActiveMs": 1795831659303,
         "deviceIds": [
           "DEV-9F2F054C46C1"
         ],
@@ -14160,9 +14160,9 @@
         "totalVisits": 13,
         "firstSeenIso": "2026-11-27T10:20:13.142Z",
         "firstSeenMs": 1795774813142,
-        "lastSeenIso": "2026-11-27T22:48:35.701Z",
-        "lastSeenMs": 1795819715701,
-        "isOnline": true,
+        "lastSeenIso": "2026-11-28T02:07:39.303Z",
+        "lastSeenMs": 1795831659303,
+        "isOnline": false,
         "currentAccountId": "acc-lobby-reg-1795585697689",
         "currentAccountNumber": "5362021409",
         "currentAccountKey": "acc-lobby-reg-1795585697689",
@@ -14182,8 +14182,8 @@
             "isAdmin": false,
             "loginCount": 6,
             "firstLoginIso": "2026-11-27T10:20:14.573Z",
-            "lastLoginIso": "2026-11-27T22:48:35.701Z",
-            "lastLoginMs": 1795819715701
+            "lastLoginIso": "2026-11-28T02:07:39.303Z",
+            "lastLoginMs": 1795831659303
           }
         ],
         "reviewStatus": "normal",
@@ -14222,10 +14222,10 @@
           "timezone": "Asia/Jakarta",
           "systemLanguage": "en-US",
           "connectionType": "Broadband / WiFi 4G+",
-          "downlinkMbps": 10,
-          "rttMs": 50,
-          "batteryLevelPct": 100,
-          "batteryCharging": true,
+          "downlinkMbps": 5.35,
+          "rttMs": 100,
+          "batteryLevelPct": 97,
+          "batteryCharging": false,
           "locationSource": "geoip"
         }
       },
@@ -14275,10 +14275,10 @@
         }
       }
     },
-    "totalAllTimeHits": 25,
-    "updatedAtMs": 1795819715701
+    "totalAllTimeHits": 31,
+    "updatedAtMs": 1795831707992
   },
   "adminTierGrantsMap": {},
   "adminTierAuditLogs": [],
-  "lastUpdated": 1795819715703
+  "lastUpdated": 1795831707992
 }

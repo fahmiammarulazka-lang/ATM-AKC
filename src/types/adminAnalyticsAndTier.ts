@@ -14,6 +14,7 @@ export type AdminPortalTabKey =
   | 'help_center'
   | 'missions_admin'
   | 'loyalty_streak_admin'
+  | 'level_system_admin'
   | 'leaderboard_admin'
   | 'super_tools'
   | 'gift_letters'
@@ -177,6 +178,13 @@ export const ADMIN_TAB_CATALOG: AdminTabCatalogItem[] = [
     shortLabel: 'Streak & Loyalty',
     group: 'Sosial & Komunitas',
     description: 'Atur Mode Libur Nasional, bonus 7/14/30 hari, aksi massal, kurs tukar, 100 misi, kontrol nasabah & log penukaran.',
+  },
+  {
+    key: 'level_system_admin',
+    label: 'Sistem Level & Hadiah Dinamis',
+    shortLabel: 'Sistem Level',
+    group: 'Nasabah & Sistem',
+    description: 'Atur target level berhadiah Saldo, Permata, Coin, Token, dan Gelar, bobot XP aktivitas, serta kontrol Level/XP nasabah (Admin = ∞).',
   },
   {
     key: 'leaderboard_admin',

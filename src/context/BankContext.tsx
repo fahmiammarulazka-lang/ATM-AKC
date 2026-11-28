@@ -125,8 +125,29 @@ import {
   resolveMissionResetCycleWindow,
 } from '../utils/loyaltySystemUtils';
 import {
+  computeProfileAchievementMetrics,
+  evaluateProfileAchievements,
+  isTitleUnlockedForAccount,
+  PROFILE_ACHIEVEMENTS,
+} from '../data/profileAchievementsCatalog';
+import { getFeaturedTitleById } from '../data/profileCustomizationCatalog';
+import {
+  DEFAULT_LEVEL_SYSTEM_CONFIG,
+  MAX_REGULAR_ACCOUNT_LEVEL,
+  MAX_REGULAR_CUMULATIVE_XP,
+  computeLevelFromXp,
+  estimateRetroactiveXpFromMetrics,
+  formatMilestoneRewardSummary,
+  getAccountLevelSnapshot,
+  getCumulativeXpForLevel,
+  normalizeAccountLevelSystemConfig,
+} from '../data/levelSystemCatalog';
+import {
+  AccountLevelSystemConfig,
   BankAccount,
   DebtHistoryEntry,
+  LevelMilestoneReward,
+  LevelXpSourceKey,
   LoyaltyRedeemTarget,
   LoyaltyRedemptionRecord,
   LoyaltyStreakFreezeStage,
@@ -1215,6 +1236,44 @@ interface BankContextType {
     avatarFrameId?: string;
     featuredTitle?: string;
   }) => { success: boolean; message: string };
+  claimProfileAchievement: (achievementId: string) => {
+    success: boolean;
+    message: string;
+    unlockedTitleLabel?: string;
+    pointsAwarded?: number;
+  };
+  claimAllReadyProfileAchievements: () => {
+    success: boolean;
+    message: string;
+    claimedCount: number;
+    totalPointsAwarded: number;
+    unlockedTitlesCount: number;
+  };
+  levelSystemConfig: AccountLevelSystemConfig;
+  updateLevelSystemConfig: (partial: Partial<AccountLevelSystemConfig>) => {
+    success: boolean;
+    message: string;
+  };
+  resetLevelSystemConfig: () => { success: boolean; message: string };
+  grantAccountXp: (
+    accountId: string,
+    source: LevelXpSourceKey,
+    multiplier?: number
+  ) => void;
+  syncAccountInitialLevelFromHistory: (accountId?: string) => void;
+  claimPendingSyncLevelRewards: () => {
+    success: boolean;
+    message: string;
+    claimedCount: number;
+  };
+  adminAdjustAccountLevelOrXp: (
+    accountId: string,
+    action: {
+      mode: 'set_level' | 'add_level' | 'set_xp' | 'add_xp' | 'reset_rewards';
+      value?: number;
+      grantNewMilestones?: boolean;
+    }
+  ) => { success: boolean; message: string };
 
   // Switch / Login to Old Card using that Old Card's 6-Digit PIN (Bukan PIN Admin!)
   loginToCardWithPin: (
@@ -4363,6 +4422,12 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loyaltyConfigRef = useRef<LoyaltyAdminConfig>(loyaltyConfig);
   loyaltyConfigRef.current = loyaltyConfig;
 
+  const [levelSystemConfig, setLevelSystemConfig] = useState<AccountLevelSystemConfig>(
+    DEFAULT_LEVEL_SYSTEM_CONFIG
+  );
+  const levelSystemConfigRef = useRef<AccountLevelSystemConfig>(levelSystemConfig);
+  levelSystemConfigRef.current = levelSystemConfig;
+
   const [familyConfig, setFamilyConfig] = useState<FamilySystemConfig>(
     DEFAULT_FAMILY_SYSTEM_CONFIG
   );
@@ -5532,6 +5597,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       loyaltyConfigRef.current = next;
       setLoyaltyConfig(next);
     }
+    if (data.levelSystemConfig && typeof data.levelSystemConfig === 'object') {
+      const nextLvl = normalizeAccountLevelSystemConfig(
+        data.levelSystemConfig as Partial<AccountLevelSystemConfig>
+      );
+      levelSystemConfigRef.current = nextLvl;
+      setLevelSystemConfig(nextLvl);
+    }
     if (data.familyConfig && typeof data.familyConfig === 'object') {
       const mergedFamCfg: FamilySystemConfig = {
         ...DEFAULT_FAMILY_SYSTEM_CONFIG,
@@ -5928,6 +6000,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     safeVaultMap?: Record<string, SafeVaultAccountState>;
     loyaltyMap?: Record<string, LoyaltyAccountState>;
     loyaltyConfig?: LoyaltyAdminConfig;
+    levelSystemConfig?: AccountLevelSystemConfig;
     familyConfig?: FamilySystemConfig;
     families?: FamilyGroup[];
     missions?: AppMissionDefinition[];
@@ -6033,7 +6106,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           overrides.deletedGiftEventIds !== undefined ||
           overrides.websitePopups !== undefined ||
           overrides.deletedAdminItemIds !== undefined ||
-          overrides.adminConfigRevisionMap !== undefined)
+          overrides.adminConfigRevisionMap !== undefined ||
+          overrides.levelSystemConfig !== undefined)
     );
 
     const payload = sanitizeForFirestore({
@@ -6182,6 +6256,9 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         : {}),
       ...(overrides?.loyaltyConfig !== undefined
         ? { loyaltyConfig: overrides.loyaltyConfig }
+        : {}),
+      ...(overrides?.levelSystemConfig !== undefined
+        ? { levelSystemConfig: overrides.levelSystemConfig }
         : {}),
       ...(overrides?.families !== undefined ? { families: overrides.families.slice(0, 150) } : {}),
       ...(overrides?.missionProgressByAccount !== undefined
@@ -11905,6 +11982,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           loyaltyConfigRef.current = merged;
           setLoyaltyConfig(merged);
         }
+        if (data.levelSystemConfig && typeof data.levelSystemConfig === 'object') {
+          const mergedLvl = normalizeAccountLevelSystemConfig(
+            data.levelSystemConfig as Partial<AccountLevelSystemConfig>
+          );
+          levelSystemConfigRef.current = mergedLvl;
+          setLevelSystemConfig(mergedLvl);
+        }
         if (Array.isArray(data.suggestions)) {
           setSuggestions(filterListByAdminTombstones('suggestions', data.suggestions as SuggestionRecord[]));
         }
@@ -12405,6 +12489,13 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 const merged = normalizeLoyaltyAdminConfig(msg.payload.loyaltyConfig as Partial<LoyaltyAdminConfig>);
                 loyaltyConfigRef.current = merged;
                 setLoyaltyConfig(merged);
+              }
+              if (msg.payload.levelSystemConfig && typeof msg.payload.levelSystemConfig === 'object') {
+                const mergedLvl = normalizeAccountLevelSystemConfig(
+                  msg.payload.levelSystemConfig as Partial<AccountLevelSystemConfig>
+                );
+                levelSystemConfigRef.current = mergedLvl;
+                setLevelSystemConfig(mergedLvl);
               }
               if (Array.isArray(msg.payload.suggestions)) {
                 setSuggestions(
@@ -20769,6 +20860,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     playAtmSound('success');
     recordMissionActivities(currentAccount.id, [{ metricKey: 'any_tx', delta: 1 }]);
+    grantAccountXp(currentAccount.id, 'tx');
     return {
       success: true,
       message: requiresApproval
@@ -21080,6 +21172,10 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     playAtmSound('success');
     recordMissionActivities(currentAccount.id, [{ metricKey: 'any_tx', delta: 1 }]);
+    grantAccountXp(
+      currentAccount.id,
+      resolvedFeatureId === 'qris' || type === 'qris_pay' ? 'qris' : 'tx'
+    );
 
     return {
       success: true,
@@ -25510,6 +25606,17 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
+    if (patch.featuredTitle !== undefined && patch.featuredTitle !== '') {
+      if (!isTitleUnlockedForAccount(activeAcc, patch.featuredTitle)) {
+        playAtmSound('alert');
+        return {
+          success: false,
+          message:
+            'Gelar masih terkunci. Penuhi syaratnya dan klaim terlebih dahulu di tab Achievement.',
+        };
+      }
+    }
+
     commitAccountMutationPermanent(activeAcc.id, (a) => ({
       ...a,
       ...(patch.profileBio !== undefined ? { profileBio: patch.profileBio.trim().slice(0, 180) } : {}),
@@ -25527,6 +25634,677 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       message: 'Kustomisasi identitas & detail profil berhasil disimpan dan tersinkron ke Cloud!',
     };
   };
+
+  const evaluateActiveProfileAchievements = (activeAcc: BankAccount) => {
+    const goldPrice =
+      activeAcc.customUserGoldPricePerGram && activeAcc.customUserGoldPricePerGram > 0
+        ? activeAcc.customUserGoldPricePerGram
+        : goldMarketConfigRef.current?.currentPricePerGram || 1_450_000;
+    const metrics = computeProfileAchievementMetrics({
+      account: activeAcc,
+      transactions,
+      pockets,
+      dreamPockets: dreamPocketsRef.current,
+      depositos,
+      families: familiesRef.current,
+      loyaltyState: loyaltyMapRef.current[activeAcc.id],
+      missionProgressByAccount: missionProgressByAccountRef.current[activeAcc.id],
+      qrisOrders: qrisOrdersRef.current,
+      frameSpinHistory: frameSpinHistoryRef.current,
+      globalChats,
+      privateChats: chats,
+      goldPricePerGram: goldPrice,
+    });
+    return evaluateProfileAchievements(metrics, activeAcc.profileAchievementClaims);
+  };
+
+  const claimProfileAchievement = (achievementId: string) => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAcc =
+      latestPool.find((a) => a.id === currentAccountIdRef.current) ||
+      latestPool.find((a) => a.id === currentAccount?.id) ||
+      currentAccount;
+
+    if (!activeAcc) {
+      return { success: false, message: 'Silakan login terlebih dahulu.' };
+    }
+
+    const def = PROFILE_ACHIEVEMENTS.find((d) => d.id === achievementId);
+    if (!def) {
+      return { success: false, message: 'Achievement tidak ditemukan.' };
+    }
+
+    if (activeAcc.profileAchievementClaims?.[achievementId]) {
+      return { success: false, message: `Achievement "${def.title}" sudah pernah diklaim.` };
+    }
+
+    const bundle = evaluateActiveProfileAchievements(activeAcc);
+    const evaluated = bundle.byId[achievementId];
+    if (!evaluated || evaluated.status !== 'ready') {
+      playAtmSound('alert');
+      return {
+        success: false,
+        message: `Syarat "${def.title}" belum terpenuhi: ${def.requirementLabel}.`,
+      };
+    }
+
+    const claimedAtIso = new Date().toISOString();
+    commitAccountMutationPermanent(activeAcc.id, (a) => ({
+      ...a,
+      profileAchievementClaims: {
+        ...(a.profileAchievementClaims || {}),
+        [achievementId]: claimedAtIso,
+      },
+    }));
+
+    const unlockedTitle = def.rewardTitleId
+      ? getFeaturedTitleById(def.rewardTitleId)
+      : undefined;
+
+    playAtmSound('success');
+    const msg = unlockedTitle
+      ? `Achievement "${def.title}" diklaim! +${def.points} Poin & Gelar "${unlockedTitle.label}" resmi terbuka!`
+      : `Achievement "${def.title}" diklaim! +${def.points} Poin Achievement ditambahkan.`;
+    pushAppToast({
+      type: 'success',
+      title: unlockedTitle ? `Gelar Terbuka: ${unlockedTitle.label}` : 'Achievement Diklaim',
+      message: msg,
+    });
+    grantAccountXp(activeAcc.id, 'achievement', 1);
+
+    return {
+      success: true,
+      message: msg,
+      unlockedTitleLabel: unlockedTitle?.label,
+      pointsAwarded: def.points,
+    };
+  };
+
+  const claimAllReadyProfileAchievements = () => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAcc =
+      latestPool.find((a) => a.id === currentAccountIdRef.current) ||
+      latestPool.find((a) => a.id === currentAccount?.id) ||
+      currentAccount;
+
+    if (!activeAcc) {
+      return {
+        success: false,
+        message: 'Silakan login terlebih dahulu.',
+        claimedCount: 0,
+        totalPointsAwarded: 0,
+        unlockedTitlesCount: 0,
+      };
+    }
+
+    const bundle = evaluateActiveProfileAchievements(activeAcc);
+    const readyItems = bundle.items.filter((it) => it.status === 'ready');
+    if (readyItems.length === 0) {
+      return {
+        success: false,
+        message: 'Belum ada Achievement siap diklaim saat ini.',
+        claimedCount: 0,
+        totalPointsAwarded: 0,
+        unlockedTitlesCount: 0,
+      };
+    }
+
+    const nowIso = new Date().toISOString();
+    const newClaims: Record<string, string> = {};
+    let totalPointsAwarded = 0;
+    let unlockedTitlesCount = 0;
+
+    readyItems.forEach((it) => {
+      newClaims[it.definition.id] = nowIso;
+      totalPointsAwarded += it.definition.points;
+      if (it.rewardTitle) unlockedTitlesCount += 1;
+    });
+
+    commitAccountMutationPermanent(activeAcc.id, (a) => ({
+      ...a,
+      profileAchievementClaims: {
+        ...(a.profileAchievementClaims || {}),
+        ...newClaims,
+      },
+    }));
+
+    playAtmSound('success');
+    const msg = `${readyItems.length} Achievement berhasil diklaim (+${totalPointsAwarded} Poin${
+      unlockedTitlesCount > 0 ? `, membuka ${unlockedTitlesCount} Gelar baru` : ''
+    })!`;
+    pushAppToast({
+      type: 'success',
+      title: 'Semua Achievement Siap Diklaim',
+      message: msg,
+    });
+    grantAccountXp(activeAcc.id, 'achievement', readyItems.length);
+
+    return {
+      success: true,
+      message: msg,
+      claimedCount: readyItems.length,
+      totalPointsAwarded,
+      unlockedTitlesCount,
+    };
+  };
+
+  // ============================================================================
+  // MESIN LEVEL AKUN XP TERPISAH (LV 1–100 & TIER ADMIN = INFINITY) + HADIAH MILESTONE ADMIN
+  // ============================================================================
+  function deliverLevelMilestonesImmediate(
+    targetAcc: BankAccount,
+    milestoneList: LevelMilestoneReward[],
+    reasonLabel = 'Naik Level Akun'
+  ): {
+    nextAcc: BankAccount;
+    newTxs: Transaction[];
+    awardedCount: number;
+    summaryParts: string[];
+  } {
+    if (isAdminCardAccount(targetAcc) || milestoneList.length === 0) {
+      return {
+        nextAcc: normalizeAdminAccountAssets(targetAcc),
+        newTxs: [],
+        awardedCount: 0,
+        summaryParts: [],
+      };
+    }
+
+    let moneySum = 0;
+    let diamondSum = 0;
+    let coinSum = 0;
+    let tokenSum = 0;
+    const titleIdsToUnlock: string[] = [];
+    const awardedLevels: number[] = [];
+    const newTxs: Transaction[] = [];
+    const summaryParts: string[] = [];
+    const nowIso = new Date().toISOString();
+
+    for (const ms of milestoneList) {
+      if (!ms.enabled) continue;
+      moneySum += Math.max(0, Math.round(ms.rewardMoney || 0));
+      diamondSum += Math.max(0, Math.round(ms.rewardDiamonds || 0));
+      coinSum += Math.max(0, Math.round(ms.rewardSpinCoins || 0));
+      tokenSum += Math.max(0, Math.round(ms.rewardSpinTokens || 0));
+      if (ms.rewardTitleId) titleIdsToUnlock.push(ms.rewardTitleId);
+      awardedLevels.push(ms.levelTarget);
+      const msSummary = formatMilestoneRewardSummary(ms);
+      summaryParts.push(`Lv.${ms.levelTarget}: ${msSummary}`);
+
+      newTxs.push({
+        id: `tx-lvl-${Date.now()}-${ms.levelTarget}-${Math.random().toString(36).slice(2, 6)}`,
+        accountId: targetAcc.id,
+        type: 'redeem_code',
+        title: `Hadiah Level Akun Lv.${ms.levelTarget} (${reasonLabel})`,
+        amount: Math.max(0, Math.round(ms.rewardMoney || 0)),
+        coinAmount: ms.rewardSpinCoins > 0 ? ms.rewardSpinCoins : undefined,
+        recipientAccount: targetAcc.accountNumber,
+        recipientName: targetAcc.fullName,
+        description: `Hadiah Milestone Level ${ms.levelTarget} dari Admin: ${msSummary}`,
+        status: 'success',
+        referenceNo: `LVL-${ms.levelTarget}-${Date.now().toString().slice(-5)}`,
+        timestamp: nowIso,
+        category: 'redeem',
+      });
+    }
+
+    if (awardedLevels.length === 0) {
+      return { nextAcc: targetAcc, newTxs: [], awardedCount: 0, summaryParts: [] };
+    }
+
+    const prevClaimed = targetAcc.claimedLevelRewardLevels || [];
+    const mergedClaimed = Array.from(new Set([...prevClaimed, ...awardedLevels])).sort(
+      (a, b) => a - b
+    );
+    const mergedPending = (targetAcc.pendingSyncLevelRewardLevels || []).filter(
+      (lv) => !awardedLevels.includes(lv)
+    );
+    const mergedTitles = Array.from(
+      new Set([...(targetAcc.unlockedAdminTitleIds || []), ...titleIdsToUnlock])
+    );
+
+    const nextAcc: BankAccount = normalizeAdminAccountAssets({
+      ...targetAcc,
+      balance: isUnlimitedNumber(targetAcc.balance)
+        ? UNLIMITED_BALANCE
+        : (targetAcc.balance || 0) + moneySum,
+      diamonds: isUnlimitedNumber(targetAcc.diamonds)
+        ? UNLIMITED_BALANCE
+        : (targetAcc.diamonds || 0) + diamondSum,
+      spinCoins: isUnlimitedNumber(targetAcc.spinCoins)
+        ? UNLIMITED_BALANCE
+        : (targetAcc.spinCoins || 0) + coinSum,
+      spinTokens: (targetAcc.spinTokens || 0) + tokenSum,
+      unlockedAdminTitleIds: mergedTitles,
+      claimedLevelRewardLevels: mergedClaimed,
+      pendingSyncLevelRewardLevels: mergedPending,
+    });
+
+    return {
+      nextAcc,
+      newTxs,
+      awardedCount: awardedLevels.length,
+      summaryParts,
+    };
+  }
+
+  function applyAccountXpImmediate(
+    accountId: string,
+    source: LevelXpSourceKey,
+    multiplier = 1
+  ) {
+    const cfg = normalizeAccountLevelSystemConfig(levelSystemConfigRef.current);
+    if (!cfg.enabled) return;
+    const perUnit = cfg.xpPerSource[source] || 0;
+    const deltaXp = Math.max(0, Math.round(perUnit * Math.max(1, multiplier)));
+    if (deltaXp <= 0) return;
+
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const targetAcc = latestPool.find((a) => a.id === accountId);
+    if (!targetAcc) return;
+
+    if (isAdminCardAccount(targetAcc)) {
+      if (targetAcc.accountLevel !== UNLIMITED_BALANCE || !targetAcc.levelSyncInitialized) {
+        commitAccountMutationPermanent(targetAcc.id, (a) =>
+          normalizeAdminAccountAssets({ ...a, levelSyncInitialized: true })
+        );
+      }
+      return;
+    }
+
+    const beforeSnap = getAccountLevelSnapshot(targetAcc);
+    const nextXp = Math.min(
+      MAX_REGULAR_CUMULATIVE_XP,
+      Math.max(beforeSnap.xp, 0) + deltaXp
+    );
+    const computed = computeLevelFromXp(nextXp);
+    const nextLevel = Math.max(beforeSnap.level, computed.level);
+    const didLevelUp = nextLevel > beforeSnap.level;
+
+    const claimedSet = new Set(targetAcc.claimedLevelRewardLevels || []);
+    const crossedMilestones = didLevelUp
+      ? cfg.milestones.filter(
+          (m) =>
+            m.enabled &&
+            m.levelTarget > beforeSnap.level &&
+            m.levelTarget <= nextLevel &&
+            !claimedSet.has(m.levelTarget)
+        )
+      : [];
+
+    let updatedAcc: BankAccount = {
+      ...targetAcc,
+      accountXp: nextXp,
+      accountLevel: nextLevel,
+      levelSyncInitialized: true,
+    };
+
+    const delivered = deliverLevelMilestonesImmediate(
+      updatedAcc,
+      crossedMilestones,
+      'Naik Level Otomatis'
+    );
+    updatedAcc = delivered.nextAcc;
+
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+    const nextTxs =
+      delivered.newTxs.length > 0 ? [...delivered.newTxs, ...latestTxs] : undefined;
+    if (nextTxs) {
+      transactionsRef.current = nextTxs;
+      setTransactions(nextTxs);
+    }
+
+    commitAccountMutationPermanent(
+      targetAcc.id,
+      () => updatedAcc,
+      nextTxs ? { transactions: nextTxs } : undefined
+    );
+
+    if (didLevelUp && targetAcc.id === (currentAccountIdRef.current || currentAccount?.id)) {
+      const rewardLine =
+        delivered.summaryParts.length > 0
+          ? ` Hadiah diterima: ${delivered.summaryParts.join(' | ')}`
+          : '';
+      pushAppToast({
+        type: 'success',
+        title: `Selamat! Naik ke Level ${nextLevel}`,
+        message: `Level Akun Anda meningkat dari Lv.${beforeSnap.level} menjadi Lv.${nextLevel}!${rewardLine}`,
+      });
+      if (delivered.awardedCount > 0) {
+        addNotification(
+          `Naik ke Level ${nextLevel} & Hadiah Admin Cair`,
+          `Level Akun Anda kini Lv.${nextLevel}.${rewardLine}`,
+          'success',
+          { category: 'hadiah', targetView: 'dashboard', accountId: targetAcc.id }
+        );
+      }
+      playAtmSound('success');
+      try {
+        confetti({ particleCount: 70, spread: 65, origin: { y: 0.68 } });
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const grantAccountXp = (
+    accountId: string,
+    source: LevelXpSourceKey,
+    multiplier = 1
+  ) => {
+    if (!accountId) return;
+    window.setTimeout(() => {
+      applyAccountXpImmediate(accountId, source, multiplier);
+    }, 65);
+  };
+
+  const syncAccountInitialLevelFromHistory = (accountId?: string) => {
+    const activeId = accountId || currentAccountIdRef.current || currentAccount?.id;
+    if (!activeId) return;
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const targetAcc = latestPool.find((a) => a.id === activeId);
+    if (!targetAcc || targetAcc.levelSyncInitialized) return;
+
+    const cfg = normalizeAccountLevelSystemConfig(levelSystemConfigRef.current);
+    if (isAdminCardAccount(targetAcc)) {
+      commitAccountMutationPermanent(targetAcc.id, (a) =>
+        normalizeAdminAccountAssets({ ...a, levelSyncInitialized: true })
+      );
+      return;
+    }
+
+    const goldPrice =
+      targetAcc.customUserGoldPricePerGram && targetAcc.customUserGoldPricePerGram > 0
+        ? targetAcc.customUserGoldPricePerGram
+        : goldMarketConfigRef.current?.currentPricePerGram || 1_450_000;
+    const metrics = computeProfileAchievementMetrics({
+      account: targetAcc,
+      transactions: transactionsRef.current.length > 0 ? transactionsRef.current : transactions,
+      pockets,
+      dreamPockets: dreamPocketsRef.current,
+      depositos,
+      families: familiesRef.current,
+      loyaltyState: loyaltyMapRef.current[targetAcc.id],
+      missionProgressByAccount: missionProgressByAccountRef.current[targetAcc.id],
+      qrisOrders: qrisOrdersRef.current,
+      frameSpinHistory: frameSpinHistoryRef.current,
+      globalChats,
+      privateChats: chats,
+      goldPricePerGram: goldPrice,
+    });
+    const claimedAchCount = Object.keys(targetAcc.profileAchievementClaims || {}).length;
+    const estimatedXp = estimateRetroactiveXpFromMetrics(metrics, claimedAchCount, cfg);
+    const computed = computeLevelFromXp(Math.max(targetAcc.accountXp || 0, estimatedXp));
+    const finalLevel = Math.max(1, computed.level, targetAcc.accountLevel || 1);
+    const finalXp = Math.max(estimatedXp, targetAcc.accountXp || 0, getCumulativeXpForLevel(finalLevel));
+
+    const claimedSet = new Set(targetAcc.claimedLevelRewardLevels || []);
+    const pendingLevels = cfg.milestones
+      .filter(
+        (m) =>
+          m.enabled &&
+          m.levelTarget <= finalLevel &&
+          !claimedSet.has(m.levelTarget)
+      )
+      .map((m) => m.levelTarget);
+
+    commitAccountMutationPermanent(targetAcc.id, (a) => ({
+      ...a,
+      accountXp: finalXp,
+      accountLevel: finalLevel,
+      pendingSyncLevelRewardLevels: pendingLevels,
+      levelSyncInitialized: true,
+    }));
+  };
+
+  const claimPendingSyncLevelRewards = (): {
+    success: boolean;
+    message: string;
+    claimedCount: number;
+  } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const activeAcc =
+      latestPool.find((a) => a.id === currentAccountIdRef.current) ||
+      latestPool.find((a) => a.id === currentAccount?.id) ||
+      currentAccount;
+
+    if (!activeAcc) {
+      return { success: false, message: 'Silakan login terlebih dahulu.', claimedCount: 0 };
+    }
+    if (isAdminCardAccount(activeAcc)) {
+      return {
+        success: false,
+        message: 'Kartu Tier Admin sudah memiliki Level Infinity (∞) dan aset tak terbatas.',
+        claimedCount: 0,
+      };
+    }
+
+    const cfg = normalizeAccountLevelSystemConfig(levelSystemConfigRef.current);
+    const snap = getAccountLevelSnapshot(activeAcc);
+    const claimedSet = new Set(activeAcc.claimedLevelRewardLevels || []);
+    const eligibleMilestones = cfg.milestones.filter(
+      (m) => m.enabled && m.levelTarget <= snap.level && !claimedSet.has(m.levelTarget)
+    );
+
+    if (eligibleMilestones.length === 0) {
+      commitAccountMutationPermanent(activeAcc.id, (a) => ({
+        ...a,
+        pendingSyncLevelRewardLevels: [],
+      }));
+      return {
+        success: false,
+        message: 'Tidak ada hadiah milestone level yang tertunda untuk diklaim.',
+        claimedCount: 0,
+      };
+    }
+
+    const delivered = deliverLevelMilestonesImmediate(
+      activeAcc,
+      eligibleMilestones,
+      'Sinkronisasi Level Awal'
+    );
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+    const nextTxs =
+      delivered.newTxs.length > 0 ? [...delivered.newTxs, ...latestTxs] : latestTxs;
+    transactionsRef.current = nextTxs;
+    setTransactions(nextTxs);
+
+    commitAccountMutationPermanent(
+      activeAcc.id,
+      () => delivered.nextAcc,
+      { transactions: nextTxs }
+    );
+
+    playAtmSound('success');
+    try {
+      confetti({ particleCount: 90, spread: 75, origin: { y: 0.65 } });
+    } catch {
+      // ignore
+    }
+
+    const msg = `${delivered.awardedCount} hadiah level sinkronisasi berhasil diklaim: ${delivered.summaryParts.join(
+      ' | '
+    )}`;
+    pushAppToast({
+      type: 'success',
+      title: 'Hadiah Level Sinkronisasi Diterima',
+      message: msg,
+    });
+    return { success: true, message: msg, claimedCount: delivered.awardedCount };
+  };
+
+  const updateLevelSystemConfig = (
+    partial: Partial<AccountLevelSystemConfig>
+  ): { success: boolean; message: string } => {
+    const merged = normalizeAccountLevelSystemConfig({
+      ...levelSystemConfigRef.current,
+      ...partial,
+      xpPerSource: {
+        ...levelSystemConfigRef.current.xpPerSource,
+        ...(partial.xpPerSource || {}),
+      },
+      milestones:
+        partial.milestones !== undefined
+          ? partial.milestones
+          : levelSystemConfigRef.current.milestones,
+      updatedAtIso: new Date().toISOString(),
+    });
+    levelSystemConfigRef.current = merged;
+    setLevelSystemConfig(merged);
+    flushMasterStateToCloud({ levelSystemConfig: merged });
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Konfigurasi Sistem Level (${merged.milestones.length} milestone hadiah) berhasil disimpan ke Cloud Firestore!`,
+    };
+  };
+
+  const resetLevelSystemConfig = (): { success: boolean; message: string } => {
+    const fresh = normalizeAccountLevelSystemConfig({
+      ...DEFAULT_LEVEL_SYSTEM_CONFIG,
+      updatedAtIso: new Date().toISOString(),
+    });
+    levelSystemConfigRef.current = fresh;
+    setLevelSystemConfig(fresh);
+    flushMasterStateToCloud({ levelSystemConfig: fresh });
+    playAtmSound('beep');
+    return {
+      success: true,
+      message: 'Konfigurasi Sistem Level dikembalikan ke pengaturan standar awal.',
+    };
+  };
+
+  const adminAdjustAccountLevelOrXp = (
+    accountId: string,
+    action: {
+      mode: 'set_level' | 'add_level' | 'set_xp' | 'add_xp' | 'reset_rewards';
+      value?: number;
+      grantNewMilestones?: boolean;
+    }
+  ): { success: boolean; message: string } => {
+    const latestPool = accountsRef.current.length > 0 ? accountsRef.current : accounts;
+    const targetAcc = latestPool.find((a) => a.id === accountId);
+    if (!targetAcc) {
+      return { success: false, message: 'Akun nasabah tidak ditemukan.' };
+    }
+
+    if (isAdminCardAccount(targetAcc)) {
+      commitAccountMutationPermanent(targetAcc.id, (a) =>
+        normalizeAdminAccountAssets({
+          ...a,
+          ...(action.mode === 'reset_rewards'
+            ? { claimedLevelRewardLevels: [], pendingSyncLevelRewardLevels: [] }
+            : {}),
+          levelSyncInitialized: true,
+        })
+      );
+      return {
+        success: true,
+        message: `Akun "${targetAcc.fullName}" bertier Admin sehingga Level Akun otomatis tetap Infinity (∞).`,
+      };
+    }
+
+    if (action.mode === 'reset_rewards') {
+      const snap = getAccountLevelSnapshot(targetAcc);
+      const cfg = normalizeAccountLevelSystemConfig(levelSystemConfigRef.current);
+      const reEligible = cfg.milestones
+        .filter((m) => m.enabled && m.levelTarget <= snap.level)
+        .map((m) => m.levelTarget);
+      commitAccountMutationPermanent(targetAcc.id, (a) => ({
+        ...a,
+        claimedLevelRewardLevels: [],
+        pendingSyncLevelRewardLevels: reEligible,
+        levelSyncInitialized: true,
+      }));
+      playAtmSound('beep');
+      return {
+        success: true,
+        message: `Status klaim hadiah level "${targetAcc.fullName}" berhasil direset (${reEligible.length} hadiah level aktif siap diklaim ulang).`,
+      };
+    }
+
+    const val = Math.round(Number(action.value) || 0);
+    const beforeSnap = getAccountLevelSnapshot(targetAcc);
+    let nextXp = beforeSnap.xp;
+    let nextLevel = beforeSnap.level;
+
+    if (action.mode === 'set_level') {
+      nextLevel = Math.max(1, Math.min(MAX_REGULAR_ACCOUNT_LEVEL, val));
+      nextXp = getCumulativeXpForLevel(nextLevel);
+    } else if (action.mode === 'add_level') {
+      nextLevel = Math.max(1, Math.min(MAX_REGULAR_ACCOUNT_LEVEL, beforeSnap.level + val));
+      nextXp = getCumulativeXpForLevel(nextLevel);
+    } else if (action.mode === 'set_xp') {
+      nextXp = Math.max(0, Math.min(MAX_REGULAR_CUMULATIVE_XP, val));
+      nextLevel = computeLevelFromXp(nextXp).level;
+    } else if (action.mode === 'add_xp') {
+      nextXp = Math.max(0, Math.min(MAX_REGULAR_CUMULATIVE_XP, beforeSnap.xp + val));
+      nextLevel = computeLevelFromXp(nextXp).level;
+    }
+
+    let workingAcc: BankAccount = {
+      ...targetAcc,
+      accountXp: nextXp,
+      accountLevel: nextLevel,
+      levelSyncInitialized: true,
+    };
+
+    let txsToAdd: Transaction[] = [];
+    let rewardInfo = '';
+    if (action.grantNewMilestones !== false && nextLevel > beforeSnap.level) {
+      const cfg = normalizeAccountLevelSystemConfig(levelSystemConfigRef.current);
+      const claimedSet = new Set(targetAcc.claimedLevelRewardLevels || []);
+      const crossed = cfg.milestones.filter(
+        (m) =>
+          m.enabled &&
+          m.levelTarget > beforeSnap.level &&
+          m.levelTarget <= nextLevel &&
+          !claimedSet.has(m.levelTarget)
+      );
+      const delivered = deliverLevelMilestonesImmediate(
+        workingAcc,
+        crossed,
+        'Penyesuaian Admin'
+      );
+      workingAcc = delivered.nextAcc;
+      txsToAdd = delivered.newTxs;
+      if (delivered.summaryParts.length > 0) {
+        rewardInfo = ` + Hadiah: ${delivered.summaryParts.join(' | ')}`;
+      }
+    }
+
+    const latestTxs = transactionsRef.current.length > 0 ? transactionsRef.current : transactions;
+    const nextTxs = txsToAdd.length > 0 ? [...txsToAdd, ...latestTxs] : undefined;
+    if (nextTxs) {
+      transactionsRef.current = nextTxs;
+      setTransactions(nextTxs);
+    }
+
+    commitAccountMutationPermanent(
+      targetAcc.id,
+      () => workingAcc,
+      nextTxs ? { transactions: nextTxs } : undefined
+    );
+    playAtmSound('success');
+    return {
+      success: true,
+      message: `Level Akun "${targetAcc.fullName}" diperbarui menjadi Lv.${nextLevel} (${nextXp.toLocaleString(
+        'id-ID'
+      )} XP).${rewardInfo}`,
+    };
+  };
+
+  // Otomatis sinkronisasi Level Awal akun aktif saat login / berganti akun
+  useEffect(() => {
+    const activeId = currentAccount?.id;
+    if (!activeId) return;
+    const liveAcc = accountsRef.current.find((a) => a.id === activeId) || currentAccount;
+    if (!liveAcc || liveAcc.levelSyncInitialized) return;
+    const t = window.setTimeout(() => {
+      syncAccountInitialLevelFromHistory(activeId);
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [currentAccount?.id]);
 
   /**
    * Tarik Tunai Mesin ATM
@@ -25632,6 +26410,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       { metricKey: 'withdraw_count', delta: 1 },
       { metricKey: 'any_tx', delta: 1 },
     ]);
+    grantAccountXp(currentAccount.id, 'tx');
     return {
       success: true,
       message: `Penarikan tunai Rp ${amount.toLocaleString('id-ID')} berhasil! Silakan ambil uang tunai Anda di dispenser ATM.`,
@@ -25676,6 +26455,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       { metricKey: 'deposit_count', delta: 1 },
       { metricKey: 'any_tx', delta: 1 },
     ]);
+    grantAccountXp(currentAccount.id, 'tx');
     return {
       success: true,
       message: 'Setoran tunai berhasil diterima mesin dan saat ini sedang diproses!',
@@ -25860,6 +26640,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         { metricKey: 'transfer_amount', delta: input.amount },
         { metricKey: 'any_tx', delta: 1 },
       ]);
+      grantAccountXp(currentAccount.id, 'tx');
       if (input.amount >= (adminTierNotificationConfigRef.current.highValueTxThreshold || 10_000_000)) {
         emitAdminTierNotification({
           eventType: 'high_value_tx',
@@ -25919,6 +26700,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         { metricKey: 'transfer_amount', delta: input.amount },
         { metricKey: 'any_tx', delta: 1 },
       ]);
+      grantAccountXp(currentAccount.id, 'tx');
       return {
         success: true,
         message: `Transfer Rp ${totalRequired.toLocaleString('id-ID')} ke ${recipientName} berhasil diajukan dan saat ini sedang diproses.`,
@@ -27516,6 +28298,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           qrisOrders: nextOrders,
         }
       );
+      grantAccountXp(targetAcc.id, 'qris');
     } else {
       flushMasterStateToCloud({ qrisOrders: nextOrders });
     }
@@ -28351,6 +29134,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       { key: 'pocket_deposit_count', delta: 1 },
       { key: 'daily_tx_count', delta: 1 },
     ]);
+    grantAccountXp(activeAcc.id, 'tx');
     playAtmSound('cash');
     return {
       success: true,
@@ -28568,6 +29352,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     loyaltyMapRef.current = nextMap;
     setLoyaltyMap(nextMap);
     syncLoyaltyToServer(nextMap);
+    grantAccountXp(activeId, 'streak');
   }, [currentAccount?.id]);
 
   const claimDailyCheckIn = (): { success: boolean; message: string; pointsEarned?: number; streak?: number } => {
@@ -28603,6 +29388,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     loyaltyMapRef.current = nextMap;
     setLoyaltyMap(nextMap);
     syncLoyaltyToServer(nextMap);
+    grantAccountXp(activeAcc.id, 'streak');
     playAtmSound('success');
     return {
       success: true,
@@ -28726,6 +29512,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     loyaltyMapRef.current = nextMap;
     setLoyaltyMap(nextMap);
     syncLoyaltyToServer(nextMap);
+    grantAccountXp(activeAcc.id, 'streak');
     playAtmSound('success');
     return {
       success: true,
@@ -28812,6 +29599,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     loyaltyMapRef.current = nextMap;
     setLoyaltyMap(nextMap);
     syncLoyaltyToServer(nextMap);
+    grantAccountXp(activeAcc.id, 'mission', 1);
     playAtmSound('success');
     return {
       success: true,
@@ -28870,6 +29658,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     loyaltyMapRef.current = nextMap;
     setLoyaltyMap(nextMap);
     syncLoyaltyToServer(nextMap);
+    grantAccountXp(activeAcc.id, 'mission', readyList.length);
     playAtmSound('success');
     return {
       success: true,
@@ -32630,6 +33419,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (!options?.deferRewardReveal) {
       commitPendingFrameSpinReward(pendingCommitPayload);
     }
+    grantAccountXp(activeAcc.id, 'spin', spinCount);
 
     return {
       success: true,
@@ -34416,6 +35206,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       { metricKey: 'gold_tx', delta: 1 },
       { metricKey: 'any_tx', delta: 1 },
     ]);
+    grantAccountXp(currentAccount.id, 'gold');
 
     return {
       success: true,
@@ -34605,6 +35396,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       { metricKey: 'gold_tx', delta: 1 },
       { metricKey: 'any_tx', delta: 1 },
     ]);
+    grantAccountXp(currentAccount.id, 'gold');
 
     return {
       success: true,
@@ -34970,6 +35762,7 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       { metricKey: 'transfer_amount', delta: uangSent + goldRupiahSent },
       { metricKey: 'any_tx', delta: 1 },
     ]);
+    grantAccountXp(currentAccount.id, 'tx');
 
     const receipt: TransferBebasReceipt = {
       referenceNo: refNo,
@@ -39629,6 +40422,8 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     }
 
+    grantAccountXp(targetAccountId, 'mission', 1);
+
     return {
       success: true,
       rewardsSummary: summary,
@@ -40759,6 +41554,15 @@ export const BankProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         updatePhone,
         renameAccountWithDiamond,
         updateAccountProfileDetails,
+        claimProfileAchievement,
+        claimAllReadyProfileAchievements,
+        levelSystemConfig,
+        updateLevelSystemConfig,
+        resetLevelSystemConfig,
+        grantAccountXp,
+        syncAccountInitialLevelFromHistory,
+        claimPendingSyncLevelRewards,
+        adminAdjustAccountLevelOrXp,
         loginToCardWithPin,
         switchCardWithAdminCode,
         adminBanCard,

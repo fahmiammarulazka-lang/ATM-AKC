@@ -364,6 +364,8 @@ export interface PreAdminAssetSnapshot {
   balance?: number;
   spinCoins?: number;
   diamonds?: number;
+  accountLevel?: number;
+  accountXp?: number;
 }
 
 export function normalizeAdminAccountAssets<
@@ -374,6 +376,8 @@ export function normalizeAdminAccountAssets<
     diamonds?: number;
     rewardPoints?: number;
     jobLevel?: number;
+    accountLevel?: number;
+    accountXp?: number;
     levelVouchers?: number;
     levelUpVouchers?: number;
     preAdminSnapshot?: PreAdminAssetSnapshot;
@@ -388,6 +392,7 @@ export function normalizeAdminAccountAssets<
     acc.diamonds === UNLIMITED_BALANCE &&
     acc.rewardPoints === UNLIMITED_BALANCE &&
     acc.jobLevel === UNLIMITED_BALANCE &&
+    acc.accountLevel === UNLIMITED_BALANCE &&
     acc.levelVouchers === UNLIMITED_BALANCE &&
     acc.levelUpVouchers === UNLIMITED_BALANCE &&
     acc.customSpendingLimit === UNLIMITED_BALANCE &&
@@ -434,6 +439,18 @@ export function normalizeAdminAccountAssets<
         : !isUnlimitedNumber(acc.diamonds) && typeof acc.diamonds === 'number'
         ? Math.max(0, Math.floor(acc.diamonds))
         : undefined,
+    accountLevel:
+      existingSnap.accountLevel !== undefined
+        ? existingSnap.accountLevel
+        : !isUnlimitedNumber(acc.accountLevel) && typeof acc.accountLevel === 'number'
+        ? Math.max(1, Math.min(100, Math.floor(acc.accountLevel)))
+        : 1,
+    accountXp:
+      existingSnap.accountXp !== undefined
+        ? existingSnap.accountXp
+        : typeof acc.accountXp === 'number' && Number.isFinite(acc.accountXp)
+        ? Math.max(0, Math.floor(acc.accountXp))
+        : 0,
   };
 
   return {
@@ -444,6 +461,7 @@ export function normalizeAdminAccountAssets<
     diamonds: UNLIMITED_BALANCE,
     rewardPoints: UNLIMITED_BALANCE,
     jobLevel: UNLIMITED_BALANCE,
+    accountLevel: UNLIMITED_BALANCE,
     levelVouchers: UNLIMITED_BALANCE,
     levelUpVouchers: UNLIMITED_BALANCE,
     customSpendingLimit: UNLIMITED_BALANCE,
@@ -459,6 +477,8 @@ export function applyTierTransitionAssets<
     diamonds?: number;
     rewardPoints?: number;
     jobLevel?: number;
+    accountLevel?: number;
+    accountXp?: number;
     levelVouchers?: number;
     levelUpVouchers?: number;
     preAdminSnapshot?: PreAdminAssetSnapshot;
@@ -476,6 +496,8 @@ export function applyTierTransitionAssets<
       | 'diamonds'
       | 'rewardPoints'
       | 'jobLevel'
+      | 'accountLevel'
+      | 'accountXp'
       | 'levelVouchers'
       | 'levelUpVouchers'
       | 'customSpendingLimit'
@@ -488,6 +510,14 @@ export function applyTierTransitionAssets<
       ...(acc.preAdminSnapshot || {}),
       ...(acc.preAdminSnapshot?.jobLevel === undefined && !isUnlimitedNumber(acc.jobLevel)
         ? { jobLevel: Math.max(1, Math.floor(acc.jobLevel || 1)) }
+        : {}),
+      ...(acc.preAdminSnapshot?.accountLevel === undefined && !isUnlimitedNumber(acc.accountLevel)
+        ? { accountLevel: Math.max(1, Math.min(100, Math.floor(acc.accountLevel || 1))) }
+        : {}),
+      ...(acc.preAdminSnapshot?.accountXp === undefined &&
+      typeof acc.accountXp === 'number' &&
+      Number.isFinite(acc.accountXp)
+        ? { accountXp: Math.max(0, Math.floor(acc.accountXp)) }
         : {}),
       ...(acc.preAdminSnapshot?.levelVouchers === undefined && !isUnlimitedNumber(acc.levelVouchers)
         ? { levelVouchers: Math.max(0, Math.floor(acc.levelVouchers || 0)) }
@@ -524,12 +554,21 @@ export function applyTierTransitionAssets<
   const rawDiamonds = overrides?.diamonds ?? acc.diamonds;
   const rawPoints = overrides?.rewardPoints ?? acc.rewardPoints;
   const rawLevel = overrides?.jobLevel ?? acc.jobLevel;
+  const rawAccLevel = overrides?.accountLevel ?? acc.accountLevel;
+  const rawAccXp = overrides?.accountXp ?? acc.accountXp;
   const rawVouchers = overrides?.levelVouchers ?? acc.levelVouchers;
   const rawLimit = overrides?.customSpendingLimit ?? acc.customSpendingLimit;
 
   const restoredLevel = isUnlimitedNumber(rawLevel)
     ? Math.max(1, Math.floor(snap?.jobLevel ?? 1))
     : Math.max(1, Math.floor(rawLevel || 1));
+  const restoredAccountLevel = isUnlimitedNumber(rawAccLevel)
+    ? Math.max(1, Math.min(100, Math.floor(snap?.accountLevel ?? 1)))
+    : Math.max(1, Math.min(100, Math.floor(rawAccLevel || 1)));
+  const restoredAccountXp =
+    rawAccXp !== undefined && Number.isFinite(rawAccXp)
+      ? Math.max(0, Math.floor(rawAccXp))
+      : Math.max(0, Math.floor(snap?.accountXp ?? 0));
   const restoredVouchers = isUnlimitedNumber(rawVouchers)
     ? Math.max(0, Math.floor(snap?.levelVouchers ?? 0))
     : Math.max(0, Math.floor(rawVouchers || 0));
@@ -545,6 +584,8 @@ export function applyTierTransitionAssets<
     diamonds: isUnlimitedNumber(rawDiamonds) ? (snap?.diamonds ?? 50) : Math.max(0, rawDiamonds || 0),
     rewardPoints: restoredPoints,
     jobLevel: restoredLevel,
+    accountLevel: restoredAccountLevel,
+    accountXp: restoredAccountXp,
     levelVouchers: restoredVouchers,
     levelUpVouchers: restoredVouchers,
     customSpendingLimit:

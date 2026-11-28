@@ -257,6 +257,8 @@ export interface BankAccount {
     balance?: number;
     spinCoins?: number;
     diamonds?: number;
+    accountLevel?: number;
+    accountXp?: number;
   };
   jobClickProgress?: Record<string, number>; // Progres klik masing-masing lowongan pekerjaan
   totalJobsCompleted?: number;
@@ -353,6 +355,15 @@ export interface BankAccount {
   // Spin Bingkai & Token Bingkai (v16.45.20)
   spinTokens?: number;
   ownedSpinFrameIds?: string[];
+  // Klaim Achievement Profil & Pembukaan Gelar Berbasis Syarat (v16.48.24)
+  profileAchievementClaims?: Record<string, string>;
+  // Sistem Level Akun XP Terpisah (Lv. 1–100, Tier Admin = Infinity) & Hadiah Milestone Admin (v16.48.24)
+  accountXp?: number;
+  accountLevel?: number;
+  claimedLevelRewardLevels?: number[];
+  pendingSyncLevelRewardLevels?: number[];
+  unlockedAdminTitleIds?: string[];
+  levelSyncInitialized?: boolean;
 }
 
 export interface NameChangeHistoryEntry {
@@ -3300,4 +3311,32 @@ export interface LoyaltyAdminConfig {
   /** @deprecated Penukaran ke Diamond ditiadakan */
   diamondPer100Points?: number;
   updatedAtMs?: number;
+}
+
+export type LevelXpSourceKey =
+  | 'tx'
+  | 'qris'
+  | 'gold'
+  | 'mission'
+  | 'streak'
+  | 'spin'
+  | 'achievement';
+
+export interface LevelMilestoneReward {
+  id: string;
+  levelTarget: number;
+  enabled: boolean;
+  rewardMoney: number;
+  rewardDiamonds: number;
+  rewardSpinCoins: number;
+  rewardSpinTokens: number;
+  rewardTitleId?: string;
+  note?: string;
+}
+
+export interface AccountLevelSystemConfig {
+  enabled: boolean;
+  xpPerSource: Record<LevelXpSourceKey, number>;
+  milestones: LevelMilestoneReward[];
+  updatedAtIso?: string;
 }

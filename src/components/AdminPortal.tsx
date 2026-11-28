@@ -165,6 +165,7 @@ import { PinPromptModal } from './PinPromptModal';
 import { AdminTierPromotionPanel } from './AdminTierPromotionPanel';
 import { AdminVisitorAnalyticsPanel } from './AdminVisitorAnalyticsPanel';
 import { AdminLoyaltyStreakPanel } from './AdminLoyaltyStreakPanel';
+import { AdminLevelSystemTab } from './AdminLevelSystemTab';
 import {
   useAdminAnalyticsAndTierSync,
   apiLogDelegatedAdminTabActivity,
@@ -1751,6 +1752,20 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
         </button>
         )}
 
+        {canSeeTab('level_system_admin') && (
+        <button
+          onClick={() => setActiveAdminTab('level_system_admin')}
+          className={`px-4 py-2.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+            activeAdminTab === 'level_system_admin'
+              ? 'bg-gradient-to-r from-indigo-400 via-cyan-400 to-amber-300 text-slate-950 font-black shadow-lg shadow-cyan-500/30'
+              : 'text-cyan-300 hover:text-white hover:bg-cyan-950/60 border-2 border-cyan-400/60'
+          }`}
+        >
+          <Award className="w-4 h-4" />
+          <span>Sistem Level &amp; Hadiah</span>
+        </button>
+        )}
+
         {canSeeTab('leaderboard_admin') && (
         <button
           onClick={() => setActiveAdminTab('leaderboard_admin')}
@@ -2212,6 +2227,11 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({ onNavigateToCustomerDa
       {/* ================= ADMIN TAB: SETTING STREAK & LOYALTY KHUSUS ================= */}
       {activeAdminTab === 'loyalty_streak_admin' && (
         <AdminLoyaltyStreakPanel isReadOnly={isReadOnlyAdmin} />
+      )}
+
+      {/* ================= ADMIN TAB: SISTEM LEVEL XP & HADIAH MILESTONE ================= */}
+      {activeAdminTab === 'level_system_admin' && canSeeTab('level_system_admin') && (
+        <AdminLevelSystemTab isReadOnly={isReadOnlyAdmin} />
       )}
 
       {/* ================= ADMIN TAB: LEADERBOARD MULTI-ASET & BADGE TOP 1–100 ================= */}
