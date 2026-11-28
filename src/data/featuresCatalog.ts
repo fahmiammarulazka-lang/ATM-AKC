@@ -3081,6 +3081,33 @@ export const INITIAL_FEATURE_CONFIGS: FeatureSecurityConfig[] = [
 
 export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
   {
+    id: 'upd-v16-47-24',
+    version: 'v16.47.24',
+    releaseType: 'patch',
+    visibilityMode: 'auto',
+    title:
+      'Pembaruan v16.47.24: Perbaikan Animasi Bingkai Laptop (Bebas Blokir Hemat Gerak OS, Kontras Latar Putih & Kontrol Mode Animasi di Profil)',
+    fullDate: 'Sabtu, 28 November 2026 • Pukul 16:30 WIB',
+    dateText: 'Sabtu, 28 November 2026 • Pukul 16:30 WIB',
+    description:
+      'Pembaruan patch v16.47.24 mengatasi masalah animasi bingkai yang berjalan mulus di HP namun tampak diam pada sebagian laptop akibat mode hemat gerak OS (prefers-reduced-motion), blending cahaya aditif di kartu putih modal Profil, maupun jeda kontainer desktop. Kini seluruh animasi Canvas 60–144fps, putaran cincin neon CSS, objek SVG tematik, dan ledakan 5 detik/ketuk tetap berputar otomatis dalam mode bawaan Penuh Selalu Aktif, tampil tajam dengan halo kontras gelap di latar terang maupun gelap, serta dilengkapi sakelar Mode Animasi Bingkai (Penuh Selalu Aktif vs Hemat Baterai) langsung di menu Profil.',
+    highlights: [
+      'Bebas Blokir Hemat Gerak Laptop: Mode bawaan Penuh Selalu Aktif mengecualikan animasi Canvas, cincin neon CSS, objek SVG, dan ledakan 5 detik dari blokir prefers-reduced-motion Windows/macOS.',
+      'Kontras Tajam Di Latar Putih & Navbar Laptop: Render dual-layer halo kontras membuat partikel menyala terang di kartu putih modal Profil maupun ikon kecil pojok kanan atas Navbar.',
+      'Kontrol Mode Animasi & Stabilitas 60–144Hz: Tersedia pemilih Penuh Selalu Aktif vs Hemat Baterai di tab Profil, lengkap dengan pengecekan visibilitas hibrida, sinkronisasi ResizeObserver DPR, dan reset delta perpindahan tab.',
+    ],
+    changes: [
+      'Menambahkan utilitas frameMotionPreference.ts untuk menyinkronkan preferensi lokal Penuh Selalu Aktif / Hemat Baterai secara real-time ke atribut root dokumen dan seluruh komponen badge.',
+      'Memperbarui LiveFrameCanvas.tsx dengan teknik rendering dual-layer source-over kontras tinggi, penguatan skala sm untuk Navbar, deteksi visibilitas hibrida, ResizeObserver, serta pemulihan delta visibilitychange.',
+      'Menambahkan kontrol segmented Mode Animasi Bingkai di UserProfileStatsModal serta cakupan selektor reduced-motion khusus bingkai pada src/index.css.',
+    ],
+    isCurrent: true,
+    categoryBadge: 'Update Sekarang',
+    author: 'Tim Pengembangan Bank Nusantara',
+    createdAt: '2026-11-28T09:30:00.000Z',
+    isAutoDetected: true,
+  },
+  {
     id: 'upd-v16-47-23',
     version: 'v16.47.23',
     releaseType: 'minor',
@@ -3101,8 +3128,8 @@ export const INITIAL_APP_UPDATES: AppUpdateRecord[] = [
       'Menebalkan seluruh siluet objek tematik SVG (Kumparan Tesla, Tanduk Naga, Mahkota 24K, Puncak Prisma Es, Saturnus & Bulan Sabit) serta mempercepat putaran cincin neon conic pada src/index.css.',
       'Memisahkan lapisan avatar mengambang bebas (z-20 overflow-visible) di atas latar .bn-hex-clip pada klaster 5 heksagon merah tengah SpinBingkaiArena.',
     ],
-    isCurrent: true,
-    categoryBadge: 'Update Sekarang',
+    isCurrent: false,
+    categoryBadge: 'Rilis Sebelumnya',
     author: 'Tim Pengembangan Bank Nusantara',
     createdAt: '2026-11-28T09:00:00.000Z',
     isAutoDetected: true,

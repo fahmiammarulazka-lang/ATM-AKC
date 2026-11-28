@@ -6,6 +6,10 @@ import {
   getAvatarPresetById,
 } from '../data/profileCustomizationCatalog';
 import { LiveCanvasTheme, LiveFrameCanvas } from './LiveFrameCanvas';
+import {
+  shouldRunFrameAnimation,
+  useFrameMotionMode,
+} from '../utils/frameMotionPreference';
 
 interface ProfileAvatarBadgeProps {
   account: Pick<
@@ -42,7 +46,7 @@ const renderCompactSmOverlay = (auraTheme: AuraTheme) => {
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible drop-shadow-[0_1px_2px_rgba(15,23,42,0.7)]"
           aria-hidden="true"
         >
           {/* Thick Cyber chamfered corner brackets */}
@@ -60,7 +64,7 @@ const renderCompactSmOverlay = (auraTheme: AuraTheme) => {
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible drop-shadow-[0_1px_2px_rgba(15,23,42,0.7)]"
           aria-hidden="true"
         >
           {/* Bold curved Dragon Horns top left/right */}
@@ -75,7 +79,7 @@ const renderCompactSmOverlay = (auraTheme: AuraTheme) => {
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible drop-shadow-[0_1px_2px_rgba(15,23,42,0.7)]"
           aria-hidden="true"
         >
           {/* Bold Royal Gold Crown at top */}
@@ -99,7 +103,7 @@ const renderCompactSmOverlay = (auraTheme: AuraTheme) => {
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[6px] w-[calc(100%+12px)] h-[calc(100%+12px)] pointer-events-none z-20 overflow-visible drop-shadow-[0_1px_2px_rgba(15,23,42,0.7)]"
           aria-hidden="true"
         >
           {/* 4 corner faceted ice crystal prisms */}
@@ -116,7 +120,7 @@ const renderCompactSmOverlay = (auraTheme: AuraTheme) => {
       return (
         <svg
           viewBox="0 0 100 100"
-          className="absolute -inset-[7px] w-[calc(100%+14px)] h-[calc(100%+14px)] pointer-events-none z-20 overflow-visible"
+          className="absolute -inset-[7px] w-[calc(100%+14px)] h-[calc(100%+14px)] pointer-events-none z-20 overflow-visible drop-shadow-[0_1px_2px_rgba(15,23,42,0.7)]"
           aria-hidden="true"
         >
           {/* Tilted cosmic orbital ellipse */}
@@ -506,6 +510,7 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
   const canvasTheme: LiveCanvasTheme =
     auraTheme || frame.ambientTheme || 'clean';
 
+  const [motionMode] = useFrameMotionMode();
   const [burstNonce, setBurstNonce] = useState(0);
   const [isBursting, setIsBursting] = useState(false);
   const burstHideTimerRef = useRef<number | null>(null);
@@ -516,11 +521,7 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
   }, [auraTheme, account.fullName]);
 
   const triggerBurst = useCallback(() => {
-    if (
-      typeof window !== 'undefined' &&
-      window.matchMedia &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
+    if (!shouldRunFrameAnimation(motionMode)) {
       return;
     }
     if (burstHideTimerRef.current !== null) {
@@ -532,18 +533,11 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
       setIsBursting(false);
       burstHideTimerRef.current = null;
     }, 1140);
-  }, []);
+  }, [motionMode]);
 
   useEffect(() => {
-    if (!isExclusiveAura || !auraTheme) {
+    if (!isExclusiveAura || !auraTheme || !shouldRunFrameAnimation(motionMode)) {
       setIsBursting(false);
-      return;
-    }
-    if (
-      typeof window !== 'undefined' &&
-      window.matchMedia &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
       return;
     }
 
@@ -563,7 +557,7 @@ export const ProfileAvatarBadge: React.FC<ProfileAvatarBadgeProps> = ({
         burstHideTimerRef.current = null;
       }
     };
-  }, [isExclusiveAura, auraTheme, burstOffsetMs, triggerBurst]);
+  }, [isExclusiveAura, auraTheme, burstOffsetMs, motionMode, triggerBurst]);
 
   const initials =
     account.fullName

@@ -183,7 +183,7 @@ export const AdminUpdateHistoryView: React.FC<AdminUpdateHistoryViewProps> = ({
       ? latestItem.record.highlights
       : latestItem?.record.changes || [];
 
-  const publicVersionLabel = publicCurrentUpdate?.version || 'v16.47.23';
+  const publicVersionLabel = publicCurrentUpdate?.version || 'v16.47.24';
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-10 pb-12">

@@ -65,6 +65,7 @@ import { computeAccountTopLeaderboardBadges } from '../utils/leaderboardUtils';
 import { DiamondIcon } from './DiamondIcon';
 import { TopLeaderboardBadges } from './TopLeaderboardBadges';
 import { ProfileAvatarBadge } from './ProfileAvatarBadge';
+import { useFrameMotionMode } from '../utils/frameMotionPreference';
 import {
   AVATAR_FRAMES,
   SPIN_AURA_FRAMES,
@@ -182,6 +183,7 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
     setIsDiamondStoreOpen,
   } = useBank();
 
+  const [frameMotionMode, setFrameMotionMode] = useFrameMotionMode();
   const [activeTab, setActiveTab] = useState<ProfileTabKey>('ringkasan');
   const [copiedField, setCopiedField] = useState<'id16' | 'rekening' | 'qris' | null>(null);
   const [isQuickSyncing, setIsQuickSyncing] = useState(false);
@@ -1445,8 +1447,46 @@ export const UserProfileStatsModal: React.FC<UserProfileStatsModalProps> = ({
                   </div>
                 </div>
 
+                {/* Kontrol Mode Animasi Bingkai (Laptop & HP) */}
+                <div className="pt-2 border-t border-slate-200/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-800">Mode Animasi Bingkai</p>
+                    <p className="text-[11px] text-slate-500">
+                      Putar penuh terus di laptop meski hemat gerak OS aktif, atau hemat daya.
+                    </p>
+                  </div>
+                  <div
+                    role="group"
+                    aria-label="Mode Animasi Bingkai"
+                    className="inline-flex items-center gap-1 p-1 rounded-lg bg-slate-100 border border-slate-200 shrink-0 self-start sm:self-auto"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setFrameMotionMode('always-full')}
+                      className={`min-h-[40px] px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        frameMotionMode === 'always-full'
+                          ? 'bg-slate-900 text-white'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Penuh Selalu Aktif
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFrameMotionMode('battery-saver')}
+                      className={`min-h-[40px] px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        frameMotionMode === 'battery-saver'
+                          ? 'bg-slate-900 text-white'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Hemat Baterai
+                    </button>
+                  </div>
+                </div>
+
                 {/* Pilihan Bingkai Avatar */}
-                <div>
+                <div className="pt-2 border-t border-slate-200/80">
                   <p className="text-xs font-semibold text-slate-700 mb-2">Pilih Bingkai Avatar</p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {AVATAR_FRAMES.map((frame) => {
